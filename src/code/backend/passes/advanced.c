@@ -3671,8 +3671,8 @@ static bool nyr_inline_summary_covered(const nyr_inst_t *call,
  * integer (a tagged literal or `x << 1 | 1`): only then is the untagged word
  * exactly what the runtime would pass.  NYTRIX_NO_CALLABLE_DEVIRT=1 disables.
  */
-static int nyr_known_callable_resolve_copy(const nyr_func_t *f,
-                                           const int *defs, int value) {
+static int nyr_known_callable_resolve_copy(const nyr_func_t *f, const int *defs,
+                                           int value) {
   for (int depth = 0; depth < 16; ++depth) {
     if (value < 0 || value >= f->next_value || defs[value] < 0)
       return -1;
@@ -3725,8 +3725,8 @@ static bool nyr_known_callable_untag(const nyr_func_t *f, const int *defs,
   if (shl_value < 0)
     return false;
   const nyr_inst_t *shl = &f->data[defs[shl_value]];
-  if (shl->op != NYIR_SHL_I64 || !nyr_known_callable_const(f, defs, shl->b, &k) ||
-      k != 1 || shl->a < 0)
+  if (shl->op != NYIR_SHL_I64 ||
+      !nyr_known_callable_const(f, defs, shl->b, &k) || k != 1 || shl->a < 0)
     return false;
   *is_const = false;
   *raw_value = shl->a;
@@ -3763,8 +3763,8 @@ static bool nyr_known_callable_returns_raw_i64(const nyr_func_t *callee) {
  * No live consumer: every use is a COPY whose result is itself dead.
  */
 static bool nyr_known_callable_value_dead(const nyr_func_t *f,
-                                          const nyr_use_def_t *uses,
-                                          int value, int depth) {
+                                          const nyr_use_def_t *uses, int value,
+                                          int depth) {
   if (value < 0 || (size_t)value >= uses->value_count || depth > 8)
     return false;
   for (size_t u = uses->offsets[value]; u < uses->offsets[value + 1]; ++u) {
@@ -3862,8 +3862,7 @@ static bool nyr_devirt_known_callables(nyr_func_t *f) {
                                   &raw_value))
       continue;
     if (ny_trace_enabled("NY_TRACE_DEVIRT"))
-      ny_trace_line("DEVIRT", "devirt: known callable %s @%zu", sym->symbol,
-                    i);
+      ny_trace_line("DEVIRT", "devirt: known callable %s @%zu", sym->symbol, i);
     /*
      * r := untagged argument; v := call F(r).
      */
@@ -5111,11 +5110,10 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
   size_t ret_count = 0, ret_at = 0, committed = 0;
   size_t call_block = 0;
   int64_t old_pred_label = -1;
-  bool ok = false;
+  bool ok = false, straight_line = false;
 
   if (!nyr_ir_func_clone(callee, &clone) ||
-      !nyr_cfg_build_topology(&clone, &fcfg) || fcfg.block_count == 0 ||
-      !nyr_cfg_build_topology(caller, &ccfg))
+      !nyr_cfg_build_topology(&clone, &fcfg) || fcfg.block_count == 0)
     goto done;
   if (caller->param_count && !caller->param_types)
     goto done; /* the type map rejected such callers */
@@ -5145,9 +5143,6 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
   for (int p = 0; p < arity; ++p)
     if (materialized_formal[p])
       formal_local[p] = next_formal_local++;
-  call_block = ccfg.inst_block[call_idx];
-  old_pred_label = ccfg.block_label[call_block];
-
   /*
    * Inlining materializes the implicit invocation edge. An entry PHI has no
    * encoded value for that edge, so keep that unusual CFG shape out.
@@ -5173,19 +5168,29 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
     if (end == 0 || (clone.data[end - 1].op != NYIR_RET &&
                      clone.data[end - 1].op != NYIR_BR))
       goto done;
+    straight_line = fcfg.block_count == 1 && fcfg.succ_offsets[1] == 0 &&
+                    clone.data[end - 1].op == NYIR_RET;
   }
 
-  if (!nyr_inline_next_label(caller, &next_label) ||
-      fcfg.block_count > (size_t)(INT64_MAX - next_label))
-    goto done;
-  labels = ny_malloc_array(fcfg.block_count, sizeof(*labels));
-  if (!labels)
-    goto done;
-  for (size_t b = 0; b < fcfg.block_count; ++b)
-    labels[b] = next_label++;
-  if (next_label == INT64_MAX)
-    goto done;
-  continuation = next_label++;
+  /* A straight-line callee does not split the caller's block. In particular,
+   * do not put a return jump and its destination between adjacent loads or
+   * arithmetic from different calls in the same loop. */
+  if (!straight_line) {
+    if (!nyr_cfg_build_topology(caller, &ccfg) ||
+        !nyr_inline_next_label(caller, &next_label) ||
+        fcfg.block_count > (size_t)(INT64_MAX - next_label))
+      goto done;
+    call_block = ccfg.inst_block[call_idx];
+    old_pred_label = ccfg.block_label[call_block];
+    labels = ny_malloc_array(fcfg.block_count, sizeof(*labels));
+    if (!labels)
+      goto done;
+    for (size_t b = 0; b < fcfg.block_count; ++b)
+      labels[b] = next_label++;
+    if (next_label == INT64_MAX)
+      goto done;
+    continuation = next_label++;
+  }
 
   if (clone.next_value > 0) {
     vmap = ny_malloc_array((size_t)clone.next_value, sizeof(*vmap));
@@ -5223,7 +5228,7 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
       ++ret_count;
   if (call_dst >= 0 && ret_count == 0)
     goto done;
-  if (ret_count) {
+  if (ret_count && !straight_line) {
     ret_labels = ny_malloc_array(ret_count, sizeof(*ret_labels));
     if (!ret_labels)
       goto done;
@@ -5235,7 +5240,8 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
   }
 
   for (size_t b = 0; b < fcfg.block_count; ++b) {
-    if (!nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
+    if (!straight_line &&
+        !nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
                                              .dst = -1,
                                              .a = -1,
                                              .b = -1,
@@ -5283,17 +5289,21 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
         continue;
 
       if (in->op == NYIR_RET) {
-        ret_labels[ret_at] = labels[b];
+        if (!straight_line)
+          ret_labels[ret_at] = labels[b];
         if (call_dst >= 0) {
-          if (next_value == INT_MAX)
-            goto done;
-          ret_values[ret_at] = next_value;
+          int result = call_dst;
+          if (!straight_line) {
+            if (next_value == INT_MAX)
+              goto done;
+            result = ret_values[ret_at] = next_value++;
+          }
           if (in->a >= 0) {
             int value = nyr_inline_value(vmap, clone.next_value, in->a);
             if (value < 0 ||
                 !nyr_inline_push(
                     &body, (nyr_inst_t){.op = NYIR_COPY,
-                                        .dst = next_value++,
+                                        .dst = result,
                                         .a = value,
                                         .b = -1,
                                         .c = -1,
@@ -5305,7 +5315,7 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
           } else if (!nyr_inline_push(
                          &body,
                          (nyr_inst_t){.op = NYIR_CONST_I64,
-                                      .dst = next_value++,
+                                      .dst = result,
                                       .a = -1,
                                       .b = -1,
                                       .c = -1,
@@ -5316,6 +5326,19 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
                                       .scalar_class = NYIR_SCALAR_I64_RAW})) {
             goto done;
           }
+        }
+        if (straight_line) {
+          if (body.len == 0 &&
+              !nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_NOP,
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .c = -1,
+                                                   .d = -1,
+                                                   .e = -1,
+                                                   .f = -1}))
+            goto done;
+          continue;
         }
         ++ret_at;
         if (!nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_BR,
@@ -5400,7 +5423,8 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
     }
   }
 
-  if (!nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
+  if (!straight_line &&
+      !nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
                                            .dst = -1,
                                            .a = -1,
                                            .b = -1,
@@ -5410,7 +5434,7 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
                                            .f = -1,
                                            .imm = continuation}))
     goto done;
-  if (call_dst >= 0) {
+  if (!straight_line && call_dst >= 0) {
     nyr_phi_incoming_t *incoming =
         ny_malloc_array(ret_count, sizeof(*incoming));
     if (!incoming)
@@ -5471,8 +5495,8 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
    * edges in each old successor to name that block instead of the split one.
    */
   size_t delta = body.len - 1;
-  for (size_t e = ccfg.succ_offsets[call_block];
-       e < ccfg.succ_offsets[call_block + 1]; ++e) {
+  for (size_t e = straight_line ? 0 : ccfg.succ_offsets[call_block];
+       !straight_line && e < ccfg.succ_offsets[call_block + 1]; ++e) {
     size_t at = ccfg.block_start[ccfg.succ_blocks[e]];
     if (at > call_idx)
       at += delta;
@@ -6015,26 +6039,26 @@ bool nyr_loop_unroll(nyr_func_t *f) {
 /*
  * Trace a value through COPY chains to its producing instruction.
  */
-#define UNROLL_TRACE_TO(v, out)                             \
-  do {                                                      \
-    int _v = (v);                                           \
-    (out) = NULL;                                           \
-    for (int _depth = 0; _depth < 8 && _v >= 0; ++_depth) { \
-      const nyr_inst_t *_def = NULL;                        \
-      for (size_t _j = 0; _j < f->len; ++_j)                \
-        if (f->data[_j].dst == _v) {                        \
-          _def = &f->data[_j];                              \
-          break;                                            \
-        }                                                   \
-      if (!_def)                                            \
-        break;                                              \
-      if (_def->op == NYIR_COPY) {                          \
-        _v = _def->a;                                       \
-        continue;                                           \
-      }                                                     \
-      (out) = _def;                                         \
-      break;                                                \
-    }                                                       \
+#define UNROLL_TRACE_TO(v, out)                                                \
+  do {                                                                         \
+    int _v = (v);                                                              \
+    (out) = NULL;                                                              \
+    for (int _depth = 0; _depth < 8 && _v >= 0; ++_depth) {                    \
+      const nyr_inst_t *_def = NULL;                                           \
+      for (size_t _j = 0; _j < f->len; ++_j)                                   \
+        if (f->data[_j].dst == _v) {                                           \
+          _def = &f->data[_j];                                                 \
+          break;                                                               \
+        }                                                                      \
+      if (!_def)                                                               \
+        break;                                                                 \
+      if (_def->op == NYIR_COPY) {                                             \
+        _v = _def->a;                                                          \
+        continue;                                                              \
+      }                                                                        \
+      (out) = _def;                                                            \
+      break;                                                                   \
+    }                                                                          \
   } while (0)
 
       const nyr_inst_t *init_def = NULL, *step_def = NULL;

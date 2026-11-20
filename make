@@ -6347,7 +6347,6 @@ def _backlog_stats() -> dict[str, object] | None:
     """Summarize the public contributor work queue."""
     todos = [
         ROOT / "docs" / "todo" / "ui.md",
-        ROOT / "docs" / "todo" / "perf.md",
         ROOT / "docs" / "todo" / "nyc.md",
     ]
     sections: list[dict[str, object]] = []

@@ -27,7 +27,7 @@ static bool nyr_adce_trace_enabled(void) {
 }
 
 static void nyr_adce_trace(const nyr_func_t *f, size_t at, const char *action,
-                            const char *reason) {
+                           const char *reason) {
   (void)f;
   if (!nyr_adce_trace_enabled())
     return;
@@ -56,6 +56,8 @@ static bool inst_has_side_effects(const nyr_func_t *f, const nyr_inst_t *in) {
   case NYIR_COPY_STRUCT:
     return true;
   case NYIR_CALL: {
+    if (in->flags & NYIR_INST_F_ABI_META)
+      return false;
     unsigned effects = nyr_effective_effects(in);
     return (effects & ~(NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                         NYIR_EFFECT_READ_LOCAL)) != NYIR_EFFECT_NONE;
@@ -70,9 +72,8 @@ static bool inst_has_side_effects(const nyr_func_t *f, const nyr_inst_t *in) {
         !(in->flags & NYIR_INST_F_MEM_VOLATILE) &&
         !(effects & (NYIR_EFFECT_VOLATILE | NYIR_EFFECT_IO)))
       effects &= ~NYIR_EFFECT_MAY_TRAP;
-    return (effects &
-            (NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE | NYIR_EFFECT_IO)) !=
-           0;
+    return (effects & (NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE |
+                       NYIR_EFFECT_IO)) != 0;
   }
   }
 }
@@ -275,13 +276,13 @@ bool nyr_adce(nyr_func_t *f) {
 
     if (inst_has_side_effects(f, in) || is_control_flow(in)) {
       nyr_adce_trace(f, i, "keep",
-                      "side effect or control-flow dependency is observable");
+                     "side effect or control-flow dependency is observable");
       continue;
     }
 
     if (in->op == NYIR_PHI) {
       nyr_adce_trace(f, i, "keep",
-                      "PHI nodes preserve control-flow merge structure");
+                     "PHI nodes preserve control-flow merge structure");
       continue;
     }
 

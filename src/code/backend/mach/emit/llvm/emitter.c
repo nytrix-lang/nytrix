@@ -10,6 +10,7 @@
 #include "code/backend/core/abi.h"
 #include "code/backend/core/internal.h"
 #include "code/backend/mach/emit/llvm/bridge.h"
+#include "code/backend/passes/util.h"
 #include <inttypes.h>
 #include <limits.h>
 #include <llvm-c/Core.h>
@@ -493,6 +494,94 @@ typedef struct {
   int64_t target;
 } ny_llvm_nyir_edge_t;
 
+static bool ny_llvm_is_typed_buffer_alloc(const nyr_inst_t *in) {
+  return in && in->op == NYIR_CALL && (in->flags & NYIR_INST_F_EXTERN) &&
+         !(in->flags & NYIR_INST_F_INDIRECT) &&
+         in->scalar_class == NYIR_SCALAR_TYPED_BUFFER && in->symbol &&
+         strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0;
+}
+
+static const nyr_inst_t *ny_llvm_address_def(const nyr_func_t *f,
+                                             const int *defs, int v) {
+  return v >= 0 && v < f->next_value && defs[v] >= 0 ? &f->data[defs[v]] : NULL;
+}
+
+/* A byte offset must not contribute a second pointer's provenance. Check the
+ * complete small integer expression, including the incoming edges of any
+ * induction PHIs. Revisits are fine: all inputs of that node are checked by
+ * its first visit. Unknown definitions and large graphs keep inttoptr. */
+static bool ny_llvm_integer_offset(const nyr_func_t *f, const int *defs, int v,
+                                   int seen[32], size_t *count) {
+  const nyr_inst_t *in = ny_llvm_address_def(f, defs, v);
+  if (!in)
+    return false;
+  if (in->op == NYIR_CONST_I64)
+    return true;
+  for (size_t i = 0; i < *count; ++i)
+    if (seen[i] == v)
+      return true;
+  if (*count == 32)
+    return false;
+  seen[(*count)++] = v;
+  switch (in->op) {
+  case NYIR_COPY:
+    return ny_llvm_integer_offset(f, defs, in->a, seen, count);
+  case NYIR_ADD_I64:
+  case NYIR_SUB_I64:
+  case NYIR_MUL_I64:
+  case NYIR_SHL_I64:
+    return ny_llvm_integer_offset(f, defs, in->a, seen, count) &&
+           ny_llvm_integer_offset(f, defs, in->b, seen, count);
+  case NYIR_PHI:
+    for (size_t i = 0; i < in->phi_incoming_len; ++i)
+      if (!ny_llvm_integer_offset(f, defs, in->phi_incoming[i].value, seen,
+                                  count))
+        return false;
+    return in->phi_incoming_len != 0;
+  default:
+    return false;
+  }
+}
+
+static LLVMValueRef ny_llvm_memory_pointer(ny_llvm_context_t *cg,
+                                           const nyr_func_t *f,
+                                           const nyr_inst_t *access,
+                                           LLVMValueRef *vals,
+                                           const int *defs) {
+  LLVMTypeRef ptr = LLVMPointerType(cg->type_i8, 0);
+  LLVMValueRef displacement =
+      access->imm ? LLVMConstInt(cg->type_i64, (uint64_t)access->imm, false)
+                  : NULL;
+  if (defs) {
+    const nyr_inst_t *addr = ny_llvm_address_def(f, defs, access->a);
+    if (addr && addr->op == NYIR_ADD_I64) {
+      const nyr_inst_t *base = ny_llvm_address_def(f, defs, addr->a);
+      int index = addr->b;
+      if (!ny_llvm_is_typed_buffer_alloc(base)) {
+        base = ny_llvm_address_def(f, defs, addr->b);
+        index = addr->a;
+      }
+      int seen[32];
+      size_t count = 0;
+      if (ny_llvm_is_typed_buffer_alloc(base) &&
+          ny_llvm_integer_offset(f, defs, index, seen, &count)) {
+        LLVMValueRef offset = ny_as_i64(cg, vals[index]);
+        if (displacement)
+          offset = LLVMBuildAdd(cg->builder, offset, displacement, "");
+        LLVMValueRef p = LLVMBuildIntToPtr(
+            cg->builder, ny_as_i64(cg, vals[base->dst]), ptr, "");
+        /* Do not imply inbounds or change the integer wrapping contract. */
+        return LLVMBuildGEP2(cg->builder, cg->type_i8, p, &offset, 1, "");
+      }
+    }
+  }
+  LLVMValueRef address = ny_as_i64(
+      cg, access->a >= 0 && access->a < f->next_value ? vals[access->a] : NULL);
+  if (displacement)
+    address = LLVMBuildAdd(cg->builder, address, displacement, "");
+  return LLVMBuildIntToPtr(cg->builder, address, ptr, "");
+}
+
 static void ny_llvm_record_edge(ny_llvm_nyir_edge_t **edges, size_t *len,
                                 size_t *cap, LLVMBasicBlockRef source,
                                 int64_t owner, int64_t target) {
@@ -789,6 +878,14 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
                "types for %s",
                name);
     return false;
+  }
+  int *address_defs = NULL;
+  for (size_t i = 0; f->has_symbol_calls && !f->untagged_values && i < f->len;
+       ++i) {
+    if (ny_llvm_is_typed_buffer_alloc(&f->data[i])) {
+      address_defs = nyr_build_defs(f);
+      break;
+    }
   }
 
   /*
@@ -1482,18 +1579,10 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         break;
       }
       if (in->dst >= 0 && (size_t)in->dst < val_count) {
-        LLVMValueRef va =
-            (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
-        LLVMValueRef base = ny_as_i64(cg, va);
-        if (in->imm != 0) {
-          LLVMValueRef off =
-              LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false);
-          base = LLVMBuildAdd(cg->builder, base, off, "");
-        }
+        LLVMValueRef ptr =
+            ny_llvm_memory_pointer(cg, f, in, vals, address_defs);
         if (in->flags & NYIR_INST_F_MEM_BYTE) {
           LLVMTypeRef i8_type = LLVMInt8TypeInContext(cg->context);
-          LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
-                                               LLVMPointerType(i8_type, 0), "");
           LLVMValueRef loaded_i8 =
               LLVMBuildLoad2(cg->builder, i8_type, ptr, "");
           if (in->flags & NYIR_INST_F_MEM_VOLATILE)
@@ -1502,8 +1591,6 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
               LLVMBuildZExt(cg->builder, loaded_i8, cg->type_i64, "");
         } else if (in->flags & NYIR_INST_F_MEM_U16) {
           LLVMTypeRef i16_type = LLVMInt16TypeInContext(cg->context);
-          LLVMValueRef ptr = LLVMBuildIntToPtr(
-              cg->builder, base, LLVMPointerType(i16_type, 0), "");
           LLVMValueRef loaded_i16 =
               LLVMBuildLoad2(cg->builder, i16_type, ptr, "");
           if (in->flags & NYIR_INST_F_MEM_VOLATILE)
@@ -1512,8 +1599,6 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
               LLVMBuildZExt(cg->builder, loaded_i16, cg->type_i64, "");
         } else if (in->flags & NYIR_INST_F_MEM_I32) {
           LLVMTypeRef i32_type = LLVMInt32TypeInContext(cg->context);
-          LLVMValueRef ptr = LLVMBuildIntToPtr(
-              cg->builder, base, LLVMPointerType(i32_type, 0), "");
           LLVMValueRef loaded_i32 =
               LLVMBuildLoad2(cg->builder, i32_type, ptr, "");
           if (in->flags & NYIR_INST_F_MEM_VOLATILE)
@@ -1522,14 +1607,10 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
               LLVMBuildSExt(cg->builder, loaded_i32, cg->type_i64, "");
         } else if (in->scalar_class == NYIR_SCALAR_F64) {
           LLVMTypeRef f64_type = LLVMDoubleTypeInContext(cg->context);
-          LLVMValueRef ptr = LLVMBuildIntToPtr(
-              cg->builder, base, LLVMPointerType(f64_type, 0), "");
           vals[in->dst] = LLVMBuildLoad2(cg->builder, f64_type, ptr, "");
           if (in->flags & NYIR_INST_F_MEM_VOLATILE)
             LLVMSetVolatile(vals[in->dst], true);
         } else {
-          LLVMValueRef ptr = LLVMBuildIntToPtr(
-              cg->builder, base, LLVMPointerType(cg->type_i64, 0), "");
           vals[in->dst] = LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "");
           if (in->flags & NYIR_INST_F_MEM_VOLATILE)
             LLVMSetVolatile(vals[in->dst], true);
@@ -1545,26 +1626,16 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         unsupported = true;
         break;
       }
-      LLVMValueRef va =
-          (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
       LLVMValueRef vb =
           (in->c >= 0 && (size_t)in->c < val_count) ? vals[in->c] : NULL;
-      LLVMValueRef base = ny_as_i64(cg, va);
-      if (in->imm != 0) {
-        LLVMValueRef off = LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false);
-        base = LLVMBuildAdd(cg->builder, base, off, "");
-      }
+      LLVMValueRef ptr = ny_llvm_memory_pointer(cg, f, in, vals, address_defs);
       if (in->flags & NYIR_INST_F_MEM_BYTE) {
         LLVMTypeRef i8_type = LLVMInt8TypeInContext(cg->context);
-        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
-                                             LLVMPointerType(i8_type, 0), "");
         LLVMValueRef val_i8 =
             LLVMBuildTrunc(cg->builder, ny_as_i64(cg, vb), i8_type, "");
         LLVMBuildStore(cg->builder, val_i8, ptr);
       } else if (in->flags & NYIR_INST_F_MEM_U16) {
         LLVMTypeRef i16_type = LLVMInt16TypeInContext(cg->context);
-        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
-                                             LLVMPointerType(i16_type, 0), "");
         LLVMValueRef val_i16 =
             LLVMBuildTrunc(cg->builder, ny_as_i64(cg, vb), i16_type, "");
         LLVMValueRef store = LLVMBuildStore(cg->builder, val_i16, ptr);
@@ -1572,19 +1643,12 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
           LLVMSetVolatile(store, true);
       } else if (in->flags & NYIR_INST_F_MEM_I32) {
         LLVMTypeRef i32_type = LLVMInt32TypeInContext(cg->context);
-        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
-                                             LLVMPointerType(i32_type, 0), "");
         LLVMValueRef val_i32 =
             LLVMBuildTrunc(cg->builder, ny_as_i64(cg, vb), i32_type, "");
         LLVMBuildStore(cg->builder, val_i32, ptr);
       } else if (in->scalar_class == NYIR_SCALAR_F64) {
-        LLVMTypeRef f64_type = LLVMDoubleTypeInContext(cg->context);
-        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
-                                             LLVMPointerType(f64_type, 0), "");
         LLVMBuildStore(cg->builder, ny_as_f64(cg, vb), ptr);
       } else {
-        LLVMValueRef ptr = LLVMBuildIntToPtr(
-            cg->builder, base, LLVMPointerType(cg->type_i64, 0), "");
         LLVMBuildStore(cg->builder, ny_as_i64(cg, vb), ptr);
       }
       break;
@@ -2467,6 +2531,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
   }
 
   if (unsupported) {
+    free(address_defs);
     free(vals);
     free(value_types);
     free(local_allocas);
@@ -2619,6 +2684,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     }
   }
 
+  free(address_defs);
   free(vals);
   free(value_types);
   free(local_allocas);

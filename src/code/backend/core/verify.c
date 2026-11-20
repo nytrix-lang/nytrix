@@ -216,6 +216,12 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
               NYIR_INST_F_EFFECTS_KNOWN | NYIR_INST_F_NOALIAS |
               NYIR_INST_F_INDIRECT | NYIR_INST_F_VARIADIC |
               NYIR_INST_F_I386_REGPARM_MASK | NYIR_INST_F_I386_C_ABI;
+    if ((in->flags & NYIR_INST_F_EXTERN) &&
+        !(in->flags & NYIR_INST_F_INDIRECT) && in->dst >= 0 && in->imm == 1 &&
+        in->symbol &&
+        (strcmp(in->symbol, "rt_len") == 0 ||
+         strcmp(in->symbol, "rt_value_tag") == 0))
+      allowed |= NYIR_INST_F_ABI_META;
     break;
   case NYIR_RET:
     allowed = NYIR_INST_F_I386_RET32 | NYIR_INST_F_I386_SRET_CALLER_POP;

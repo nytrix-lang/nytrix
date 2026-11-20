@@ -13,7 +13,7 @@ use core.tbuf
 ;; Fixed-depth binary radix indexing. The leaf index is assembled one key bit
 ;; at a time; every probe is a dependent shift/branch chain plus one leaf load.
 ;; The loops are inline because the helper-function form currently miscompiles
-;; at -O2/-O3 in the native backend (recorded in docs/todo/perf.md).
+;; at -O2/-O3 in the native backend.
 def BITS = 20
 def CAP = 2097152
 def keys = i64buf_new(CAP)

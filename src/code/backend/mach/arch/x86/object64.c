@@ -272,7 +272,7 @@ typedef struct {
    */
   size_t *select_cmp_inst;
   uint8_t *cmp_elision_action;
-  uint8_t *select_skip_and;
+  uint8_t *select_skip_alu;
   int8_t *direct_param_source;
   bool *direct_param_slots;
   bool bare_syscalls;
@@ -408,7 +408,7 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   free(e->select_test_equal);
   free(e->select_cmp_inst);
   free(e->cmp_elision_action);
-  free(e->select_skip_and);
+  free(e->select_skip_alu);
   free(e->direct_param_source);
   free(e->direct_param_slots);
   e->vreg_has_ret_use = NULL;
@@ -419,7 +419,7 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   e->select_test_equal = NULL;
   e->select_cmp_inst = NULL;
   e->cmp_elision_action = NULL;
-  e->select_skip_and = NULL;
+  e->select_skip_alu = NULL;
   e->direct_param_source = NULL;
   e->direct_param_slots = NULL;
 }
@@ -6287,7 +6287,7 @@ static void mach_note_single_use(uint8_t *counts, size_t *sole_user,
 static bool mach_prepare_select_bit_test(nyr_x64_mach_enc_t *e,
                                          const char *name) {
   if (!e || !e->mach || !e->select_test_src || !e->select_test_equal ||
-      !e->cmp_elision_action || !e->select_skip_and || !e->def_inst)
+      !e->cmp_elision_action || !e->select_skip_alu || !e->def_inst)
     return false;
   const nyr_mach_func_t *m = e->mach;
   size_t n = m->vreg_len;
@@ -6347,6 +6347,37 @@ static bool mach_prepare_select_bit_test(nyr_x64_mach_enc_t *e,
       continue;
     }
     const nyr_mach_inst_t *cmp = &m->insts[ci];
+    const nyr_mach_operand_t *negative =
+        select->condition == NYR_MACH_COND_NE ? &select->src1 : &select->src2;
+    const nyr_mach_operand_t *original =
+        select->condition == NYR_MACH_COND_NE ? &select->src2 : &select->src1;
+    int64_t zero;
+    if (e->select_cmp_inst && cmp->opcode == NYR_MACH_CMP &&
+        cmp->condition == NYR_MACH_COND_LT &&
+        original->kind == NYR_MACH_OPERAND_VREG &&
+        original->reg_class == NYR_MACH_REGCLASS_GPR &&
+        mach_op_is_vreg(&cmp->src0, original->as.reg) &&
+        mach_operand_const_i64(e, &cmp->src1, &zero) && zero == 0 &&
+        negative->kind == NYR_MACH_OPERAND_VREG && negative->as.reg < n &&
+        use_count[cond] == 1 && sole_user[cond] == si &&
+        e->def_count[cond] == 1 && select->dst.kind == NYR_MACH_OPERAND_VREG &&
+        mach_block_for_inst(e, ci) == mach_block_for_inst(e, si) &&
+        use_count[negative->as.reg] == 1 &&
+        e->def_count[negative->as.reg] == 1) {
+      size_t ni = e->def_inst[negative->as.reg];
+      if (ni < si && mach_block_for_inst(e, ni) == mach_block_for_inst(e, si)) {
+        const nyr_mach_inst_t *neg = &m->insts[ni];
+        if (neg->opcode == NYR_MACH_SUB && !neg->narrow32 &&
+            mach_op_is_vreg(&neg->src1, original->as.reg) &&
+            mach_operand_const_i64(e, &neg->src0, &zero) && zero == 0) {
+          e->select_cmp_inst[cond] = ni;
+          e->select_skip_alu[negative->as.reg] = 1;
+          e->cmp_elision_action[cond] = MACH_CMP_SKIP_FOR_SELECT;
+          SELECT_FUSE_TRACE("wrapping-abs");
+          continue;
+        }
+      }
+    }
     /*
      * Integer compare whose only user is this select: re-emit it at the
      * select as cmp + cmovcc. Its operands must still be live there; the
@@ -6464,7 +6495,7 @@ static bool mach_prepare_select_bit_test(nyr_x64_mach_enc_t *e,
     e->select_test_equal[cond] = (cmp->condition == NYR_MACH_COND_EQ) !=
                                  (select->condition == NYR_MACH_COND_EQ);
     e->cmp_elision_action[cond] = MACH_CMP_SKIP_FOR_SELECT;
-    e->select_skip_and[and_v] = 1;
+    e->select_skip_alu[and_v] = 1;
     SELECT_FUSE_TRACE("accepted");
   }
 #undef SELECT_FUSE_TRACE
@@ -6844,9 +6875,8 @@ static bool mach_prepare_cmp_flag_reuse(nyr_x64_mach_enc_t *e,
      * Flags reuse is detected but not accepted: the allocation view it needs
      * is rejected by the machine verifier (operand-less cmp/br_if), which
      * sent every function that matched to the stack encoder, and emitting the
-     * reuse without that verification miscompiled `splay` (see
-     * docs/todo/perf.md). Keep the second compare until the reuse path has a
-     * regression fixture.
+     * reuse without that verification miscompiled `splay`. Keep the second
+     * compare until the reuse path has a regression fixture.
      */
     if (getenv("NY_X64_CMP_REUSE") &&
         e->cmp_elision_action[cmp_reg] == MACH_CMP_KEEP) {
@@ -11868,10 +11898,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
     e->select_test_src = malloc(mach->vreg_len * sizeof(*e->select_test_src));
     e->select_test_equal =
         calloc(mach->vreg_len, sizeof(*e->select_test_equal));
-    e->select_skip_and = calloc(mach->vreg_len, sizeof(*e->select_skip_and));
+    e->select_skip_alu = calloc(mach->vreg_len, sizeof(*e->select_skip_alu));
     e->select_cmp_inst = malloc(mach->vreg_len * sizeof(*e->select_cmp_inst));
     if (!e->def_inst || !e->select_test_src || !e->select_test_equal ||
-        !e->cmp_elision_action || !e->select_skip_and || !e->select_cmp_inst)
+        !e->cmp_elision_action || !e->select_skip_alu || !e->select_cmp_inst)
       return mach_err(e, "x64 machine form encode: OOM");
     for (size_t v = 0; v < mach->vreg_len; ++v) {
       e->def_inst[v] = SIZE_MAX;
@@ -13310,10 +13340,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             return false;
           break;
         }
-        if (in->opcode == NYR_MACH_AND &&
-            in->dst.kind == NYR_MACH_OPERAND_VREG && e->select_skip_and &&
+        if ((in->opcode == NYR_MACH_AND || in->opcode == NYR_MACH_SUB) &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG && e->select_skip_alu &&
             in->dst.as.reg < e->colors_len &&
-            e->select_skip_and[in->dst.as.reg])
+            e->select_skip_alu[in->dst.as.reg])
           break;
         if (in->opcode == NYR_MACH_ADD &&
             in->dst.kind == NYR_MACH_OPERAND_VREG &&
@@ -14834,6 +14864,43 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         mach_record_div_stat(e, false);
         break;
       case NYR_MACH_SELECT: {
+        size_t fused_cmp = in->src0.kind == NYR_MACH_OPERAND_VREG &&
+                                   e->select_cmp_inst &&
+                                   in->src0.as.reg < e->mach->vreg_len
+                               ? e->select_cmp_inst[in->src0.as.reg]
+                               : SIZE_MAX;
+        if (fused_cmp != SIZE_MAX &&
+            e->mach->insts[fused_cmp].opcode == NYR_MACH_SUB) {
+          const nyr_mach_operand_t *original = &e->mach->insts[fused_cmp].src1;
+          int result = mach_vreg_def_preg(e, in->dst.as.reg);
+          if (!mach_seed_colored_preg(e, original->as.reg))
+            return false;
+          int source = mach_vreg_preg(e, original->as.reg);
+          if (source < 0) {
+            source = 10;
+            if (!mach_load_op_preg(e, original, (unsigned)source))
+              return false;
+          }
+          if (result < 0 || source == result)
+            result = 0;
+          /* neg sets SF from -x. Keep x when -x is negative. For INT64_MIN
+           * both arms are INT64_MIN, so the wrapping result is unchanged. */
+          if (!mach_mov_preg_preg(e, result, source) ||
+              !mach_rex(e, true, false, false, result >= 8) ||
+              !mach_u8(e, 0xf7) || !mach_u8(e, 0xd8 | (result & 7)) ||
+              !mach_rex(e, true, result >= 8, false, source >= 8) ||
+              !mach_u8(e, 0x0f) || !mach_u8(e, 0x48) ||
+              !mach_u8(e, 0xc0 | ((result & 7) << 3) | (source & 7)))
+            return false;
+          if (result == 0) {
+            mach_rax_invalidate(e);
+            if (!mach_commit_vreg(e, &in->dst, dst))
+              return false;
+          } else if (!mach_commit_preg(e, &in->dst, dst, (unsigned)result,
+                                       false))
+            return false;
+          break;
+        }
         /*
          * Seed the true arm before establishing the predicate flags.
          * Rematerializing a zero in its assigned register uses XOR, which
@@ -14858,11 +14925,6 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          * materializer's flags and select the wrong arm.  R10 is reserved
          * from allocator colors and is available as a short-lived scratch.
          */
-        size_t fused_cmp = in->src0.kind == NYR_MACH_OPERAND_VREG &&
-                                   e->select_cmp_inst &&
-                                   in->src0.as.reg < e->mach->vreg_len
-                               ? e->select_cmp_inst[in->src0.as.reg]
-                               : SIZE_MAX;
         if (fused_cmp != SIZE_MAX) {
           const nyr_mach_inst_t *cmp = &e->mach->insts[fused_cmp];
           int cc = mach_cmov_cc(cmp->condition);

@@ -1861,6 +1861,14 @@ static bool nyr_prove_reflexive(nyr_builder_t *b, const expr_t *condition) {
   return same;
 }
 
+static int nyr_emit_abi_metadata(nyr_builder_t *b, const char *symbol,
+                                 int value) {
+  int result = nyr_emit_runtime_call(b, symbol, value, -1, -1, 1, 0);
+  if (result >= 0)
+    b->nyir.data[b->nyir.len - 1].flags |= NYIR_INST_F_ABI_META;
+  return result;
+}
+
 static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
   if (!nyr_check_type_param_consistency(b, e))
     return -1;
@@ -13911,14 +13919,14 @@ ordinary_call:
            * claims RAW_INT; builder_append measured slen=0 for such chars
            * and _char_list_to_str returned the empty string.
            */
-          length = nyr_emit_runtime_call(b, "rt_len", arg, -1, -1, 1, 0);
+          length = nyr_emit_abi_metadata(b, "rt_len", arg);
         else if (!(arg_expr && arg_expr->kind == NY_E_LITERAL &&
                    arg_expr->as.literal.kind == NY_LIT_INT) &&
                  !raw_integer_argument &&
                  !(arg_expr && arg_expr->semantic.resolved &&
                    arg_expr->semantic.rep == NY_SEM_REP_RAW_INT) &&
                  !nyr_expr_is_ptr(b, arg_expr))
-          length = nyr_emit_runtime_call(b, "rt_len", arg, -1, -1, 1, 0);
+          length = nyr_emit_abi_metadata(b, "rt_len", arg);
         else
           length = nyr_emit_const(b, 0);
       }
@@ -13947,7 +13955,7 @@ ordinary_call:
            * handles without guessing from the low bit. */
           tag = nyr_emit_runtime_call(b, "rt_raw_word_tag", arg, -1, -1, 1, 0);
         } else {
-          tag = nyr_emit_runtime_call(b, "rt_value_tag", arg, -1, -1, 1, 0);
+          tag = nyr_emit_abi_metadata(b, "rt_value_tag", arg);
         }
       }
       if (lowered_argc + 1 >= NYIR_CALL_MAX_ARGS) {

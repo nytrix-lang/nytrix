@@ -12,7 +12,7 @@ compiler subsystems.
 | --- | --- |
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
 | UI, engine, and editor work | [UI guide](learn/ui.md#verification) |
-| Compiler performance work | [Performance backlog](todo/perf.md) |
+| Compiler performance gaps and target | [Benchmark dashboard](learn/measurements.md#benchmark-dashboard) and [how to read the results](learn/measurements.md#reading-the-results) |
 | NYC Linux kernel | [Build acceptance](todo/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |
 | Commands, traces, pass isolation, and runtime failures | [Compiler debugging](learn/debugging.md) |

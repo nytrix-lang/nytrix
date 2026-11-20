@@ -90,7 +90,8 @@ static unsigned bits_of_const(int64_t value) {
 static unsigned bits_width_of(const nyr_func_t *f, const nyr_inst_t *in,
                               const unsigned char *w, const int64_t *constants,
                               const unsigned char *is_constant,
-                              const unsigned char *iv_bits, const int *iv_init) {
+                              const unsigned char *iv_bits,
+                              const int *iv_init) {
   size_t nv = (size_t)f->next_value;
 #define BITS_W(x) ((x) < 0 || (size_t)(x) >= nv ? 64u : (unsigned)w[x])
 #define BITS_K(x) ((x) >= 0 && (size_t)(x) < nv && is_constant[x])
@@ -259,8 +260,8 @@ static bool bits_bounded_iv(const nyr_func_t *f, const nyr_cfg_t *cfg,
   for (int side = 0; side < 2; ++side) {
     int update = phi->phi_incoming[side].value;
     int init = phi->phi_incoming[1 - side].value;
-    if (update < 0 || (size_t)update >= nv || init < 0 ||
-        (size_t)init >= nv || defs[update] < 0)
+    if (update < 0 || (size_t)update >= nv || init < 0 || (size_t)init >= nv ||
+        defs[update] < 0)
       continue;
     const nyr_inst_t *add = &f->data[defs[update]];
     /*
@@ -384,12 +385,12 @@ void nyr_bits_simplify(nyr_func_t *f) {
    * PHIs, so a loop counter holds as long as every incoming value does.
    */
   memset(in32, 0, nv);
-#define BITS_IS_SEXT(in)                                                  \
-  ((in)->op == NYIR_SAR_I64 && BITS_CONST((in)->b, 32) && (in)->a >= 0 && \
-   defs[(in)->a] >= 0 && f->data[defs[(in)->a]].op == NYIR_SHL_I64 &&     \
+#define BITS_IS_SEXT(in)                                                       \
+  ((in)->op == NYIR_SAR_I64 && BITS_CONST((in)->b, 32) && (in)->a >= 0 &&      \
+   defs[(in)->a] >= 0 && f->data[defs[(in)->a]].op == NYIR_SHL_I64 &&          \
    BITS_CONST(f->data[defs[(in)->a]].b, 32))
-#define BITS_CONST(x, c) ((x) >= 0 && (size_t)(x) < nv && is_constant[x] && \
-                          constants[x] == (c))
+#define BITS_CONST(x, c)                                                       \
+  ((x) >= 0 && (size_t)(x) < nv && is_constant[x] && constants[x] == (c))
   for (size_t i = 0; i < f->len; ++i)
     if (f->data[i].dst >= 0 && (size_t)f->data[i].dst < nv)
       in32[f->data[i].dst] = 1;
@@ -412,8 +413,8 @@ void nyr_bits_simplify(nyr_func_t *f) {
           value = v >= 0 && (size_t)v < nv && in32[v];
         }
       } else if (!value && in->op == NYIR_ADD_I64 && have_cfg)
-        value = bits_guarded_iv_add(f, &cfg, defs, in32, is_constant, constants,
-                                    i);
+        value =
+            bits_guarded_iv_add(f, &cfg, defs, in32, is_constant, constants, i);
       else if (!value && in->op == NYIR_SUB_I64 && have_cfg && in->a >= 0 &&
                (size_t)in->a < nv && in32[in->a])
         value = bits_guarded_iv_sub(f, &cfg, defs, is_constant, constants, i);
@@ -426,10 +427,10 @@ void nyr_bits_simplify(nyr_func_t *f) {
   if (in32_changed)
     memset(in32, 0, nv);
 #undef BITS_CONST
-#define BITS_DEF(x)                                                         \
+#define BITS_DEF(x)                                                            \
   ((x) >= 0 && (size_t)(x) < nv && defs[x] >= 0 ? &f->data[defs[x]] : NULL)
-#define BITS_CONST(x, c) ((x) >= 0 && (size_t)(x) < nv && is_constant[x] && \
-                          constants[x] == (c))
+#define BITS_CONST(x, c)                                                       \
+  ((x) >= 0 && (size_t)(x) < nv && is_constant[x] && constants[x] == (c))
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
     if (in->dst < 0)
@@ -437,8 +438,8 @@ void nyr_bits_simplify(nyr_func_t *f) {
     if (in->op == NYIR_AND_I64) {
       for (int side = 0; side < 2; ++side) {
         int mask = side ? in->a : in->b, data = side ? in->b : in->a;
-        if (mask < 0 || (size_t)mask >= nv || !is_constant[mask] ||
-            data < 0 || (size_t)data >= nv)
+        if (mask < 0 || (size_t)mask >= nv || !is_constant[mask] || data < 0 ||
+            (size_t)data >= nv)
           continue;
         int64_t m = constants[mask];
         if (m <= 0 || (m & (m + 1)) != 0 || w[data] > bits_of_const(m))
@@ -560,12 +561,17 @@ bool nyr_narrow(nyr_func_t *f) {
   /*
    * A mask at a value boundary permits earlier add/sub/mul/bitwise nodes to
    * run modulo 2^32 when every use of each narrowed result remains inside the
-   * same low-word expression. Walk backward through SSA definitions, stopping
-   * at PHIs, calls, loads, and all other operations that are not modular ALU.
-   * Values with an escaping wide use retain their 64-bit instruction.
+   * same low-word expression. A rotate of the low word is also a boundary.
+   * Walk backward through modular ALU operations. An intermediate mask can
+   * disappear if nothing observes its high bits; a boundary mask must remain
+   * explicit for backends that emit the full-width arithmetic.
    */
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_ROR32_I64 && in->a >= 0 && in->a < f->next_value) {
+      low_needed[in->a] = 1;
+      low_uses[in->a]++;
+    }
     if (in->op != NYIR_AND_I64)
       continue;
     bool mask_a =
@@ -586,6 +592,18 @@ bool nyr_narrow(nyr_func_t *f) {
     if (in->dst < 0 || in->dst >= f->next_value || !low_needed[in->dst] ||
         !narrow32_op(in->op) || uses[in->dst] != low_uses[in->dst])
       continue;
+    if (in->op == NYIR_AND_I64) {
+      bool mask_a =
+          is_u32_mask_value(constants, is_constant, in->a, f->next_value);
+      bool mask_b =
+          is_u32_mask_value(constants, is_constant, in->b, f->next_value);
+      if (mask_a != mask_b) {
+        /* Its input demand was already counted as a boundary above. */
+        if (f->untagged_values)
+          nir_make_copy(in, mask_a ? in->b : in->a);
+        continue;
+      }
+    }
     in->flags |= NYIR_INST_F_NARROW32;
     if (in->a >= 0 && in->a < f->next_value) {
       low_needed[in->a] = 1;

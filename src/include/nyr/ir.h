@@ -146,7 +146,7 @@ typedef enum {
   NYIR_VEC8_AND_I64,
   NYIR_VEC8_OR_I64,
   NYIR_VEC8_XOR_I64,
-  NYIR_VEC8_MUL_I64, /* four-lane wrapping i64 multiply */
+  NYIR_VEC8_MUL_I64,        /* four-lane wrapping i64 multiply */
   NYIR_VEC8_REDUCE_ADD_I64, /* dst = scalar a + sum of four i64 lanes in b */
   /* Bounds check: verifies addr + offset within [base, base+len).
    * .a = base pointer, .b = offset, .imm = byte length.
@@ -256,6 +256,9 @@ typedef enum {
  * friends treat provably pure user calls like any other pure operation.
  */
 #define NYIR_INST_F_EFFECTS_KNOWN 128u
+/* Compiler-generated call ABI metadata, not an explicit source query.
+ * DCE may drop a dead lane; a live query retains all its usual effects. */
+#define NYIR_INST_F_ABI_META (1u << 24)
 /*
  * Set on NYIR_CMP_I64 to mark the comparison as an assumption: the compare is
  * known true at this point even though no branch tests it. The instruction
@@ -325,8 +328,8 @@ typedef enum {
 #define NYIR_ARG_CLASS_HVA_V128 7u
 #define NYIR_ARG_CLASS_AAPCS_INTEGER_A16 8u
 #define NYIR_ARG_AGG_SIZE(v) ((v) & NYIR_ARG_AGG_SIZE_MASK)
-#define NYIR_ARG_AGG_CLASS(v, n)                                            \
-  (((v) >> ((n) ? NYIR_ARG_AGG_CLASS1_SHIFT : NYIR_ARG_AGG_CLASS0_SHIFT)) & \
+#define NYIR_ARG_AGG_CLASS(v, n)                                               \
+  (((v) >> ((n) ? NYIR_ARG_AGG_CLASS1_SHIFT : NYIR_ARG_AGG_CLASS0_SHIFT)) &    \
    NYIR_ARG_AGG_CLASS_MASK)
 
 /* Calls with more than 6 args carry args[6..] out-of-line in extra_args,

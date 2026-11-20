@@ -487,6 +487,10 @@ at HEAD. `lib/os/sound/wav.ny` used the 64-bit maximum as an `int` (ints hold
 
 ## Reading the results
 
+- The runtime target is **at most 2× host C for every valid fixture** on
+  NYR, LLVM, and NYC. Assess it with a full `./make bench` run with matching
+  checksums and stable measurements. Passing the runner's existing gates or a
+  class geomean does not establish that each fixture met the target.
 - Compare the same source, input, execution route, flags, cache state, and timed
   region. Changed benchmark sources are new baselines, not compiler A/B tests.
 - If `./make bench` reports `BENCH INVALIDATED`, its saved rows are
@@ -511,10 +515,9 @@ snapshots, not current performance claims; compare only runs with the same
 source, input, route, flags, cache state, and timed region.
 
 <details>
-<summary>All dated investigations</summary>
+<summary>Dated investigations and remaining leads</summary>
 
-Newest first. The dated 2026-11-19 entries below are the ones moved here
-from the performance backlog; older investigations follow them.
+Selected investigations:
 
 - [2026-11-19 runtime linking, registry cache residency, allocation bookkeeping](#2026-11-19-runtime-linking-registry-cache-residency-allocation-bookkeeping)
 - [2026-11-19 NYC regression: two encoder bugs, mach-object default reverted](#2026-11-19-nyc-regression-two-encoder-bugs-mach-object-default-reverted)
@@ -4764,10 +4767,6 @@ fixture, so the deep `X64_LOOP_HOME` records never reach the terminal.
 
 ### x86-64 encoder correctness and instruction counts (2026-11-16)
 
-This pass closed the "x86-64 codegen quality" roadmap item in
-[Performance work](../todo/perf.md); its two remaining measured leads moved
-to the runtime-gap backlog.
-
 Three encoder changes, measured by **user-space instructions retired**
 (`perf stat -e instructions:u`) on the 110-fixture bench corpus, old compiler
 = the tree before this pass, new = after; checksums match on every row.
@@ -4958,7 +4957,7 @@ perf: rt_malloc_impl 9.28%, rt_heap_ptr_registry_has 9.25%, rt_value_tag 5.75%,
 ```
 
 About 22% of the run is memory bookkeeping rather than arithmetic. No change was
-kept here; the ordered candidates are recorded in `docs/todo/perf.md`.
+kept in this investigation.
 
 #### Fixture budgets recalibrated with the measured spread (kept)
 
@@ -6749,5 +6748,79 @@ NYC median time fell from 8.96 ms to 8.26 ms and retired instructions from
 64.30 M to 57.23 M. The new boundary oracle also checks negative inputs
 whose truncating quotient is zero and an independently consumed comparison.
 Clang vectorizes the stencil; this does not close that remaining gap.
+
+### 2026-11-20 post-fix Clang-reference run
+
+The local O3 run used six fixture workers, one warm-up and three measured
+runs. All 110 fixtures matched their checksums. FFT stayed below 2× on
+all three routes (LLVM 1.92×), as did `qrsyndrome` (NYC 1.62×).
+The 2× ceiling remained open: 20 of 108 valid NYR comparisons,
+16 of 108 LLVM comparisons, and 31 of 109 NYC comparisons missed it.
+
+The largest timed gaps were `cd` (12.66× NYC, 9.05× NYR), `pbkdf2`
+(8.10× NYC), and `bigint-oracle` (7.48× NYR, 6.77× LLVM).
+`native-oracle` also showed a 17.98× LLVM ratio, but its Fibonacci
+work is constant-folded and it does not have a kernel timer.
+
+The emitted `bigint-oracle` machine code also showed unused `rt_len` and
+`rt_value_tag` results in the BigFloat arithmetic loops. They originate
+in the compiler-generated length/tag lanes of the dynamic call ABI.
+The ordinary runtime effect annotations remain intact: an unused
+compiler-generated lane is a different case from an explicit query.
+For `page-rank`, both native emitters reload and store the accumulator
+on each iteration, whereas Clang holds it in an XMM register and stores
+it once. The two array bases swap on the backedge, so sinking the store
+requires a disjointness proof that survives that swap.
+
+An isolated NYC outer-AVX2 trial of `binary` kept checksum
+`3360874588549334` and reduced the five-sample median from 6.21 ms to
+3.60 ms; Clang took 1.05 ms. The emitted code still had 199 YMM
+frame-access sites. The trial did not change NYC's default target policy.
+
+### 2026-11-20 dead dynamic call metadata
+
+ADCE can now remove unused compiler-generated length/tag queries after
+inlining. Live metadata and explicit source queries keep their existing
+effects. In `bigint-oracle`, the native AOT entry's static `rt_len` and
+`rt_value_tag` call sites fell from 29 to 7. Five pinned, interleaved
+samples returned `1968365`; median retired instructions fell from
+166.21 M to 149.49 M, cycles from 83.43 M to 75.35 M, and kernel time
+from 43.92 ms to 40.93 ms. Eleven BigFloat and dynamic ABI fixture
+variants passed. This change was measured after the full run above.
+
+### 2026-11-20 collision and SHA hot loops
+
+LLVM now receives byte GEPs for typed-buffer accesses with integer-only
+offsets. Its optimized `cd` IR uses a four-lane reduction and the x86
+code uses `vpcmpgtq`/`vpsubq`. NYR and NYC instead use `neg; cmovs` for
+the scalar wrapping absolute values, including `INT64_MIN`.
+With Clang 23.1.5, the focused `cd` run (checksum `387`) took 5.84 ms
+NYR, 1.56 ms LLVM, 9.26 ms NYC, and 0.932 ms Clang. LLVM is now 1.67×
+Clang and NYR/LLVM is 3.74×, below the existing 5× fixture limit.
+
+In `pbkdf2`, straight-line inlining no longer splits the SHA schedule
+and round blocks; narrowing removes internal low-word masks only when
+all uses ignore their high bits. The numeric fixture's five pinned
+samples went from 9.46 ms to 8.66 ms and from 58.26 M to 52.33 M
+retired instructions. Both NYC fixtures still returned `2991` and
+remain above 7× Clang. The collision workloads and benchmark limits
+were not changed.
+
+### Remaining investigation leads
+
+Re-rank using the dashboard, then confirm a miss in isolation before changing
+the compiler. The former backlog's still-open leads:
+
+- Prove typed-buffer bounds and memory dependence for native conditional-count,
+  max-reduction, and stencil vectorization (`cd`, `viterbi`, `lbm`, `susan`).
+- Reduce spills across inner loops (`sssp`, `mont64`, NYC `pbkdf2`), track
+  available loads by root and byte range (`bce-matrix`), and scalar-replace
+  fixed buffers after unrolling (`mont64`).
+- Narrow provable integer lanes (`bitcount`, `intops`, crypto); reduce
+  managed allocation and operand validation without weakening pointer checks
+  (`bigint-oracle`).
+- Separate startup from kernel cost (`native-oracle`) and reuse CFG,
+  dominator, and SCEV results only where invalidation permits (`page-rank`,
+  `dce`, `sha256`).
 
 </details>
