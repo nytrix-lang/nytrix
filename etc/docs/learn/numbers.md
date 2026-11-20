@@ -5,7 +5,7 @@ Choose a numeric type for the range and precision the program needs. Convert at
 boundaries rather than relying on mixed-width arithmetic. The type rules are in
 [Types](../spec/types.md).
 
-Prerequisites: basic [Nytrix syntax](tour.md).
+Prerequisites: basic [Nytrix syntax](start.md#tour).
 
 Skip this guide if ordinary inferred integers and floating-point values meet
 your range and precision needs.

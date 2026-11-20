@@ -43,10 +43,10 @@ The full project adds a descriptive helper and output:
 ny etc/labs/ffi.ny
 ```
 
-The [complete `ffi.ny` example](../../etc/labs/ffi.ny) checks that the
+The [complete `ffi.ny` example](../../../etc/labs/ffi.ny) checks that the
 computed value crosses the C floating-point argument ABI and that
 `sqrt` returns the expected result. The `test_ffi` fixture in
-[`etc/tests/lang/interop/ny/ffi.nshape`](../../etc/tests/lang/interop/ny/ffi.nshape)
+[`etc/tests/lang/interop/ny/ffi.nshape`](../../../etc/tests/lang/interop/ny/ffi.nshape)
 also covers a runtime-computed C `sqrt` argument.
 
 ## Check the boundary

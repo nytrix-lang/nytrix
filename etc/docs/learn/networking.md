@@ -45,6 +45,6 @@ and user permissions. Use [Execution routes](status.md#execution-routes) and
 
 Next:
 
-- [Library](library.md) — find current networking signatures.
+- [Tooling](tooling.md#find-api-documentation) — find current networking signatures.
 - [Browser](browser.md) — check browser host and permissions.
 - [Testing](testing.md) — exercise error and timeout paths.

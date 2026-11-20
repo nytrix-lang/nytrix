@@ -5,7 +5,7 @@ Ownership contracts say whether a callee borrows a value temporarily or takes
 responsibility for it. Analysis is opt-in and bounded; see the
 [specification](../spec/ownership.md) for supported rules.
 
-Prerequisites: [Tour](tour.md) for bindings and function calls.
+Prerequisites: [Start tour](start.md#tour) for bindings and function calls.
 
 ## Borrow a value
 
@@ -21,7 +21,7 @@ assert_eq(len(source), 3, "owner remains available")
 ```
 
 This behavior is also covered by
-[`ownership.nshape`](../../etc/tests/lang/memory/ownership.nshape).
+[`ownership.nshape`](../../../etc/tests/lang/memory/ownership.nshape).
 
 ## Choose the contract
 

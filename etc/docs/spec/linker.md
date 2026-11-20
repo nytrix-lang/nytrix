@@ -13,9 +13,9 @@ compiler driver's application-link path are separate.
 - [ELF executable linking](#in-process-elf-executables)
 - [Coverage and failure boundaries](#coverage)
 
-Declarations are in [`<nyr/nyr.h>`](../../src/include/nyr/nyr.h);
+Declarations are in [`<nyr/nyr.h>`](../../../src/include/nyr/nyr.h);
 dispatch and ELF linking are implemented in
-[`linker.c`](../../src/code/backend/mach/linker.c).
+[`linker.c`](../../../src/code/backend/mach/linker.c).
 
 ## Link requests
 
@@ -104,7 +104,7 @@ bool linked = nyr_link(&request, error, sizeof(error));
 
 ## Coverage
 
-The [public API acceptance program](../../src/code/test/backend/core/public_acceptance.c)
+The [public API acceptance program](../../../src/code/test/backend/core/public_acceptance.c)
 executes linked outputs and checks multiple objects, archive extraction,
 strong/weak resolution, duplicate definitions, and unresolved-symbol errors.
 It also checks AArch64 ELF output and runs that executable under `qemu-aarch64`

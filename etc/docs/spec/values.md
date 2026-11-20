@@ -308,6 +308,6 @@ encoders such as `json_encode`/`json_decode` own the stable wire form.
 ## Related
 
 - [Types](types.md) for static type expressions.
-- [Library](../learn/library.md) for parser and encoder modules.
+- [Tooling](../learn/tooling.md#find-api-documentation) for parser and encoder modules.
 - [Numbers](../learn/numbers.md) for the numeric tower and conversions.
 - [Troubleshooting](../learn/troubleshooting.md) for string/byte and list-capacity pitfalls.

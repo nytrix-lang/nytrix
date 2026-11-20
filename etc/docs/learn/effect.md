@@ -5,7 +5,7 @@ An effect contract names the observable work a function may perform and gives
 the compiler a boundary to check. Put it on the function that owns that
 boundary, then run strict checks in the target that requires it.
 
-Prerequisites: basic function syntax from the [Tour](tour.md).
+Prerequisites: basic function syntax from the [Start tour](start.md#tour).
 
 ## Declare a contract
 

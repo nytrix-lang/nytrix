@@ -15,15 +15,14 @@ Prerequisites: none; start with the [first program](start.md).
 Next:
 
 - [Start](start.md) — compile and run a program.
-- [Tour](tour.md) — read core language forms.
+- [Quick reference](quirks.md) — check syntax and behavior surprises.
 - [Specification](../spec/index.md) — look up exact language rules.
 
 ## Start here
 
-1. [Start](start.md): install or locate the compiler, compile a file, and run it.
-2. [Tour](tour.md): read and extend a small Ny program.
-3. [Programs](programs.md): organize files, imports, and entry points.
-4. [Library](library.md): find an exported function with `ny doc`.
+1. [Start](start.md): compile and run a file, then read one annotated program.
+2. [Programs](programs.md): organize files, imports, and entry points.
+3. [Tooling](tooling.md): find an exported function with `ny doc`.
 
 ## First concepts
 
@@ -52,7 +51,7 @@ Next:
   boundary; [examples](examples.md) for runnable projects.
 - [Performance](performance.md) for timing, profiles, and contention;
   [compiler debugging](debugging.md) for diagnostics and pass isolation.
-- [Recorded measurements](measurements.md) for historical experiments, not
+- [Recorded measurements](../spec/stats.md) for historical experiments, not
   current performance guarantees; [execution routes](status.md#execution-routes)
   for execution-path differences.
 

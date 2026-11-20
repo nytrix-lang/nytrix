@@ -277,7 +277,7 @@ not evidence of zero HITM. Rerun quiet benchmarks after any attribution capture.
 
 ## Editor compile investigation
 
-The [2026-10-22 validated comparison](measurements.md#validated-editor-compile)
+The [2026-10-22 validated comparison](../spec/stats.md#validated-editor-compile)
 identified repeated CFG construction in peephole range queries. Reusing topology
 and definition positions within that pass preserved the complete object and
 inline logs. The profiled interval fell from 4,180.842 to 1,423.179 seconds;
@@ -304,7 +304,7 @@ were directional, not exact time accounting or a current speed claim. The
 recorded compiler BuildIDs were
 `b21ef392c90bcea1bad92991a88447db0186492c` and
 `de14b7480c4feacbd9dc6969786bc482d369baed`.
-The [measurement archive](measurements.md) retains the full record and rejected
+The [measurement archive](../spec/stats.md) retains the full record and rejected
 allocator/inliner experiments. Those earlier unresolved instruction addresses
 keep their sampled shares provisional.
 
@@ -329,5 +329,5 @@ See [Testing](testing.md) for repeatable fixtures and
 Next:
 
 - [Testing](testing.md) — run the workload's correctness check.
-- [Recorded measurements](measurements.md) — dated results and limits.
+- [Recorded measurements](../spec/stats.md) — dated results and limits.
 - [Status](status.md) — select the route being measured.

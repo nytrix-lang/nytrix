@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"learn","order":180,"summary":"Benchmark dashboard: runtime versus C per backend, trends across runs, the latest full run, and compile-time results."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":50,"summary":"Benchmark dashboard: runtime versus C per backend, trends across runs, the latest full run, and compile-time results."} -->
 # Recorded measurements
 
 This page is the current picture: a dashboard generated from every saved full
@@ -21,7 +21,7 @@ section is written by the C benchmark runner.
 [Reading the results](#reading-the-results)
 [Measurement log](#measurement-log): investigations, profiles, and rejected
   experiments
-[Measurement and profiling method](performance.md)
+[Measurement and profiling method](../learn/performance.md)
 
 <!-- AUTO_MEASUREMENT_CHARTS_BEGIN -->
 
@@ -1382,7 +1382,7 @@ Zero tests already use `test %reg,%reg`, and immediates already take the zero /
   targets (0 occurrences of `cmp $0` in `knight`).
 37 adjacent `mov A,B; mov B,A` reversed pairs remain in `knight`. They come out of
   the inline ALU/copy paths, so removing them needs a MACH-level copy-forwarding
-  pass (see `measurements.md`, 2026-11-15).
+  pass (see `spec/stats.md`, 2026-11-15).
 The 32-bit path already emits compact forms: no `pushl`/`popl` pairs, no `cmpl $0`,
   no self moves in `knight`'s i386 assembly; its 119 `pushl` are call arguments
   under the stack ABI.
@@ -2686,12 +2686,12 @@ teardown at several working-set sizes.
 
 | Public fixture | Question covered |
 | --- | --- |
-| [Graph BFS](../../etc/tests/bench/algorithms/graph-bfs.nshape) | CSR construction and traversal at 4K, 32K, and 256K vertices, four starts per size. |
-| [Expression tree](../../etc/tests/bench/algorithms/expression-tree.nshape) | Indexed recursive interpretation with a changed leaf before each of 4,096 evaluations. |
-| [Records](../../etc/tests/bench/datastructures/records.nshape) | Mixed tag/two-word rows at 32K, 256K, and 2M records, matching C's 24-byte AoS. |
-| [Repeat](../../etc/tests/bench/string/repeat.nshape) | String construction at 1, 16, and 128 MB without turning validation into a full byte-scan benchmark. |
-| [Word frequency](../../etc/tests/bench/string/word-frequency.nshape) | General string-key aggregation, including owned splitting/counting costs. |
-| [Known-vocabulary scan](../../etc/tests/bench/string/word-frequency-scan.nshape) | Allocation/token scanning and a small counting kernel without hashing. |
+| [Graph BFS](../../../etc/tests/bench/algorithms/graph-bfs.nshape) | CSR construction and traversal at 4K, 32K, and 256K vertices, four starts per size. |
+| [Expression tree](../../../etc/tests/bench/algorithms/expression-tree.nshape) | Indexed recursive interpretation with a changed leaf before each of 4,096 evaluations. |
+| [Records](../../../etc/tests/bench/datastructures/records.nshape) | Mixed tag/two-word rows at 32K, 256K, and 2M records, matching C's 24-byte AoS. |
+| [Repeat](../../../etc/tests/bench/string/repeat.nshape) | String construction at 1, 16, and 128 MB without turning validation into a full byte-scan benchmark. |
+| [Word frequency](../../../etc/tests/bench/string/word-frequency.nshape) | General string-key aggregation, including owned splitting/counting costs. |
+| [Known-vocabulary scan](../../../etc/tests/bench/string/word-frequency-scan.nshape) | Allocation/token scanning and a small counting kernel without hashing. |
 
 The repeat fixture's earlier full byte-scan form measured 441/391/12.8 ms and
 checksum `1122000000`; that was a memory-scan finding, not a string-copy comparison.
@@ -3372,7 +3372,7 @@ A full `--bench-correctness` sweep over all 77 `etc/tests/bench/**/*.nshape` pas
 
 Next:
 
-[Performance](performance.md) — measurement method and profile validation.
+[Performance](../learn/performance.md) — measurement method and profile validation.
 [Changelog](../CHANGELOG.md) — verified release records.
 
 ### Collatz mask-test fusion (2026-11-13)

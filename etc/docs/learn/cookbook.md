@@ -4,7 +4,7 @@
 Use the smallest pattern that fits, then follow its linked contract before
 extending it.
 
-Prerequisites: basic [Nytrix syntax](tour.md).
+Prerequisites: basic [Nytrix syntax](start.md#tour).
 
 | Goal | Combine | Read next |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Prerequisites: basic [Nytrix syntax](tour.md).
 | Cross a C boundary | `layout`, `extern`, and a typed wrapper | [Native compilation](native.md) |
 | Run independent work | async task plus `parallel_map` | [Effects](effect.md) |
 | Draw a portable frame | window, frame, then render calls | [UI and rendering](ui.md) |
-| Inspect a public API | `ny doc get` and source comments | [Library](library.md) |
+| Inspect a public API | `ny doc get` and source comments | [Tooling](tooling.md#find-api-documentation) |
 | Measure a native change | reproducible binary and result assertion | [Performance](performance.md) |
 
 ## Match an algebraic value

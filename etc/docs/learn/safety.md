@@ -5,7 +5,7 @@ Nytrix does not make every program memory-safe by default. This page shows the
 checks you can turn on, what each one catches, and what it costs. Pair it with
 [Ownership](ownership.md), which covers the opt-in static checks.
 
-Prerequisites: [Tour](tour.md) for functions and bindings.
+Prerequisites: [Start tour](start.md#tour) for functions and bindings.
 
 ## The safe heap
 

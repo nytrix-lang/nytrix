@@ -134,59 +134,6 @@ The collector exists on Linux with glibc. Elsewhere `__heap_collect` returns
 | `NYTRIX_HEAP_COLLECT_TRACK=soft-dirty` or `none` | Force the older page-tracking method, or none. |
 | `NYTRIX_HEAP_COLLECT_TRACE=1` or `2` | One line per collection on stderr; `2` adds where the scan time went. |
 
-### Frame collection
-
-Lists, dictionaries and strings have no owner in the language, so a program
-that builds them every frame would grow without bound. `__heap_collect(mode)`
-is the runtime's answer for programs with a frame loop; `core.os.ui.render`'s
-`end_frame` calls it, so UI programs need no change.
-
-| `mode` | Effect |
-| --- | --- |
-| `0` | Frame boundary. The first call starts recording what the calling thread allocates; later calls collect when enough has accumulated and otherwise free a slice of what the last collection found. |
-| `1` | Collect the objects recorded since the last collection now. |
-| `2` | Full collection: also reconsider objects that survived earlier ones. |
-| `10`-`16` | Statistics: collections, full collections, objects freed, bytes freed, last pause (microseconds), recorded survivors, longest pause (microseconds). |
-
-The result of modes 0-2 is the number of bytes found unreachable.
-
-What is collected: lists, dictionaries, strings (heap and small), byte
-buffers, big integers and result objects that the recording thread allocated
-after the first call. Objects that predate it, objects made by other threads,
-and memory the program obtained with `malloc` are never freed by the
-collector.
-
-How reachability is decided: conservatively. Any aligned word in writable
-memory that holds an address inside a recorded object keeps it alive, whether
-the word is the address itself, the address carried as a tagged integer, or
-the native handle encoding. This covers references held in registers, in raw
-buffers and in C structures without compiler support. The cost is that a
-stray word can keep an object alive; it can never free one that is in use.
-A reference that exists only outside the process's ordinary private memory
-(in a file, a shared mapping, a device buffer, or packed at an odd byte
-offset) is not seen.
-
-A collection reads only the memory written since the previous one. On Linux
-6.7 and later the pages are tracked with asynchronous userfaultfd write
-protection and `PAGEMAP_SCAN`; older kernels use soft-dirty bits; without
-either, all writable memory is read each time and collections are spaced
-further apart. Other threads the runtime started are paused for the scan.
-The kernel's part of a collection costs time for every resident page of the
-process, so a program run in-process by the JIT, next to the compiler's heap,
-pauses for tens of milliseconds where a standalone executable pauses for a
-few; collections are spaced so that this part stays below a fortieth of the
-run time.
-
-The collector exists on Linux with glibc. Elsewhere `__heap_collect` returns
-0 and nothing is freed.
-
-| Variable | Meaning |
-| --- | --- |
-| `NYTRIX_HEAP_COLLECT=0` | Never start the collector. |
-| `NYTRIX_HEAP_COLLECT_BYTES=N` | Young bytes that trigger a collection (default 2 MiB). |
-| `NYTRIX_HEAP_COLLECT_MAJOR_BYTES=N` | Promoted bytes that trigger a full collection (default 48 MiB). |
-| `NYTRIX_HEAP_COLLECT_TRACK=soft-dirty` or `none` | Force the older page-tracking method, or none. |
-| `NYTRIX_HEAP_COLLECT_TRACE=1` or `2` | One line per collection on stderr; `2` adds where the scan time went. |
 
 ## Container slots
 

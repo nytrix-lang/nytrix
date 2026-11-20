@@ -14395,7 +14395,7 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
     return false;
 
   char doc_path[PATH_MAX], temporary[PATH_MAX];
-  if (snprintf(doc_path, sizeof(doc_path), "%s/etc/docs/learn/measurements.md",
+  if (snprintf(doc_path, sizeof(doc_path), "%s/etc/docs/spec/stats.md",
                root) >= (int)sizeof(doc_path) ||
       snprintf(temporary, sizeof(temporary), "%s.tmp", doc_path) >=
           (int)sizeof(temporary))
@@ -14537,7 +14537,7 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
     fprintf(stderr, "measurements: could not replace %s\n", doc_path);
   else
     printf("Updated latest full benchmark results in "
-           "etc/docs/learn/measurements.md\n");
+           "etc/docs/spec/stats.md\n");
   return write_ok;
 }
 
@@ -14549,7 +14549,7 @@ static int run_bench_report_selftest(void) {
   if (!mkdtemp(root))
     return 1;
   char path[PATH_MAX];
-  snprintf(path, sizeof(path), "%s/etc/docs/learn/measurements.md", root);
+  snprintf(path, sizeof(path), "%s/etc/docs/spec/stats.md", root);
   BenchRow *rows = calloc(4, sizeof(*rows));
   bool ok =
       rows && shape_write_tree_file(

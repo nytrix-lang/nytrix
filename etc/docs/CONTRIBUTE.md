@@ -12,14 +12,14 @@ compiler subsystems.
 | --- | --- |
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
 | UI, engine, and editor work | [UI guide](learn/ui.md#verification) |
-| Compiler performance gaps and target | [Benchmark dashboard](learn/measurements.md#benchmark-dashboard) and [how to read the results](learn/measurements.md#reading-the-results) |
+| Compiler performance gaps and target | [Benchmark dashboard](spec/stats.md#benchmark-dashboard) and [how to read the results](spec/stats.md#reading-the-results) |
 | NYC C compiler | [Compiler and verification evidence](spec/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |
 | Commands, traces, pass isolation, and runtime failures | [Compiler debugging](learn/debugging.md) |
 | Benchmarking, profiles, sample validation, and editor compilation | [Performance](learn/performance.md) |
 | Visible drawing, input, resize, and frame cost | [UI verification](learn/ui.md#verification) |
 | Detailed historical implementation changes | Expand a version's Details in the [changelog](CHANGELOG.md) |
-| Dated measurements and rejected experiments | [Recorded measurements](learn/measurements.md) |
+| Dated measurements and rejected experiments | [Recorded measurements](spec/stats.md) |
 
 The changelog and measurement archive contain dated evidence. Their task labels
 and timings do not describe current acceptance; see the linked topic pages for
@@ -473,7 +473,7 @@ it is not a successful execution.
 ## Performance
 
 Use [Performance](learn/performance.md) for measurement methods and
-[Recorded measurements](learn/measurements.md) for dated results.
+[Recorded measurements](spec/stats.md) for dated results.
 
 Keep source, input, checksum, target, route, optimization, cache state, warmups,
 and measured region fixed. Separate compiler time, startup/link time, runtime,

@@ -48,7 +48,7 @@ assert(GeneratedModule.value() == 11, "generated module function")
 ```
 
 The compiler-test source is
-[`comptime-clone-declarations.nshape`](../../etc/tests/lang/comptime/comptime-clone-declarations.nshape).
+[`comptime-clone-declarations.nshape`](../../../etc/tests/lang/comptime/comptime-clone-declarations.nshape).
 
 When a generated declaration is hard to understand, inspect the expansion,
 then compile or test the resulting program through its intended backend.

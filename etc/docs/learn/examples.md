@@ -11,9 +11,9 @@ checkout and build tools.
 
 | Area | Files |
 | --- | --- |
-| Terminal | [conway.ny](../../etc/labs/conway.ny), [matrix.ny](../../etc/labs/matrix.ny), [ant.ny](../../etc/labs/ant.ny) |
-| OS | [args.ny](../../etc/labs/args.ny), [server.ny](../../etc/labs/server.ny), [ffi.ny](../../etc/labs/ffi.ny), [sound.ny](../../etc/labs/sound.ny) |
-| UI | [term.ny](../../etc/labs/term.ny), [input.ny](../../etc/labs/input.ny), [monitor.ny](../../etc/labs/monitor.ny), [engine.ny](../../etc/labs/engine.ny), [editor.ny](../../etc/labs/editor.ny) |
+| Terminal | [conway.ny](../../../etc/labs/conway.ny), [matrix.ny](../../../etc/labs/matrix.ny), [ant.ny](../../../etc/labs/ant.ny) |
+| OS | [args.ny](../../../etc/labs/args.ny), [server.ny](../../../etc/labs/server.ny), [ffi.ny](../../../etc/labs/ffi.ny), [sound.ny](../../../etc/labs/sound.ny) |
+| UI | [term.ny](../../../etc/labs/term.ny), [input.ny](../../../etc/labs/input.ny), [monitor.ny](../../../etc/labs/monitor.ny), [engine.ny](../../../etc/labs/engine.ny), [editor.ny](../../../etc/labs/editor.ny) |
 
 Run one directly:
 
@@ -44,11 +44,11 @@ boundary in isolation:
 
 | Topic | Files |
 | --- | --- |
-| ADTs and matching | [adt.nshape](../../etc/tests/lang/types/aggregates/adt.nshape), [match.nshape](../../etc/tests/lang/patterns/match.nshape) |
-| Concurrency and threads | [concurrency.nshape](../../etc/tests/lang/concurrency/concurrency.nshape), [thread.nshape](../../etc/tests/lang/concurrency/thread.nshape) |
-| Comptime | [comptime.nshape](../../etc/tests/lang/comptime/comptime.nshape), [table.nshape](../../etc/tests/lang/values/table.nshape) |
-| Native boundary | [ffi.nshape](../../etc/tests/lang/interop/ny/ffi.nshape), [extern.nshape](../../etc/tests/lang/interop/ny/extern.nshape), [asm.nshape](../../etc/tests/lang/interop/ny/asm.nshape) |
-| Ownership and safety | [ownership.nshape](../../etc/tests/lang/memory/ownership.nshape), [safe.nshape](../../etc/tests/lang/memory/safe.nshape), [memory.nshape](../../etc/tests/lang/memory/memory.nshape) |
+| ADTs and matching | [adt.nshape](../../../etc/tests/lang/types/aggregates/adt.nshape), [match.nshape](../../../etc/tests/lang/patterns/match.nshape) |
+| Concurrency and threads | [concurrency.nshape](../../../etc/tests/lang/concurrency/concurrency.nshape), [thread.nshape](../../../etc/tests/lang/concurrency/thread.nshape) |
+| Comptime | [comptime.nshape](../../../etc/tests/lang/comptime/comptime.nshape), [table.nshape](../../../etc/tests/lang/values/table.nshape) |
+| Native boundary | [ffi.nshape](../../../etc/tests/lang/interop/ny/ffi.nshape), [extern.nshape](../../../etc/tests/lang/interop/ny/extern.nshape), [asm.nshape](../../../etc/tests/lang/interop/ny/asm.nshape) |
+| Ownership and safety | [ownership.nshape](../../../etc/tests/lang/memory/ownership.nshape), [safe.nshape](../../../etc/tests/lang/memory/safe.nshape), [memory.nshape](../../../etc/tests/lang/memory/memory.nshape) |
 
 Run a focused test by pattern:
 

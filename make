@@ -6180,7 +6180,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         log(
             "TEST",
             f"no benchmark results from this run ({bench_stale_note}); "
-            "etc/docs/learn/measurements.md still shows the previous full run",
+            "etc/docs/spec/stats.md still shows the previous full run",
         )
     try:
         suite_full_bin.unlink()
@@ -6804,9 +6804,9 @@ def _chart_bands(series: list[tuple[str, str, list[float]]]) -> str:
 
 
 def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
-    """Regenerate the chart overview in etc/docs/learn/measurements.md from every
+    """Regenerate the chart overview in etc/docs/spec/stats.md from every
     saved bench report (build/bench-reports/bench-*.json)."""
-    doc = ROOT / "etc" / "docs" / "learn" / "measurements.md"
+    doc = ROOT / "etc" / "docs" / "spec" / "stats.md"
     reports = sorted((build_root / "bench-reports").glob("bench-*.json"))
     runs = []
     for path in reports:

@@ -117,5 +117,5 @@ See [Programs](programs.md) for module structure and
 Next:
 
 - [Programs](programs.md) — local module imports.
-- [Library](library.md) — inspect module APIs.
+- [Tooling](tooling.md#find-api-documentation) — inspect module APIs.
 - [Troubleshooting](troubleshooting.md) — diagnose import errors.

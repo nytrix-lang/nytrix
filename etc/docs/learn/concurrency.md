@@ -5,7 +5,7 @@ Concurrency is easiest to reason about when independent tasks return values
 that one caller merges. Use channels or queues for handoff; protect shared
 mutable state explicitly.
 
-Prerequisites: basic [Nytrix syntax](tour.md); thread APIs also require a
+Prerequisites: basic [Nytrix syntax](start.md#tour); thread APIs also require a
 thread-capable target.
 
 ## Choose the abstraction

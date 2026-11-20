@@ -82,6 +82,6 @@ For maturity and intended use, see [Where Nytrix fits](status.md#where-nytrix-fi
 
 Next:
 
-- [Tour](tour.md) — read the common source forms.
+- [Start](start.md#tour) — read the common source forms.
 - [Syntax](../spec/syntax.md) — source grammar and spellings.
 - [Implementation status](status.md) — check feature boundaries.

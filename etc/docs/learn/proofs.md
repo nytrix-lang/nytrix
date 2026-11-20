@@ -6,7 +6,7 @@ compiler checks only a bounded subset. The solver rejects obligations it cannot
 prove; it is not a general theorem prover. [Types](../spec/types.md) lists
 supported forms and regression boundaries.
 
-Prerequisites: the [Tour](tour.md) for functions, types, and assertions.
+Prerequisites: the [Start tour](start.md#tour) for functions, types, and assertions.
 
 ## Check a compile-time fact
 
