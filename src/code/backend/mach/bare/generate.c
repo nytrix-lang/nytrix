@@ -2,6 +2,9 @@
  * Maintainer tool for regenerating the embedded freestanding runtime.
  */
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
 #include "code/backend/mach/bare/generate.h"
 
 #ifdef _WIN32
@@ -108,30 +111,65 @@ static int generate_one(const char *root, const char *tmp, const char *arch,
   snprintf(target, sizeof(target), "--target=%s-unknown-linux-gnu", arch);
 
   char runtime[4096];
-  snprintf(runtime, sizeof(runtime), "%s/src/code/backend/mach/bare/runtime.c", root);
+  snprintf(runtime, sizeof(runtime), "%s/src/code/backend/mach/bare/runtime.c",
+           root);
   if (strcmp(arch, "aarch64") == 0) {
-    char *args[] = {"clang", target, "-std=c11", "-Oz", "-ffreestanding",
-                    "-fno-builtin", "-fno-stack-protector", "-fno-unwind-tables",
-                    "-fno-asynchronous-unwind-tables", "-fno-jump-tables",
-                    "-fno-vectorize", "-fno-slp-vectorize", "-fPIC", "-nostdlib",
-                    "-mcmodel=tiny", "-mno-outline-atomics", "-c", runtime,
-                    "-o", obj, NULL};
-    if (run_capture(out, args, NULL) != 0) goto fail;
+    char *args[] = {"clang",
+                    target,
+                    "-std=c11",
+                    "-Oz",
+                    "-ffreestanding",
+                    "-fno-builtin",
+                    "-fno-stack-protector",
+                    "-fno-unwind-tables",
+                    "-fno-asynchronous-unwind-tables",
+                    "-fno-jump-tables",
+                    "-fno-vectorize",
+                    "-fno-slp-vectorize",
+                    "-fPIC",
+                    "-nostdlib",
+                    "-mcmodel=tiny",
+                    "-mno-outline-atomics",
+                    "-c",
+                    runtime,
+                    "-o",
+                    obj,
+                    NULL};
+    if (run_capture(out, args, NULL) != 0)
+      goto fail;
   } else {
-    char *args[] = {"clang", target, "-std=c11", "-Oz", "-ffreestanding",
-                    "-fno-builtin", "-fno-stack-protector", "-fno-unwind-tables",
-                    "-fno-asynchronous-unwind-tables", "-fno-jump-tables",
-                    "-fno-vectorize", "-fno-slp-vectorize", "-fPIC", "-nostdlib",
-                    "-mno-red-zone", "-c", runtime, "-o", obj, NULL};
-    if (run_capture(out, args, NULL) != 0) goto fail;
+    char *args[] = {"clang",
+                    target,
+                    "-std=c11",
+                    "-Oz",
+                    "-ffreestanding",
+                    "-fno-builtin",
+                    "-fno-stack-protector",
+                    "-fno-unwind-tables",
+                    "-fno-asynchronous-unwind-tables",
+                    "-fno-jump-tables",
+                    "-fno-vectorize",
+                    "-fno-slp-vectorize",
+                    "-fPIC",
+                    "-nostdlib",
+                    "-mno-red-zone",
+                    "-c",
+                    runtime,
+                    "-o",
+                    obj,
+                    NULL};
+    if (run_capture(out, args, NULL) != 0)
+      goto fail;
   }
   char *readrel[] = {"readelf", "-rW", obj, NULL};
-  if (run_capture(out, readrel, &relocs) != 0) goto fail;
+  if (run_capture(out, readrel, &relocs) != 0)
+    goto fail;
   const char *allowed_x[] = {"R_X86_64_PC32", "R_X86_64_PLT32"};
-  const char *allowed_a[] = {"R_AARCH64_ADR_PREL_LO21", "R_AARCH64_LD_PREL_LO19",
-                             "R_AARCH64_CALL26", "R_AARCH64_JUMP26",
-                             "R_AARCH64_CONDBR19"};
-  const char *const *allowed = strcmp(arch, "aarch64") == 0 ? allowed_a : allowed_x;
+  const char *allowed_a[] = {"R_AARCH64_ADR_PREL_LO21",
+                             "R_AARCH64_LD_PREL_LO19", "R_AARCH64_CALL26",
+                             "R_AARCH64_JUMP26", "R_AARCH64_CONDBR19"};
+  const char *const *allowed =
+      strcmp(arch, "aarch64") == 0 ? allowed_a : allowed_x;
   size_t allowed_n = strcmp(arch, "aarch64") == 0 ? 5 : 2;
   for (char *line = strtok(relocs, "\n"); line; line = strtok(NULL, "\n"))
     if (strstr(line, "R_") && !contains_any(line, allowed, allowed_n)) {
@@ -139,36 +177,59 @@ static int generate_one(const char *root, const char *tmp, const char *arch,
       goto fail;
     }
   FILE *ld = fopen(script, "wb");
-  if (!ld) goto fail;
+  if (!ld)
+    goto fail;
   fputs("SECTIONS { . = 0; .payload : { *(.text*) *(.rodata*) } "
-        "/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) } }\n", ld);
+        "/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) } }\n",
+        ld);
   fclose(ld);
-  char *link[] = {"ld.lld", "--no-undefined", "-T", script, "-e",
-                  "ny_bare_entry", obj, "-o", elf, NULL};
-  if (run_capture(out, link, NULL) != 0) goto fail;
+  char *link[] = {"ld.lld", "--no-undefined",
+                  "-T",     script,
+                  "-e",     "ny_bare_entry",
+                  obj,      "-o",
+                  elf,      NULL};
+  if (run_capture(out, link, NULL) != 0)
+    goto fail;
   char *readsec[] = {"readelf", "-SW", elf, NULL};
-  if (run_capture(out, readsec, &sections) != 0) goto fail;
+  if (run_capture(out, readsec, &sections) != 0)
+    goto fail;
   const char *badsec[] = {".data", ".bss", ".got", ".rela"};
   if (contains_any(sections, badsec, 4)) {
-    fputs("bare generator: payload has mutable data or dynamic relocations\n", stderr);
+    fputs("bare generator: payload has mutable data or dynamic relocations\n",
+          stderr);
     goto fail;
   }
   char *nm[] = {"nm", elf, NULL};
-  if (run_capture(out, nm, &symbols) != 0) goto fail;
+  if (run_capture(out, nm, &symbols) != 0)
+    goto fail;
   char *entry_line = strstr(symbols, " ny_bare_entry");
-  if (!entry_line) goto fail;
-  while (entry_line > symbols && entry_line[-1] != '\n') --entry_line;
+  if (!entry_line)
+    goto fail;
+  while (entry_line > symbols && entry_line[-1] != '\n')
+    --entry_line;
   unsigned long entry = strtoul(entry_line, NULL, 16);
-  char *copy[] = {"llvm-objcopy", "-O", "binary", "--only-section=.payload",
-                  elf, bin, NULL};
-  if (run_capture(out, copy, NULL) != 0) goto fail;
+  char *copy[] = {"llvm-objcopy",
+                  "-O",
+                  "binary",
+                  "--only-section=.payload",
+                  elf,
+                  bin,
+                  NULL};
+  if (run_capture(out, copy, NULL) != 0)
+    goto fail;
   FILE *data = fopen(bin, "rb");
-  if (!data) goto fail;
+  if (!data)
+    goto fail;
   FILE *generated = fopen(out, "wb");
-  if (!generated) { fclose(data); goto fail; }
-  fprintf(generated, "/* Generated by bare/generate.c from runtime.c. Do not edit. */\n"
-                     "static const size_t ny_bare_%s_entry = %lu;\n"
-                     "static const unsigned char ny_bare_%s_code[] = {\n", arch, entry, arch);
+  if (!generated) {
+    fclose(data);
+    goto fail;
+  }
+  fprintf(generated,
+          "/* Generated by bare/generate.c from runtime.c. Do not edit. */\n"
+          "static const size_t ny_bare_%s_entry = %lu;\n"
+          "static const unsigned char ny_bare_%s_code[] = {\n",
+          arch, entry, arch);
   unsigned char bytes[12];
   size_t n;
   while ((n = fread(bytes, 1, sizeof(bytes), data)) != 0) {
@@ -181,7 +242,8 @@ static int generate_one(const char *root, const char *tmp, const char *arch,
   fclose(data);
   fclose(generated);
   FILE *fresh = fopen(out, "rb");
-  if (!fresh) goto fail;
+  if (!fresh)
+    goto fail;
   /*
    * Only the --check path compares against the existing file; opening it in
    * the regeneration path leaked the handle (and both handles leaked when
@@ -191,22 +253,39 @@ static int generate_one(const char *root, const char *tmp, const char *arch,
   if (check) {
     int a, b;
     bool same = old != NULL;
-    while (same && (a = fgetc(fresh)) != EOF) { b = fgetc(old); if (a != b) same = false; }
-    if (old && fgetc(old) != EOF) same = false;
+    while (same && (a = fgetc(fresh)) != EOF) {
+      b = fgetc(old);
+      if (a != b)
+        same = false;
+    }
+    if (old && fgetc(old) != EOF)
+      same = false;
     fclose(fresh);
-    if (old) fclose(old);
-    if (!same) { fprintf(stderr, "%s needs regeneration\n", path); goto fail; }
+    if (old)
+      fclose(old);
+    if (!same) {
+      fprintf(stderr, "%s needs regeneration\n", path);
+      goto fail;
+    }
   } else {
     FILE *dst = fopen(path, "wb");
-    if (!dst) { fclose(fresh); goto fail; }
-    while ((n = fread(bytes, 1, sizeof(bytes), fresh)) != 0) fwrite(bytes, 1, n, dst);
+    if (!dst) {
+      fclose(fresh);
+      goto fail;
+    }
+    while ((n = fread(bytes, 1, sizeof(bytes), fresh)) != 0)
+      fwrite(bytes, 1, n, dst);
     fclose(fresh);
     fclose(dst);
   }
-  free(relocs); free(sections); free(symbols);
+  free(relocs);
+  free(sections);
+  free(symbols);
   return 0;
 fail:
-  free(relocs); free(sections); free(symbols);
+  free(relocs);
+  free(sections);
+  free(symbols);
   fprintf(stderr, "bare generator: failed while generating %s\n", arch);
   return 1;
 }
@@ -219,12 +298,15 @@ int ny_bare_generate_main(const char *root, int argc, char **argv) {
   }
   char temp[] = "/tmp/ny-bare-XXXXXX";
   char *dir = mkdtemp(temp);
-  if (!dir) { perror("mkdtemp"); return 1; }
+  if (!dir) {
+    perror("mkdtemp");
+    return 1;
+  }
   int rc = generate_one(root, dir, "x86_64", check) ||
            generate_one(root, dir, "aarch64", check);
-  const char *files[] = {"x86_64.o", "x86_64.elf", "x86_64.bin",
-                         "aarch64.o", "aarch64.elf", "aarch64.bin",
-                         "payload.ld", "x86_64.inc", "aarch64.inc"};
+  const char *files[] = {"x86_64.o",   "x86_64.elf",  "x86_64.bin",
+                         "aarch64.o",  "aarch64.elf", "aarch64.bin",
+                         "payload.ld", "x86_64.inc",  "aarch64.inc"};
   for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
     char file[4096];
     snprintf(file, sizeof(file), "%s/%s", dir, files[i]);

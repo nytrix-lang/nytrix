@@ -2,6 +2,7 @@
  * Native backend stack manager: explicit stack-frame layout tracking
  * for register spills, local variables, and ABI-mandated slots.
  */
+#include "base/compat.h"
 #include "base/debug.h"
 #include "code/backend/core/abi.h"
 #include "code/backend/core/internal.h"
@@ -73,8 +74,7 @@ typedef struct {
 
 static int sm_i386_parameter_register(const ny_sm_ctx_t *c, size_t index,
                                       unsigned *used);
-static size_t sm_i386_unsigned_divmod_peer(const ny_sm_ctx_t *c,
-                                            size_t index);
+static size_t sm_i386_unsigned_divmod_peer(const ny_sm_ctx_t *c, size_t index);
 static bool sm_i386_put_raw_asm(ny_sm_ctx_t *c, const char *assembly);
 
 static size_t sm_i386_parameter_size(const ny_sm_ctx_t *c, size_t index) {
@@ -129,7 +129,8 @@ static bool sm_frame(ny_sm_ctx_t *c) {
     if (in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64)
       ++c->max_divmod_slots;
     if (c->kind == NY_SM_I386 && in->op == NYIR_ALLOCA) {
-      if ((!c->nyir->untagged_values || getenv("NYC_DISABLE_I386_STATIC_C_ALLOCA")) &&
+      if ((!c->nyir->untagged_values ||
+           getenv("NYC_DISABLE_I386_STATIC_C_ALLOCA")) &&
           i && c->nyir->data[i - 1].op != NYIR_ALLOCA &&
           c->nyir->data[i - 1].op != NYIR_VA_SAVE)
         c->i386_alloca_static = false;
@@ -178,8 +179,8 @@ static bool sm_frame(ny_sm_ctx_t *c) {
                     "i386 NYIR emit: spill frame is too large");
       return false;
     }
-    int local_bytes = c->i386_local_offsets ? c->i386_local_bytes
-                                            : c->max_local_slot * slot;
+    int local_bytes =
+        c->i386_local_offsets ? c->i386_local_bytes : c->max_local_slot * slot;
     spill = value_bytes + local_bytes;
     if (spill > INT_MAX - c->i386_parameter_bytes)
       return false;
@@ -275,7 +276,7 @@ static const char *sm_i386_frame_reg(const ny_sm_ctx_t *c) {
 static bool sm_movi(ny_sm_ctx_t *c, const char *reg, int64_t v);
 
 static const char *sm_i386_seg_prefix(unsigned flags) {
-  return (flags & NYIR_INST_F_MEM_SEG_GS) ? "%gs:"
+  return (flags & NYIR_INST_F_MEM_SEG_GS)   ? "%gs:"
          : (flags & NYIR_INST_F_MEM_SEG_FS) ? "%fs:"
                                             : "";
 }
@@ -295,8 +296,8 @@ static bool sm_ld(ny_sm_ctx_t *c, const char *reg, int off) {
     return sm_movi(c, "x16", off) && nyr_put(c->w, "\tadd\tx16, sp, x16\n") &&
            nyr_printf(c->w, "\tldr\t%s, [x16]\n", reg);
   case NY_SM_I386:
-    return nyr_printf(c->w, "\tmovl\t%d(%s), %s\n", off,
-                      sm_i386_frame_reg(c), reg);
+    return nyr_printf(c->w, "\tmovl\t%d(%s), %s\n", off, sm_i386_frame_reg(c),
+                      reg);
   case NY_SM_RISCV:
     if (off < 0 || off > 2047) {
       nyr_set_error(c->err, c->err_len,
@@ -368,8 +369,8 @@ static bool sm_stv(ny_sm_ctx_t *c, int v, const char *reg) {
 }
 
 static bool sm_i386_store_u32(ny_sm_ctx_t *c, int off, uint32_t bits) {
-  return nyr_printf(c->w, "\tmovl\t$0x%08" PRIx32 ", %d(%s)\n", bits,
-                    off, sm_i386_frame_reg(c));
+  return nyr_printf(c->w, "\tmovl\t$0x%08" PRIx32 ", %d(%s)\n", bits, off,
+                    sm_i386_frame_reg(c));
 }
 
 static bool sm_i386_high_word_used_wide(const ny_sm_ctx_t *c, int value);
@@ -427,22 +428,44 @@ static bool sm_i386_asm_low_operands(const nyr_inst_t *in) {
   if (in->imm > 0)
     return true;
   if ((in->imm >= -74 && in->imm <= -71) ||
-      (in->imm >= -69 && in->imm <= -60) ||
-      (in->imm >= -57 && in->imm <= -52))
+      (in->imm >= -69 && in->imm <= -60) || (in->imm >= -57 && in->imm <= -52))
     return true;
   switch (in->imm) {
-  case -195: case -194: case -193: case -191: case -190: case -189:
-  case -188: case -187: case -134: case -118: case -108: case -105:
-  case -104: case -103: case -80: case -79: case -70: case -47:
-  case -33: case -31: case -19: case -18: case -17: case -12:
+  case -195:
+  case -194:
+  case -193:
+  case -191:
+  case -190:
+  case -189:
+  case -188:
+  case -187:
+  case -134:
+  case -118:
+  case -108:
+  case -105:
+  case -104:
+  case -103:
+  case -80:
+  case -79:
+  case -70:
+  case -47:
+  case -33:
+  case -31:
+  case -19:
+  case -18:
+  case -17:
+  case -12:
     return true;
   case 0:
-    return in->symbol && (!*in->symbol || strcmp(in->symbol, "nop") == 0 ||
-        strcmp(in->symbol, "cld") == 0 || strcmp(in->symbol, "std") == 0 ||
-        strcmp(in->symbol, "cli") == 0 || strcmp(in->symbol, "sti") == 0 ||
-        strcmp(in->symbol, "hlt") == 0 || strcmp(in->symbol, "pause") == 0 ||
-        strcmp(in->symbol, "lfence") == 0 || strcmp(in->symbol, "mfence") == 0 ||
-        strcmp(in->symbol, "sfence") == 0);
+    return in->symbol &&
+           (!*in->symbol || strcmp(in->symbol, "nop") == 0 ||
+            strcmp(in->symbol, "cld") == 0 || strcmp(in->symbol, "std") == 0 ||
+            strcmp(in->symbol, "cli") == 0 || strcmp(in->symbol, "sti") == 0 ||
+            strcmp(in->symbol, "hlt") == 0 ||
+            strcmp(in->symbol, "pause") == 0 ||
+            strcmp(in->symbol, "lfence") == 0 ||
+            strcmp(in->symbol, "mfence") == 0 ||
+            strcmp(in->symbol, "sfence") == 0);
   default:
     return false;
   }
@@ -460,8 +483,8 @@ static bool sm_i386_asm_touches_local(const nyr_inst_t *in, int64_t slot) {
     if (metadata && sscanf(metadata, "nyc_slot=%d", &a) == 1)
       return a == slot;
   }
-  return !sm_i386_asm_low_operands(in) && in->imm != -21 &&
-         in->imm != -22 && in->imm != -23;
+  return !sm_i386_asm_low_operands(in) && in->imm != -21 && in->imm != -22 &&
+         in->imm != -23;
 }
 
 static bool sm_i386_narrow32_parameter(const ny_sm_ctx_t *c, size_t slot) {
@@ -495,10 +518,11 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
         unsigned definitions = 0;
         for (size_t k = 0; k < c->nyir->len; ++k)
           definitions += c->nyir->data[k].dst == path[p];
-        if (definitions != 1) return false;
+        if (definitions != 1)
+          return false;
       }
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = INT64_MAX, .max = INT64_MIN};
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = INT64_MAX, .max = INT64_MIN};
       return true;
     }
   path[depth] = value;
@@ -510,10 +534,9 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
       *range = in->range;
       return true;
     }
-    if (in->op == NYIR_LOAD_LOCAL &&
-        (in->flags & NYIR_INST_F_NARROW32)) {
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = 0, .max = UINT32_MAX};
+    if (in->op == NYIR_LOAD_LOCAL && (in->flags & NYIR_INST_F_NARROW32)) {
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = 0, .max = UINT32_MAX};
       return true;
     }
     if (in->op == NYIR_CONST_I64) {
@@ -523,7 +546,8 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
     }
     if (in->op == NYIR_CMP_I64 || in->op == NYIR_CMP_F32 ||
         in->op == NYIR_CMP_F64) {
-      *range = (nyr_range_t){.has_min = true, .has_max = true, .min = 0, .max = 1};
+      *range =
+          (nyr_range_t){.has_min = true, .has_max = true, .min = 0, .max = 1};
       return true;
     }
     /*
@@ -532,40 +556,45 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
      * Never infer signed bounds merely from the low-word instruction flag.
      */
     int64_t constant = 0;
-    if (in->op == NYIR_SAR_I64 &&
-        sm_i386_const_value(c, in->b, &constant) &&
+    if (in->op == NYIR_SAR_I64 && sm_i386_const_value(c, in->b, &constant) &&
         constant >= 32 && constant < 64) {
       int64_t limit = INT64_C(1) << (63 - (unsigned)constant);
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = -limit, .max = limit - 1};
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = -limit, .max = limit - 1};
       return true;
     }
     if (in->op == NYIR_AND_I64 &&
         (sm_i386_const_value(c, in->a, &constant) ||
          sm_i386_const_value(c, in->b, &constant)) &&
         constant >= 0 && (uint64_t)constant <= UINT32_MAX) {
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = 0, .max = constant};
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = 0, .max = constant};
       return true;
     }
     if (in->op == NYIR_LOAD_I64 &&
-        (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32))) {
-      *range = (nyr_range_t){.has_min = true, .has_max = true, .min = 0,
-          .max = in->flags & NYIR_INST_F_MEM_BYTE ? UINT8_MAX :
-                 in->flags & NYIR_INST_F_MEM_U16 ? UINT16_MAX : UINT32_MAX};
+        (in->flags &
+         (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32))) {
+      *range =
+          (nyr_range_t){.has_min = true,
+                        .has_max = true,
+                        .min = 0,
+                        .max = in->flags & NYIR_INST_F_MEM_BYTE  ? UINT8_MAX
+                               : in->flags & NYIR_INST_F_MEM_U16 ? UINT16_MAX
+                                                                 : UINT32_MAX};
       return true;
     }
-    if (in->op == NYIR_ADDR_LOCAL || in->op == NYIR_ADDR_SYMBOL || in->op == NYIR_ALLOCA) {
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = 0, .max = UINT32_MAX};
+    if (in->op == NYIR_ADDR_LOCAL || in->op == NYIR_ADDR_SYMBOL ||
+        in->op == NYIR_ALLOCA) {
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = 0, .max = UINT32_MAX};
       return true;
     }
     if ((in->flags & NYIR_INST_F_NARROW32) &&
         (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64 ||
          in->op == NYIR_MUL_I64 || in->op == NYIR_AND_I64 ||
          in->op == NYIR_OR_I64 || in->op == NYIR_XOR_I64)) {
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = 0, .max = UINT32_MAX};
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = 0, .max = UINT32_MAX};
       return true;
     }
     if (in->op == NYIR_SELECT_I64) {
@@ -573,7 +602,8 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
       if (!sm_i386_range_for_value_path(c, in->b, &a, path, depth + 1) ||
           !sm_i386_range_for_value_path(c, in->c, &b, path, depth + 1))
         return false;
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
+      *range = (nyr_range_t){.has_min = true,
+                             .has_max = true,
                              .min = a.min < b.min ? a.min : b.min,
                              .max = a.max > b.max ? a.max : b.max};
       return true;
@@ -585,9 +615,10 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
         return false;
       if ((uint64_t)in->imm < c->nyir->param_count) {
         size_t slot = (size_t)in->imm;
-        nyr_param_type_t type = c->nyir->param_types
-                                   ? c->nyir->param_types[slot] : NYIR_PARAM_I64;
-        if (type != NYIR_PARAM_AGGREGATE && sm_i386_parameter_size(c, slot) != 4)
+        nyr_param_type_t type =
+            c->nyir->param_types ? c->nyir->param_types[slot] : NYIR_PARAM_I64;
+        if (type != NYIR_PARAM_AGGREGATE &&
+            sm_i386_parameter_size(c, slot) != 4)
           return false;
         unsigned used = 0;
         int reg = -1;
@@ -607,24 +638,29 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
       for (size_t k = 0; k < c->nyir->len; ++k) {
         const nyr_inst_t *store = &c->nyir->data[k];
         if ((store->op == NYIR_ADDR_LOCAL && store->imm == in->imm) ||
-            (store->op == NYIR_INLINE_ASM && sm_i386_asm_touches_local(store, in->imm)))
+            (store->op == NYIR_INLINE_ASM &&
+             sm_i386_asm_touches_local(store, in->imm)))
           return false;
         if (store->op != NYIR_STORE_LOCAL || store->imm != in->imm)
           continue;
         nyr_range_t source = {0};
-        if (!sm_i386_range_for_value_path(c, store->a, &source, path, depth + 1))
+        if (!sm_i386_range_for_value_path(c, store->a, &source, path,
+                                          depth + 1))
           return false;
-        if (source.min < minimum) minimum = source.min;
-        if (source.max > maximum) maximum = source.max;
+        if (source.min < minimum)
+          minimum = source.min;
+        if (source.max > maximum)
+          maximum = source.max;
         initialized |= source.min <= source.max;
       }
       /*
        * A cycle without any entry value stays empty until an enclosing
        * union supplies a concrete seed. The public query rejects emptiness.
        */
-      if (!initialized) minimum = INT64_MAX, maximum = INT64_MIN;
-      *range = (nyr_range_t){.has_min = true, .has_max = true,
-                             .min = minimum, .max = maximum};
+      if (!initialized)
+        minimum = INT64_MAX, maximum = INT64_MIN;
+      *range = (nyr_range_t){
+          .has_min = true, .has_max = true, .min = minimum, .max = maximum};
       return true;
     }
     if (in->op != NYIR_COPY)
@@ -643,8 +679,8 @@ static bool sm_i386_range_for_value(const ny_sm_ctx_t *c, int value,
 
 static bool sm_i386_truth_needs_high(const ny_sm_ctx_t *c, int value) {
   nyr_range_t range = {0};
-  return !sm_i386_range_for_value(c, value, &range) ||
-         range.min < INT32_MIN || range.max > UINT32_MAX;
+  return !sm_i386_range_for_value(c, value, &range) || range.min < INT32_MIN ||
+         range.max > UINT32_MAX;
 }
 
 static bool sm_i386_biased_u32(const ny_sm_ctx_t *c, int value) {
@@ -764,11 +800,10 @@ static bool sm_i386_high_word_used_wide_path(const ny_sm_ctx_t *c, int value,
         sm_i386_cmp32_mode(c, user, &unsigned_compare))
       continue;
     bool low_word_operation =
-        user->op == NYIR_COPY ||
-        user->op == NYIR_ADD_I64 || user->op == NYIR_SUB_I64 ||
-        user->op == NYIR_MUL_I64 || user->op == NYIR_AND_I64 ||
-        user->op == NYIR_OR_I64 || user->op == NYIR_XOR_I64 ||
-        user->op == NYIR_SHL_I64;
+        user->op == NYIR_COPY || user->op == NYIR_ADD_I64 ||
+        user->op == NYIR_SUB_I64 || user->op == NYIR_MUL_I64 ||
+        user->op == NYIR_AND_I64 || user->op == NYIR_OR_I64 ||
+        user->op == NYIR_XOR_I64 || user->op == NYIR_SHL_I64;
     if (low_word_operation && user->dst >= 0 &&
         !sm_i386_high_word_used_wide_path(c, user->dst, path, depth + 1))
       continue;
@@ -889,10 +924,11 @@ static bool sm_i386_assign_value_slots(ny_sm_ctx_t *c, int *offsets,
          * loop-expanded lifetimes and partial overlaps remain conflicts.
          */
         bool copy_boundary = has_definition && slots[v].first == definition &&
-            slots[p].last == definition && candidate == offsets[p] &&
-            slots[v].bytes == slots[p].bytes &&
-            c->nyir->data[definition].op == NYIR_COPY &&
-            c->nyir->data[definition].a == (int)p;
+                             slots[p].last == definition &&
+                             candidate == offsets[p] &&
+                             slots[v].bytes == slots[p].bytes &&
+                             c->nyir->data[definition].op == NYIR_COPY &&
+                             c->nyir->data[definition].a == (int)p;
         if (live_overlap && byte_overlap && !copy_boundary) {
           int next = offsets[p] + slots[p].bytes;
           if (next <= candidate || next > INT_MAX - 8) {
@@ -950,8 +986,8 @@ static bool sm_i386_assign_value_slots_cfg(ny_sm_ctx_t *c, int *offsets,
   uint64_t *flow = NULL, *interference = NULL;
   bool ok = false;
   size_t words = (count + 63u) / 64u;
-  if (!slots || !definitions || !inst_offsets || !order ||
-      !assigned || !nyr_build_use_def(c->nyir, &uses) ||
+  if (!slots || !definitions || !inst_offsets || !order || !assigned ||
+      !nyr_build_use_def(c->nyir, &uses) ||
       !nyr_cfg_build_topology(c->nyir, &cfg))
     goto done;
   for (size_t i = 0; i < c->nyir->len; ++i) {
@@ -986,7 +1022,8 @@ static bool sm_i386_assign_value_slots_cfg(ny_sm_ctx_t *c, int *offsets,
   }
   if (uses.use_count > SIZE_MAX / sizeof(*inst_values))
     goto done;
-  inst_values = uses.use_count ? malloc(uses.use_count * sizeof(*inst_values)) : NULL;
+  inst_values =
+      uses.use_count ? malloc(uses.use_count * sizeof(*inst_values)) : NULL;
   cursor = c->nyir->len ? malloc(c->nyir->len * sizeof(*cursor)) : NULL;
   if ((uses.use_count && !inst_values) || (c->nyir->len && !cursor))
     goto done;
@@ -1074,8 +1111,7 @@ static bool sm_i386_assign_value_slots_cfg(ny_sm_ctx_t *c, int *offsets,
       int dst = in->dst;
       if (dst >= 0) {
         int copy_source = -1;
-        if (in->op == NYIR_COPY && in->a >= 0 &&
-            (size_t)in->a < count &&
+        if (in->op == NYIR_COPY && in->a >= 0 && (size_t)in->a < count &&
             uses.offsets[in->a + 1] - uses.offsets[in->a] == 1 &&
             uses.users[uses.offsets[in->a]] == i &&
             slots[dst].bytes == slots[in->a].bytes)
@@ -1112,9 +1148,8 @@ static bool sm_i386_assign_value_slots_cfg(ny_sm_ctx_t *c, int *offsets,
   for (size_t k = 0; k < count; ++k) {
     size_t best = SIZE_MAX;
     for (size_t v = 0; v < count; ++v)
-      if (!assigned[v] &&
-          (best == SIZE_MAX || order[v] > order[best] ||
-           (order[v] == order[best] && v < best)))
+      if (!assigned[v] && (best == SIZE_MAX || order[v] > order[best] ||
+                           (order[v] == order[best] && v < best)))
         best = v;
     if (best == SIZE_MAX)
       goto done;
@@ -1161,7 +1196,8 @@ done:
 }
 
 static bool sm_i386_local_high_word_used_wide(const ny_sm_ctx_t *c, int local) {
-  if (c->i386_high_locals && local >= 0 && (size_t)local < c->i386_high_local_count)
+  if (c->i386_high_locals && local >= 0 &&
+      (size_t)local < c->i386_high_local_count)
     return c->i386_high_locals[local] != 0;
   if (!c || !c->nyir || local < 0)
     return true;
@@ -1303,16 +1339,16 @@ static int sm_i386_emit_narrow_immediate(ny_sm_ctx_t *c, const nyr_inst_t *in,
   bool addsub = strcmp(op, "add") == 0 || strcmp(op, "sub") == 0;
   bool one = (uint32_t)immediate == 1;
   bool minus_one = (uint32_t)immediate == UINT32_MAX;
-  bool increment = (strcmp(op, "add") == 0 && one) ||
-                   (strcmp(op, "sub") == 0 && minus_one);
-  bool decrement = (strcmp(op, "sub") == 0 && one) ||
-                   (strcmp(op, "add") == 0 && minus_one);
+  bool increment =
+      (strcmp(op, "add") == 0 && one) || (strcmp(op, "sub") == 0 && minus_one);
+  bool decrement =
+      (strcmp(op, "sub") == 0 && one) || (strcmp(op, "add") == 0 && minus_one);
   bool emitted = addsub && increment ? nyr_put(c->w, "\tincl\t%eax\n")
-                 : addsub && decrement ? nyr_put(c->w, "\tdecl\t%eax\n")
-                 : nyr_printf(c->w, "\t%sl\t$0x%08" PRIx32 ", %%eax\n", op,
-                              (uint32_t)immediate);
-  return emitted &&
-                 sm_stv(c, in->dst, "%eax") &&
+                 : addsub && decrement
+                     ? nyr_put(c->w, "\tdecl\t%eax\n")
+                     : nyr_printf(c->w, "\t%sl\t$0x%08" PRIx32 ", %%eax\n", op,
+                                  (uint32_t)immediate);
+  return emitted && sm_stv(c, in->dst, "%eax") &&
                  sm_i386_store_high_if_used(c, in->dst)
              ? 1
              : 0;
@@ -1338,7 +1374,9 @@ static int sm_i386_emit_wide_immediate(ny_sm_ctx_t *c, const nyr_inst_t *in,
     if ((!strcmp(op, "and") && upper == 0) ||
         (!strcmp(op, "or") && upper == UINT32_MAX))
       return sm_stv(c, in->dst, "%eax") &&
-             sm_i386_store_u32(c, sm_vhi_off(c, in->dst), upper) ? 1 : 0;
+                     sm_i386_store_u32(c, sm_vhi_off(c, in->dst), upper)
+                 ? 1
+                 : 0;
     const char *high_op = strcmp(op, "add") == 0   ? "adc"
                           : strcmp(op, "sub") == 0 ? "sbb"
                                                    : op;
@@ -1669,18 +1707,17 @@ static bool sm_movi(ny_sm_ctx_t *c, const char *reg, int64_t v) {
     if (v == 0)
       return nyr_printf(c->w, "\txorl\t%s, %s\n", reg, reg);
     if (v >= INT8_MIN && v <= INT8_MAX)
-      return nyr_printf(c->w, "\tpushl\t$%" PRId32 "\n\tpopl\t%s\n",
-                        (int32_t)v, reg);
+      return nyr_printf(c->w, "\tpushl\t$%" PRId32 "\n\tpopl\t%s\n", (int32_t)v,
+                        reg);
     if (v >= 128 && v <= 255) {
-      const char *byte = !strcmp(reg, "%eax") ? "%al"
+      const char *byte = !strcmp(reg, "%eax")   ? "%al"
                          : !strcmp(reg, "%ecx") ? "%cl"
                          : !strcmp(reg, "%edx") ? "%dl"
                          : !strcmp(reg, "%ebx") ? "%bl"
-                                                  : NULL;
+                                                : NULL;
       if (byte)
-        return nyr_printf(c->w,
-                          "\txorl\t%s, %s\n\tmovb\t$%u, %s\n",
-                          reg, reg, (unsigned)v, byte);
+        return nyr_printf(c->w, "\txorl\t%s, %s\n\tmovb\t$%u, %s\n", reg, reg,
+                          (unsigned)v, byte);
     }
     return nyr_printf(c->w, "\tmovl\t$%" PRId64 ", %s\n", v, reg);
   case NY_SM_RISCV:
@@ -1732,7 +1769,7 @@ static bool sm_emit_binop(ny_sm_ctx_t *c, const nyr_inst_t *in, const char *arm,
  * their intervals can overlap other values across control-flow edges.
  */
 static bool sm_i386_binary_operand(ny_sm_ctx_t *c, const char *op,
-                                    const char *reg, int value) {
+                                   const char *reg, int value) {
   int64_t constant = 0;
   if (!sm_err_val(c, value, "value"))
     return false;
@@ -1742,13 +1779,12 @@ static bool sm_i386_binary_operand(ny_sm_ctx_t *c, const char *op,
     return nyr_printf(c->w, "\t%sl\t$0x%08" PRIx32 ", %s\n", op,
                       (uint32_t)constant, reg);
   }
-  return nyr_printf(c->w, "\t%sl\t%d(%s), %s\n", op,
-                    sm_voff(c, value),
+  return nyr_printf(c->w, "\t%sl\t%d(%s), %s\n", op, sm_voff(c, value),
                     sm_i386_frame_reg(c), reg);
 }
 
 static bool sm_i386_binary_low(ny_sm_ctx_t *c, const nyr_inst_t *in,
-                                const char *op) {
+                               const char *op) {
   return sm_ldv(c, "%eax", in->a) &&
          sm_i386_binary_operand(c, op, "%eax", in->b) &&
          sm_stv(c, in->dst, "%eax");
@@ -1776,8 +1812,7 @@ static bool sm_i386_bitwise64(ny_sm_ctx_t *c, const nyr_inst_t *in,
   }
   if (!sm_i386_binary_low(c, in, op) ||
       !sm_ld(c, "%edx", sm_voff(c, in->a) + 4) ||
-      !nyr_printf(c->w, "\t%sl\t%d(%s), %%edx\n", op,
-                  sm_voff(c, in->b) + 4,
+      !nyr_printf(c->w, "\t%sl\t%d(%s), %%edx\n", op, sm_voff(c, in->b) + 4,
                   sm_i386_frame_reg(c)) ||
       !sm_st(c, sm_voff(c, in->dst) + 4, "%edx"))
     return false;
@@ -1791,8 +1826,7 @@ static bool sm_i386_shift64(ny_sm_ctx_t *c, const nyr_inst_t *in,
            nyr_put(c->w, arithmetic_right
                              ? "\tandl\t$31, %ecx\n\tsarl\t%cl, %eax\n"
                              : "\tandl\t$31, %ecx\n\tshll\t%cl, %eax\n") &&
-           sm_stv(c, in->dst, "%eax") &&
-           sm_i386_store_high_if_used(c, in->dst);
+           sm_stv(c, in->dst, "%eax") && sm_i386_store_high_if_used(c, in->dst);
   }
   bool high_used = sm_i386_high_word_used_wide(c, in->dst);
   int64_t constant_shift = 0;
@@ -1811,18 +1845,21 @@ static bool sm_i386_shift64(ny_sm_ctx_t *c, const nyr_inst_t *in,
             (high_used && !nyr_printf(c->w, "\tsarl\t$%u, %%edx\n", shift)))
           return false;
       } else if (!nyr_put(c->w, "\tmovl\t%edx, %eax\n") ||
-                 (shift > 32 && !nyr_printf(c->w, "\tsarl\t$%u, %%eax\n", shift - 32)) ||
+                 (shift > 32 &&
+                  !nyr_printf(c->w, "\tsarl\t$%u, %%eax\n", shift - 32)) ||
                  (high_used && !nyr_put(c->w, "\tsarl\t$31, %edx\n"))) {
         return false;
       }
     } else if (shift && shift < 32) {
-      if ((high_used && !nyr_printf(c->w, "\tshldl\t$%u, %%eax, %%edx\n", shift)) ||
+      if ((high_used &&
+           !nyr_printf(c->w, "\tshldl\t$%u, %%eax, %%edx\n", shift)) ||
           !nyr_printf(c->w, "\tshll\t$%u, %%eax\n", shift))
         return false;
     } else if (shift >= 32) {
       if ((high_used &&
            (!nyr_put(c->w, "\tmovl\t%eax, %edx\n") ||
-            (shift > 32 && !nyr_printf(c->w, "\tshll\t$%u, %%edx\n", shift - 32)))) ||
+            (shift > 32 &&
+             !nyr_printf(c->w, "\tshll\t$%u, %%edx\n", shift - 32)))) ||
           !nyr_put(c->w, "\txorl\t%eax, %eax\n"))
         return false;
     }
@@ -1854,7 +1891,8 @@ static bool sm_i386_shift64(ny_sm_ctx_t *c, const nyr_inst_t *in,
                        "\tsarl\t$31, %edx\n"))
       return false;
   } else {
-    if ((high_used && !nyr_put(c->w, "\tmovl\t%eax, %edx\n\tshll\t%cl, %edx\n")) ||
+    if ((high_used &&
+         !nyr_put(c->w, "\tmovl\t%eax, %edx\n\tshll\t%cl, %edx\n")) ||
         !nyr_put(c->w, "\txorl\t%eax, %eax\n"))
       return false;
   }
@@ -1884,9 +1922,8 @@ static bool sm_i386_addsub64(ny_sm_ctx_t *c, const nyr_inst_t *in,
   }
   if (!sm_i386_binary_low(c, in, subtract ? "sub" : "add") ||
       !sm_ld(c, "%edx", sm_voff(c, in->a) + 4) ||
-      !nyr_printf(c->w, "\t%sl\t%d(%s), %%edx\n",
-                  subtract ? "sbb" : "adc", sm_voff(c, in->b) + 4,
-                  sm_i386_frame_reg(c)) ||
+      !nyr_printf(c->w, "\t%sl\t%d(%s), %%edx\n", subtract ? "sbb" : "adc",
+                  sm_voff(c, in->b) + 4, sm_i386_frame_reg(c)) ||
       !sm_st(c, sm_voff(c, in->dst) + 4, "%edx"))
     return false;
   return true;
@@ -2298,9 +2335,8 @@ static bool sm_arm_divmod64(ny_sm_ctx_t *c, const nyr_inst_t *in,
 }
 
 static bool sm_i386_divmod64(ny_sm_ctx_t *c, const nyr_inst_t *in,
-                              bool remainder, bool signed_division) {
-  if (!sm_err_val(c, in->a, "dividend") ||
-      !sm_err_val(c, in->b, "divisor") ||
+                             bool remainder, bool signed_division) {
+  if (!sm_err_val(c, in->a, "dividend") || !sm_err_val(c, in->b, "divisor") ||
       !sm_err_val(c, in->dst, "destination"))
     return false;
   nyr_range_t left = {0}, right = {0};
@@ -2315,24 +2351,25 @@ static bool sm_i386_divmod64(ny_sm_ctx_t *c, const nyr_inst_t *in,
   if ((signed_division && (signed32 || narrow32)) ||
       (!signed_division && (unsigned32 || narrow32))) {
     if (!sm_ldv(c, "%eax", in->a) || !sm_ldv(c, "%ecx", in->b) ||
-        !nyr_put(c->w, signed_division ? "\tcltd\n\tidivl\t%ecx\n"
-                                      : "\txorl\t%edx, %edx\n\tdivl\t%ecx\n") ||
+        !nyr_put(c->w, signed_division
+                           ? "\tcltd\n\tidivl\t%ecx\n"
+                           : "\txorl\t%edx, %edx\n\tdivl\t%ecx\n") ||
         (remainder && !nyr_put(c->w, "\tmovl\t%edx, %eax\n")) ||
         !sm_stv(c, in->dst, "%eax"))
       return false;
     if (!sm_i386_high_word_used_wide(c, in->dst))
       return true;
-    return nyr_put(c->w, signed_division ? "\tcltd\n" : "\txorl\t%edx, %edx\n") &&
+    return nyr_put(c->w,
+                   signed_division ? "\tcltd\n" : "\txorl\t%edx, %edx\n") &&
            sm_st(c, sm_vhi_off(c, in->dst), "%edx");
   }
   char label[192];
-  snprintf(label, sizeof(label), "%s_div64_%zu", c->epilogue, c->divmod_serial++);
-  if (!sm_ldv(c, "%eax", in->a) ||
-      !sm_ld(c, "%edx", sm_vhi_off(c, in->a)) ||
+  snprintf(label, sizeof(label), "%s_div64_%zu", c->epilogue,
+           c->divmod_serial++);
+  if (!sm_ldv(c, "%eax", in->a) || !sm_ld(c, "%edx", sm_vhi_off(c, in->a)) ||
       !nyr_put(c->w, "\tpushl\t%ebx\n\tpushl\t%esi\n\tpushl\t%edi\n"
-                    "\tsubl\t$12, %esp\n") ||
-      !sm_ldv(c, "%ecx", in->b) ||
-      !nyr_put(c->w, "\tmovl\t%ecx, 0(%esp)\n") ||
+                     "\tsubl\t$12, %esp\n") ||
+      !sm_ldv(c, "%ecx", in->b) || !nyr_put(c->w, "\tmovl\t%ecx, 0(%esp)\n") ||
       !sm_ld(c, "%ecx", sm_vhi_off(c, in->b)) ||
       !nyr_put(c->w, "\tmovl\t%ecx, 4(%esp)\n"))
     return false;
@@ -2342,26 +2379,29 @@ static bool sm_i386_divmod64(ny_sm_ctx_t *c, const nyr_inst_t *in,
         !nyr_put(c->w, "\tmovl\t%ebx, 8(%esp)\n\ttestl\t%edx, %edx\n") ||
         !nyr_printf(c->w, "\tjns\t%s_abs_a\n", label) ||
         !nyr_put(c->w, "\tnegl\t%eax\n\tadcl\t$0, %edx\n\tnegl\t%edx\n") ||
-        !nyr_printf(c->w, "%s_abs_a:\n\ttestl\t%%ecx, %%ecx\n"
-                          "\tjns\t%s_abs_b\n", label, label) ||
+        !nyr_printf(c->w,
+                    "%s_abs_a:\n\ttestl\t%%ecx, %%ecx\n"
+                    "\tjns\t%s_abs_b\n",
+                    label, label) ||
         !nyr_put(c->w, "\tnegl\t0(%esp)\n\tadcl\t$0, 4(%esp)\n"
-                      "\tnegl\t4(%esp)\n") ||
+                       "\tnegl\t4(%esp)\n") ||
         !nyr_printf(c->w, "%s_abs_b:\n", label))
       return false;
   }
   if (!nyr_put(c->w, "\tmovl\t0(%esp), %ecx\n\torl\t4(%esp), %ecx\n") ||
-      !nyr_printf(c->w, "\tjnz\t%s_nonzero\n\tud2\n%s_nonzero:\n", label, label) ||
+      !nyr_printf(c->w, "\tjnz\t%s_nonzero\n\tud2\n%s_nonzero:\n", label,
+                  label) ||
       !nyr_put(c->w, "\txorl\t%ebx, %ebx\n\txorl\t%esi, %esi\n"
-                    "\tmovl\t$64, %edi\n") ||
+                     "\tmovl\t$64, %edi\n") ||
       !nyr_printf(c->w,
-          "%s_loop:\n\tshll\t$1, %%eax\n\trcll\t$1, %%edx\n"
-          "\trcll\t$1, %%ebx\n\trcll\t$1, %%esi\n"
-          "\tjc\t%s_sub\n\tcmpl\t4(%%esp), %%esi\n"
-          "\tja\t%s_sub\n\tjb\t%s_next\n"
-          "\tcmpl\t0(%%esp), %%ebx\n\tjb\t%s_next\n"
-          "%s_sub:\n\tsubl\t0(%%esp), %%ebx\n\tsbbl\t4(%%esp), %%esi\n"
-          "\torl\t$1, %%eax\n%s_next:\n\tdecl\t%%edi\n\tjnz\t%s_loop\n",
-          label, label, label, label, label, label, label, label))
+                  "%s_loop:\n\tshll\t$1, %%eax\n\trcll\t$1, %%edx\n"
+                  "\trcll\t$1, %%ebx\n\trcll\t$1, %%esi\n"
+                  "\tjc\t%s_sub\n\tcmpl\t4(%%esp), %%esi\n"
+                  "\tja\t%s_sub\n\tjb\t%s_next\n"
+                  "\tcmpl\t0(%%esp), %%ebx\n\tjb\t%s_next\n"
+                  "%s_sub:\n\tsubl\t0(%%esp), %%ebx\n\tsbbl\t4(%%esp), %%esi\n"
+                  "\torl\t$1, %%eax\n%s_next:\n\tdecl\t%%edi\n\tjnz\t%s_loop\n",
+                  label, label, label, label, label, label, label, label))
     return false;
   if (remainder && !nyr_put(c->w, "\tmovl\t%ebx, %eax\n\tmovl\t%esi, %edx\n"))
     return false;
@@ -2371,7 +2411,9 @@ static bool sm_i386_divmod64(ny_sm_ctx_t *c, const nyr_inst_t *in,
        !nyr_put(c->w, "\tnegl\t%eax\n\tadcl\t$0, %edx\n\tnegl\t%edx\n") ||
        !nyr_printf(c->w, "%s_sign_done:\n", label)))
     return false;
-  return nyr_put(c->w, "\taddl\t$12, %esp\n\tpopl\t%edi\n\tpopl\t%esi\n\tpopl\t%ebx\n") &&
+  return nyr_put(
+             c->w,
+             "\taddl\t$12, %esp\n\tpopl\t%edi\n\tpopl\t%esi\n\tpopl\t%ebx\n") &&
          sm_stv(c, in->dst, "%eax") &&
          (!sm_i386_high_word_used_wide(c, in->dst) ||
           sm_st(c, sm_vhi_off(c, in->dst), "%edx"));
@@ -2390,8 +2432,8 @@ static bool sm_i386_equivalent_div_operand(const nyr_func_t *nyir, int left,
     if (nyir->data[i].dst == right)
       b = &nyir->data[i];
   }
-  if (!a || !b || a->op != b->op || a->flags != b->flags ||
-      a->imm != b->imm || a->cmp != b->cmp)
+  if (!a || !b || a->op != b->op || a->flags != b->flags || a->imm != b->imm ||
+      a->cmp != b->cmp)
     return false;
   if (a->op == NYIR_CONST_I64)
     return true;
@@ -2409,8 +2451,7 @@ static bool sm_i386_equivalent_div_operand(const nyr_func_t *nyir, int left,
           sm_i386_equivalent_div_operand(nyir, a->b, b->a, depth + 1));
 }
 
-static size_t sm_i386_unsigned_divmod_peer(const ny_sm_ctx_t *c,
-                                           size_t index) {
+static size_t sm_i386_unsigned_divmod_peer(const ny_sm_ctx_t *c, size_t index) {
   const nyr_func_t *nyir = c ? c->nyir : NULL;
   if (!nyir || index >= nyir->len)
     return SIZE_MAX;
@@ -2420,9 +2461,9 @@ static size_t sm_i386_unsigned_divmod_peer(const ny_sm_ctx_t *c,
       !in->symbol || strcmp(in->symbol, "unsigned-div") != 0 ||
       !sm_i386_range_for_value(c, in->a, &dividend) ||
       !sm_i386_range_for_value(c, in->b, &divisor) || dividend.min < 0 ||
-      !dividend.has_min || !dividend.has_max ||
-      dividend.max > UINT32_MAX || divisor.min < 0 ||
-      !divisor.has_min || !divisor.has_max || divisor.max > UINT32_MAX)
+      !dividend.has_min || !dividend.has_max || dividend.max > UINT32_MAX ||
+      divisor.min < 0 || !divisor.has_min || !divisor.has_max ||
+      divisor.max > UINT32_MAX)
     return SIZE_MAX;
   for (size_t i = index + 1; i < nyir->len; ++i) {
     const nyr_inst_t *candidate = &nyir->data[i];
@@ -2440,8 +2481,8 @@ static size_t sm_i386_unsigned_divmod_peer(const ny_sm_ctx_t *c,
 }
 
 static bool sm_i386_emit_unsigned_divmod_pair(ny_sm_ctx_t *c,
-                                               const nyr_inst_t *first,
-                                               const nyr_inst_t *second) {
+                                              const nyr_inst_t *first,
+                                              const nyr_inst_t *second) {
   int quotient = first->imm == -21 ? first->dst : second->dst;
   int remainder = first->imm == -22 ? first->dst : second->dst;
   return sm_ldv(c, "%eax", first->a) && sm_ldv(c, "%ecx", first->b) &&
@@ -2454,12 +2495,18 @@ static bool sm_i386_emit_unsigned_divmod_pair(ny_sm_ctx_t *c,
 
 static const char *sm_i386_cmp_condition(nyr_cmp_t cmp, bool is_unsigned) {
   switch (cmp) {
-  case NYIR_CMP_EQ: return "e";
-  case NYIR_CMP_NE: return "ne";
-  case NYIR_CMP_LT: return is_unsigned ? "b" : "l";
-  case NYIR_CMP_LE: return is_unsigned ? "be" : "le";
-  case NYIR_CMP_GT: return is_unsigned ? "a" : "g";
-  case NYIR_CMP_GE: return is_unsigned ? "ae" : "ge";
+  case NYIR_CMP_EQ:
+    return "e";
+  case NYIR_CMP_NE:
+    return "ne";
+  case NYIR_CMP_LT:
+    return is_unsigned ? "b" : "l";
+  case NYIR_CMP_LE:
+    return is_unsigned ? "be" : "le";
+  case NYIR_CMP_GT:
+    return is_unsigned ? "a" : "g";
+  case NYIR_CMP_GE:
+    return is_unsigned ? "ae" : "ge";
   }
   return NULL;
 }
@@ -2652,8 +2699,9 @@ static bool sm_i386_single_eax_call_arg(const ny_sm_ctx_t *c,
     return false;
   int args[NYIR_CALL_MAX_ARGS];
   int argc = 0;
-  if (!nyr_call_args(call, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS,
-                     &argc, NULL, 0) || argc != 1 || args[0] != value)
+  if (!nyr_call_args(call, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
+                     NULL, 0) ||
+      argc != 1 || args[0] != value)
     return false;
   nyr_scalar_class_t cls = nyr_call_arg_class_get(call, 0);
   return cls != NYIR_SCALAR_F32 && cls != NYIR_SCALAR_F64 &&
@@ -2774,13 +2822,13 @@ static bool sm_call(ny_sm_ctx_t *c, const nyr_inst_t *in) {
      * handles dynamic alloca and the SysV callee-pop hidden result pointer.
      */
     size_t alignment = i386_simple_stack ? 4 : 16;
-    i386_outgoing_bytes = (stack_bytes + (indirect ? 4u : 0u) + alignment - 1) &
-                           ~(alignment - 1);
-    if ((!i386_simple_stack && !nyr_put(c->w,
-                 "\tpushl\t%ebx\n\tmovl\t%esp, %ebx\n\tandl\t$-16, %esp\n")) ||
+    i386_outgoing_bytes =
+        (stack_bytes + (indirect ? 4u : 0u) + alignment - 1) & ~(alignment - 1);
+    if ((!i386_simple_stack &&
+         !nyr_put(c->w,
+                  "\tpushl\t%ebx\n\tmovl\t%esp, %ebx\n\tandl\t$-16, %esp\n")) ||
         (i386_outgoing_bytes &&
-         !nyr_printf(c->w, "\tsubl\t$%zu, %%esp\n",
-                     i386_outgoing_bytes)))
+         !nyr_printf(c->w, "\tsubl\t$%zu, %%esp\n", i386_outgoing_bytes)))
       return false;
     size_t offset = 0;
     for (int i = indirect ? 1 : 0; i < argc; ++i) {
@@ -2996,9 +3044,10 @@ static bool sm_call(ny_sm_ctx_t *c, const nyr_inst_t *in) {
     } else if (!nyr_printf(c->w, "\tcall\t%s%s%s\n", pfx, fn, sym)) {
       return false;
     }
-    if (i386_simple_stack ?
-          (i386_outgoing_bytes && !nyr_printf(c->w, "\taddl\t$%zu, %%esp\n", i386_outgoing_bytes)) :
-          !nyr_put(c->w, "\tmovl\t%ebx, %esp\n\tpopl\t%ebx\n"))
+    if (i386_simple_stack
+            ? (i386_outgoing_bytes &&
+               !nyr_printf(c->w, "\taddl\t$%zu, %%esp\n", i386_outgoing_bytes))
+            : !nyr_put(c->w, "\tmovl\t%ebx, %esp\n\tpopl\t%ebx\n"))
       return false;
     break;
   case NY_SM_RISCV:
@@ -3264,8 +3313,7 @@ static bool sm_inst(ny_sm_ctx_t *c, const nyr_inst_t *in) {
              sm_stv(c, in->dst, "%eax") &&
              sm_st(c, sm_vhi_off(c, in->dst), "%edx") &&
              nyr_printf(c->w, "\tjmp\t%s\n%s:\n", done, wide) &&
-             sm_ldv(c, "%ecx", in->b) &&
-             nyr_put(c->w, "\tsubl\t$32, %ecx\n") &&
+             sm_ldv(c, "%ecx", in->b) && nyr_put(c->w, "\tsubl\t$32, %ecx\n") &&
              sm_ld(c, "%eax", sm_vhi_off(c, in->a)) &&
              nyr_put(c->w, "\tshrl\t%cl, %eax\n") &&
              sm_stv(c, in->dst, "%eax") && sm_movi(c, "%edx", 0) &&
@@ -3948,8 +3996,10 @@ static bool sm_inst(ny_sm_ctx_t *c, const nyr_inst_t *in) {
         if (in->dst < 0)
           return true;
         if (!c->i386_position_independent)
-          return nyr_printf(c->w, "\tmovl\t$%s_nyir_L%zu, %%eax\n", c->epilogue, label) &&
-                 sm_stv(c, in->dst, "%eax") && sm_i386_store_high_if_used(c, in->dst);
+          return nyr_printf(c->w, "\tmovl\t$%s_nyir_L%zu, %%eax\n", c->epilogue,
+                            label) &&
+                 sm_stv(c, in->dst, "%eax") &&
+                 sm_i386_store_high_if_used(c, in->dst);
         return nyr_put(c->w, "\tcall\t1f\n"
                              "1:\n"
                              "\tpopl\t%eax\n") &&
@@ -4118,8 +4168,8 @@ static bool sm_inst(ny_sm_ctx_t *c, const nyr_inst_t *in) {
     if (c->kind != NY_SM_I386 || stack_bytes > INT_MAX - 8)
       return false;
     return sm_ldv(c, "%eax", in->a) &&
-           nyr_printf(c->w, "\tleal\t%" PRIu64 "(%s), %%ecx\n",
-                      stack_bytes + 8, sm_i386_frame_reg(c)) &&
+           nyr_printf(c->w, "\tleal\t%" PRIu64 "(%s), %%ecx\n", stack_bytes + 8,
+                      sm_i386_frame_reg(c)) &&
            nyr_put(c->w, "\tmovl\t%ecx, (%eax)\n");
   }
   case NYIR_RET:
@@ -4216,8 +4266,8 @@ static bool sm_inst(ny_sm_ctx_t *c, const nyr_inst_t *in) {
   return false;
 }
 
-#include "code/backend/mach/arch/i386/registers.h"
 #include "code/backend/mach/arch/i386/home.h"
+#include "code/backend/mach/arch/i386/registers.h"
 #include "code/backend/mach/arch/i386/spills.h"
 
 static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
@@ -4229,49 +4279,50 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
                          const int *i386_local_offsets, int i386_local_bytes,
                          unsigned char *i386_single_use,
                          const nyr_use_def_t *i386_uses, bool register_runs,
-                         int register_limit,
-                         const unsigned char *high_values,
-                         const unsigned char *high_locals, size_t high_local_count,
-                         bool position_independent, bool i386_address16) {
+                         int register_limit, const unsigned char *high_values,
+                         const unsigned char *high_locals,
+                         size_t high_local_count, bool position_independent,
+                         bool i386_address16) {
   if (!w || !target || !nyir)
     return false;
   const char *name = func_name && func_name[0] ? func_name : "rt_main";
-  ny_sm_ctx_t c = {.w = w,
-                   .target = target,
-                   .nyir = nyir,
-                   .kind = kind,
-                   .pretty = pretty,
-                   .ret = ret,
-                   .t0 = t0,
-                   .t1 = t1,
-                   .word = word,
-                   .frame_align = frame_align,
-                   .i386_address16 = i386_address16,
-                   .is_local = is_local,
-                   .i386_value_offsets = i386_value_offsets,
-                   .i386_local_offsets = i386_local_offsets,
-                   .i386_local_bytes = i386_local_bytes,
-                   .i386_single_use = i386_single_use,
-                   .i386_uses = i386_uses,
-                   .i386_high_values = high_values,
-                   .i386_high_locals = high_locals,
-                   .i386_high_local_count = high_local_count,
-                   .i386_register_limit = register_limit,
-                   .i386_global_registers = register_runs && register_limit >= 6,
-                   .i386_position_independent = position_independent,
-                   .i386_eax_reuse = -1,
-                   .i386_elide_value = -1,
-                   .i386_skip_divmod = SIZE_MAX,
-                   .i386_save_ebx =
-                       kind == NY_SM_I386 &&
-                       ((register_runs && register_limit >= 4) || sm_i386_uses_ebx(nyir)),
-                   .err = err,
-                   .err_len = err_len};
+  ny_sm_ctx_t c = {
+      .w = w,
+      .target = target,
+      .nyir = nyir,
+      .kind = kind,
+      .pretty = pretty,
+      .ret = ret,
+      .t0 = t0,
+      .t1 = t1,
+      .word = word,
+      .frame_align = frame_align,
+      .i386_address16 = i386_address16,
+      .is_local = is_local,
+      .i386_value_offsets = i386_value_offsets,
+      .i386_local_offsets = i386_local_offsets,
+      .i386_local_bytes = i386_local_bytes,
+      .i386_single_use = i386_single_use,
+      .i386_uses = i386_uses,
+      .i386_high_values = high_values,
+      .i386_high_locals = high_locals,
+      .i386_high_local_count = high_local_count,
+      .i386_register_limit = register_limit,
+      .i386_global_registers = register_runs && register_limit >= 6,
+      .i386_position_independent = position_independent,
+      .i386_eax_reuse = -1,
+      .i386_elide_value = -1,
+      .i386_skip_divmod = SIZE_MAX,
+      .i386_save_ebx =
+          kind == NY_SM_I386 &&
+          ((register_runs && register_limit >= 4) || sm_i386_uses_ebx(nyir)),
+      .err = err,
+      .err_len = err_len};
   snprintf(c.epilogue, sizeof(c.epilogue), ".Lny_%s_epilogue_%s",
            target->target_name ? target->target_name : "sm", name);
   if (c.kind == NY_SM_I386) {
-    bool assigned = sm_i386_assign_value_slots_cfg(
-        &c, i386_value_offsets, &c.i386_value_bytes);
+    bool assigned = sm_i386_assign_value_slots_cfg(&c, i386_value_offsets,
+                                                   &c.i386_value_bytes);
     if (!assigned)
       assigned = sm_i386_assign_value_slots(&c, i386_value_offsets,
                                             &c.i386_value_bytes);
@@ -4389,9 +4440,8 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
           size_t size = sm_i386_parameter_size(&c, i);
           if (type == NYIR_PARAM_AGGREGATE) {
             aggregate_bytes += (int)((size + 3u) & ~(size_t)3u);
-            int home =
-                -4 - c.local_base - c.i386_local_bytes - aggregate_bytes -
-                (c.i386_global_registers ? 16 : 0);
+            int home = -4 - c.local_base - c.i386_local_bytes -
+                       aggregate_bytes - (c.i386_global_registers ? 16 : 0);
             if (!nyr_printf(w, "\tleal\t%d(%s), %%eax\n", home,
                             sm_i386_frame_reg(&c)) ||
                 !sm_st(&c, sm_loff(&c, (int)i), "%eax") ||
@@ -4402,8 +4452,7 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
                      sm_i386_local_high_word_used_wide(&c, (int)i)) {
             if (!sm_ld(&c, "%eax", sm_loff(&c, (int)i)))
               return false;
-            if (type == NYIR_PARAM_I64 &&
-                !sm_i386_narrow32_parameter(&c, i)) {
+            if (type == NYIR_PARAM_I64 && !sm_i386_narrow32_parameter(&c, i)) {
               if (!nyr_put(w, "\tcltd\n") ||
                   !sm_st(&c, sm_lhi_off(&c, (int)i), "%edx"))
                 return false;
@@ -4446,8 +4495,7 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
           incoming_offset += 8;
         } else {
           if (sm_i386_local_high_word_used_wide(&c, (int)i)) {
-            if (type == NYIR_PARAM_I64 &&
-                !sm_i386_narrow32_parameter(&c, i)) {
+            if (type == NYIR_PARAM_I64 && !sm_i386_narrow32_parameter(&c, i)) {
               if (!nyr_put(w, "\tcltd\n") ||
                   !sm_st(&c, sm_lhi_off(&c, (int)i), "%edx")) {
                 nyr_set_error(err, err_len,
@@ -4495,7 +4543,7 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
         int incoming_eax = c.i386_eax_reuse;
         c.i386_eax_reuse = -1;
         int emitted = sm_i386_emit_register_run(&c, i, &next, incoming_eax,
-                                                 prior_elide == incoming_eax);
+                                                prior_elide == incoming_eax);
         if (emitted < 0) {
           nyr_set_error(err, err_len, "i386 local register allocation failed");
           return false;
@@ -4511,33 +4559,46 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
        * consumer whose first load will reuse it. Do not omit a home for
        * repeated operands, wide values, labels or nonadjacent consumers.
        */
-      bool call_arg = in->dst >= 0 && i + 1 < nyir->len &&
-                      sm_i386_single_eax_call_arg(&c, &nyir->data[i + 1],
-                                                  in->dst);
+      bool call_arg =
+          in->dst >= 0 && i + 1 < nyir->len &&
+          sm_i386_single_eax_call_arg(&c, &nyir->data[i + 1], in->dst);
       bool binary_arg = in->dst >= 0 && i + 1 < nyir->len &&
                         nyir->data[i + 1].a == in->dst &&
                         nyir->data[i + 1].b != in->dst;
-      if (in->dst >= 0 && i + 1 < nyir->len &&
-          c.i386_single_use[in->dst] && (binary_arg || call_arg)) {
+      if (in->dst >= 0 && i + 1 < nyir->len && c.i386_single_use[in->dst] &&
+          (binary_arg || call_arg)) {
         bool producer = false, consumer = false;
         switch (in->op) {
-        case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
-        case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
-        case NYIR_CMP_I64: case NYIR_COPY: case NYIR_LOAD_LOCAL:
+        case NYIR_ADD_I64:
+        case NYIR_SUB_I64:
+        case NYIR_MUL_I64:
+        case NYIR_AND_I64:
+        case NYIR_OR_I64:
+        case NYIR_XOR_I64:
+        case NYIR_CMP_I64:
+        case NYIR_COPY:
+        case NYIR_LOAD_LOCAL:
           producer = true;
           break;
-        default: break;
+        default:
+          break;
         }
         switch (nyir->data[i + 1].op) {
-        case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
-        case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
-        case NYIR_CMP_I64: case NYIR_LOAD_I64:
+        case NYIR_ADD_I64:
+        case NYIR_SUB_I64:
+        case NYIR_MUL_I64:
+        case NYIR_AND_I64:
+        case NYIR_OR_I64:
+        case NYIR_XOR_I64:
+        case NYIR_CMP_I64:
+        case NYIR_LOAD_I64:
           consumer = true;
           break;
         case NYIR_CALL:
           consumer = call_arg;
           break;
-        default: break;
+        default:
+          break;
         }
         /*
          * A coalesced COPY may emit no store of its own. Its input home
@@ -4551,9 +4612,15 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
        * Labels, calls and other instructions terminate adjacency.
        */
       switch (in->op) {
-      case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
-      case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
-      case NYIR_CMP_I64: case NYIR_COPY: case NYIR_LOAD_I64:
+      case NYIR_ADD_I64:
+      case NYIR_SUB_I64:
+      case NYIR_MUL_I64:
+      case NYIR_AND_I64:
+      case NYIR_OR_I64:
+      case NYIR_XOR_I64:
+      case NYIR_CMP_I64:
+      case NYIR_COPY:
+      case NYIR_LOAD_I64:
         break;
       default:
         c.i386_eax_reuse = -1;
@@ -4569,11 +4636,13 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
          * Materialize the boolean only if another instruction uses it; the
          * full use index includes backward edges and PHI inputs too.
          */
-        const char *condition = sm_i386_cmp_condition(in->cmp, unsigned_compare);
-        bool compared = c.i386_single_use[in->dst]
-            ? sm_ldv(&c, "%eax", in->a) &&
-              sm_i386_binary_operand(&c, "cmp", "%eax", in->b)
-            : sm_cmp(&c, in);
+        const char *condition =
+            sm_i386_cmp_condition(in->cmp, unsigned_compare);
+        bool compared =
+            c.i386_single_use[in->dst]
+                ? sm_ldv(&c, "%eax", in->a) &&
+                      sm_i386_binary_operand(&c, "cmp", "%eax", in->b)
+                : sm_cmp(&c, in);
         if (!condition || !compared ||
             !nyr_printf(w, "\tj%s\t%s_nyir_L%" PRId64 "\n", condition,
                         c.epilogue, nyir->data[i + 1].imm))
@@ -4627,9 +4696,14 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
        * remain in place, so stack homes and control-flow edges stay canonical.
        */
       switch (in->op) {
-      case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
-      case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
-      case NYIR_CMP_I64: case NYIR_LOAD_LOCAL:
+      case NYIR_ADD_I64:
+      case NYIR_SUB_I64:
+      case NYIR_MUL_I64:
+      case NYIR_AND_I64:
+      case NYIR_OR_I64:
+      case NYIR_XOR_I64:
+      case NYIR_CMP_I64:
+      case NYIR_LOAD_LOCAL:
         c.i386_eax_reuse = in->dst;
         break;
       case NYIR_COPY:
@@ -4682,13 +4756,15 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
     break;
   case NY_SM_I386:
     if (c.i386_global_registers) {
-      if (!nyr_printf(w, "\tleal\t-12(%s), %%esp\n\tpopl\t%%edi\n"
-                         "\tpopl\t%%esi\n\tpopl\t%%ebx\n\tpopl\t%%ebp\n",
+      if (!nyr_printf(w,
+                      "\tleal\t-12(%s), %%esp\n\tpopl\t%%edi\n"
+                      "\tpopl\t%%esi\n\tpopl\t%%ebx\n\tpopl\t%%ebp\n",
                       sm_i386_frame_reg(&c)))
         return false;
     } else if (c.i386_save_ebx) {
-      if (!nyr_printf(w, "\tleal\t-4(%s), %%esp\n\tpopl\t%%ebx\n"
-                         "\tpopl\t%%ebp\n",
+      if (!nyr_printf(w,
+                      "\tleal\t-4(%s), %%esp\n\tpopl\t%%ebx\n"
+                      "\tpopl\t%%ebp\n",
                       sm_i386_frame_reg(&c)))
         return false;
     } else if (!nyr_put(w, "\tleave\n")) {
@@ -4770,10 +4846,9 @@ static bool sm_i386_write_code16(nyr_writer_t *w, const char *assembly) {
  * so simple functions can otherwise retain an unused frame prologue.
  */
 static bool sm_i386_elide_unused_leaf_frame(const nyr_func_t *func,
-                                             const char *assembly,
-                                             nyr_writer_t *out) {
-  static const char prologue[] =
-      "\tpushl\t%ebp\n\tmovl\t%esp, %ebp\n";
+                                            const char *assembly,
+                                            nyr_writer_t *out) {
+  static const char prologue[] = "\tpushl\t%ebp\n\tmovl\t%esp, %ebp\n";
   const char *frame = strstr(assembly, prologue);
   if (!frame || !func)
     return nyr_put(out, assembly);
@@ -4822,8 +4897,10 @@ static size_t sm_i386_cost_line(const sm_i386_cost_line_t *line,
   memcpy(text, line->start + 1, line->length - 1);
   text[line->length - 1] = 0;
   char *args = text + strcspn(text, " \t");
-  if (*args) *args++ = 0;
-  while (*args == ' ' || *args == '\t') ++args;
+  if (*args)
+    *args++ = 0;
+  while (*args == ' ' || *args == '\t')
+    ++args;
   const char *memory = strchr(args, '(');
   size_t address = 0;
   if (memory) {
@@ -4831,9 +4908,9 @@ static size_t sm_i386_cost_line(const sm_i386_cost_line_t *line,
     char *parsed = NULL;
     long offset = strtol(number, &parsed, 10);
     bool setup_bp = code16_low_stack && strstr(memory, "%ebp");
-    address = parsed == memory && offset >= -128 && offset <= 127
-                  ? 1
-                  : setup_bp ? 2 : 4;
+    address = parsed == memory && offset >= -128 && offset <= 127 ? 1
+              : setup_bp                                          ? 2
+                                                                  : 4;
     if (!setup_bp && (strstr(memory, "%esp") || strchr(memory, ',')))
       ++address;
     if (code16_low_stack && !setup_bp)
@@ -4884,7 +4961,8 @@ static size_t sm_i386_cost_line(const sm_i386_cost_line_t *line,
     int32_t value = (int32_t)bits;
     bytes = value >= -128 && value <= 127 ? 3 : 6;
     if ((!strcmp(text, "shll") || !strcmp(text, "shrl") ||
-         !strcmp(text, "sarl")) && bits == 1)
+         !strcmp(text, "sarl")) &&
+        bits == 1)
       bytes = 2;
   } else if (!strcmp(text, "imull"))
     bytes = 3;
@@ -5024,8 +5102,8 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
     nyr_set_error(err, err_len, "i386 NYIR emit: cannot index register uses");
     return false;
   }
-  bool register_runs = kind == NY_SM_I386 &&
-                       !getenv("NYC_DISABLE_I386_REGISTER_RUNS");
+  bool register_runs =
+      kind == NY_SM_I386 && !getenv("NYC_DISABLE_I386_REGISTER_RUNS");
   unsigned char *high_values = NULL, *high_locals = NULL;
   int *local_offsets = NULL;
   int local_bytes = 0;
@@ -5035,7 +5113,8 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
     for (size_t i = 0; i < nyir->len; ++i) {
       const nyr_inst_t *in = &nyir->data[i];
       if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
-           in->op == NYIR_ADDR_LOCAL) && in->imm >= 0 && in->imm < INT_MAX &&
+           in->op == NYIR_ADDR_LOCAL) &&
+          in->imm >= 0 && in->imm < INT_MAX &&
           (uint64_t)in->imm >= high_local_count)
         high_local_count = (size_t)in->imm + 1;
     }
@@ -5048,21 +5127,24 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
         free(i386_value_offsets);
         free(i386_single_use);
         nyr_use_def_free(&i386_uses);
-        nyr_set_error(err, err_len, "i386 NYIR emit: cannot allocate word-demand analysis");
+        nyr_set_error(err, err_len,
+                      "i386 NYIR emit: cannot allocate word-demand analysis");
         return false;
       }
       ny_sm_ctx_t analysis = {.nyir = nyir, .kind = NY_SM_I386};
-      sm_i386_compute_high_words(&analysis, high_values, high_locals, high_local_count);
+      sm_i386_compute_high_words(&analysis, high_values, high_locals,
+                                 high_local_count);
     }
-    local_offsets = calloc(high_local_count ? high_local_count : 1,
-                           sizeof(*local_offsets));
+    local_offsets =
+        calloc(high_local_count ? high_local_count : 1, sizeof(*local_offsets));
     if (!local_offsets) {
       free(high_values);
       free(high_locals);
       free(i386_value_offsets);
       free(i386_single_use);
       nyr_use_def_free(&i386_uses);
-      nyr_set_error(err, err_len, "i386 NYIR emit: cannot allocate local layout");
+      nyr_set_error(err, err_len,
+                    "i386 NYIR emit: cannot allocate local layout");
       return false;
     }
     for (size_t local = 0; local < high_local_count; ++local) {
@@ -5074,7 +5156,8 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
         free(i386_value_offsets);
         free(i386_single_use);
         nyr_use_def_free(&i386_uses);
-        nyr_set_error(err, err_len, "i386 NYIR emit: local layout is too large");
+        nyr_set_error(err, err_len,
+                      "i386 NYIR emit: local layout is too large");
         return false;
       }
       local_bytes += width;
@@ -5084,71 +5167,68 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
   nyr_writer_t compact = {0}, baseline = {0}, four = {0}, three = {0};
   nyr_writer_t promoted = {0}, promoted_four = {0}, promoted_three = {0};
   nyr_writer_t colored = {0}, colored_four = {0};
-  bool emitted = sm_emit_impl(register_runs ? &compact : w, target, nyir,
-                              func_name, tag_return, is_local, err, err_len,
-                              kind, pretty, ret, t0, t1, word, frame_align,
-                              i386_value_offsets,
-                              local_offsets, local_bytes,
-                              i386_single_use, &i386_uses,
-                              register_runs, 6, high_values,
-                              high_locals, high_local_count,
-                              position_independent, i386_address16);
+  bool emitted = sm_emit_impl(
+      register_runs ? &compact : w, target, nyir, func_name, tag_return,
+      is_local, err, err_len, kind, pretty, ret, t0, t1, word, frame_align,
+      i386_value_offsets, local_offsets, local_bytes, i386_single_use,
+      &i386_uses, register_runs, 6, high_values, high_locals, high_local_count,
+      position_independent, i386_address16);
   if (emitted && register_runs) {
     emitted = sm_emit_impl(&baseline, target, nyir, func_name, tag_return,
                            is_local, err, err_len, kind, pretty, ret, t0, t1,
-                           word, frame_align, i386_value_offsets,
-                           local_offsets, local_bytes,
-                           i386_single_use, &i386_uses, false, 6,
-                           high_values, high_locals, high_local_count, position_independent,
-                           i386_address16);
+                           word, frame_align, i386_value_offsets, local_offsets,
+                           local_bytes, i386_single_use, &i386_uses, false, 6,
+                           high_values, high_locals, high_local_count,
+                           position_independent, i386_address16);
     if (emitted)
-      emitted = sm_emit_impl(&four, target, nyir, func_name, tag_return,
-                             is_local, err, err_len, kind, pretty, ret, t0, t1,
-                             word, frame_align, i386_value_offsets,
-                             local_offsets, local_bytes,
-                             i386_single_use, &i386_uses, true, 4,
-                             high_values, high_locals, high_local_count, position_independent,
-                             i386_address16);
+      emitted = sm_emit_impl(
+          &four, target, nyir, func_name, tag_return, is_local, err, err_len,
+          kind, pretty, ret, t0, t1, word, frame_align, i386_value_offsets,
+          local_offsets, local_bytes, i386_single_use, &i386_uses, true, 4,
+          high_values, high_locals, high_local_count, position_independent,
+          i386_address16);
     if (emitted)
-      emitted = sm_emit_impl(&three, target, nyir, func_name, tag_return,
-                             is_local, err, err_len, kind, pretty, ret, t0, t1,
-                             word, frame_align, i386_value_offsets,
-                             local_offsets, local_bytes,
-                             i386_single_use, &i386_uses, true, 3,
-                             high_values, high_locals, high_local_count, position_independent,
-                             i386_address16);
+      emitted = sm_emit_impl(
+          &three, target, nyir, func_name, tag_return, is_local, err, err_len,
+          kind, pretty, ret, t0, t1, word, frame_align, i386_value_offsets,
+          local_offsets, local_bytes, i386_single_use, &i386_uses, true, 3,
+          high_values, high_locals, high_local_count, position_independent,
+          i386_address16);
     if (emitted && high_values) {
       int value_bytes = 0;
       for (int v = 0; v < nyir->next_value; ++v) {
         int end = i386_value_offsets[v] + (high_values[v] ? 8 : 4);
-        if (end > value_bytes) value_bytes = end;
+        if (end > value_bytes)
+          value_bytes = end;
       }
       for (int pass = 0; emitted && pass < 2; ++pass)
-        emitted = sm_i386_cleanup_spills(&baseline, value_bytes, local_offsets,
-                                          high_local_count, local_bytes, nyir,
-                                          pass == 1 ? &colored : NULL, false) &&
-                  sm_i386_cleanup_spills(&compact, value_bytes + 16, local_offsets,
-                                          high_local_count, local_bytes, nyir, NULL,
-                                          false) &&
-                  sm_i386_cleanup_spills(&four, value_bytes, local_offsets,
-                                          high_local_count, local_bytes, nyir,
-                                          pass == 1 ? &colored_four : NULL, false) &&
-                  sm_i386_cleanup_spills(&three, value_bytes, local_offsets,
-                                          high_local_count, local_bytes, nyir,
-                                          NULL, false);
+        emitted =
+            sm_i386_cleanup_spills(&baseline, value_bytes, local_offsets,
+                                   high_local_count, local_bytes, nyir,
+                                   pass == 1 ? &colored : NULL, false) &&
+            sm_i386_cleanup_spills(&compact, value_bytes + 16, local_offsets,
+                                   high_local_count, local_bytes, nyir, NULL,
+                                   false) &&
+            sm_i386_cleanup_spills(&four, value_bytes, local_offsets,
+                                   high_local_count, local_bytes, nyir,
+                                   pass == 1 ? &colored_four : NULL, false) &&
+            sm_i386_cleanup_spills(&three, value_bytes, local_offsets,
+                                   high_local_count, local_bytes, nyir, NULL,
+                                   false);
     }
     if (emitted && high_values) {
       int value_bytes = 0;
       for (int v = 0; v < nyir->next_value; ++v) {
         int end = i386_value_offsets[v] + (high_values[v] ? 8 : 4);
-        if (end > value_bytes) value_bytes = end;
+        if (end > value_bytes)
+          value_bytes = end;
       }
       int a = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
-                                     baseline.data, &promoted);
+                                    baseline.data, &promoted);
       int b = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
-                                     four.data, &promoted_four);
+                                    four.data, &promoted_four);
       int c = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
-                                     three.data, &promoted_three);
+                                    three.data, &promoted_three);
       emitted = a >= 0 && b >= 0 && c >= 0;
       /*
        * The promoted writer replaces stack homes with registers, so its output
@@ -5158,14 +5238,14 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
        */
       if (emitted)
         emitted = sm_i386_cleanup_spills(&promoted, value_bytes + 16,
-                                          local_offsets, high_local_count,
-                                          local_bytes, nyir, NULL, true) &&
+                                         local_offsets, high_local_count,
+                                         local_bytes, nyir, NULL, true) &&
                   sm_i386_cleanup_spills(&promoted_four, value_bytes + 16,
-                                          local_offsets, high_local_count,
-                                          local_bytes, nyir, NULL, true) &&
+                                         local_offsets, high_local_count,
+                                         local_bytes, nyir, NULL, true) &&
                   sm_i386_cleanup_spills(&promoted_three, value_bytes + 16,
-                                          local_offsets, high_local_count,
-                                          local_bytes, nyir, NULL, true);
+                                         local_offsets, high_local_count,
+                                         local_bytes, nyir, NULL, true);
     }
     if (emitted) {
       /*
@@ -5173,9 +5253,10 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
        * and boundary stores exceed its removed spill instructions.
        */
       const char *chosen = baseline.data;
-      const char *candidates[] = {compact.data, four.data, three.data, promoted.data,
+      const char *candidates[] = {compact.data,       four.data,
+                                  three.data,         promoted.data,
                                   promoted_four.data, promoted_three.data,
-                                  colored.data, colored_four.data};
+                                  colored.data,       colored_four.data};
       for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i)
         if (candidates[i] &&
             sm_i386_assembly_cost(candidates[i], i386_address16) <
@@ -5183,16 +5264,18 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
           chosen = candidates[i];
       const char *forced = getenv("NYC_I386_REGISTER_VARIANT");
       if (forced) {
-        static const char *const names[] = {"compact", "four", "three", "promoted",
-                                             "promoted-four", "promoted-three",
-                                             "colored", "colored-four"};
-        if (!strcmp(forced, "baseline")) chosen = baseline.data;
+        static const char *const names[] = {
+            "compact",       "four",           "three",   "promoted",
+            "promoted-four", "promoted-three", "colored", "colored-four"};
+        if (!strcmp(forced, "baseline"))
+          chosen = baseline.data;
         for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i)
-          if (!strcmp(forced, names[i]) && candidates[i]) chosen = candidates[i];
+          if (!strcmp(forced, names[i]) && candidates[i])
+            chosen = candidates[i];
       }
       nyr_writer_t leaf = {0};
-      emitted = sm_i386_elide_unused_leaf_frame(nyir, chosen ? chosen : "",
-                                                 &leaf);
+      emitted =
+          sm_i386_elide_unused_leaf_frame(nyir, chosen ? chosen : "", &leaf);
       if (emitted)
         emitted = i386_address16 ? sm_i386_write_code16(w, leaf.data)
                                  : nyr_put(w, leaf.data);
@@ -5228,18 +5311,14 @@ bool nyr_aarch64_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                          const nyr_func_t *nyir, const char *func_name,
                          bool tag_return, char *err, size_t err_len) {
   return sm_emit(w, target, nyir, func_name, tag_return, false, err, err_len,
-                 NY_SM_A64, "AArch64", "x0", "x0", "x1", 8, 16, false,
-                 false);
+                 NY_SM_A64, "AArch64", "x0", "x0", "x1", 8, 16, false, false);
 }
 
-bool nyr_i386_emit_ir_with_linkage(nyr_writer_t *w,
-                                   const ny_native_target_info_t *target,
-                                   const nyr_func_t *nyir,
-                                   const char *func_name, bool tag_return,
-                                   bool is_local, bool position_independent,
-                                   unsigned stack_alignment,
-                                   bool code16_low_stack,
-                                   char *err, size_t err_len) {
+bool nyr_i386_emit_ir_with_linkage(
+    nyr_writer_t *w, const ny_native_target_info_t *target,
+    const nyr_func_t *nyir, const char *func_name, bool tag_return,
+    bool is_local, bool position_independent, unsigned stack_alignment,
+    bool code16_low_stack, char *err, size_t err_len) {
   return sm_emit(w, target, nyir, func_name, tag_return, is_local, err, err_len,
                  NY_SM_I386, "i386", "%eax", "%eax", "%ecx", 4,
                  stack_alignment == 4 ? 4 : 16, position_independent,
@@ -5257,6 +5336,5 @@ bool nyr_riscv_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                        const nyr_func_t *nyir, const char *func_name,
                        bool tag_return, char *err, size_t err_len) {
   return sm_emit(w, target, nyir, func_name, tag_return, false, err, err_len,
-                 NY_SM_RISCV, "RISC-V", "a0", "a0", "a1", 8, 16, false,
-                 false);
+                 NY_SM_RISCV, "RISC-V", "a0", "a0", "a1", 8, 16, false, false);
 }
