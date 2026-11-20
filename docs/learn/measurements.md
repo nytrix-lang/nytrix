@@ -6681,4 +6681,73 @@ formats and prints it. The large ratio is not evidence of a slow
 Fibonacci loop. Its integer-only AOT executable still has no libm
 dependency.
 
+### 2026-11-20 collision, bignum, and repeat diagnostics
+
+- `cd`: NYR already hoists the outer `px[i]` and `py[i]` reads. In the
+  inner loop, LLVM IR and NYIR still express signed absolute differences
+  and conditional hit counting; Clang emits packed compares and accumulates
+  counts in registers. Folding the two NYR short-circuit guards into an
+  eager scalar `and` increased retired instructions from 100.47 M to
+  136.21 M and median time from 7.15 ms to 9.25 ms across five pinned
+  samples. Reverted; the packed reduction, not scalar speculation, is
+  the remaining opportunity. Every run returned `387`.
+- `bigint-oracle`: assembly and sampling place the cost in object
+  allocation, pointer membership, limb decoding, and multi-limb division.
+  GMP reuses its destination objects. A split hit/miss generation added
+  4.08 M retired instructions to the 165.34 M baseline with no wall-time
+  improvement. Skipping repeated normalization in compare and splitting
+  the carry/borrow loops left instructions and cycles essentially flat.
+  Deferring limb decode output stores retired 166.21 M instructions and
+  slowed all seven pinned samples. All three experiments returned
+  `1968365` and were reverted.
+- `repeat`: the LLVM IR calls `rt_str_repeat_raw`; sampled AOT assembly
+  spends most kernel cycles in libc's AVX `memcpy`, not checked element
+  access or extra zeroing. The unchanged fixture ran within 2× in
+  isolation (NYR 1.12×, LLVM 1.27×, NYC 1.48×); the full parallel run's
+  higher ratios have not been cleared in a complete rerun.
+
+### 2026-11-20 NYC PBKDF2 low-word encoding
+
+Samples placed 89% of NYC's retired instructions in SHA-256 compression.
+NYIR had already found the 32-bit rotates and masks. The machine encoder
+now omits the extra zero-extension after a known nonzero immediate rotate,
+and lowers an exact low-word mask on its accumulator path to a register
+zero-extension instead of an AND from a stack slot. Dynamic rotate counts
+retain the explicit zero-extension.
+
+Five pinned, interleaved samples retired 60.57 M → 58.26 M instructions
+and took a median 9.88 ms → 9.52 ms. Both PBKDF2 fixtures returned `2991`,
+and the x86 masked rotate oracle passed. Clang took 1.17 ms in separate
+pinned samples; stack traffic in the compression loop remains open.
+
+### 2026-11-20 signed constant divisors in machine IR
+
+`qrsyndrome` already had literal divisors 200 and 255 in NYIR, but its
+object used three `idiv` sites: register lowering obscured those constants
+before instruction selection. x86-64 machine IR now keeps signed constant
+divisors as immediate operands, so the object encoder can select its
+existing reciprocal multiply-and-shift sequences. The machine route
+accepted the changed shape and the resulting object contained no `idiv`.
+
+Five pinned, interleaved samples of the unchanged fixture returned
+`1161080`. NYC median kernel time fell from 16.85 ms to 10.84 ms and
+cycles from 48.21 M to 30.45 M. Retired instructions rose from 56.15 M to
+75.82 M: the reciprocal sequences perform more, cheaper instructions.
+Clang took 5.23 ms in the same sample set. The signed magic, dependent
+divmod, and power-of-two division fixtures passed all ten variants.
+
+### 2026-11-20 rounding under a nonnegative clamp
+
+The NYC LBM inner loop implemented signed division by eight with a sign
+mask, bias add, and arithmetic shift, immediately before clamping negative
+results to zero. Both rounding modes give the same clamped result.
+Strength reduction now emits the shift alone when neither the quotient
+nor the comparison has a consumer outside the clamp.
+
+Five interleaved pinned samples on the unchanged fixture returned `152700`.
+NYC median time fell from 8.96 ms to 8.26 ms and retired instructions from
+64.30 M to 57.23 M. The new boundary oracle also checks negative inputs
+whose truncating quotient is zero and an independently consumed comparison.
+Clang vectorizes the stencil; this does not close that remaining gap.
+
 </details>

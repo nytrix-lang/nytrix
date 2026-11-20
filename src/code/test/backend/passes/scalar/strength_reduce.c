@@ -212,11 +212,48 @@ static bool test_power_of_two_rewrite_preserves_dividend(void) {
   return ok;
 }
 
+static bool test_clamped_signed_division(void) {
+  const int64_t inputs[] = {INT64_MIN, -17, -8, -7, -1, 0, 7, 8, INT64_MAX};
+  for (int live_predicate = 0; live_predicate <= 1; ++live_predicate) {
+    nyr_func_t f;
+    nyr_opt_begin(&f);
+    int input = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+    int zero = nyr_opt_const(&f, 0);
+    int eight = nyr_opt_const(&f, 8);
+    int quotient = nyr_opt_binop(&f, NYIR_DIV_I64, input, eight);
+    int negative = nyr_opt_cmp(&f, quotient, zero, NYIR_CMP_LT);
+    int result =
+        nyr_opt_emit_abc(&f, NYIR_SELECT_I64, negative, zero, quotient);
+    if (live_predicate)
+      result = nyr_opt_binop(&f, NYIR_ADD_I64, result, negative);
+    nyr_opt_ret(&f, result);
+
+    bool ok = nyr_strength_reduce(&f) &&
+              nyr_opt_verify(&f, "strength-reduce/clamped-div");
+    for (size_t i = 0; ok && i < sizeof(inputs) / sizeof(inputs[0]); ++i) {
+      int64_t q = inputs[i] / 8;
+      int64_t expected = (q < 0 ? 0 : q) + (live_predicate && q < 0);
+      int64_t actual = eval_input(&f, inputs[i]);
+      if (actual != expected) {
+        fprintf(stderr, "[clamped-div] x=%lld predicate=%d: %lld != %lld\n",
+                (long long)inputs[i], live_predicate, (long long)actual,
+                (long long)expected);
+        ok = false;
+      }
+    }
+    nyr_ir_func_free(&f);
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
 int main(void) {
   if (!test_wraparound_reassociation() ||
       !test_shared_intermediate_is_not_rewritten() ||
       !test_signed_power_of_two_division_without_nonnegative_proof() ||
-      !test_power_of_two_rewrite_preserves_dividend())
+      !test_power_of_two_rewrite_preserves_dividend() ||
+      !test_clamped_signed_division())
     return 1;
   puts("[strength-reduce] wrapping reassociation, use checks, and signed "
        "division semantics ok");

@@ -2493,13 +2493,10 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
     if (inst->effects != NYR_MACH_EFFECT_NONE || !mach_is_none(&inst->src2))
       return false;
     if (inst->opcode == NYR_MACH_DIV &&
-        mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_I64 &&
+        mach_is_integer_value(func, &inst->dst) &&
         mach_is_integer_value(func, &inst->src0) &&
-        inst->src1.kind == NYR_MACH_OPERAND_IMM) {
-      int64_t divisor = inst->src1.as.imm;
-      return divisor > 1 && divisor <= INT32_MAX &&
-             ((uint64_t)divisor & ((uint64_t)divisor - 1)) == 0;
-    }
+        inst->src1.kind == NYR_MACH_OPERAND_IMM)
+      return true;
     if (mach_is_v128_value(func, &inst->dst))
       return mach_same_value_type(func, &inst->dst, &inst->src0) &&
              mach_same_value_type(func, &inst->dst, &inst->src1);
@@ -2537,6 +2534,9 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
   case NYR_MACH_VSHR:
     if (inst->effects != NYR_MACH_EFFECT_NONE || !mach_is_none(&inst->src2))
       return false;
+    if (inst->opcode == NYR_MACH_MOD && inst->src1.kind == NYR_MACH_OPERAND_IMM)
+      return mach_is_integer_value(func, &inst->dst) &&
+             mach_is_integer_value(func, &inst->src0);
     if (inst->opcode == NYR_MACH_VSHR)
       return inst->src1.kind == NYR_MACH_OPERAND_IMM &&
              inst->src1.as.imm >= 0 && inst->src1.as.imm <= 63 &&
@@ -5979,13 +5979,20 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
         bool has_constant_rhs =
             bdef >= 0 && nyir->data[bdef].op == NYIR_CONST_I64 &&
             mach_nir_const_i64(nyir, definitions, in->b, &rhs_constant);
-        bool pow2_divisor =
-            (caps & NY_NATIVE_CAP_MACH_SDIV_POW2) && in->op == NYIR_DIV_I64 &&
-            has_constant_rhs && rhs_constant > 1 && rhs_constant <= INT32_MAX &&
-            ((uint64_t)rhs_constant & ((uint64_t)rhs_constant - 1)) == 0;
+        /*
+         * Keep signed constant divisors explicit before register lowering.
+         * A materialized loop constant can share a vreg with other
+         * definitions, hiding it from the encoder's constant recovery.
+         */
+        bool immediate_divisor =
+            (caps & NY_NATIVE_CAP_MACH_SDIV_POW2) && !inst.unsigned_arith &&
+            (in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
+            (has_constant_rhs ||
+             mach_nir_const_i64(nyir, definitions, in->b, &rhs_constant)) &&
+            (rhs_constant > 1 || rhs_constant < -1);
         bool immediate_shift =
             bdef >= 0 && nyir->data[bdef].op == NYIR_CONST_I64 && shift_like;
-        bool immediate_rhs = immediate_shift || pow2_divisor;
+        bool immediate_rhs = immediate_shift || immediate_divisor;
         if (immediate_rhs) {
           inst.src1 = (nyr_mach_operand_t){
               .kind = NYR_MACH_OPERAND_IMM,

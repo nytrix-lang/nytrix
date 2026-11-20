@@ -13696,7 +13696,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                        (!is_ror32 && !mach_rex(e, true, false, false, false)) ||
                        !mach_u8(e, 0xc1) || !mach_u8(e, op) ||
                        !mach_u8(e, (unsigned char)(fold & 0xff)) ||
-                       (is_ror32 && (!mach_u8(e, 0x89) || !mach_u8(e, 0xc0))))
+                       (is_ror32 && fold == 0 &&
+                        (!mach_u8(e, 0x89) || !mach_u8(e, 0xc0))))
               return false;
           } else {
             /*
@@ -14108,11 +14109,24 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
            */
           int64_t fold = 0;
           bool fold_ok = false;
-          if (in->src1.kind == NYR_MACH_OPERAND_VREG && imm_fold_known &&
-              in->src1.as.reg < mach->vreg_len &&
-              imm_fold_known[in->src1.as.reg]) {
+          if (in->src1.kind == NYR_MACH_OPERAND_IMM) {
+            fold = in->src1.as.imm;
+            fold_ok = (int64_t)(int32_t)fold == fold;
+          } else if (in->src1.kind == NYR_MACH_OPERAND_VREG && imm_fold_known &&
+                     in->src1.as.reg < mach->vreg_len &&
+                     imm_fold_known[in->src1.as.reg]) {
             fold = imm_fold[in->src1.as.reg];
             fold_ok = (int64_t)(int32_t)fold == fold;
+          }
+          if (in->opcode == NYR_MACH_AND && fold == UINT32_MAX) {
+            /*
+             * The low-word mask is a zero extension even when the result
+             * has no assigned register. Avoid loading a mask from its home.
+             */
+            if (!mach_u8(e, 0x89) || !mach_u8(e, 0xc0) ||
+                !mach_commit_vreg(e, &in->dst, dst))
+              return false;
+            break;
           }
           if (fold_ok) {
             unsigned char op = 0;
@@ -14603,13 +14617,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          * sequence selected by GCC. `imul` produces the high half needed for
          * the quotient; do not replace this with NYIR's low-half MUL.
          */
-        int64_t divisor_imm = 0;
-        bool mersenne31 =
-            in->opcode == NYR_MACH_MOD &&
-            in->src1.kind == NYR_MACH_OPERAND_VREG &&
-            in->src1.as.reg < mach->vreg_len &&
-            imm_fold_known[in->src1.as.reg] &&
-            ((divisor_imm = imm_fold[in->src1.as.reg]) == INT64_C(2147483647));
+        int64_t sdivisor = 0;
+        bool sdivisor_known = mach_operand_const_i64(e, &in->src1, &sdivisor);
+        bool mersenne31 = in->opcode == NYR_MACH_MOD && sdivisor_known &&
+                          sdivisor == INT64_C(2147483647);
         if (mersenne31) {
           /*
            * This sequence owns RAX, RDX, R8, and R9.  Values colored to
@@ -14680,17 +14691,6 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          * by |d| and negate the quotient; remainders use |d| directly because
          * x % d == x % |d|.
          */
-        int64_t sdivisor = 0;
-        bool sdivisor_known = false;
-        if (in->src1.kind == NYR_MACH_OPERAND_IMM) {
-          sdivisor = in->src1.as.imm;
-          sdivisor_known = true;
-        } else if (in->src1.kind == NYR_MACH_OPERAND_VREG && imm_fold &&
-                   imm_fold_known && in->src1.as.reg < mach->vreg_len &&
-                   imm_fold_known[in->src1.as.reg]) {
-          sdivisor = imm_fold[in->src1.as.reg];
-          sdivisor_known = true;
-        }
         if (sdivisor_known && sdivisor != 0 && sdivisor != 1 &&
             sdivisor != -1) {
           uint64_t ad = sdivisor >= 0 ? (uint64_t)sdivisor

@@ -52,6 +52,37 @@ static bool nyr_strength_recover_const(const nyr_func_t *f,
   return false;
 }
 
+/*
+ * max(0, x / 2^k) == max(0, x >> k): the two roundings differ only for
+ * negative x, where both quotients are nonpositive. The comparison must
+ * itself be private to the clamp, as it can distinguish negative from zero.
+ */
+static size_t nyr_strength_zero_clamp(const nyr_func_t *f,
+                                      const nyr_value_fact_t *facts,
+                                      int fact_count, const int *uses,
+                                      size_t div) {
+  int q = f->data[div].dst;
+  if (q < 0 || q >= fact_count || uses[q] != 2 || div + 2 >= f->len)
+    return SIZE_MAX;
+  const nyr_inst_t *cmp = &f->data[div + 1];
+  const nyr_inst_t *sel = &f->data[div + 2];
+  if (cmp->op != NYIR_CMP_I64 || cmp->a != q || cmp->dst < 0 ||
+      (cmp->flags & NYIR_INST_F_ASSUME) || cmp->dst >= fact_count ||
+      uses[cmp->dst] != 1 || sel->op != NYIR_SELECT_I64 || sel->a != cmp->dst)
+    return SIZE_MAX;
+  int zero = cmp->b;
+  bool negative_arm = cmp->cmp == NYIR_CMP_LT || cmp->cmp == NYIR_CMP_LE;
+  bool positive_arm = cmp->cmp == NYIR_CMP_GT || cmp->cmp == NYIR_CMP_GE;
+  if ((!negative_arm || sel->b != zero || sel->c != q) &&
+      (!positive_arm || sel->b != q || sel->c != zero))
+    return SIZE_MAX;
+  int64_t value;
+  return nyr_strength_recover_const(f, facts, fact_count, zero, &value) &&
+                 value == 0
+             ? div + 1
+             : SIZE_MAX;
+}
+
 typedef struct {
   nyr_scalar_class_t scalar_class;
   uint8_t semantic_ownership;
@@ -597,7 +628,16 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         int saved_a = in->a;
         nyr_strength_result_metadata_t metadata =
             nyr_strength_result_metadata(in);
-        if (in->op == NYIR_DIV_I64 && !dividend_nonnegative) {
+        size_t clamp_cmp =
+            in->op == NYIR_DIV_I64 && !dividend_nonnegative
+                ? nyr_strength_zero_clamp(f, facts, fact_count, uses, i)
+                : SIZE_MAX;
+        if (clamp_cmp != SIZE_MAX) {
+          metadata.range = (nyr_range_t){0};
+          nyr_clear_derived_facts(&f->data[clamp_cmp]);
+        }
+        if (in->op == NYIR_DIV_I64 && !dividend_nonnegative &&
+            clamp_cmp == SIZE_MAX) {
           /*
            * Truncating signed division by 2^shift is
            * (x + ((x >> 63) & (2^shift - 1))) >> shift.
@@ -669,11 +709,13 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         if (nyr_strength_trace_enabled())
           ny_dbg_heuristic_event(
               "STRENGTH_REDUCE",
-              "accept %s @%zu dst=v%d: divisor=%lld and dividend range "
-              "proves nonnegative; replace with %s %lld",
+              "accept %s @%zu dst=v%d: divisor=%lld and %s; replace "
+              "with %s %lld",
               in->op == NYIR_DIV_I64 ? "div" : "mod", i, saved_dst,
-              (long long)divisor, in->op == NYIR_DIV_I64 ? "SAR" : "AND",
-              (long long)replacement);
+              (long long)divisor,
+              clamp_cmp != SIZE_MAX ? "zero clamp hides rounding"
+                                    : "dividend is nonnegative",
+              in->op == NYIR_DIV_I64 ? "SAR" : "AND", (long long)replacement);
         int imm_value = f->next_value++;
         if (!nir_ensure_inst_space(f, 1)) {
           free(facts);
