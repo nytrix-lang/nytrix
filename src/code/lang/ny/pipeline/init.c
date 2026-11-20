@@ -13,25 +13,24 @@
 #include "base/util.h"
 #include "base/version.h"
 #include "cmd/ny/repl/repl.h"
-#include "code/backend/core/internal.h"
-#include "code/backend/core/module.h"
-#include "code/backend/mach/emit/llvm/bridge.h"
-#include "code/backend/lower/native.h"
-#include "code/lang/ny/pipeline/bundle.h"
 #include "code/backend/core/cache/cache.h"
 #include "code/backend/core/cache/incremental.h"
+#include "code/backend/core/internal.h"
+#include "code/backend/core/module.h"
+#include "code/backend/lower/native.h"
+#include "code/backend/mach/emit/llvm/bridge.h"
 #include "code/lang/ny/gen/context.h"
+#include "code/lang/ny/gen/internal.h"
 #include "code/lang/ny/gen/llvm/jit.h"
 #include "code/lang/ny/lower/lower.h"
-#include "code/lang/ny/parser/visitor.h"
 #include "code/lang/ny/parser/json.h"
 #include "code/lang/ny/parser/parser.h"
-#include "code/lang/ny/pipeline/pipeline.h"
+#include "code/lang/ny/parser/visitor.h"
 #include "code/lang/ny/pipeline/build.h"
+#include "code/lang/ny/pipeline/bundle.h"
 #include "code/lang/ny/pipeline/native.h"
-#include "code/lang/ny/gen/internal.h"
+#include "code/lang/ny/pipeline/pipeline.h"
 #include "code/lang/ny/semantics/pipeline.h"
-#include <nyr/nyr.h>
 #include <limits.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
@@ -44,6 +43,7 @@
 #include <llvm-c/Support.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm/Config/llvm-config.h>
+#include <nyr/nyr.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1960,6 +1960,27 @@ static void ny_link_lib_vec_merge(ny_link_lib_vec *libs, const ny_options *opt,
     ny_link_lib_vec_add_codegen(libs, cg->links.data[i]);
 }
 
+static void ny_link_llvm_trig(ny_link_lib_vec *libs, LLVMModuleRef module) {
+#ifndef _WIN32
+  /*
+   * Raw LLVM trig uses libm directly. Integer-only programs keep the
+   * runtime's lazy binding and need no libm dependency at startup.
+   */
+  static const char *const names[] = {"sin", "cos", "sincos", "llvm.sin.f64",
+                                      "llvm.cos.f64"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+    LLVMValueRef f = LLVMGetNamedFunction(module, names[i]);
+    if (f && LLVMIsDeclaration(f) && LLVMGetFirstUse(f)) {
+      ny_link_lib_vec_add_codegen(libs, "m");
+      break;
+    }
+  }
+#else
+  (void)libs;
+  (void)module;
+#endif
+}
+
 static void ny_link_lib_vec_dispose(ny_link_lib_vec *libs) {
   if (!libs)
     return;
@@ -2991,9 +3012,9 @@ int ny_pipeline_run(ny_options *opt) {
          parse_name ? parse_name : "<input>", ulen, stdlib_bytes, parser_bytes);
   ny_pipe_trace_phase_memory("parse.begin");
 
-  bool can_reuse_std_ast =
-      std_src && !opt->no_std && std_mode != STD_MODE_NONE &&
-      ny_env_enabled_default_on("NYTRIX_STD_AST_CACHE");
+  bool can_reuse_std_ast = std_src && !opt->no_std &&
+                           std_mode != STD_MODE_NONE &&
+                           ny_env_enabled_default_on("NYTRIX_STD_AST_CACHE");
 
   if (can_reuse_std_ast) {
     uint64_t std_key = ny_hash64(std_src, stdlib_bytes);
@@ -3012,15 +3033,14 @@ int ny_pipeline_run(ny_options *opt) {
           g_std_ast_cache.key = std_key;
           g_std_ast_cache.type_aliases = std_parser.type_aliases;
           g_std_ast_cache.gensym_counter = std_parser.gensym_counter;
-#define STD_AST_CACHE_REG(dst, src)                                        \
-          do {                                                             \
-            if ((src).len) {                                               \
-              vec_reserve_arena(g_std_ast_cache.arena, &(dst), (src).len); \
-              memcpy((dst).data, (src).data,                               \
-                     (src).len * sizeof(*(src).data));                     \
-              (dst).len = (src).len;                                       \
-            }                                                              \
-          } while (0)
+#define STD_AST_CACHE_REG(dst, src)                                            \
+  do {                                                                         \
+    if ((src).len) {                                                           \
+      vec_reserve_arena(g_std_ast_cache.arena, &(dst), (src).len);             \
+      memcpy((dst).data, (src).data, (src).len * sizeof(*(src).data));         \
+      (dst).len = (src).len;                                                   \
+    }                                                                          \
+  } while (0)
           STD_AST_CACHE_REG(g_std_ast_cache.ct_layouts, std_parser.ct_layouts);
           STD_AST_CACHE_REG(g_std_ast_cache.ct_modules, std_parser.ct_modules);
           STD_AST_CACHE_REG(g_std_ast_cache.ct_templates,
@@ -3043,14 +3063,14 @@ int ny_pipeline_run(ny_options *opt) {
       parser.error_limit = opt->max_errors;
     parser.type_aliases = g_std_ast_cache.type_aliases;
     parser.gensym_counter = g_std_ast_cache.gensym_counter;
-#define USER_AST_CACHE_REG(dst, src)                                     \
-    do {                                                                 \
-      if ((src).len) {                                                   \
-        vec_reserve_arena(arena, &(dst), (src).len);                     \
-        memcpy((dst).data, (src).data, (src).len * sizeof(*(src).data)); \
-        (dst).len = (src).len;                                           \
-      }                                                                  \
-    } while (0)
+#define USER_AST_CACHE_REG(dst, src)                                           \
+  do {                                                                         \
+    if ((src).len) {                                                           \
+      vec_reserve_arena(arena, &(dst), (src).len);                             \
+      memcpy((dst).data, (src).data, (src).len * sizeof(*(src).data));         \
+      (dst).len = (src).len;                                                   \
+    }                                                                          \
+  } while (0)
     USER_AST_CACHE_REG(parser.ct_layouts, g_std_ast_cache.ct_layouts);
     USER_AST_CACHE_REG(parser.ct_modules, g_std_ast_cache.ct_modules);
     USER_AST_CACHE_REG(parser.ct_templates, g_std_ast_cache.ct_templates);
@@ -4380,6 +4400,7 @@ skip_compilation:
       ny_link_lib_vec merged_libs;
       vec_init(&merged_libs);
       ny_link_lib_vec_merge(&merged_libs, opt, &cg);
+      ny_link_llvm_trig(&merged_libs, cg.module);
       ny_tick_t t_link = opt->do_timing ? ny_ticks_now() : 0;
       if (!ny_builder_link(
               cc, obj, rto, NULL, NULL, 0,

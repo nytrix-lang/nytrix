@@ -1621,8 +1621,7 @@ static bool nyr_check_type_param_consistency(nyr_builder_t *b,
           ? e->as.call.callee->as.ident.name
           : NULL;
   if (!fn && callee_name)
-    fn = nyr_find_user_function_for_arity(b, callee_name,
-                                          e->as.call.args.len);
+    fn = nyr_find_user_function_for_arity(b, callee_name, e->as.call.args.len);
   if (!fn && callee_name)
     fn = nyr_find_user_function(b, callee_name);
   if (!fn || fn->kind != NY_S_FUNC || fn->as.fn.type_params.len == 0 ||
@@ -1785,7 +1784,8 @@ static char *nyr_proof_rule_witness_type(nyr_builder_t *b, const expr_t *e,
   if (!e || depth > 32)
     return NULL;
   if (e->kind == NY_E_CALL && e->as.call.callee &&
-      e->as.call.callee->kind == NY_E_IDENT && e->as.call.callee->as.ident.name) {
+      e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name) {
     const char *leaf = ny_name_leaf(e->as.call.callee->as.ident.name);
     if (leaf && strcmp(leaf, "prove") == 0 && e->as.call.args.len >= 1)
       return ny_proof_type_from_expr(e->as.call.args.data[0].val);
@@ -1833,8 +1833,9 @@ static char *nyr_proof_rule_witness_type(nyr_builder_t *b, const expr_t *e,
  * any call, member access, index or floating/string literal fails closed.
  */
 static bool nyr_prove_reflexive(nyr_builder_t *b, const expr_t *condition) {
-  if (!condition || condition->kind != NY_E_BINARY || !condition->as.binary.op ||
-      !condition->as.binary.left || !condition->as.binary.right)
+  if (!condition || condition->kind != NY_E_BINARY ||
+      !condition->as.binary.op || !condition->as.binary.left ||
+      !condition->as.binary.right)
     return false;
   const char *op = condition->as.binary.op;
   if (strcmp(op, "==") != 0 && strcmp(op, "<=") != 0 && strcmp(op, ">=") != 0)
@@ -1848,8 +1849,9 @@ static bool nyr_prove_reflexive(nyr_builder_t *b, const expr_t *condition) {
   char *rhs = ny_proof_type_from_expr((expr_t *)condition->as.binary.right);
   bool same = lhs && rhs && strcmp(lhs, rhs) == 0;
   if (same) {
-    static const char *const impure[] = {"call", "app:", "member", "index", "flt:",
-                                         "str:", "float", "unknown", "any"};
+    static const char *const impure[] = {"call",  "app:",    "member",
+                                         "index", "flt:",    "str:",
+                                         "float", "unknown", "any"};
     for (size_t i = 0; same && i < sizeof(impure) / sizeof(impure[0]); ++i)
       if (strstr(lhs, impure[i]))
         same = false;
@@ -2202,9 +2204,8 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
    * Tag raw integer and pointer operands here; tagged ones pass unchanged,
    * so callers that already wrap them in __tag() keep working. */
   if (canon_leaf && strcmp(canon_leaf, "__ioctl") == 0 &&
-      e->as.call.args.len == 3 &&
-      !e->as.call.args.data[0].name && !e->as.call.args.data[1].name &&
-      !e->as.call.args.data[2].name) {
+      e->as.call.args.len == 3 && !e->as.call.args.data[0].name &&
+      !e->as.call.args.data[1].name && !e->as.call.args.data[2].name) {
     int ioctl_args[3] = {-1, -1, -1};
     for (int ai = 0; ai < 3; ++ai) {
       int v = nyr_lower_expr(b, e->as.call.args.data[ai].val);
@@ -4680,12 +4681,12 @@ ordinary_call:
      * Wayland backend looked windows up this way and dropped all input. */
     if (nyr_value_scalar_class(b, arg) == NYIR_SCALAR_POINTER ||
         nyr_expr_is_ptr(b, arg_expr)) {
-      int copied = nyr_ir_emit(&b->nyir,
-                               (nyr_inst_t){.op = NYIR_COPY,
-                                            .dst = -1,
-                                            .a = arg,
-                                            .b = -1,
-                                            .scalar_class = NYIR_SCALAR_I64_RAW});
+      int copied = nyr_ir_emit(
+          &b->nyir, (nyr_inst_t){.op = NYIR_COPY,
+                                 .dst = -1,
+                                 .a = arg,
+                                 .b = -1,
+                                 .scalar_class = NYIR_SCALAR_I64_RAW});
       if (copied >= 0) {
         ((expr_t *)e)->semantic.rep = NY_SEM_REP_RAW_INT;
         ((expr_t *)e)->semantic.resolved = true;
@@ -5741,7 +5742,8 @@ ordinary_call:
        * raw cstr) is stored as a managed string. The binary-expression rule
        * below otherwise took it for a raw integer and the dict held the
        * pointer value as a number. */
-      bool string_value = nyr_value_scalar_class(b, value) == NYIR_SCALAR_STRING;
+      bool string_value =
+          nyr_value_scalar_class(b, value) == NYIR_SCALAR_STRING;
       if (string_value) {
         value = nyr_emit_runtime_call(b, "rt_cstr_to_str", value, -1, -1, 1,
                                       NYIR_SCALAR_I64_TAGGED);
@@ -7315,8 +7317,8 @@ ordinary_call:
     /* Integer arithmetic that decoded a dynamic operand (`N + 1` with
      * `mut any N`) yields a raw word even though the expression is typed
      * dynamic; formatting it as a tagged value printed nil. */
-    if (lowered_arg_class == NYIR_SCALAR_I64_RAW && arg_expr->kind == NY_E_BINARY &&
-        arg_expr->as.binary.op &&
+    if (lowered_arg_class == NYIR_SCALAR_I64_RAW &&
+        arg_expr->kind == NY_E_BINARY && arg_expr->as.binary.op &&
         (strcmp(arg_expr->as.binary.op, "+") == 0 ||
          strcmp(arg_expr->as.binary.op, "-") == 0 ||
          strcmp(arg_expr->as.binary.op, "*") == 0 ||
@@ -7674,9 +7676,8 @@ ordinary_call:
       strcmp(canon_leaf, "__flt_pow") == 0 && e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     int base_v = nyr_lower_f64_arg(b, e->as.call.args.data[0].val);
-    int exp_v = base_v < 0
-                    ? -1
-                    : nyr_lower_f64_arg(b, e->as.call.args.data[1].val);
+    int exp_v =
+        base_v < 0 ? -1 : nyr_lower_f64_arg(b, e->as.call.args.data[1].val);
     if (base_v < 0 || exp_v < 0)
       return -1;
     int result = nyr_emit_runtime_call(b, "rt_f64_pow", base_v, exp_v, -1, 2,
@@ -7701,7 +7702,8 @@ ordinary_call:
     if (value < 0)
       return -1;
     int result = -1;
-    if (b->options && b->options->native_backend == NY_NATIVE_BACKEND_X86_64)
+    if (b->options && (b->options->native_backend == NY_NATIVE_BACKEND_X86_64 ||
+                       b->options->native_backend == NY_NATIVE_BACKEND_LLVM))
       result = nyr_push_val(
           b, strcmp(canon_leaf, "__flt_sin") == 0 ? NYIR_SIN_F64 : NYIR_COS_F64,
           value, -1, 0, NULL);
@@ -7865,8 +7867,8 @@ ordinary_call:
       const expr_t *moved = e->as.call.args.data[1].val;
       char *moved_proof = nyr_proof_rule_witness_type(b, moved, 0);
       const char *moved_type = nyr_expr_type_name(b, moved);
-      bool is_proof = moved_proof ||
-                      (moved_type && strncmp(moved_type, "proof<", 6) == 0);
+      bool is_proof =
+          moved_proof || (moved_type && strncmp(moved_type, "proof<", 6) == 0);
       free(moved_proof);
       if (!is_proof)
         return nyr_lower_expr(b, moved);
@@ -7955,8 +7957,8 @@ ordinary_call:
       exact_proof_value = true;
       proof_value = 1;
     }
-    if (proof_kind == NY_NATIVE_LEAF_PROVE && !exact_proof_value &&
-        condition && b->current_fn_name) {
+    if (proof_kind == NY_NATIVE_LEAF_PROVE && !exact_proof_value && condition &&
+        b->current_fn_name) {
       /*
        * Preconditions are evidence: inside `fn f(int n) requires n > 0`,
        * prove(...) may use the bounds `requires` states for parameters the
@@ -7968,9 +7970,8 @@ ordinary_call:
         char *req = ny_proof_type_from_expr(fn->as.fn.requires_cond);
         char *cond = ny_proof_type_from_expr((expr_t *)condition);
         size_t rl = req ? strlen(req) : 0, cl = cond ? strlen(cond) : 0;
-        nyr_proves_env_t env = {
-            fn, NULL,
-            rl > 7 ? ny_strndup(req + 6, rl - 7) : NULL};
+        nyr_proves_env_t env = {fn, NULL,
+                                rl > 7 ? ny_strndup(req + 6, rl - 7) : NULL};
         char *inner = cl > 7 ? ny_strndup(cond + 6, cl - 7) : NULL;
         if (env.req_canon && inner &&
             ny_proof_canon_decide(inner, nyr_proves_env_range, &env, 0) == 1) {
@@ -8364,38 +8365,38 @@ ordinary_call:
       int m32 = nyr_emit_const(b, (int64_t)0x00000000ffffffffLL);
       if (m63 < 0 || m62 < 0 || m60 < 0 || m56 < 0 || m48 < 0 || m32 < 0)
         return -1;
-#define NY_BREV_STEP(xin, sh, msk, cm)                                       \
-  do {                                                                       \
-    int _r = nyr_ir_emit(                                                    \
-        &b->nyir,                                                            \
-        (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = (xin), .b = (sh)}); \
-    if (_r < 0)                                                              \
-      return -1;                                                             \
-    _r = nyr_ir_emit(                                                        \
-        &b->nyir,                                                            \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (msk)});   \
-    if (_r < 0)                                                              \
-      return -1;                                                             \
-    _r = nyr_ir_emit(                                                        \
-        &b->nyir,                                                            \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (cm)});    \
-    if (_r < 0)                                                              \
-      return -1;                                                             \
-    int _l = nyr_ir_emit(                                                    \
-        &b->nyir,                                                            \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = (xin), .b = (cm)}); \
-    if (_l < 0)                                                              \
-      return -1;                                                             \
-    _l = nyr_ir_emit(                                                        \
-        &b->nyir,                                                            \
-        (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = _l, .b = (sh)});    \
-    if (_l < 0)                                                              \
-      return -1;                                                             \
-    (xin) = nyr_ir_emit(                                                     \
-        &b->nyir,                                                            \
-        (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = _r, .b = _l});       \
-    if ((xin) < 0)                                                           \
-      return -1;                                                             \
+#define NY_BREV_STEP(xin, sh, msk, cm)                                         \
+  do {                                                                         \
+    int _r = nyr_ir_emit(                                                      \
+        &b->nyir,                                                              \
+        (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = (xin), .b = (sh)});   \
+    if (_r < 0)                                                                \
+      return -1;                                                               \
+    _r = nyr_ir_emit(                                                          \
+        &b->nyir,                                                              \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (msk)});     \
+    if (_r < 0)                                                                \
+      return -1;                                                               \
+    _r = nyr_ir_emit(                                                          \
+        &b->nyir,                                                              \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (cm)});      \
+    if (_r < 0)                                                                \
+      return -1;                                                               \
+    int _l = nyr_ir_emit(                                                      \
+        &b->nyir,                                                              \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = (xin), .b = (cm)});   \
+    if (_l < 0)                                                                \
+      return -1;                                                               \
+    _l = nyr_ir_emit(                                                          \
+        &b->nyir,                                                              \
+        (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = _l, .b = (sh)});      \
+    if (_l < 0)                                                                \
+      return -1;                                                               \
+    (xin) = nyr_ir_emit(                                                       \
+        &b->nyir,                                                              \
+        (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = _r, .b = _l});         \
+    if ((xin) < 0)                                                             \
+      return -1;                                                               \
   } while (0)
       NY_BREV_STEP(x, one, m63, c1);
       NY_BREV_STEP(x, two, m62, c2);
@@ -11025,10 +11026,9 @@ ordinary_call:
   /* A module-qualified call that resolved to a Ny function binds to that
    * function. Extern lookups match by leaf name, so `pal.close(st)` became a
    * call to the libc `close` declared by the window bindings. */
-  bool qualified_ny_callee = callee_fn && name && strchr(name, '.') &&
-                             callee_fn->kind == NY_S_FUNC &&
-                             !callee_fn->as.fn.is_extern &&
-                             !callee_fn->as.fn.link_name;
+  bool qualified_ny_callee =
+      callee_fn && name && strchr(name, '.') && callee_fn->kind == NY_S_FUNC &&
+      !callee_fn->as.fn.is_extern && !callee_fn->as.fn.link_name;
   const stmt_t *callee_ext_decl =
       qualified_ny_callee
           ? NULL
@@ -11043,10 +11043,9 @@ ordinary_call:
   bool runtime_builtin =
       ny_native_runtime_symbol_for_expr(name, leaf, e) != NULL;
   bool ffi_builtin = ny_native_ffi_symbol_name(name);
-  bool declared_external =
-      (!qualified_ny_callee && b->externs &&
-       ny_extern_table_lookup(b->externs, name)) ||
-      callee_ext_decl != NULL;
+  bool declared_external = (!qualified_ny_callee && b->externs &&
+                            ny_extern_table_lookup(b->externs, name)) ||
+                           callee_ext_decl != NULL;
   /* A source struct/layout is a constructor declaration, not a function
    * symbol.  Resolve it before the unresolved-call diagnostic so the native
    * lowering block below gets a chance to materialize the record. */
@@ -11328,9 +11327,9 @@ ordinary_call:
              -1;
     }
   }
-  const ny_extern_entry_t *ext =
-      b->externs && !qualified_ny_callee ? ny_extern_table_lookup(b->externs, name)
-                                         : NULL;
+  const ny_extern_entry_t *ext = b->externs && !qualified_ny_callee
+                                     ? ny_extern_table_lookup(b->externs, name)
+                                     : NULL;
   ny_extern_entry_t synthetic_ext;
   if (ext) {
     synthetic_ext = *ext;
@@ -14002,10 +14001,9 @@ ordinary_call:
      * the NYIR/object lifetime; strtab_intern would turn it into .Lnystr.N
      * and the trampoline would jump into string data. */
     char *callback_symbol = NULL;
-    if (!ny_arena_alloc_aligned_try(&b->default_arg_arena,
-                                    (size_t)callback_len + 1,
-                                    sizeof(max_align_t),
-                                    (void **)&callback_symbol)) {
+    if (!ny_arena_alloc_aligned_try(
+            &b->default_arg_arena, (size_t)callback_len + 1,
+            sizeof(max_align_t), (void **)&callback_symbol)) {
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
     }
     memcpy(callback_symbol, callback_name, (size_t)callback_len + 1);

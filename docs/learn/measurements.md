@@ -6657,4 +6657,28 @@ cover empty loops, scalar-only loops, exact vector prefixes and nonempty
 tails. The AVX-only and forced legacy encoder oracles passed. This
 diagnostic does not change the `bce-matrix` benchmark workload.
 
+### 2026-11-20 LLVM FFT and the startup oracle
+
+The timed FFT loop already had raw floating-point operations in LLVM IR.
+Its first `rt_cos_f64` call loaded and resolved libm after the first timer
+read. Preloading libm reduced the old AOT kernel from a median of 124.9 µs
+to 28.5 µs without changing the code or checksum. Raw LLVM sine and cosine
+now call libm directly; AOT supplies the dependency only when the module
+references it. The AOT disassembly calls `cos@plt` and `sin@plt`.
+
+| LLVM route | Before | After | Clang reference |
+|---|---:|---:|---:|
+| MCJIT | 281.0 µs | 27.0 µs | 14.0 µs |
+| AOT | 165.8 µs | 17.7 µs | 14.0 µs |
+
+Seven pinned runs per variant, interleaved; checksum `1423277954`.
+The separate five-sample benchmark reported 0.84× NYR/C, 1.45× LLVM/C
+and 0.94× NYC/C. The float ABI fixture and ORC FFT passed.
+
+`native-oracle` reported `NOISY` and has no kernel timer. LLVM IR contains
+the literal `832040`, not the Fibonacci loop; the corresponding assembly
+formats and prints it. The large ratio is not evidence of a slow
+Fibonacci loop. Its integer-only AOT executable still has no libm
+dependency.
+
 </details>

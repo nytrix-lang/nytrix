@@ -34,8 +34,8 @@ static void ny_llvm_emit_i64_binop(ny_llvm_context_t *cg, const nyr_inst_t *in,
       (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
   LLVMValueRef vb =
       (in->b >= 0 && (size_t)in->b < val_count) ? vals[in->b] : NULL;
-  vals[in->dst] = LLVMBuildBinOp(cg->builder, op, ny_as_i64(cg, va),
-                                 ny_as_i64(cg, vb), "");
+  vals[in->dst] =
+      LLVMBuildBinOp(cg->builder, op, ny_as_i64(cg, va), ny_as_i64(cg, vb), "");
 }
 
 static inline LLVMValueRef ny_as_i64(ny_llvm_context_t *cg, LLVMValueRef val) {
@@ -266,9 +266,8 @@ static LLVMTypeRef ny_llvm_vector_type(ny_llvm_context_t *cg, nyr_op_t op) {
       op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
       op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
       op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_MUL_I64 ||
-      op == NYIR_VEC8_REDUCE_ADD_I64 ||
-      op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64 ||
-      op == NYIR_VEC8_SHR_I64)
+      op == NYIR_VEC8_REDUCE_ADD_I64 || op == NYIR_VEC8_SET1_I64 ||
+      op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64)
     return LLVMVectorType(cg->type_i64, 4);
   return NULL;
 }
@@ -737,8 +736,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     free(nyir_edges);
     if (err && err_len > 0)
       snprintf(err, err_len,
-               "LLVM NYIR emission: out of memory allocating %s locals",
-               name);
+               "LLVM NYIR emission: out of memory allocating %s locals", name);
     return false;
   }
   LLVMValueRef slot_zero = LLVMConstInt(cg->type_i64, 0, false);
@@ -1226,7 +1224,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       if (in->dst >= 0 && (size_t)in->dst < val_count) {
         LLVMValueRef va =
             (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
-        vals[in->dst] = ny_llvm_emit_f64_unary_runtime(cg, "rt_sin_f64", va);
+        vals[in->dst] = ny_llvm_emit_f64_unary_runtime(cg, "sin", va);
       }
       break;
 
@@ -1234,7 +1232,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       if (in->dst >= 0 && (size_t)in->dst < val_count) {
         LLVMValueRef va =
             (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
-        vals[in->dst] = ny_llvm_emit_f64_unary_runtime(cg, "rt_cos_f64", va);
+        vals[in->dst] = ny_llvm_emit_f64_unary_runtime(cg, "cos", va);
       }
       break;
 
@@ -1694,9 +1692,11 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         break;
       }
       if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64) {
-        LLVMValueRef lhs = ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
+        LLVMValueRef lhs =
+            ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
         LLVMValueRef count = ny_llvm_vector_splat(
-            cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false), vector_type);
+            cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false),
+            vector_type);
         vals[in->dst] = in->op == NYIR_VEC8_SHR_I64
                             ? LLVMBuildLShr(cg->builder, lhs, count, "")
                             : LLVMBuildAShr(cg->builder, lhs, count, "");
@@ -1870,8 +1870,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
          */
         if (!strchr(addr_name, '.') && nyr_globaltab_has(addr_name)) {
           char cell_name[512];
-          int cell_len = snprintf(cell_name, sizeof(cell_name), "nyg.%s",
-                                  addr_name);
+          int cell_len =
+              snprintf(cell_name, sizeof(cell_name), "nyg.%s", addr_name);
           if (cell_len > 0 && (size_t)cell_len < sizeof(cell_name)) {
             LLVMValueRef cell = LLVMGetNamedGlobal(cg->module, cell_name);
             if (!cell && cg->global_symbol) {
@@ -1911,11 +1911,10 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
          * later declaration of the real function was renamed
          * `rt_zalloc_raw.N`, which the JIT resolves to null.
          */
-        if (!sym &&
-            (strncmp(addr_name, "ny_fn_", 6) == 0 ||
-             (!nyr_globaltab_has(addr_name) &&
-              (ny_native_runtime_abi_decl(addr_name) ||
-               LLVMSearchForAddressOfSymbol(addr_name))))) {
+        if (!sym && (strncmp(addr_name, "ny_fn_", 6) == 0 ||
+                     (!nyr_globaltab_has(addr_name) &&
+                      (ny_native_runtime_abi_decl(addr_name) ||
+                       LLVMSearchForAddressOfSymbol(addr_name))))) {
           LLVMTypeRef provisional =
               LLVMFunctionType(cg->type_i64, NULL, 0, false);
           sym = LLVMAddFunction(cg->module, addr_name, provisional);
@@ -2370,8 +2369,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
           block_branch_targets[current_nyir_label] = in->imm;
         }
         ny_llvm_record_edge(&nyir_edges, &nyir_edge_len, &nyir_edge_cap,
-                            LLVMGetInsertBlock(cg->builder),
-                            current_nyir_label, in->imm);
+                            LLVMGetInsertBlock(cg->builder), current_nyir_label,
+                            in->imm);
         LLVMBuildBr(cg->builder, blocks[in->imm]);
         block_terminated = true;
       }
@@ -2391,8 +2390,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
           block_branch_targets[current_nyir_label] = in->imm;
         }
         ny_llvm_record_edge(&nyir_edges, &nyir_edge_len, &nyir_edge_cap,
-                            LLVMGetInsertBlock(cg->builder),
-                            current_nyir_label, in->imm);
+                            LLVMGetInsertBlock(cg->builder), current_nyir_label,
+                            in->imm);
         char ft_name[64];
         snprintf(ft_name, sizeof(ft_name), "br_fallthrough_%zu", i);
         LLVMBasicBlockRef ft_bb =
