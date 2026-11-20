@@ -5386,10 +5386,10 @@ caching, which are architectural rather than cheap edits.
 
 ### 2026-11-19 compile-time and cd vectorization: measured findings
 
-**Measurement harness.** `etc/scripts/compile-time.sh` reports the median of N cold
-compiles in milliseconds, because `/usr/bin/time` is not installed on this host. It
-disables the native and AOT caches so a hit cannot masquerade as a fast compile, and
-its exit status stays non-zero when a compile fails.
+**Measurement harness.** Each figure is the median of N cold compiles in
+milliseconds, timed with the shell builtin because `/usr/bin/time` is not installed
+on this host. The native and AOT caches were disabled so a hit could not masquerade
+as a fast compile, and a failing compile ended the run.
 
 **Where compile time actually goes.** Compiling a program that declares no imports
 costs 280 ms. Adding what the radix fixture imports costs 956 ms for `use core` and
@@ -5435,8 +5435,7 @@ surprising half and deserves its own profile.
 #### The landed runtime work carries no compile-time cost
 
 Disabling the bit-assembly fold leaves radix at 1844 ms and disabling select fusion
-leaves it at 1795 ms, against a 1830 ms baseline (median of 5, cold caches,
-`etc/scripts/compile-time.sh`). Neither knob is faster, so the runtime optimizations
+leaves it at 1795 ms, against a 1830 ms baseline (median of 5, cold caches). Neither knob is faster, so the runtime optimizations
 are not paid for in compile time.
 
 ### 2026-11-19 cd: what the address really is, and where the 860 ms goes
