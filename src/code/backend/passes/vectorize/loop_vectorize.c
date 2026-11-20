@@ -1567,7 +1567,7 @@ static bool emit_i64_vector_accumulator(
     nyr_func_t *f, int vf, const bool *in_loop, int scalar_phi, int scalar_init,
     int vector_phi, int vector_update, int scalar_result,
     int64_t preheader_label, int64_t header_label, int64_t latch_label,
-    int invariant_term, int64_t trip) {
+    int64_t dispatch_label, int invariant_term, int64_t trip) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg))
     return false;
@@ -1577,23 +1577,36 @@ static bool emit_i64_vector_accumulator(
     nyr_cfg_free(&cfg);
     return false;
   }
-  for (size_t e = cfg.succ_offsets[header]; e < cfg.succ_offsets[header + 1];
-       ++e) {
-    size_t succ = cfg.succ_blocks[e];
-    if (!in_loop[succ]) {
-      if (exit != SIZE_MAX) {
-        nyr_cfg_free(&cfg);
-        return false;
-      }
-      exit = succ;
+  if (dispatch_label >= 0) {
+    /*
+     * The scalar tail already owns every use outside the vector loop.
+     * Its entry PHI takes the horizontal sum from the named dispatch edge.
+     */
+    if (!block_for_label(&cfg, dispatch_label, &exit) ||
+        cfg.pred_offsets[exit + 1] - cfg.pred_offsets[exit] != 1 ||
+        cfg.pred_blocks[cfg.pred_offsets[exit]] != header) {
+      nyr_cfg_free(&cfg);
+      return false;
     }
+  } else {
+    for (size_t e = cfg.succ_offsets[header]; e < cfg.succ_offsets[header + 1];
+         ++e) {
+      size_t succ = cfg.succ_blocks[e];
+      if (!in_loop[succ]) {
+        if (exit != SIZE_MAX) {
+          nyr_cfg_free(&cfg);
+          return false;
+        }
+        exit = succ;
+      }
+    }
+    if (exit != SIZE_MAX)
+      replace_uses_outside_loop(f, &cfg, in_loop, scalar_phi, scalar_result);
   }
   if (exit == SIZE_MAX) {
     nyr_cfg_free(&cfg);
     return false;
   }
-
-  replace_uses_outside_loop(f, &cfg, in_loop, scalar_phi, scalar_result);
 
   int zero = f->next_value++;
   int vector_zero = f->next_value++;
@@ -3564,15 +3577,20 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     if (!bad && !nyr_build_use_def(f, &uses))
       bad = true;
     /*
-     * Loop-carried vector accumulators for fixed-trip integer reductions.
+     * Loop-carried vector accumulators for integer reductions. A scalar tail
+     * takes the final horizontal sum instead of observing every chunk.
      * The vector allocator keeps latch recurrences resident across the
      * backedge (vector_phi_reads_precede_source, re-checked by
      * verify_vector_latch_recurrence), which was the reason this stayed off.
      * NYTRIX_NO_VECTOR_ACCUMULATOR=1 restores the per-chunk reduction.
      */
     bool vector_accumulator_safe = !getenv("NYTRIX_NO_VECTOR_ACCUMULATOR") &&
-                                   reduction_phi_dst >= 0 && !reduction_f64 &&
-                                   !is_var_trip;
+                                   reduction_phi_dst >= 0 && !reduction_f64;
+    if (vector_accumulator_safe && (is_var_trip || fixed_trip % vf != 0))
+      vector_accumulator_safe =
+          estimated_trip >= (uint64_t)(2 * vf) &&
+          (vf == 2 || supports_vec8_i64_broadcast) &&
+          !(f->data[reduction_update_idx].flags & NYIR_INST_F_NARROW32);
     /*
      * The reduction update is excluded from the body scan above. This
      * transformation emits one vector add per chunk in place of one scalar
@@ -3626,9 +3644,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                                       : -1),
                       (long long)exit_target, single_exit ? "yes" : "no",
                       vector_preheader, has_preheader ? "yes" : "no");
-      vector_accumulator_safe = vector_accumulator_safe &&
-                                exit_block < cfg.block_count && single_exit &&
-                                has_preheader;
+      vector_accumulator_safe =
+          vector_accumulator_safe && exit_block < cfg.block_count &&
+          single_exit && has_preheader && reduction_preheader_label >= 0 &&
+          cfg.block_label[vector_preheader] == reduction_preheader_label;
     }
     if (!bad && vector_accumulator_safe) {
       for (size_t u = uses.offsets[reduction_phi_dst];
@@ -3717,8 +3736,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     }
     int invariant_reduction_term = -1;
     size_t drop_reduction_add = SIZE_MAX;
-    if (!bad && vector_accumulator_safe && fixed_trip % vf == 0 &&
-        reduction_term >= 0 && defs[reduction_term] >= 0 &&
+    if (!bad && vector_accumulator_safe && !is_var_trip &&
+        fixed_trip % vf == 0 && reduction_term >= 0 &&
+        defs[reduction_term] >= 0 &&
         uses.offsets[reduction_term + 1] == uses.offsets[reduction_term] + 1 &&
         uses.users[uses.offsets[reduction_term]] == reduction_update_idx) {
       size_t pc = (size_t)defs[reduction_term];
@@ -3882,7 +3902,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     int vector_step = vector_unroll_factor * vf;
     bool needs_scalar_tail =
         is_var_trip || ((uint64_t)fixed_trip % (uint64_t)vector_step != 0);
-    vector_accumulator = vector_accumulator_safe && !needs_scalar_tail;
+    vector_accumulator = vector_accumulator_safe;
     int vector_acc_phi = -1;
     int vector_acc_update = -1;
     int vector_acc_result = -1;
@@ -4299,8 +4319,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       if (!emit_scalar_tail(f, saved_body, saved_count, iv, vec_end_v, limit_v,
                             exit_label, dispatch_label, scalar_label,
                             scalar_latch_label, reduction_phi_dst,
-                            reduction_phi_dst, reduction_update_value,
-                            tail_acc_v)) {
+                            vector_accumulator ? vector_acc_result
+                                               : reduction_phi_dst,
+                            reduction_update_value, tail_acc_v)) {
         if (nyr_vector_trace_enabled())
           ny_trace_line("VECTORIZE", "vectorize: failed to emit scalar tail");
         free(saved_body);
@@ -4321,7 +4342,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             f, vf, in_loop, reduction_phi_dst, reduction_phi_init,
             vector_acc_phi, vector_acc_update, vector_acc_result,
             reduction_preheader_label, cfg.block_label[header], latch_label,
-            invariant_reduction_term, fixed_trip)) {
+            dispatch_label, invariant_reduction_term, fixed_trip)) {
       free(saved_body);
       free(vec);
       free(rewrite);

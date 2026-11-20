@@ -6632,4 +6632,29 @@ An exponent-based BigFloat integer decoder was tried and reverted.
 cycles increased from 60.07 M to 61.80 M and every measured kernel
 sample was slower. Checksums and the padding and rounding tests passed.
 
+### 2026-11-20 integer reductions with scalar tails
+
+The vector accumulator now seeds the scalar tail with one horizontal sum
+at the vector exit. The seed is preserved even when the vector prefix has
+zero iterations. The x86-64 encoder uses VEX.128 packed instructions for
+the horizontal sum on AVX targets instead of alternating between AVX and
+legacy SSE inside the loop.
+
+A separate 9,999-element reduction with a nonzero seed and changing
+addend diagnosed the two costs independently. All three NYR artifacts
+returned `14438471528459`; three interleaved samples per variant:
+
+| NYR variant | Median retired instructions | Median kernel time |
+|---|---:|---:|
+| Per-chunk legacy SSE reduction | 92.56 M | 417.9 ms |
+| Per-chunk VEX reduction | 72.12 M | 4.85 ms |
+| VEX reduction once before the scalar tail | 41.40 M | 4.77 ms |
+
+The original object has `vextractf128` followed by legacy `paddq` and
+`pshufd` in the hot body. The final object keeps only packed adds in that
+body and uses `vpaddq`/`vpshufd` at the exit. Runtime-bound reduction tests
+cover empty loops, scalar-only loops, exact vector prefixes and nonempty
+tails. The AVX-only and forced legacy encoder oracles passed. This
+diagnostic does not change the `bce-matrix` benchmark workload.
+
 </details>

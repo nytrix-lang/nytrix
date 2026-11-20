@@ -119,7 +119,7 @@ static bool build_variable_sum(nyr_func_t *f) {
   int base = emit_alloca(f, 512);
   int limit = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int zero = nyr_opt_const(f, 0);
-  int sum_seed = nyr_opt_const(f, 0);
+  int sum_seed = nyr_opt_const(f, 11);
   int one = nyr_opt_const(f, 1);
   int eight = nyr_opt_const(f, 8);
   if (base < 0 || limit < 0 || zero < 0 || sum_seed < 0 || one < 0 || eight < 0)
@@ -236,29 +236,31 @@ static bool check_malloc_i64_affine_vectorization(void) {
   return ok;
 }
 
-static bool check_variable_reduction_tails(void) {
+static bool check_variable_reduction_tails(bool wide) {
   nyr_func_t f;
   if (!build_variable_sum(&f)) {
     fprintf(stderr, "[loop-vector-variable-sum] failed to build input IR\n");
     nyr_ir_func_free(&f);
     return false;
   }
-  int64_t expected[] = {145, 172};
-  int64_t limits[] = {33, 39};
-  bool ok = nyr_loop_vectorize(&f);
+  const int64_t cases[][2] = {
+      {-1, 11},  {0, 11},   {1, 12},   {3, 17},   {4, 21},
+      {32, 155}, {33, 156}, {39, 183}, {64, 299},
+  };
+  bool ok = wide ? nyr_loop_vectorize_avx2(&f) : nyr_loop_vectorize(&f);
   if (!ok)
     fprintf(stderr, "[loop-vector-variable-sum] vectorization failed\n");
   ok = ok && nyr_opt_verify(&f, "loop-vector-variable-sum-after");
   ok = ok && f.vectorized_loops > 0;
-  for (size_t i = 0; ok && i < sizeof(limits) / sizeof(limits[0]); ++i) {
-    int64_t locals[1] = {limits[i]};
+  for (size_t i = 0; ok && i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    int64_t locals[1] = {cases[i][0]};
     nyr_eval_result_t result = {0};
     char err[256] = {0};
-    ok = nyr_ir_eval(&f, locals, 1, 500, &result, err, sizeof(err)) &&
-         result.result == expected[i];
+    ok = nyr_ir_eval(&f, locals, 1, 1000, &result, err, sizeof(err)) &&
+         result.result == cases[i][1];
     if (!ok)
       fprintf(stderr, "[loop-vector-variable-sum] limit=%lld result=%lld: %s\n",
-              (long long)limits[i], (long long)result.result, err);
+              (long long)cases[i][0], (long long)result.result, err);
     nyr_eval_result_free(&result);
   }
   if (!ok)
@@ -898,7 +900,8 @@ static bool check_disjoint_memory_streams(void) {
     int output = nyr_opt_binop(&f, NYIR_ADD_I64, input, gap);
     int loaded = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, input, -1, -1);
     nyr_opt_emit_abc(&f, NYIR_STORE_I64, output, -1, loaded);
-    f.data[phi].phi_incoming[1].value = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
+    f.data[phi].phi_incoming[1].value =
+        nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
     nyr_opt_br(&f, 2);
     nyr_opt_label(&f, 4);
     int last = nyr_opt_const(&f, disjoint ? 120 : 64);
@@ -954,7 +957,8 @@ static bool check_reduction_order_and_exit(void) {
     }
     nyr_ir_func_free(&f);
   }
-  puts("[reduction-order] early IV update and fallthrough exit observations pass");
+  puts("[reduction-order] early IV update and fallthrough exit observations "
+       "pass");
   return true;
 }
 
@@ -965,7 +969,8 @@ int main(void) {
     return 1;
   if (!check_vec8_set1_i64_semantics())
     return 1;
-  if (!check_chained_reductions() || !check_variable_reduction_tails() ||
+  if (!check_chained_reductions() || !check_variable_reduction_tails(false) ||
+      !check_variable_reduction_tails(true) ||
       !check_boolean_guard_vectorizes())
     return 1;
   nyr_func_t f;

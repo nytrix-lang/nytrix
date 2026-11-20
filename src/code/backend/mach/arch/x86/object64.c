@@ -8476,26 +8476,48 @@ static bool mach_reduce_add_i64(nyr_x64_mach_enc_t *e,
   bool v256 = in->src1.kind == NYR_MACH_OPERAND_VREG && e->mach &&
               in->src1.as.reg < e->mach->vreg_len && e->mach->vreg_types &&
               e->mach->vreg_types[in->src1.as.reg] == NYR_MACH_TYPE_V256_I64;
+  unsigned low = v;
   if (v256) {
     /*
      * VEXTRACTF128 is an AVX instruction and extracts bits without applying
      * floating-point semantics. VEXTRACTI128 would unnecessarily require
      * AVX2 for this reduction.
      */
-    if (!mach_xmm_vextractf128(e, 0, v, 0) ||
-        !mach_xmm_vextractf128(e, 1, v, 1) ||
-        !mach_vec_op_reg(e, 0, 1, 0x66, 0xd4))
+    /*
+     * Use VEX.128 on AVX targets even though the result fits an XMM.
+     * A legacy paddq here repeatedly pays the dirty-upper transition when
+     * a surrounding loop consumes YMM values.
+     */
+    unsigned high = v == 1 ? 0 : 1;
+    if (e->vex) {
+      if (!mach_xmm_vextractf128(e, high, v, 1) ||
+          !mach_vex(e, 1, false, 0, 0, high, v, 0xd4) ||
+          !mach_u8(e, 0xc0 | high))
+        return false;
+    } else {
+      unsigned bottom = high ^ 1u;
+      if (!mach_xmm_vextractf128(e, high, v, 1) ||
+          !mach_xmm_vextractf128(e, bottom, v, 0) ||
+          !mach_vec_op_reg(e, 0, 1, 0x66, 0xd4))
+        return false;
+    }
+    low = 0;
+  }
+  if (e->vex) {
+    unsigned shuffle = low == 1 ? 0 : 1;
+    if (!mach_vex(e, 1, false, shuffle, 0, low, 0, 0x70) ||
+        !mach_u8(e, 0xc0 | (shuffle << 3) | (low & 7)) || !mach_u8(e, 0x4e) ||
+        !mach_vex(e, 1, false, 0, 0, shuffle, low, 0xd4) ||
+        !mach_u8(e, 0xc0 | shuffle))
       return false;
-  } else if (v != 0 && !mach_vec_mov_reg(e, 0, v)) {
+  } else if ((low != 0 && !mach_vec_mov_reg(e, 0, low)) || !mach_u8(e, 0x66) ||
+             !mach_u8(e, 0x0f) || !mach_u8(e, 0x70) || !mach_u8(e, 0xc8) ||
+             !mach_u8(e, 0x4e) || !mach_vec_op_reg(e, 0, 1, 0x66, 0xd4)) {
     return false;
   }
-  if (!mach_u8(e, 0x66) || !mach_u8(e, 0x0f) || !mach_u8(e, 0x70) ||
-      !mach_u8(e, 0xc8) || !mach_u8(e, 0x4e) ||
-      !mach_vec_op_reg(e, 0, 1, 0x66, 0xd4) || !mach_mov_xmm_rax(e, 0) ||
-      !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x01) ||
-      !mach_u8(e, 0xd0) || !mach_commit_vreg(e, &in->dst, dst_off))
-    return false;
-  return true;
+  return mach_mov_xmm_rax(e, 0) && mach_rex(e, true, false, false, false) &&
+         mach_u8(e, 0x01) && mach_u8(e, 0xd0) &&
+         mach_commit_vreg(e, &in->dst, dst_off);
 }
 
 static bool mach_reduce_add_f64(nyr_x64_mach_enc_t *e,
