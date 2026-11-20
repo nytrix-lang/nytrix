@@ -218,7 +218,8 @@ static void rt_managed_ptr_register(uintptr_t value) {
      * walked every tombstone left by earlier frees (97% of the time in a
      * defer-heavy loop).
      */
-    if (!seen || (tombstone != SIZE_MAX && probe >= RT_MANAGED_PTR_REUSE_WINDOW)) {
+    if (!seen ||
+        (tombstone != SIZE_MAX && probe >= RT_MANAGED_PTR_REUSE_WINDOW)) {
       size_t target = tombstone == SIZE_MAX ? slot : tombstone;
       atomic_store_explicit(&rt_managed_ptr_table[target], value,
                             memory_order_release);
@@ -423,13 +424,15 @@ static inline int ny_mem_pool_slot(size_t total) {
  * Runtime-internal objects keep the normal allocator, so the cost is paid only
  * by allocations the program owns.
  */
-#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <ucontext.h>
 #include <unistd.h>
+#if defined(__linux__) && defined(__x86_64__)
+#include <dlfcn.h>
+#include <ucontext.h>
+#endif
 
 typedef struct {
   uintptr_t user;     /* payload address; 0 = empty slot, 1 = tombstone */
@@ -588,9 +591,9 @@ static void sh_message(const char *kind, uintptr_t addr, const sh_entry_t *e) {
 }
 
 static void sh_fault(int sig, siginfo_t *info, void *ctx) {
+#if defined(__linux__) && defined(__x86_64__)
   if (getenv("NYTRIX_SAFE_HEAP_TRACE")) {
-    ucontext_t *uc = (ucontext_t *)ctx;
-#if defined(__x86_64__)
+    const ucontext_t *uc = ctx;
     void *pc = (void *)uc->uc_mcontext.gregs[REG_RIP];
     Dl_info di;
     if (dladdr(pc, &di) && di.dli_sname)
@@ -598,10 +601,10 @@ static void sh_fault(int sig, siginfo_t *info, void *ctx) {
               di.dli_sname, (unsigned long)((char *)pc - (char *)di.dli_saddr));
     else
       fprintf(stderr, "Nytrix safe-heap: fault pc=%p\n", pc);
-#else
-    (void)uc;
-#endif
   }
+#else
+  (void)ctx;
+#endif
   uintptr_t addr = (uintptr_t)info->si_addr;
   const sh_entry_t *hit = sh_find_address(addr);
   if (!hit) {
@@ -903,8 +906,7 @@ static void *rt_block_bump_alloc(size_t bytes) {
     if (chunk < bytes) {
       if (bytes > SIZE_MAX - (RT_BLOCK_CHUNK_BYTES - 1))
         return NULL;
-      chunk =
-          (bytes + RT_BLOCK_CHUNK_BYTES - 1) & ~(RT_BLOCK_CHUNK_BYTES - 1);
+      chunk = (bytes + RT_BLOCK_CHUNK_BYTES - 1) & ~(RT_BLOCK_CHUNK_BYTES - 1);
     }
     unsigned char *fresh = (unsigned char *)ny_aligned_alloc(16, chunk);
     if (!fresh)
@@ -2535,7 +2537,7 @@ static size_t fc_major_threshold = (size_t)48 << 20;
 static size_t fc_young_limit = (size_t)256 << 20;
 static uint64_t fc_last_end_ns;
 static uint64_t fc_kernel_ns; /* kernel time of the last collection */
-static int fc_state; /* 0 = not started, 1 = recording, -1 = disabled */
+static int fc_state;      /* 0 = not started, 1 = recording, -1 = disabled */
 static int fc_soft_dirty; /* 0 = untested, 1 = usable, -1 = unavailable */
 static int fc_in_collect;
 static uint64_t fc_stat_collections, fc_stat_major, fc_stat_freed_objects,
@@ -2543,7 +2545,8 @@ static uint64_t fc_stat_collections, fc_stat_major, fc_stat_freed_objects,
 static size_t fc_trace_pages, fc_trace_words;
 static int fc_trace_level;
 static uint64_t fc_trace_t[6];
-static uintptr_t fc_stack_low; /* lowest address of the recording thread's stack */
+static uintptr_t
+    fc_stack_low; /* lowest address of the recording thread's stack */
 static uintptr_t fc_excludes[FC_MAX_EXCLUDES][2];
 static size_t fc_exclude_n;
 
@@ -2610,7 +2613,8 @@ static inline unsigned fc_pool_class(size_t bytes, size_t *rounded) {
     *rounded = r;
     return (unsigned)(r / 16u) - 1u; /* 0..63 */
   }
-  unsigned shift = 63u - (unsigned)__builtin_clzll((unsigned long long)(bytes - 1u));
+  unsigned shift =
+      63u - (unsigned)__builtin_clzll((unsigned long long)(bytes - 1u));
   size_t step = (size_t)1 << (shift - 3u);
   size_t r = (bytes + step - 1u) & ~(step - 1u);
   *rounded = r;
@@ -2632,8 +2636,8 @@ static inline bool fc_pool_owns(uintptr_t p) {
 bool rt_fc_pool_owns(const void *ptr) { return fc_pool_owns((uintptr_t)ptr); }
 
 static void fc_pool_drain_foreign(void) {
-  uintptr_t node = atomic_exchange_explicit(&fc_foreign_free, 0,
-                                            memory_order_acq_rel);
+  uintptr_t node =
+      atomic_exchange_explicit(&fc_foreign_free, 0, memory_order_acq_rel);
   while (node) {
     uintptr_t *words = (uintptr_t *)node;
     uintptr_t next = ~words[0];
@@ -2997,7 +3001,8 @@ static void fc_scan_words(fc_ctx_t *c, const uintptr_t *words, size_t n) {
     uintptr_t w = words[i];
     uintptr_t untagged = w >> 1;
     uintptr_t decoded = (uintptr_t)NY_NATIVE_DECODE(w);
-    unsigned hit = (unsigned)(w - lo_a < span_a) | (unsigned)(w - lo_b < span_b) |
+    unsigned hit = (unsigned)(w - lo_a < span_a) |
+                   (unsigned)(w - lo_b < span_b) |
                    (unsigned)(untagged - lo_a < span_a) |
                    (unsigned)(untagged - lo_b < span_b) |
                    (unsigned)(decoded - lo_a < span_a) |
@@ -3100,8 +3105,7 @@ static void fc_fault_guard_remove(void) {
   sigaction(SIGBUS, &fc_old_bus, NULL);
 }
 
-static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c,
-                                                       uintptr_t s,
+static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c, uintptr_t s,
                                                        uintptr_t e) {
   volatile uintptr_t cursor = s;
   sigjmp_buf jmp;
@@ -3113,8 +3117,8 @@ static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c,
      * The page at the fault is gone; continue after it.
      */
     uintptr_t at = fc_fault_addr;
-    uintptr_t next = ((at >= cursor && at < e ? at : cursor) &
-                      ~(uintptr_t)4095u) + 4096u;
+    uintptr_t next =
+        ((at >= cursor && at < e ? at : cursor) & ~(uintptr_t)4095u) + 4096u;
     cursor = next;
   }
   fc_fault_jmp = &jmp;
@@ -3446,8 +3450,7 @@ static long fc_pagemap_pass_range(fc_ctx_t *c, uint64_t from, uint64_t to,
     for (long i = 0; i < n; ++i) {
       pages += (long)((regions[i].end - regions[i].start) >> 12);
       if (record)
-        fc_written_note((uintptr_t)regions[i].start,
-                        (uintptr_t)regions[i].end);
+        fc_written_note((uintptr_t)regions[i].start, (uintptr_t)regions[i].end);
       if (scan)
         fc_scan_root_span(c, (uintptr_t)regions[i].start,
                           (uintptr_t)regions[i].end);
@@ -3536,9 +3539,9 @@ static bool fc_scan_roots_uffd(fc_ctx_t *c, bool dirty_only) {
     }
     fc_trace_unregistered_pages = other > 0 ? (size_t)other : 0;
   } else {
-    other = fc_pagemap_pass(c, 0, PAGE_IS_FILE,
-                            PAGE_IS_PRESENT | PAGE_IS_SWAPPED, PAGE_IS_FILE,
-                            true);
+    other =
+        fc_pagemap_pass(c, 0, PAGE_IS_FILE, PAGE_IS_PRESENT | PAGE_IS_SWAPPED,
+                        PAGE_IS_FILE, true);
   }
   if (fc_trace_level > 1)
     fprintf(stderr,
@@ -3637,7 +3640,8 @@ static bool fc_scan_roots_legacy(fc_ctx_t *c, bool dirty_only) {
     }
     if (fc_trace_level == 2 &&
         (c->marked > marked_before || fc_trace_pages - pages_before > 64))
-      fprintf(stderr, "[heap-collect]   %zu marked, %zu pages, %zu words from %.*s\n",
+      fprintf(stderr,
+              "[heap-collect]   %zu marked, %zu pages, %zu words from %.*s\n",
               c->marked - marked_before, fc_trace_pages - pages_before,
               fc_trace_words - words_before, (int)(eol - line), line);
   }
@@ -3697,7 +3701,7 @@ static void (*fc_cache_reporters[FC_MAX_CACHE_REPORTERS])(
 static size_t fc_cache_reporter_n;
 
 void rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,
-                                                             uintptr_t))) {
+                                                              uintptr_t))) {
   for (size_t i = 0; i < fc_cache_reporter_n; ++i)
     if (fc_cache_reporters[i] == report)
       return;
@@ -3841,8 +3845,7 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
     }
   }
   fc_trace_t[1] = fc_now_ns();
-  fc_sort_ranges(c.ranges, (fc_range_t *)fc_bufs[FC_BUF_SORT].data,
-                 c.range_n);
+  fc_sort_ranges(c.ranges, (fc_range_t *)fc_bufs[FC_BUF_SORT].data, c.range_n);
   fc_trace_t[2] = fc_now_ns();
   /*
    * The same address recorded twice (released and reused) yields identical
@@ -3949,7 +3952,7 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
     /*
      * Per-thread classification caches: addresses, not references.
      */
-#define FC_EXCLUDE_ARRAY(a)                                  \
+#define FC_EXCLUDE_ARRAY(a)                                                    \
   fc_add_exclude((uintptr_t)(a), (uintptr_t)(a) + sizeof(a))
     for (size_t i = 0; i < fc_cache_reporter_n; ++i)
       fc_cache_reporters[i](fc_add_exclude);
@@ -3975,8 +3978,7 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
         if (c.cand[idx].kind == RT_FC_KIND_SSO)
           continue;
         if (c.cand[idx].kind == RT_FC_KIND_MANAGED &&
-            !fc_managed_has_references(
-                *(const int64_t *)(c.cand[idx].ptr - 8)))
+            !fc_managed_has_references(*(const int64_t *)(c.cand[idx].ptr - 8)))
           continue;
         if (c.cand[idx].kind == RT_FC_KIND_LIST) {
           /*
@@ -4265,7 +4267,7 @@ bool rt_fc_pool_owns(const void *ptr) {
 }
 #if defined(__linux__) && defined(__GNUC__)
 void rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,
-                                                             uintptr_t))) {
+                                                              uintptr_t))) {
   (void)report;
 }
 #endif

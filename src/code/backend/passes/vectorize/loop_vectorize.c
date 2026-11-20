@@ -950,7 +950,7 @@ static bool tbuf_affine_memory_safe(const nyr_func_t *f, const int *defs,
 }
 
 static bool affine_memory_range(const nyr_func_t *f, const int *defs,
-                                 affine_t *access, int64_t init, int64_t trip) {
+                                affine_t *access, int64_t init, int64_t trip) {
   if (trip <= 0)
     return false;
   int64_t bytes = 0;
@@ -1137,8 +1137,7 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
   bool valid = true;
   for (size_t k = 0; k < phi->phi_incoming_len && valid; ++k) {
     size_t pred = SIZE_MAX;
-    if (!block_for_label(cfg, phi->phi_incoming[k].predecessor_label,
-                         &pred)) {
+    if (!block_for_label(cfg, phi->phi_incoming[k].predecessor_label, &pred)) {
       valid = false;
       break;
     }
@@ -1159,15 +1158,13 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
         break;
       }
       pre_block = pred;
-      pre =
-          nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
+      pre = nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
       if (pre < 0)
         valid = false;
       continue;
     }
 
-    int back =
-        nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
+    int back = nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
     if (back < 0 || back >= f->next_value || defs[back] < 0) {
       valid = false;
       break;
@@ -1206,8 +1203,8 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
     size_t pred = cfg->pred_blocks[e];
     size_t occurrences = 0;
     size_t matches = 0;
-    for (size_t prior = cfg->pred_offsets[h];
-         prior < cfg->pred_offsets[h + 1]; ++prior)
+    for (size_t prior = cfg->pred_offsets[h]; prior < cfg->pred_offsets[h + 1];
+         ++prior)
       occurrences += cfg->pred_blocks[prior] == pred;
     for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
       size_t incoming = SIZE_MAX;
@@ -1236,8 +1233,8 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
     if (start_depth >= 6)
       return false;
     ++start_depth;
-    bool have = value_range_under_guards(f, defs, cfg, use_pc, pre, -1, 0,
-                                         0, 0, &start_range);
+    bool have = value_range_under_guards(f, defs, cfg, use_pc, pre, -1, 0, 0, 0,
+                                         &start_range);
     --start_depth;
     if (!have || !start_range.has_min)
       return false;
@@ -1566,12 +1563,10 @@ static void replace_uses_outside_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
   }
 }
 
-static bool
-emit_i64_vector_accumulator(nyr_func_t *f, int vf, const bool *in_loop,
-                            int scalar_phi, int scalar_init, int vector_phi,
-                            int vector_update, int scalar_result,
-                            int64_t preheader_label, int64_t header_label,
-                            int64_t latch_label) {
+static bool emit_i64_vector_accumulator(
+    nyr_func_t *f, int vf, const bool *in_loop, int scalar_phi, int scalar_init,
+    int vector_phi, int vector_update, int scalar_result,
+    int64_t preheader_label, int64_t header_label, int64_t latch_label) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg))
     return false;
@@ -1581,8 +1576,8 @@ emit_i64_vector_accumulator(nyr_func_t *f, int vf, const bool *in_loop,
     nyr_cfg_free(&cfg);
     return false;
   }
-  for (size_t e = cfg.succ_offsets[header];
-       e < cfg.succ_offsets[header + 1]; ++e) {
+  for (size_t e = cfg.succ_offsets[header]; e < cfg.succ_offsets[header + 1];
+       ++e) {
     size_t succ = cfg.succ_blocks[e];
     if (!in_loop[succ]) {
       if (exit != SIZE_MAX) {
@@ -1881,6 +1876,7 @@ static bool vector_unroll_shape(const nyr_func_t *f, const nyr_cfg_t *cfg,
 static bool vector_unroll_body(nyr_func_t *f, int64_t body_label,
                                size_t update_idx, int iv, int vf, int factor,
                                int reduction_phi_dst, int reduction_update_dst,
+                               int *pending_phi_update,
                                size_t *inserted_count) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg))
@@ -1939,7 +1935,7 @@ static bool vector_unroll_body(nyr_func_t *f, int64_t body_label,
       remap[v] = -1;
     if (reduction_phi_dst >= 0) {
       if (reduction_phi_dst >= original_value_count || previous_reduction < 0 ||
-          previous_reduction >= original_value_count) {
+          previous_reduction >= f->next_value) {
         if (nyr_vector_trace_enabled())
           ny_trace_line("VECTORIZE",
                         "unroll: invalid reduction chain phi=%d previous=%d "
@@ -2040,7 +2036,10 @@ static bool vector_unroll_body(nyr_func_t *f, int64_t body_label,
     nyr_cfg_free(&cfg);
     return false;
   }
-  if (reduction_phi_dst >= 0) {
+  if (pending_phi_update) {
+    /* The vector PHI is inserted after the loop body is widened. */
+    *pending_phi_update = previous_reduction;
+  } else if (reduction_phi_dst >= 0) {
     bool chained = false;
     for (size_t i = 0; i < f->len; ++i) {
       nyr_inst_t *in = &f->data[i];
@@ -2440,7 +2439,8 @@ typedef struct {
   bool written;
 } root_access_t;
 
-/* The vector memory operations here have 64-bit lanes and use flat addresses. */
+/* The vector memory operations here have 64-bit lanes and use flat addresses.
+ */
 static const unsigned vector_unsupported_mem_flags =
     NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32 |
     NYIR_INST_F_MEM_VOLATILE | NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS;
@@ -2488,8 +2488,8 @@ static bool values_structurally_equal(const nyr_func_t *f, const int *defs,
 
 static bool track_root_access(const nyr_func_t *f, const int *defs,
                               root_access_t *seen, size_t *seen_count,
-                              size_t seen_cap, affine_t access, bool dynamic_offset,
-                              bool is_store) {
+                              size_t seen_cap, affine_t access,
+                              bool dynamic_offset, bool is_store) {
   for (size_t r = 0; r < *seen_count; ++r) {
     affine_t prior_access = seen[r].access;
     int root = access.root;
@@ -2525,9 +2525,8 @@ static bool track_root_access(const nyr_func_t *f, const int *defs,
   }
   if (*seen_count >= seen_cap)
     return false;
-  seen[(*seen_count)++] = (root_access_t){.access = access,
-                                         .dynamic_offset = dynamic_offset,
-                                         .written = is_store};
+  seen[(*seen_count)++] = (root_access_t){
+      .access = access, .dynamic_offset = dynamic_offset, .written = is_store};
   return true;
 }
 
@@ -2613,11 +2612,11 @@ static const char *vector_symbol_of_address(const nyr_func_t *f,
 static bool vector_slot_entry_const(const nyr_func_t *f, const int *defs,
                                     const nyr_cfg_t *cfg, int load_pc,
                                     int64_t *out) {
-  if (!f || !defs || !cfg || !out || load_pc < 0 ||
-      (size_t)load_pc >= f->len)
+  if (!f || !defs || !cfg || !out || load_pc < 0 || (size_t)load_pc >= f->len)
     return false;
   const nyr_inst_t *load = &f->data[(size_t)load_pc];
-  if (load->op != NYIR_LOAD_I64 || (load->flags & vector_unsupported_mem_flags) ||
+  if (load->op != NYIR_LOAD_I64 ||
+      (load->flags & vector_unsupported_mem_flags) ||
       !cfg->reachable[cfg->inst_block[load_pc]])
     return false;
   const char *symbol = vector_symbol_of_address(f, defs, load->a);
@@ -2918,10 +2917,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         /* The entering value can be affine in an enclosing induction.
          * Reuse the address proof's guard analysis at the body edge.
          */
-        if (range.has_min ||
-            (value_range_under_guards(f, defs, &cfg, cfg.block_start[body_target],
-                                      init_v, -1, 0, 0, 0, &range) &&
-             range.has_min)) {
+        if (range.has_min || (value_range_under_guards(
+                                  f, defs, &cfg, cfg.block_start[body_target],
+                                  init_v, -1, 0, 0, 0, &range) &&
+                              range.has_min)) {
           w_lo = range.min;
           have_lo = true;
         }
@@ -2933,10 +2932,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       } else if (limit_v >= 0 && limit_v < f->next_value &&
                  defs[limit_v] >= 0) {
         nyr_range_t range = f->data[(size_t)defs[limit_v]].range;
-        if (range.has_max ||
-            (value_range_under_guards(f, defs, &cfg, cfg.block_start[body_target],
-                                      limit_v, -1, 0, 0, 0, &range) &&
-             range.has_max)) {
+        if (range.has_max || (value_range_under_guards(
+                                  f, defs, &cfg, cfg.block_start[body_target],
+                                  limit_v, -1, 0, 0, 0, &range) &&
+                              range.has_max)) {
           w_hi = range.max;
           have_hi = true;
         }
@@ -3227,10 +3226,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         affine_t a = {0};
         bool dynamic_offset = false;
         const char *mem_why = NULL;
-        bool access_ok = vector_memory_affine(f, defs, &cfg, in_loop, in->a, iv,
-                                              init, is_var_trip, fixed_trip,
-                                              window_init, window_trip, i, &a,
-                                              &dynamic_offset, &mem_why);
+        bool access_ok = vector_memory_affine(
+            f, defs, &cfg, in_loop, in->a, iv, init, is_var_trip, fixed_trip,
+            window_init, window_trip, i, &a, &dynamic_offset, &mem_why);
         if (!access_ok && read_only_loop)
           access_ok =
               vector_checked_read_affine(f, defs, &cfg, in_loop, in->a, iv, &a);
@@ -3284,8 +3282,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             bool in_loop_a =
                 value_defined_in_loop(f, defs, &cfg, in_loop, in->a);
             if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
-                (in_loop_a && affine_value(f, defs, &cfg, in_loop, in->a, iv,
-                                           0).stride != 0)) {
+                (in_loop_a &&
+                 affine_value(f, defs, &cfg, in_loop, in->a, iv, 0).stride !=
+                     0)) {
               bad = true;
               reject_reason =
                   vector_mixed_operand_reason(f, defs, in->a, "i64");
@@ -3298,8 +3297,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             bool in_loop_b =
                 value_defined_in_loop(f, defs, &cfg, in_loop, in->b);
             if (in->b < 0 || (size_t)in->b >= scalar_value_count ||
-                (in_loop_b && affine_value(f, defs, &cfg, in_loop, in->b, iv,
-                                           0).stride != 0)) {
+                (in_loop_b &&
+                 affine_value(f, defs, &cfg, in_loop, in->b, iv, 0).stride !=
+                     0)) {
               bad = true;
               reject_reason =
                   vector_mixed_operand_reason(f, defs, in->b, "i64");
@@ -3331,8 +3331,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             bool in_loop_a =
                 value_defined_in_loop(f, defs, &cfg, in_loop, in->a);
             if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
-                (in_loop_a && affine_value(f, defs, &cfg, in_loop, in->a, iv,
-                                           0).stride != 0)) {
+                (in_loop_a &&
+                 affine_value(f, defs, &cfg, in_loop, in->a, iv, 0).stride !=
+                     0)) {
               bad = true;
               reject_reason = "mixed f64 operand is not loop-invariant";
               reject_pc = i;
@@ -3344,8 +3345,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             bool in_loop_b =
                 value_defined_in_loop(f, defs, &cfg, in_loop, in->b);
             if (in->b < 0 || (size_t)in->b >= scalar_value_count ||
-                (in_loop_b && affine_value(f, defs, &cfg, in_loop, in->b, iv,
-                                           0).stride != 0)) {
+                (in_loop_b &&
+                 affine_value(f, defs, &cfg, in_loop, in->b, iv, 0).stride !=
+                     0)) {
               bad = true;
               reject_reason = "mixed f64 operand is not loop-invariant";
               reject_pc = i;
@@ -3368,9 +3370,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         bool access_ok = vector_memory_affine(
             f, defs, &cfg, in_loop, in->a, iv, init, is_var_trip, fixed_trip,
             window_init, window_trip, i, &a, &dynamic_offset, &mem_why);
-        if (access_ok &&
-            !track_root_access(f, defs, seen_roots, &seen_count, 64, a,
-                               dynamic_offset, true)) {
+        if (access_ok && !track_root_access(f, defs, seen_roots, &seen_count,
+                                            64, a, dynamic_offset, true)) {
           access_ok = false;
           mem_why = "store has an unproven dependence on another stream";
         }
@@ -3586,9 +3587,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                                       : -1),
                       (long long)exit_target, single_exit ? "yes" : "no",
                       vector_preheader, has_preheader ? "yes" : "no");
-      vector_accumulator_safe =
-          vector_accumulator_safe && exit_block < cfg.block_count &&
-          single_exit && has_preheader;
+      vector_accumulator_safe = vector_accumulator_safe &&
+                                exit_block < cfg.block_count && single_exit &&
+                                has_preheader;
     }
     if (!bad && vector_accumulator_safe) {
       for (size_t u = uses.offsets[reduction_phi_dst];
@@ -3632,9 +3633,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                     "reduction=%d init=%d preheader=%lld vf=%d "
                     "trip=%lld variable=%s",
                     reduction_phi_dst, reduction_phi_init,
-                    (long long)reduction_preheader_label,
-                    vf, (long long)fixed_trip,
-                    is_var_trip ? "yes" : "no");
+                    (long long)reduction_preheader_label, vf,
+                    (long long)fixed_trip, is_var_trip ? "yes" : "no");
     if (!bad) {
       for (int v = 0; v < f->next_value && !bad; ++v) {
         if (!vec[v])
@@ -3775,7 +3775,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                             fixed_trip >= (int64_t)(4 * vf);
     bool unroll_fixed_body = !is_var_trip && fixed_trip >= (int64_t)(2 * vf) &&
                              reduction_phi_dst < 0 && extra_phi_dst < 0;
-    if ((unroll_fixed_body || unroll_reduction) && body_target == latch &&
+    bool unroll_accumulator = vector_accumulator_safe && extra_phi_dst < 0 &&
+                              reduction_update_idx < update_idx &&
+                              fixed_trip >= 8 * vf && vec_ops <= 4;
+    if ((unroll_fixed_body || unroll_reduction || unroll_accumulator) &&
+        body_target == latch &&
         vector_unroll_shape(f, &cfg, latch, update_idx)) {
       uint64_t chunks = unroll_reduction ? estimated_trip / (uint64_t)vf
                                          : (uint64_t)fixed_trip / (uint64_t)vf;
@@ -3784,12 +3788,19 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         /*
          * Only clone small vector bodies: register pressure grows with the
          * number of simultaneously live vector results, and an extra copy of
-         * a dense body can turn loop overhead savings into spills. Scalar
-         * reductions retain their per-chunk scalar accumulation; only the
-         * vector body is cloned. The scalar-tail bound rounds by a bit mask,
-         * so vector_step must remain a power of two.
+         * a dense body can turn loop overhead savings into spills. Chain
+         * each cloned reduction to the preceding chunk, leaving the
+         * horizontal reduction at the exit when using a vector accumulator.
+         * The scalar-tail bound rounds by a bit mask, so vector_step must
+         * remain a power of two.
          */
         uint64_t factor = 2;
+        if (unroll_accumulator) {
+          /* Keep the vector PHI live only in loops with no scalar tail. */
+          factor = fixed_trip % (4 * vf) == 0   ? 4
+                   : fixed_trip % (2 * vf) == 0 ? 2
+                                                : 1;
+        }
         if ((unroll_reduction || vec_ops <= 4) &&
             body_inst_count <= 2048 / (size_t)factor)
           vector_unroll_factor = (int)factor;
@@ -4020,11 +4031,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
 
     size_t vector_clone_count = 0;
     if (vector_unroll_factor > 1) {
-      if (!vector_unroll_body(f, latch_label, update_idx, iv, vf,
-                              vector_unroll_factor, reduction_phi_dst,
-                              reduction_phi_dst >= 0 ? reduction_update_value
-                                                     : -1,
-                              &vector_clone_count)) {
+      if (!vector_unroll_body(
+              f, latch_label, update_idx, iv, vf, vector_unroll_factor,
+              vector_accumulator ? vector_acc_phi : reduction_phi_dst,
+              vector_accumulator ? vector_acc_update : reduction_update_value,
+              vector_accumulator ? &vector_acc_update : NULL,
+              &vector_clone_count)) {
         if (nyr_vector_trace_enabled())
           ny_trace_line("VECTORIZE",
                         "vectorize: failed to clone unrolled loop body");

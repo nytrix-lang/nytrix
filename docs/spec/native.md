@@ -27,18 +27,20 @@ back to a different execution mode.
 
 ## NYIR artifacts and native objects
 
-Save a validated NYIR bundle and run it later in the debug VM:
+On x86-64, save a validated binary NYIR bundle and run it later in the
+debug VM:
 
 ```bash
-ny --emit=nyr=build/cache/program.nyr myprog.ny
-ny --nyr-run-bin=build/cache/program.nyr
+ny --native-precompile=build/cache/program.nyrb myprog.ny
+ny --nyr-run-bin=build/cache/program.nyrb
 ```
 
 The bundle also contains the native data tables needed by its lowered code.
-Build a native executable without reparsing the source:
+`--emit=nyr` writes text, not a reusable binary. Build a native executable
+without reparsing the source:
 
 ```bash
-ny --native-from-nyr=build/cache/program.nyr --output=build/cache/program
+ny --native-from-nyr=build/cache/program.nyrb --output=build/cache/program
 ```
 
 The compiler links the Nytrix runtime. External libraries are not recorded in
@@ -613,7 +615,10 @@ constraints and asm expressions remain unsupported. `asm goto` in a
 reachable function remains unsupported; an unreferenced static-inline
 function containing it is discarded.
 A fresh NYC `defconfig` passes Kconfig's assembler-version query through
-`-Wa,--version` forwarding. The scratch Linux Makefile now supplies external
+`-Wa,--version` forwarding. NYC accepts `-x assembler` and
+`-x assembler-with-cpp` for source files and standard input, with GNU `as`
+for object output. `-Wa,--fatal-warnings` keeps assembler warnings fatal.
+The earlier scratch Linux Makefile supplied external
 retpolines for kernel objects and inline retpolines for VDSO objects when
 `CONFIG_CC_IS_NYC` is selected. A current local-adapter Kbuild attempt with
 retpoline enabled generates offsets and initramfs data and begins kernel C
