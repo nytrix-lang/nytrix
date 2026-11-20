@@ -1747,9 +1747,9 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
   if (!name)
     return 0;
   /*
-   * The repository README and docs/README.md intentionally share a filename
-   * but have different jobs. Keep both records: the docs copy owns the
-   * website overview, while the root copy is appended as the project guide.
+   * The root README owns the website overview. A docs/README.md, when one
+   * exists, takes the overview slot instead and the root copy keeps its own
+   * route, so the two files never collide.
    */
   if (overview_path && strcmp(path, overview_path) == 0) {
     free(name);
@@ -1872,13 +1872,15 @@ static void append_markdown_docs_json(sb_t *json, const char *root) {
   char *seen[1024];
   int seen_n = 0;
   sb_add(json, "[");
+  int docs_overview = docs_readme[0] && access(docs_readme, R_OK) == 0;
   if (root_readme[0])
-    append_markdown_doc_json_item(json, root, root, root_readme, NULL, &first,
+    append_markdown_doc_json_item(json, root, root, root_readme,
+                                  docs_overview ? NULL : root_readme, &first,
                                   seen, &seen_n,
                                   (int)(sizeof(seen) / sizeof(seen[0])));
   if (docs_dir[0])
     append_markdown_docs_from_dir(
-        json, docs_dir, root, docs_dir, docs_readme[0] ? docs_readme : NULL,
+        json, docs_dir, root, docs_dir, docs_overview ? docs_readme : NULL,
         &first, seen, &seen_n, (int)(sizeof(seen) / sizeof(seen[0])), 1);
   if (env_dir[0])
     append_markdown_docs_from_dir(json, env_dir, root, env_dir, NULL, &first,

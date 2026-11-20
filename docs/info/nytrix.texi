@@ -227,7 +227,7 @@ language rules.
 @chapter See Also
 
 @itemize @bullet
-@item @file{docs/README.md}
+@item @file{README.md}
 @item @file{docs/spec/units.md}
 @item @file{docs/spec/syntax.md}
 @item @file{docs/spec/native.md}

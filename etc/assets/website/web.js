@@ -2137,9 +2137,6 @@ function renderReferenceSection(title, desc) {
 }
 
 function renderOverviewBody(source, sections) {
-  const rootReadmeMarker = /<!--\s*overview:root-readme\s*-->/;
-  const includeRootReadme = rootReadmeMarker.test(source);
-  source = source.replace(rootReadmeMarker, "");
   const marker = /<!--\s*overview:cards\s+({[\s\S]*?})\s*-->/g;
   let html = "";
   let start = 0;
@@ -2166,17 +2163,16 @@ function renderOverviewBody(source, sections) {
   }
   const tail = source.slice(start);
   if (tail.trim()) html += `<section class="overview-body markdown-content">${markdownHtml(tail)}</section>`;
-  if (includeRootReadme && sections.rootReadmeHtml) {
-    /* The root README is already the repository's canonical project narrative.
-     * Reuse everything after its centered hero. The overview page owns the
-     * hero presentation, but the README introduction and practical sections
-     * should remain visible below the overview cards. */
-    let readme = marked.parse(String(sections.rootReadmeHtml));
-    const heroEnd = readme.indexOf("</div>");
-    if (heroEnd >= 0) readme = readme.slice(heroEnd + "</div>".length);
-    html += `<section class="overview-body markdown-content overview-root-readme">${DOMPurify.sanitize(readme)}</section>`;
-  }
   return html;
+}
+
+/* Blocks that only make sense on the site (the quick-start grid, for one) are
+ * kept inside a plain HTML comment so the GitHub preview stays clean. The site
+ * unwraps the comment before rendering; any other comment stays hidden. */
+function unwrapWebsiteOnlyBlock(source) {
+  const text = String(source ?? "");
+  const match = text.match(/^\s*<!--\s*\n?([\s\S]*?)\n?\s*-->\s*$/);
+  return match ? match[1] : text;
 }
 
 function renderDocsHome(overviewMod) {
@@ -2187,9 +2183,6 @@ function renderDocsHome(overviewMod) {
   const learnDocs = docs.filter((doc) => OVERVIEW_DOC_ROUTES.learn.has(doc.name));
   const specDocs = docs.filter((doc) => OVERVIEW_DOC_ROUTES.spec.has(doc.name));
   const projectDocs = docs.filter((doc) => doc.name === "CHANGELOG");
-  const rootReadme = (overviewMod && overviewMod.markdown_docs || []).find(
-    (doc) => doc.name === "README" && !isOverviewDoc(doc),
-  );
   const overviewDoc =
     (overviewMod && overviewMod.markdown_docs || []).find(
       (doc) => isOverviewDoc(doc),
@@ -2200,11 +2193,38 @@ function renderDocsHome(overviewMod) {
   const overviewLeadParts = overviewParts.length
     ? overviewParts[0].split("<!-- overview:quick-start -->")
     : [];
+  /* The README's centered hero duplicates the site header, so the lead drops it
+   * and keeps only the introduction above the quick-start marker. */
+  let overviewLeadSource = overviewLeadParts.length
+    ? String(overviewLeadParts[0])
+    : "";
+  const leadHeroEnd = overviewLeadSource.indexOf("</div>");
+  if (leadHeroEnd >= 0)
+    overviewLeadSource = overviewLeadSource.slice(
+      leadHeroEnd + "</div>".length,
+    );
+  const quickStartSource = overviewLeadParts.length > 1
+    ? unwrapWebsiteOnlyBlock(
+        overviewLeadParts.slice(1).join("<!-- overview:quick-start -->"),
+      )
+    : "";
+  /* A leading "# Title" in the site-only block is the page heading. Hoist it
+   * above the introduction so the title, lead, and quick-start grid read in
+   * that order instead of putting the title after the buttons. */
+  let overviewHeadingSource = "";
+  let quickStartBody = quickStartSource;
+  const headingMatch = quickStartSource.match(/^[ \t]*#[ \t]+(.+?)[ \t]*$/m);
+  if (headingMatch) {
+    overviewHeadingSource = `# ${headingMatch[1]}\n\n`;
+    quickStartBody =
+      quickStartSource.slice(0, headingMatch.index) +
+      quickStartSource.slice(headingMatch.index + headingMatch[0].length);
+  }
   const overviewLeadHtml = overviewLeadParts.length
-    ? markdownHtml(overviewLeadParts[0])
+    ? markdownHtml(overviewHeadingSource + overviewLeadSource)
     : "<p>Read the manual to explore Nytrix.</p>";
-  const overviewQuickStartHtml = overviewLeadParts.length > 1
-    ? markdownHtml(overviewLeadParts.slice(1).join("<!-- overview:quick-start -->"))
+  const overviewQuickStartHtml = quickStartBody.trim()
+    ? markdownHtml(quickStartBody)
     : "";
   const overviewBodySource = overviewParts.length > 1
     ? overviewParts.slice(1).join("<!-- overview:body -->")
@@ -2213,7 +2233,6 @@ function renderDocsHome(overviewMod) {
     learn: learnDocs,
     spec: specDocs,
     project: projectDocs,
-    rootReadmeHtml: rootReadme ? rootReadme.html : "",
   });
   const heroLines = String((overviewMod && overviewMod.hero_source) || "").split("\n");
   const heroSource = heroLines
@@ -2224,9 +2243,9 @@ function renderDocsHome(overviewMod) {
     ? `<div class="docs-hero-aside"><pre class="docs-example overview-hero-code"><code class="language-ny">${highlightNytrixCode(heroSource)}</code></pre></div>`
     : "";
   let html = header(
-    "Nytrix",
-    "Manual, specification, and source-linked API reference.",
-    "Manual · API · source",
+    "Index",
+    "Language reference",
+    "Specification · Src · Docs",
     "book",
   );
   html += `<div class="docs-home">`;

@@ -365,7 +365,7 @@ ny pkg add helper ./deps/helper
 Canonical repository docs:
 
 @itemize @bullet
-@item @file{docs/README.md}
+@item @file{README.md}
 @item @file{docs/learn/tooling.md}
 @item @file{docs/learn/status.md}
 @item @file{docs/learn/quirks.md}
