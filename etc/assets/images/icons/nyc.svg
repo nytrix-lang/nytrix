@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>NYC C Compiler</title>
+  <desc>Open C ring emitting compiled output.</desc>
+  <path fill="#22d3ee" fill-rule="evenodd" d="M18.78 6.71A8.6 8.6 0 1 0 18.78 17.29L16.1 15.2A5.2 5.2 0 1 1 16.1 8.8Z"/>
+  <path fill="#8ccfff" d="M16.3 10.85H18.95V9.3L21.8 12L18.95 14.7V13.15H16.3Z"/>
+</svg>

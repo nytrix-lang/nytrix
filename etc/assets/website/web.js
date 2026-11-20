@@ -497,7 +497,7 @@ const DOC_ICONS = {
   tour: "route", troubleshooting: "alert", ui: "window",
   verification: "prover", "control-flow": "workflow", dependent: "dependent",
   errors: "error", functions: "callable", ir: "compiler", kernel: "kernel",
-  linker: "link", memory: "mem", nyr: "cpu", nytrix: "nytrix",
+  linker: "link", memory: "mem", nyc: "nyc", nyr: "cpu", nytrix: "nytrix",
   operators: "hash", patterns: "regex", pipeline: "tree", runtime: "runtime",
   syntax: "code", traits: "reflect", types: "primitives", units: "collections",
   values: "database",
