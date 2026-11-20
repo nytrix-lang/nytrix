@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: aggregate variadic va arg.
+ */
 #include "aggregate-variadic-va-arg.h"
 
 typedef __builtin_va_list va_list;

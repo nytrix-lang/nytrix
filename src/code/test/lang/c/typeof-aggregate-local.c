@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: typeof aggregate local.
+ */
 typedef struct {
   unsigned long bits[1];
 } mask;

@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: bool pointer call.
+ */
 typedef _Bool flag;
 
 static __attribute__((noinline)) flag *set_flag(flag *out, flag value) {

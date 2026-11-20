@@ -429,7 +429,9 @@ static unsigned bf_clz32(uint32_t x) {
 #endif
 }
 
-/* Rounding needs only whether the exact quotient had a remainder. */
+/*
+ * Rounding needs only whether the exact quotient had a remainder.
+ */
 static bool mag_div(bf_mag_t *q, bool *inexact, const bf_mag_t *u,
                     const bf_mag_t *v) {
   if (!v->n)
@@ -594,7 +596,9 @@ static bool mag_div(bf_mag_t *q, bool *inexact, const bf_mag_t *u,
     q->d[qwords - 1] = qq[qn - 1];
   q->n = qwords;
   mag_trim(q);
-  /* Normalizing multiplies the remainder by 2^s; zero is unchanged. */
+  /*
+   * Normalizing multiplies the remainder by 2^s; zero is unchanged.
+   */
   uint32_t sticky = 0;
   for (size_t i = 0; i < vn; ++i)
     sticky |= unorm[i];

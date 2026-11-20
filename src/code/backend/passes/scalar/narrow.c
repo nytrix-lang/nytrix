@@ -598,7 +598,9 @@ bool nyr_narrow(nyr_func_t *f) {
       bool mask_b =
           is_u32_mask_value(constants, is_constant, in->b, f->next_value);
       if (mask_a != mask_b) {
-        /* Its input demand was already counted as a boundary above. */
+        /*
+         * Its input demand was already counted as a boundary above.
+         */
         if (f->untagged_values)
           nir_make_copy(in, mask_a ? in->b : in->a);
         continue;

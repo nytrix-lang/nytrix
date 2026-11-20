@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: inline asm memory output.
+ */
 unsigned long nyc_inline_asm_memory_output(unsigned long, unsigned long,
                                            unsigned long);
 

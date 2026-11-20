@@ -4856,8 +4856,10 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
     ny_ctok_t leading_mode = p->last_type_mode;
     if (!parse_typeof_type(p, type))
       return false;
-    /* A recursively parsed type name owns its type metadata, not the
-     * attributes already collected for the enclosing declaration. */
+    /*
+     * A recursively parsed type name owns its type metadata, not the
+     * attributes already collected for the enclosing declaration.
+     */
     if (leading_section.len)
       p->last_type_section = leading_section;
     if (leading_cleanup.len)

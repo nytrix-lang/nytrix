@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: cleanup jumps.
+ */
 static int cleaned;
 static int jump_key;
 

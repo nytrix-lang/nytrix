@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: local pointer to array stride.
+ */
 typedef struct {
   unsigned long bits;
 } entry;

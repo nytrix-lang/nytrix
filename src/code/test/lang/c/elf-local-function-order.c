@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: elf local function order.
+ */
 static __attribute__((noinline)) int local_first(int x) { return x + 7; }
 int exported_first(int x) { return local_first(x); }
 

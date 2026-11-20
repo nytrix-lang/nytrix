@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: inline aggregate return capture.
+ */
 struct argument {
   _Bool compat;
   union {

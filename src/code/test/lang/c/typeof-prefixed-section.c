@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: typeof prefixed section.
+ */
 struct record {
   unsigned long key;
   unsigned long value;

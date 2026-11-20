@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: elf callback table section.
+ */
 static int callback(void) { return 41; }
 
 static int (*callbacks[])(void)

@@ -408,7 +408,9 @@ static bool nir_value_dominates_use(const nyr_func_t *f, const nyr_cfg_t *cfg,
                              "value definition does not dominate its use");
 }
 
-/* A zero-extending load shifted by at least width-1 produces only 0 or 1. */
+/*
+ * A zero-extending load shifted by at least width-1 produces only 0 or 1.
+ */
 static bool nir_select_shift_is_boolean(const nyr_func_t *f,
                                         const nyr_inst_t *shift,
                                         size_t before) {

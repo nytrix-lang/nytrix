@@ -1534,7 +1534,7 @@ fn _lift_row(dict bin, list r) dict {
          row = row.set("operator", "sign_extend").set("kind", "sign_extend_dividend").set("dst", "edx").set("src", "eax").set("effect", "edx = signbit(eax) ? -1 : 0")
       } elif m == "cqo" {
          row = row.set("operator", "sign_extend").set("kind", "sign_extend_dividend").set("dst", "rdx").set("src", "rax").set("effect", "rdx = signbit(rax) ? -1 : 0")
-   } elif m == "cdqe" {
+      } elif m == "cdqe" {
          row = row.set("op", "arith").set("operator", "sign_extend").set("kind", "sign_extend_acc").set("dst", "rax").set("src", "eax")
          .set("dst_kind", "reg").set("src_kind", "reg").set("effect", "rax = sext(eax)")
       } elif m == "cwde" {
@@ -1612,8 +1612,8 @@ fn _lift_row(dict bin, list r) dict {
       row = row.set("op", "nop").set("kind", "landing_pad").set("effect", "")
    } elif fam == "x86" && (m == "rep movsb" || m == "movsb") {
       row = row.set("op", "assign").set("kind", "memory_copy")
-         .set("dst", "rdi").set("src", "rsi")
-         .set("effect", "copy_bytes(rdi, rsi, rcx)")
+      .set("dst", "rdi").set("src", "rsi")
+      .set("effect", "copy_bytes(rdi, rsi, rcx)")
    }
    row
 }
@@ -26354,12 +26354,12 @@ fn decompile(any source, any target=0, any opts=dict()) dict {
       def row = lifted[li]
       def op = str(row.get("op", ""))
       def renderable = op == "assign" || op == "arith" || op == "compare" ||
-         op == "stack" || op == "call" || op == "syscall" || op == "branch" ||
-         op == "return" || op == "nop"
+      op == "stack" || op == "call" || op == "syscall" || op == "branch" ||
+      op == "return" || op == "nop"
       if !renderable {
          return {"ok": false, "language": "ny", "text": "",
             "diagnostic": "no Ny semantic lift for " + str(row.get("mnemonic", "instruction")) +
-               " at " + to_str(row.get("addr", 0)), "analysis": bin}
+            " at " + to_str(row.get("addr", 0)), "analysis": bin}
       }
       li += 1
    }

@@ -2536,7 +2536,9 @@ static void c_append_spaces(char **out, size_t *out_len, size_t *out_cap,
 /*
  * Align the backslashes in physical lines of #define replacement lists.
  * Only trailing backslashes followed immediately by a newline are changed;
- * all other preprocessing directives and source bytes are preserved.
+ * all other preprocessing directives and source bytes are preserved. Padding
+ * is only ever added: a block that is already aligned at a wider column keeps
+ * its layout, so tidy does not reflow unrelated multi-line macros.
  */
 static char *c_align_macro_continuations(const char *in) {
   size_t n = strlen(in), out_len = 0, out_cap = 0, pos = 0;
@@ -2559,6 +2561,7 @@ static char *c_align_macro_continuations(const char *in) {
 
     size_t block_end = pos;
     size_t max_prefix = 0;
+    size_t max_column = 0;
     int valid_block = 1;
     for (;;) {
       line_end = block_end;
@@ -2577,6 +2580,11 @@ static char *c_align_macro_continuations(const char *in) {
                                          content_end - block_end, continuation);
       if (prefix > max_prefix)
         max_prefix = prefix;
+      if (continuation) {
+        size_t column = (content_end - block_end) - 1;
+        if (column > max_column)
+          max_column = column;
+      }
       block_end = line_end < n ? line_end + 1 : line_end;
       if (!continuation)
         break;
@@ -2589,6 +2597,8 @@ static char *c_align_macro_continuations(const char *in) {
       continue;
     }
 
+    size_t align_column =
+        max_prefix + 1 > max_column ? max_prefix + 1 : max_column;
     size_t macro_pos = pos;
     while (macro_pos < block_end) {
       line_end = macro_pos;
@@ -2603,7 +2613,7 @@ static char *c_align_macro_continuations(const char *in) {
             c_macro_prefix_len(in + macro_pos, content_end - macro_pos, 1);
         for (size_t i = macro_pos; i < macro_pos + prefix; i++)
           buf_append_char(&out, &out_len, &out_cap, in[i]);
-        c_append_spaces(&out, &out_len, &out_cap, max_prefix - prefix + 1);
+        c_append_spaces(&out, &out_len, &out_cap, align_column - prefix);
         buf_append_char(&out, &out_len, &out_cap, '\\');
         if (content_end < line_end)
           buf_append_char(&out, &out_len, &out_cap, '\r');

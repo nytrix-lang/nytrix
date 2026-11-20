@@ -2744,7 +2744,9 @@ static bool sm_i386_place_call_regs(ny_sm_ctx_t *c, const int *args,
                    : !sm_ldv(c, sm_i386_gpr[dst], values[dst]))
         return false;
     } else {
-      /* The remaining assignments form a cycle in the ABI registers. */
+      /*
+       * The remaining assignments form a cycle in the ABI registers.
+       */
       if (!nyr_printf(c->w, "\txchgl\t%s, %s\n", sm_i386_gpr[src],
                       sm_i386_gpr[dst]))
         return false;
@@ -2863,8 +2865,10 @@ static bool sm_call(ny_sm_ctx_t *c, const nyr_inst_t *in,
       stack_bytes += (size + 3u) & ~(size_t)3u;
       push_args &= cls != NYIR_SCALAR_AGGREGATE;
     }
-    /* A frame-relative indirect target survives argument pushes and all
-     * three ABI register assignments without another outgoing slot. */
+    /*
+     * A frame-relative indirect target survives argument pushes and all
+     * three ABI register assignments without another outgoing slot.
+     */
     i386_target_in_frame = indirect && push_args;
     size_t alignment = i386_simple_stack ? 4 : 16;
     i386_outgoing_bytes =
@@ -4972,8 +4976,10 @@ static bool sm_i386_finalize_frame(const nyr_func_t *func, int frame_align,
          nyr_put(out, leave + sizeof("\tleave\n") - 1);
 
 keep_frame:
-  /* With a low real-mode stack, ENTER's 16-bit stack-address calculation
-   * and the generated full-ESP adjustment describe the same frame. */
+  /*
+   * With a low real-mode stack, ENTER's 16-bit stack-address calculation
+   * and the generated full-ESP adjustment describe the same frame.
+   */
   if (code16_low_stack && bytes <= UINT16_MAX)
     return nyr_printf(out, "%.*s\tenterl\t$%lu, $0\n", (int)(frame - assembly),
                       assembly, bytes) &&

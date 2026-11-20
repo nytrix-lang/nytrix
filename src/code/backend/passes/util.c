@@ -685,8 +685,10 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
   const int *defs = cache->defs;
   int root_value = nir_strip_copy_value(f, defs, value);
   size_t child = cfg->inst_block[at];
-  /* Block zero has an implicit incoming edge from function entry. Its
-   * only explicit predecessor may be a backedge, not an entry guard. */
+  /*
+   * Block zero has an implicit incoming edge from function entry. Its
+   * only explicit predecessor may be a backedge, not an entry guard.
+   */
   for (unsigned depth = 0; depth < 8 && child && child < cfg->block_count;
        ++depth) {
     size_t pb = cfg->pred_offsets[child], pe = cfg->pred_offsets[child + 1];

@@ -413,9 +413,9 @@ fn executable_sections(any source) list {
          def s = segs[i]
          if s.get("load", false) && (int(s.get("flags", 0)) & PF_X) != 0 && int(s.get("filesz", 0)) > 0 {
             out = out.append(s.set("addr", s.get("vaddr", 0))
-                              .set("size", s.get("filesz", 0))
-                              .set("exec", true)
-                              .set("name", "load_" + str(s.get("index", i))))
+               .set("size", s.get("filesz", 0))
+               .set("exec", true)
+               .set("name", "load_" + str(s.get("index", i))))
          }
          i += 1
       }

@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: inline asm memory output.
+ */
 static __attribute__((always_inline)) inline unsigned long read_flags(void) {
   unsigned long flags;
   asm volatile("pushf; pop %0" : "=rm"(flags) : : "memory");

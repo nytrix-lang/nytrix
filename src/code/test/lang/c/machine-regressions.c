@@ -75,7 +75,9 @@ static uint32_t schedule(const uint8_t *buf) {
   return sum;
 }
 
-/* Descending bit assembly and cases that must keep their original meaning. */
+/*
+ * Descending bit assembly and cases that must keep their original meaning.
+ */
 static __attribute__((noinline)) int low_bits(int64_t key) {
   int node = 1;
   for (int depth = 19; depth >= 0; --depth)

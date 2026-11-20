@@ -1217,8 +1217,10 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
         excluded_loop++;
       continue;
     }
-    /* An ABI capture reads the most recent call, not an SSA operand. Neither
-     * the capture nor its call can be merged with a different chain. */
+    /*
+     * An ABI capture reads the most recent call, not an SSA operand. Neither
+     * the capture nor its call can be merged with a different chain.
+     */
     bool feeds_return_capture = in->op == NYIR_CALL && i + 1 < f->len &&
                                 f->data[i + 1].op == NYIR_CAPTURE_RET;
     if (!gvn_can_number(in, feeds_return_capture)) {

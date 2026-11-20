@@ -758,15 +758,19 @@ bool nyr_sccp(nyr_func_t *f) {
           } else if (a == b && (a == F32 || a == F64)) {
             if (nyr_sccp_fold_float(in->op, constant[in->a], constant[in->b], a,
                                     b, &value, &kind)) {
-              /* kind is set by the fold. */
+              /*
+               * kind is set by the fold.
+               */
             } else if (nyr_sccp_fold_float_cmp(in->op, in->cmp, constant[in->a],
                                                constant[in->b], a, b, &value))
               kind = INTEGER;
           }
         }
-        /* An executable predecessor may be discovered after a PHI and its
+        /*
+         * An executable predecessor may be discovered after a PHI and its
          * consumers were visited. Merge facts monotonically so those
-         * consumers also become varying instead of retaining stale values. */
+         * consumers also become varying instead of retaining stale values.
+         */
         unsigned char old = constant_kind[in->dst];
         if (old == VARYING || kind == UNSEEN)
           continue;

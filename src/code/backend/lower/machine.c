@@ -5060,7 +5060,8 @@ static bool mach_nir_match_swar_popcount(const nyr_func_t *f,
     v = subv;
   }
   skipped[n++] = (size_t)pc;
-  /* The C frontend may explicitly truncate the unsigned subtraction.
+  /*
+   * The C frontend may explicitly truncate the unsigned subtraction.
    * Its right operand is at most v >> 1, so the subtraction already fits
    * in 32 bits once the input mask has been verified below.
    */
@@ -6621,7 +6622,9 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
                             add.src0.kind == NYR_MACH_OPERAND_VREG &&
                             mach_schedule_inst_reads(in, &add.src0);
         if (crosses_call && add.src1.kind != NYR_MACH_OPERAND_IMM) {
-          /* Only move a second operand that the encoder can rematerialize. */
+          /*
+           * Only move a second operand that the encoder can rematerialize.
+           */
           crosses_call = false;
           for (size_t def = pc; def > block->first_inst && pc - def < 64;) {
             const nyr_mach_inst_t *prior = &m->insts[--def];
@@ -6635,7 +6638,8 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
             break;
           }
         }
-        /* This move preserves the order of the edge copies themselves. It
+        /*
+         * This move preserves the order of the edge copies themselves. It
          * can cross a sibling copy provided neither input is overwritten.
          */
         bool crosses_edge_copy = in->opcode == NYR_MACH_COPY &&

@@ -308,7 +308,9 @@ typedef struct {
   int *home_offs_snapshot; /* first pass only; maps are torn down on return */
   uint32_t *home_store_counts; /* first pass, indexed by -off */
   bool home_store_seen;
-  /* Emitted home traffic, counted in the final pass only. */
+  /*
+   * Emitted home traffic, counted in the final pass only.
+   */
   size_t home_store_ops;
   size_t home_load_ops;
   size_t frame_ops;
@@ -826,7 +828,9 @@ static bool mach_is_known_copy(const nyr_mach_inst_t *in) {
  * 64-bit words); the vector extension gives |, & and ~ per word.
  */
 #define MACH_SET_BLOCKS 256u
-/* Whole-function home proof cap; see the comment at mach_select_loop_gpr. */
+/*
+ * Whole-function home proof cap; see the comment at mach_select_loop_gpr.
+ */
 #define MACH_LOOP_GPR_MAX_VREGS 640u
 typedef uint64_t mach_set_t __attribute__((vector_size(32)));
 static inline mach_set_t mach_set_bit(size_t b) {
@@ -3880,7 +3884,9 @@ static bool mach_load_op_rax(nyr_x64_mach_enc_t *e,
       return true;
     }
   }
-  /* A shared slot's offset alone does not identify its current value. */
+  /*
+   * A shared slot's offset alone does not identify its current value.
+   */
   int off = mach_slot_off(e, op);
   if (op->kind == NYR_MACH_OPERAND_VREG && e->last_rax_valid &&
       e->last_rax_off == off && mach_vreg_home_shared(e, op->as.reg))
@@ -8646,8 +8652,7 @@ static bool mach_reduce_add_i64(nyr_x64_mach_enc_t *e,
      * VEXTRACTF128 is an AVX instruction and extracts bits without applying
      * floating-point semantics. VEXTRACTI128 would unnecessarily require
      * AVX2 for this reduction.
-     */
-    /*
+     *
      * Use VEX.128 on AVX targets even though the result fits an XMM.
      * A legacy paddq here repeatedly pays the dirty-upper transition when
      * a surrounding loop consumes YMM values.
@@ -15018,8 +15023,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           }
           if (result < 0 || source == result)
             result = 0;
-          /* neg sets SF from -x. Keep x when -x is negative. For INT64_MIN
-           * both arms are INT64_MIN, so the wrapping result is unchanged. */
+          /*
+           * neg sets SF from -x. Keep x when -x is negative. For INT64_MIN
+           * both arms are INT64_MIN, so the wrapping result is unchanged.
+           */
           if (!mach_mov_preg_preg(e, result, source) ||
               !mach_rex(e, true, false, false, result >= 8) ||
               !mach_u8(e, 0xf7) || !mach_u8(e, 0xd8 | (result & 7)) ||
@@ -16205,7 +16212,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                              e->cur_inst);
             in_arg_reg = target_seg && target_seg->color >= MIR_CALLEE_COLOR_N;
           }
-          /* Use r11 so staging the target cannot overwrite SysV %al. */
+          /*
+           * Use r11 so staging the target cannot overwrite SysV %al.
+           */
           if (!(in_arg_reg ? mach_load_home_preg(
                                  e, mach_vreg_home_off(e, in->src0.as.reg), 11)
                            : mach_load_op_preg(e, &in->src0, 11)))
@@ -16494,8 +16503,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             !mach_u8(e, 0x5a) || !mach_u8(e, 0x08) ||
             !mach_patch_rel32(e, done_branch, e->code.len))
           return false;
-        /* Commit after advancing either cursor: the destination's register
-         * may be R10 (va_list) or R11 (overflow argument address). */
+        /*
+         * Commit after advancing either cursor: the destination's register
+         * may be R10 (va_list) or R11 (overflow argument address).
+         */
         if (fp ? !mach_store_xmm(e, dst, false, 0)
                : !mach_commit_vreg(e, &in->dst, dst))
           return false;

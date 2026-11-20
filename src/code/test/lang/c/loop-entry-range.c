@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: loop entry range.
+ */
 struct time_pair {
   long seconds, nanoseconds;
 };

@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: segment aggregate pointer load.
+ */
 #include <asm/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>

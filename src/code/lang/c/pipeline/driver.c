@@ -191,8 +191,10 @@ static bool nyc_func_uses_va_list(const nyr_func_t *func) {
   return false;
 }
 
-/* Keep the SysV va_list layout, but expose no vector argument slots when the
- * target disables SSE. Early kernel callers can execute with CR4.OSFXSR=0. */
+/*
+ * Keep the SysV va_list layout, but expose no vector argument slots when the
+ * target disables SSE. Early kernel callers can execute with CR4.OSFXSR=0.
+ */
 static void nyc_use_integer_varargs(nyr_func_t *func) {
   for (size_t i = 0; i < func->len; ++i) {
     nyr_inst_t *in = &func->data[i];
@@ -203,8 +205,10 @@ static void nyc_use_integer_varargs(nyr_func_t *func) {
   }
 }
 
-/* -fconserve-stack must not disable inlining of small leaves without
- * addressable frame objects or outgoing calls. */
+/*
+ * -fconserve-stack must not disable inlining of small leaves without
+ * addressable frame objects or outgoing calls.
+ */
 static bool nyc_stackless_inline_candidate(const nyr_func_t *func) {
   if (func->len > 24 || func->return_aggregate_size || func->param_count > 6)
     return false;
@@ -218,7 +222,9 @@ static bool nyc_stackless_inline_candidate(const nyr_func_t *func) {
         return false;
       break;
     case NYIR_INLINE_ASM:
-      /* This private NYIR form is the logical shift operator, not user asm. */
+      /*
+       * This private NYIR form is the logical shift operator, not user asm.
+       */
       if (in->imm != -23 || !in->symbol ||
           strcmp(in->symbol, "unsigned-shift-right") != 0)
         return false;
@@ -521,7 +527,9 @@ static bool nyc_protect_stack(nyr_func_t *func, const nyc_driver_t *driver,
   failure.symbol = "__stack_chk_fail";
   failure.flags = NYIR_INST_F_EXTERN;
   data[len++] = failure;
-  /* A returning failure hook must not fall through to a normal epilogue. */
+  /*
+   * A returning failure hook must not fall through to a normal epilogue.
+   */
   failure = nyc_guard_inst(NYIR_INLINE_ASM);
   failure.symbol = "ud2";
   failure.effects = NYIR_EFFECT_CONTROL | NYIR_EFFECT_MAY_TRAP;
@@ -1654,7 +1662,9 @@ static bool write_c_unit_assembly(
       ok = nyr_printf(&assembly, "\t.weak %s%s\n", target->symbol_prefix,
                       unit->names[i]);
   }
-  /* Do not inject SSE into integer-only translation units. */
+  /*
+   * Do not inject SSE into integer-only translation units.
+   */
   unsigned missing_float_helpers = float_helper_refs & ~float_helper_defs;
   for (size_t h = 0; ok && missing_float_helpers;
        ++h, missing_float_helpers >>= 1) {
@@ -1983,8 +1993,10 @@ static int compile_source(int argc, char **argv, int source_arg,
       static const char disabled[] =
           "loop_unroll,unroll_jam,loop_peel,loop_unswitch,loop_versioning,"
           "loop_predication,softpipe_rewrite,loop_vectorize,slp_vectorize";
-      /* The i386 encoder keeps frame homes across branches. Promoting
-       * source locals here adds PHI edge copies without freeing those homes. */
+      /*
+       * The i386 encoder keeps frame homes across branches. Promoting
+       * source locals here adds PHI edge copies without freeing those homes.
+       */
       const char *target_disabled = abi == NYC_ABI_I386 ? ",mem2reg" : "";
       const char *user = getenv("NYC_DISABLE_PASS");
       size_t bytes = sizeof(disabled) + strlen(target_disabled) +
@@ -2028,8 +2040,10 @@ static int compile_source(int argc, char **argv, int source_arg,
         ok = nyr_tail_call(&unit.funcs[i], unit.names[i]);
       }
       if (ok && nyc_func_initializes_va_list(&unit.funcs[i])) {
-        /* Fold constant dispatch before it can leave unreachable references
-         * in ELF, without running passes that model va_list storage. */
+        /*
+         * Fold constant dispatch before it can leave unreachable references
+         * in ELF, without running passes that model va_list storage.
+         */
         stage = "during variadic control-flow cleanup";
         ok = nyr_const_fold(&unit.funcs[i]) &&
              nyr_cfg_simplify(&unit.funcs[i]) && nyr_dce(&unit.funcs[i]) &&
@@ -2324,9 +2338,11 @@ static int compile_source(int argc, char **argv, int source_arg,
           continue;
         const char *section = NULL;
         if (data->section_flags == 2) {
-          /* The default link driver may produce PIE even without -fPIC.
+          /*
+           * The default link driver may produce PIE even without -fPIC.
            * Leave relocated const data writable until the loader applies its
-           * relocations, unless the user explicitly disabled PIC and PIE. */
+           * relocations, unless the user explicitly disabled PIC and PIE.
+           */
           if (data->reloc_count && !driver->position_independent_disabled) {
             section = ".data.rel.ro";
             data->section_flags = 3;

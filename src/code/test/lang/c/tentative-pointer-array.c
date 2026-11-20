@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: tentative pointer array.
+ */
 struct record {
   unsigned long value;
 };

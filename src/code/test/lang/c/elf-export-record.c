@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: elf export record.
+ */
 int example_export(int value) { return value + 23; }
 
 __asm__(".section \".export_symbol\",\"a\"\n"

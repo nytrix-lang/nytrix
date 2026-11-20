@@ -2144,7 +2144,9 @@ static bool vector_unroll_body(nyr_func_t *f, int64_t body_label,
     return false;
   }
   if (pending_phi_update) {
-    /* The vector PHI is inserted after the loop body is widened. */
+    /*
+     * The vector PHI is inserted after the loop body is widened.
+     */
     *pending_phi_update = previous_reduction;
   } else if (reduction_phi_dst >= 0) {
     bool chained = false;
@@ -2546,7 +2548,8 @@ typedef struct {
   bool written;
 } root_access_t;
 
-/* The vector memory operations here have 64-bit lanes and use flat addresses.
+/*
+ * The vector memory operations here have 64-bit lanes and use flat addresses.
  */
 static const unsigned vector_unsupported_mem_flags =
     NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32 |
@@ -2711,7 +2714,8 @@ static const char *vector_symbol_of_address(const nyr_func_t *f,
   return NULL;
 }
 
-/* Find the last full-width store on every path into the entry load. A join
+/*
+ * Find the last full-width store on every path into the entry load. A join
  * may have one dominating store or different stores of the same constant.
  * A backedge can reach the load block again, in which case the whole block
  * must be scanned as a predecessor, separately from the prefix before load.
@@ -2729,7 +2733,8 @@ static bool vector_slot_entry_const(const nyr_func_t *f, const int *defs,
   const char *symbol = vector_symbol_of_address(f, defs, load->a);
   if (!symbol)
     return false;
-  /* Bound the amount of CFG work per candidate, without allocating scratch
+  /*
+   * Bound the amount of CFG work per candidate, without allocating scratch
    * space for the common same-block case. Entry zero is always a path root.
    */
   size_t blocks[64] = {cfg->inst_block[load_pc]};
@@ -3021,7 +3026,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         have_lo = true;
       } else if (init_v >= 0 && init_v < f->next_value && defs[init_v] >= 0) {
         nyr_range_t range = f->data[(size_t)defs[init_v]].range;
-        /* The entering value can be affine in an enclosing induction.
+        /*
+         * The entering value can be affine in an enclosing induction.
          * Reuse the address proof's guard analysis at the body edge.
          */
         if (range.has_min || (value_range_under_guards(
@@ -3948,7 +3954,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
          */
         uint64_t factor = 2;
         if (unroll_accumulator) {
-          /* Keep the vector PHI live only in loops with no scalar tail. */
+          /*
+           * Keep the vector PHI live only in loops with no scalar tail.
+           */
           factor = fixed_trip % (4 * vf) == 0   ? 4
                    : fixed_trip % (2 * vf) == 0 ? 2
                                                 : 1;

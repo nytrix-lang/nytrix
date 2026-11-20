@@ -1,4 +1,6 @@
-/* Compare NYC's signed quotient and remainder with the host compiler. */
+/*
+ * Compare NYC's signed quotient and remainder with the host compiler.
+ */
 #include <stdint.h>
 #include <stdio.h>
 

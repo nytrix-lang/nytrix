@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: bool scalar return.
+ */
 typedef _Bool boolean;
 
 __attribute__((noinline)) boolean masked(unsigned flags) {

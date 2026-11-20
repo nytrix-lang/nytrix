@@ -1,3 +1,4 @@
+/* x86-64 retpoline thunk declarations. */
 #ifndef NYR_X64_RETPOLINE_H
 #define NYR_X64_RETPOLINE_H
 

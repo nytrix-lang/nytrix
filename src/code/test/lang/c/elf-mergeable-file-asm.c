@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: elf mergeable file asm.
+ */
 __asm__(".section \"nyc_merge_strings\",\"aMS\",%progbits,1\n"
         ".globl nyc_merge_string\n"
         "nyc_merge_string:\n"

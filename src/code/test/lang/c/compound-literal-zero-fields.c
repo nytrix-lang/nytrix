@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: compound literal zero fields.
+ */
 struct record {
   unsigned key;
   unsigned limit;

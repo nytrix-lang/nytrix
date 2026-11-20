@@ -3944,7 +3944,8 @@ bool nyr_inline_small(nyr_func_t *f) {
     nyr_inst_t *in = &f->data[i];
     if (in->op != NYIR_CALL || !in->symbol)
       continue;
-    /* Scalar rewrites cannot replace a call that feeds ABI return registers.
+    /*
+     * Scalar rewrites cannot replace a call that feeds ABI return registers.
      * Even inserting a constant after the call would break the capture chain.
      */
     if (i + 1 < f->len && f->data[i + 1].op == NYIR_CAPTURE_RET)
@@ -5177,9 +5178,11 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
                     clone.data[end - 1].op == NYIR_RET;
   }
 
-  /* A straight-line callee does not split the caller's block. In particular,
+  /*
+   * A straight-line callee does not split the caller's block. In particular,
    * do not put a return jump and its destination between adjacent loads or
-   * arithmetic from different calls in the same loop. */
+   * arithmetic from different calls in the same loop.
+   */
   if (!straight_line) {
     if (!nyr_cfg_build_topology(caller, &ccfg) ||
         !nyr_inline_next_label(caller, &next_label) ||

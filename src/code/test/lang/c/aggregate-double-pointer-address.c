@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: aggregate double pointer address.
+ */
 struct section {
   unsigned long flags;
   unsigned long payload;

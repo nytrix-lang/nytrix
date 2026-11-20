@@ -1402,9 +1402,11 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       goto done;
   }
   for (size_t i = 0; i < reloc_symbol_count; ++i) {
-    /* The relocation names a symbol, not necessarily a function. Leave
+    /*
+     * The relocation names a symbol, not necessarily a function. Leave
      * undefined references untyped so they do not retype assembly labels
-     * or data when a relocatable link resolves them. */
+     * or data when a relocatable link resolves them.
+     */
     if (!nyr_obj_elf64_write_sym(&file, reloc_name_offs[i], 0x10, 0, 0, 0))
       goto done;
   }
@@ -2030,8 +2032,10 @@ static bool nyr_x64_c_bundle_append_data_group(
                     data[i].section ? data[i].section : "(null)");
       return false;
     }
-    /* modpost finds the assembler record label at the export relocation
-     * offset. A second, compiler-private symbol obscures that label. */
+    /*
+     * modpost finds the assembler record label at the export relocation
+     * offset. A second, compiler-private symbol obscures that label.
+     */
     bool reference_alias =
         !want || strncmp(want, ".export_symbol", sizeof(".export_symbol") - 1);
     char reference_name[256];
@@ -2570,7 +2574,9 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
         target, &code, defs, &def_count, relocs, &reloc_count, err, err_len);
   if (ok) {
     qsort(defs, def_count, sizeof(*defs), nyr_c_symbol_binding_order);
-    /* Sorting changes definition indices even when the last name stays put. */
+    /*
+     * Sorting changes definition indices even when the last name stays put.
+     */
     (void)nyr_x64_obj_def_index(NULL, 0, NULL);
   }
   if (ok)

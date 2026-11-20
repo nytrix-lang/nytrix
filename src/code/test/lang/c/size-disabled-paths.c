@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: size disabled paths.
+ */
 #include <stdarg.h>
 
 extern void unsupported_word_size(void);

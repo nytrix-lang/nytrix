@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: asm rip relative.
+ */
 extern int image_anchor;
 
 static __attribute__((always_inline)) inline void *relative(void *address) {

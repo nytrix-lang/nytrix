@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: typedef row pointer difference.
+ */
 typedef unsigned char row[32];
 extern row records[];
 

@@ -3942,8 +3942,10 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     if (c->nyir->return_aggregate_size && class0 != NYIR_ARG_CLASS_MEMORY) {
       unsigned class1 = c->nyir->return_aggregate_classes[1];
       if (class1 == NYIR_ARG_CLASS_INTEGER) {
-        /* The generic value loader uses RAX. Stage the second INTEGER
-         * eightbyte first so loading it cannot overwrite the first one. */
+        /*
+         * The generic value loader uses RAX. Stage the second INTEGER
+         * eightbyte first so loading it cannot overwrite the first one.
+         */
         if (in->b < 0 || !ny_x64_nir_load_value(c, in->b) ||
             (class0 == NYIR_ARG_CLASS_INTEGER &&
              !nyr_put(c->w, "\tmovq\t%rax, %rdx\n")))
@@ -4199,7 +4201,9 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       if (!ny_x64_nir_load_value(c, arg_vals[0]) ||
           !nyr_put(c->w, "\tmovq\t%rax, %r11\n"))
         return false;
-      /* C function pointers currently carry no variadic prototype bit. */
+      /*
+       * C function pointers currently carry no variadic prototype bit.
+       */
       if (c->target->abi == NY_NATIVE_ABI_SYSV &&
           !nyr_printf(c->w, "\tmovb\t$%d, %%al\n", sse))
         return false;
@@ -5171,8 +5175,10 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
         if (!ny_x64_nir_load_value(c, inputs[i]) ||
             !nyr_printf(c->w, "\tmovq\t%%rax, %s\n", input_regs[i]))
           return false;
-      /* Stage every input before clobbering the caller's callee-saved RBX.
-       * Keep pushes outside the instruction-alternative span. */
+      /*
+       * Stage every input before clobbering the caller's callee-saved RBX.
+       * Keep pushes outside the instruction-alternative span.
+       */
       if (!nyr_put(c->w, "\tmovq\t%r10, %rax\n\tpushq\t%rbx\n"
                          "\tmovq\t%r11, %rbx\n") ||
           (alternative && !nyr_put(c->w, "771:\n")) ||

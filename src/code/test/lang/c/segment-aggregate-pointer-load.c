@@ -1,3 +1,6 @@
+/*
+ * C frontend test fixture: segment aggregate pointer load.
+ */
 struct record {
   unsigned long value;
   unsigned long decoy;

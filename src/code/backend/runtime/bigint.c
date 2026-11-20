@@ -828,7 +828,8 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
   }
 
   uint64_t divisor = vn[n - 1];
-  /* A short quotient does not amortize the general 128-bit reciprocal
+  /*
+   * A short quotient does not amortize the general 128-bit reciprocal
    * calculation. Use the same one-word quotient step as single-limb division
    * on targets that can compute it directly.
    */
@@ -855,7 +856,8 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
        */
       rhat_carried = rhat < vn[n - 1];
     } else if (direct_division) {
-      /* Knuth's normalized remainder has high <= divisor. The equality
+      /*
+       * Knuth's normalized remainder has high <= divisor. The equality
        * case above saturates the estimate before reaching hardware division.
        */
       qhat = _bi_div_u128_u64(un[j + n], un[j + n - 1], divisor, &rhat);
@@ -3400,7 +3402,9 @@ static inline uint32_t _bi_div_u64_u32(uint64_t numerator, uint32_t denominator,
 
 #endif
 
-/* Divide nonempty limbs with an incoming remainder smaller than divisor. */
+/*
+ * Divide nonempty limbs with an incoming remainder smaller than divisor.
+ */
 static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
                                     size_t words, uint64_t divisor,
                                     uint64_t remainder) {
@@ -3413,7 +3417,9 @@ static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
     uint64_t low = limbs[0] & (divisor - 1);
     if (quotient) {
       unsigned shift = (unsigned)__builtin_ctzll(divisor);
-      /* Read each higher limb before it can be overwritten in place. */
+      /*
+       * Read each higher limb before it can be overwritten in place.
+       */
       for (size_t i = 0; i + 1 < words; ++i)
         quotient[i] = (limbs[i] >> shift) | (limbs[i + 1] << (64u - shift));
       quotient[words - 1] =

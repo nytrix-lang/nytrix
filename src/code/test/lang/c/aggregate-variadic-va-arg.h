@@ -1,3 +1,4 @@
+/* C frontend test fixture: aggregate variadic va_arg declarations. */
 #ifndef NYC_TEST_AGGREGATE_VA_ARG_H
 #define NYC_TEST_AGGREGATE_VA_ARG_H
 

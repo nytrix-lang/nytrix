@@ -506,10 +506,12 @@ static const nyr_inst_t *ny_llvm_address_def(const nyr_func_t *f,
   return v >= 0 && v < f->next_value && defs[v] >= 0 ? &f->data[defs[v]] : NULL;
 }
 
-/* A byte offset must not contribute a second pointer's provenance. Check the
+/*
+ * A byte offset must not contribute a second pointer's provenance. Check the
  * complete small integer expression, including the incoming edges of any
  * induction PHIs. Revisits are fine: all inputs of that node are checked by
- * its first visit. Unknown definitions and large graphs keep inttoptr. */
+ * its first visit. Unknown definitions and large graphs keep inttoptr.
+ */
 static bool ny_llvm_integer_offset(const nyr_func_t *f, const int *defs, int v,
                                    int seen[32], size_t *count) {
   const nyr_inst_t *in = ny_llvm_address_def(f, defs, v);
@@ -570,7 +572,9 @@ static LLVMValueRef ny_llvm_memory_pointer(ny_llvm_context_t *cg,
           offset = LLVMBuildAdd(cg->builder, offset, displacement, "");
         LLVMValueRef p = LLVMBuildIntToPtr(
             cg->builder, ny_as_i64(cg, vals[base->dst]), ptr, "");
-        /* Do not imply inbounds or change the integer wrapping contract. */
+        /*
+         * Do not imply inbounds or change the integer wrapping contract.
+         */
         return LLVMBuildGEP2(cg->builder, cg->type_i8, p, &offset, 1, "");
       }
     }

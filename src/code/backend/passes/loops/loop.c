@@ -252,7 +252,9 @@ static bool bitasm_bit_test(const nyr_func_t *f, const int *defs, int cond,
   return true;
 }
 
-/* C may leave the two bit choices as a control-flow diamond. */
+/*
+ * C may leave the two bit choices as a control-flow diamond.
+ */
 static bool bitasm_phi_choice(const nyr_func_t *f, const int *defs,
                               const nyr_cfg_t *cfg, const nyr_inst_t *phi,
                               size_t latch, int node, int iv, int64_t min,
@@ -699,7 +701,8 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
        * The frontend uses the arithmetic form once the diamond is folded.
        */
       const nyr_inst_t *back = bitasm_def(f, defs, back_v);
-      /* Signed 32-bit storage is transparent when even the maximum possible
+      /*
+       * Signed 32-bit storage is transparent when even the maximum possible
        * final assembly fits in a nonnegative int32_t.
        */
       int64_t right_shift = 0, left_shift = 0;
@@ -845,7 +848,8 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
 static bool nir_loop_bit_assembly(nyr_func_t *f) {
   if (!f || f->next_value <= 0 || f->len < 8)
     return true;
-  /* Skip CFG/SCEV construction when the bit extraction is absent. The
+  /*
+   * Skip CFG/SCEV construction when the bit extraction is absent. The
    * native C frontend can still have width-normalizing shifts on its IV.
    */
   int *defs = nyr_build_defs(f);
