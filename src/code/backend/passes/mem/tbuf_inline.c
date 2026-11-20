@@ -1,6 +1,6 @@
 /*
  * Tbuf inline pass: replaces core.tbuf typed-buffer calls with direct memory
- * access.  Each rewrite mirrors the source helper in lib/tbuf.ny: the index is
+ * access.  Each rewrite mirrors the source helper in core/tbuf.ny: the index is
  * scaled by the element width, the buffer base is added, and the access keeps
  * the element width in its instruction flags/scalar class.  Store helpers
  * return the buffer, so a store rewrite publishes the base through a COPY when

@@ -658,7 +658,7 @@ static bool ny_std_sources_available(void) {
     return false;
   char std_src[4096];
   struct stat st;
-  const char *cands[] = {"src/std", "std", "src/lib", "lib"};
+  const char *cands[] = {"src/std", "std", "src/core", "core"};
   for (size_t i = 0; i < 4; i++) {
     snprintf(std_src, sizeof(std_src), "%s/%s", root, cands[i]);
     if (stat(std_src, &st) == 0 && S_ISDIR(st.st_mode))

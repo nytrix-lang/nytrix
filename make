@@ -3283,7 +3283,7 @@ def stdlib_needs_regeneration(build_root: Path, kind: str) -> bool:
     try:
         generated_mtime = generated.stat().st_mtime_ns
         return any(path.stat().st_mtime_ns > generated_mtime
-                   for path in (ROOT / "lib").rglob("*.ny")
+                   for path in (ROOT / "core").rglob("*.ny")
                    if path.is_file())
     except OSError:
         return True
@@ -6198,7 +6198,7 @@ def _gate_source_paths():
     """Fixture and library source roots whose mutation invalidates a verdict."""
     return (
         ROOT / "etc" / "tests",
-        ROOT / "lib",
+        ROOT / "core",
     )
 
 
@@ -6206,7 +6206,7 @@ def _bench_gate_source_paths():
     """Benchmark inputs whose mutation invalidates a performance verdict."""
     return (
         ROOT / "etc" / "tests" / "bench",
-        ROOT / "lib",
+        ROOT / "core",
     )
 
 
@@ -6271,7 +6271,7 @@ def _gate_source_changes(paths, before):
 
 def check_source_hygiene() -> int:
     """Reject accidental binary source and temporary print-debugging probes."""
-    source_roots = (ROOT / "src", ROOT / "lib", ROOT / "etc" / "tests")
+    source_roots = (ROOT / "src", ROOT / "core", ROOT / "etc" / "tests")
     suffixes = {".c", ".h", ".ny"}
     debug_print = re.compile(
         r'\b(?:printf|fprintf)\s*\(\s*"(?:DEBUG|XXX|TODO DEBUG)'
@@ -8115,13 +8115,13 @@ def _stage_static_tools(src_dir: Path, out_dir: Path) -> int:
         if src.exists():
             _copy2_if_different(src, out_dir / name)
     # Bundle project runtime assets for moving the folder to another machine.
-    for name in ("src", "etc", "lib"):
+    for name in ("src", "etc", "core"):
         src = ROOT / name
         dst = out_dir / name
         if src.exists() and src.is_dir():
             if dst.exists():
-                # Preserve lib/host if present; refresh everything else.
-                if name == "lib" and (dst / "host").exists():
+                # Preserve a staged host/ if present; refresh everything else.
+                if name == "core" and (dst / "host").exists():
                     host_tmp = out_dir / ".host.tmp"
                     shutil.rmtree(host_tmp, ignore_errors=True)
                     shutil.move(str(dst / "host"), str(host_tmp))
@@ -8831,7 +8831,7 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
 
     # Source tree. Do not package .git history; it is large and not needed to build.
     # Hardlink staging avoids copying hundreds of megabytes before tar reads it.
-    for name in ("src", "lib", "etc", "docs", ".github", ".githooks"):
+    for name in ("src", "core", "etc", "docs", ".github", ".githooks"):
         _copytree_hardlink_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
     for name in (
         "make", "CMakeLists.txt", ".clangd", "README.md", "LICENSE", ".editorconfig"
@@ -9119,7 +9119,7 @@ def main() -> int:
             targets = ["ny", "ny-test"]
             # `run_test` treats the benchmark suite as a focused run. Without a
             # pinned core.bc every sample re-stocks the stdlib from source, so
-            # concurrent `lib/` or core.ny churn between samples changes the
+            # concurrent `core/` or core.ny churn between samples changes the
             # std the compiler builds against and can degrade codegen
             # observably mid-suite (call-chain NYR 1.0ms/230ms/2645ms in one
             # 3-sample row). "auto" therefore pins core.bc when the build tree
@@ -9209,7 +9209,7 @@ def main() -> int:
             # are reviewed rather than rewritten automatically.
             rc = run_tool(
                 build_root, active_kind, "ny-fmt",
-                ["--bugs", "--limit", "80", "lib"],
+                ["--bugs", "--limit", "80", "core"],
             )
             if rc != 0:
                 return rc
@@ -9357,7 +9357,7 @@ def main() -> int:
             # Watch docs/, etc/assets/website/, src/cmd/tools/web/ for changes
             watch_dirs = [
                 ROOT / "docs",
-                ROOT / "lib",
+                ROOT / "core",
                 ROOT / "etc" / "assets" / "website",
                 ROOT / "etc" / "assets" / "images" / "icons",
                 ROOT / "src" / "cmd" / "tools" / "web",

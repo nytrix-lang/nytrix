@@ -7,7 +7,7 @@ shape test_raw_fd_abi {
   expect compile_and_run
   source ny <<'NY'
 use core
-def path = "lib/mod.ny"
+def path = "core/mod.ny"
 def fd = __open(__any_to_cstr(path), 0, 0)
 assert(fd >= 0, "open returns a usable descriptor")
 mut buf = malloc(16)

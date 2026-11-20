@@ -26,7 +26,7 @@ static const MakeHelp commands[] = {
          "both architectures."),
     HELP("unicode", "./make unicode",
          "Regenerate Unicode 18.0 tables in place.",
-         "[Outputs]\nlib/unicode.ny|Generated core.unicode module.\n"
+         "[Outputs]\ncore/unicode.ny|Generated core.unicode module.\n"
          "src/code/lang/ny/parser/unicode.c, unicode.h|Lexer XID_Start/Continue tables.\n"
          "[Sources]\netc/assets/dict/unicode/18.0.0/|Cached UCD.zip and UTS #39 "
          "security files verified by manifest.json.\nunzip|Required to read UCD members.\n"

@@ -1129,7 +1129,7 @@ static int cmd_public_compiler_smoke(int argc, char **argv) {
   compiler_smoke_add_case(root, ny_bin, selector, "type",
                           "etc/tests/lang/types/inference/type.nshape",
                           timeout_s, &rows, &failures);
-  compiler_smoke_add_case(root, ny_bin, selector, "simmd", "lib/math/simmd.ny",
+  compiler_smoke_add_case(root, ny_bin, selector, "simmd", "core/math/simmd.ny",
                           timeout_s, &rows, &failures);
   if (rows.count == 0) {
     (void)string_list_push_take(
@@ -2128,7 +2128,7 @@ static char *audit_runtime_next_inspect_command_dup(
   char lib_dir[4096] = {0};
   char rt_dir[4096] = {0};
   (void)path_join(lib_dir, sizeof(lib_dir), nytrix_root ? nytrix_root : "",
-                  "lib");
+                  "core");
   (void)path_join(rt_dir, sizeof(rt_dir), nytrix_root ? nytrix_root : "",
                   "etc/tests/runtime");
   char *defs_rel = repo_or_sibling_rel_path_dup(
@@ -2574,7 +2574,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
                 simmd_missing_wrappers = {0}, simmd_unknown_refs = {0};
   char *defs_path = NULL, *lib_dir = NULL, *rt_dir = NULL;
   (void)asprintf(&defs_path, "%s/src/code/backend/runtime/defs.h", root);
-  (void)asprintf(&lib_dir, "%s/lib", root);
+  (void)asprintf(&lib_dir, "%s/core", root);
   (void)asprintf(&rt_dir, "%s/etc/tests/runtime", root);
   file_buf_t defs_file = {0};
   bool ok = defs_path && read_file(defs_path, &defs_file);
@@ -2585,7 +2585,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
                                 "src/code/backend/runtime/defs.h");
   }
   if (lib_dir && !collect_regular_files_recursive(lib_dir, &files))
-    (void)string_list_push_copy(&scan_errors, "lib");
+    (void)string_list_push_copy(&scan_errors, "core");
   if (rt_dir && !collect_regular_files_recursive(rt_dir, &files))
     (void)string_list_push_copy(&scan_errors, "etc/tests/runtime");
   qsort(files.items, (size_t)files.count, sizeof(char *), cmp_cstr);
@@ -6089,7 +6089,7 @@ static int cmd_public_corpus_real_db(int argc, char **argv, const char *kind) {
   string_list_t rows = {0}, failures = {0}, files = {0};
   const char *scan_dir = "etc/tests/runtime";
   if (strcmp(kind, "functions") == 0)
-    scan_dir = "lib";
+    scan_dir = "core";
   char *dir = NULL, *default_corpus = NULL;
   if (strcmp(kind, "mined-hosts") == 0) {
     (void)nytrix_asprintf(&dir, "etc/tests/runtime");

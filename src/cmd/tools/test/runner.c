@@ -3739,11 +3739,11 @@ static int test_is_ownership_error_path(const char *path) {
 }
 
 static int test_is_optional_system_stdlib(const char *path) {
-  return path && (strncmp(path, "lib/os/ui/", 10) == 0 ||
-                  strncmp(path, "lib/os/sound/", 13) == 0 ||
-                  strcmp(path, "lib/os/ui/mod.ny") == 0 ||
-                  strcmp(path, "lib/os/sound/mod.ny") == 0 ||
-                  strcmp(path, "lib/os/clipboard.ny") == 0);
+  return path && (strncmp(path, "core/os/ui/", 11) == 0 ||
+                  strncmp(path, "core/os/sound/", 14) == 0 ||
+                  strcmp(path, "core/os/ui/mod.ny") == 0 ||
+                  strcmp(path, "core/os/sound/mod.ny") == 0 ||
+                  strcmp(path, "core/os/clipboard.ny") == 0);
 }
 
 static int test_is_unsupported_native_host(const char *path) {
@@ -5946,7 +5946,7 @@ static int path_is_repl_test(const char *p) {
 static int path_is_stdlib_source(const char *p) {
   if (!p)
     return 0;
-  return strncmp(p, "lib/", 4) == 0 || strstr(p, "/lib/") != NULL;
+  return strncmp(p, "core/", 5) == 0 || strstr(p, "/core/") != NULL;
 }
 
 static int test_timeout_for_path(const char *path, int default_timeout_sec) {
@@ -6018,8 +6018,8 @@ static int test_requires_host_exclusive(const char *p) {
    * Compositor probes drive the shared seat and input method of the session
    * they run in; two at once steal each other's pointer and IME.
    */
-  return strncmp(p, "lib/os/ui/", 10) == 0 ||
-         strncmp(p, "lib/os/sound/", 13) == 0 ||
+  return strncmp(p, "core/os/ui/", 11) == 0 ||
+         strncmp(p, "core/os/sound/", 14) == 0 ||
          strstr(p, "probes/ui/wayland-") != NULL;
 }
 
@@ -7795,7 +7795,7 @@ int ny_test_main(int argc, char **argv) {
      * categories are automatically covered without another path allow-list.
      */
     if (!test_collect_native("etc/tests", &files, false) ||
-        (with_stdlib && !test_collect_native("lib", &files, false))) {
+        (with_stdlib && !test_collect_native("core", &files, false))) {
       nyt_err("ny-test",
               "native fixture discovery failed while discovering tests");
       sv_free(&patterns);
@@ -8081,14 +8081,14 @@ int ny_test_main(int argc, char **argv) {
     qsort(selected_all.items, selected_all.len, sizeof(char *), path_lex_cmp);
 
   StrVec grouped_tests[5] = {{0}};
-  const char *group_names[] = {"Tests · lib", "Tests · lang", "Tests · code",
+  const char *group_names[] = {"Tests · core", "Tests · lang", "Tests · code",
                                "Tests · bench", "Tests · other"};
   for (size_t i = 0; i < selected_all.len; i++) {
     const char *path = selected_all.items[i];
     size_t group = 4;
     if (test_path_is_benchmark(path))
       group = 3;
-    else if (strncmp(path, "lib/", 4) == 0 || test_path_in(path, "lib/"))
+    else if (strncmp(path, "core/", 5) == 0 || test_path_in(path, "core/"))
       group = 0;
     else if (test_path_in(path, "lang/"))
       group = 1;

@@ -304,9 +304,9 @@ rasterization, and driver coverage.
 
 Reduce discrepancies to one drawing API; retain the backend, image, log, frame
 count, and exit status. Shared contracts live in
-[`lib/os/ui/render/mod.ny`](../../lib/os/ui/render/mod.ny); backend implementations
-live under [`gl/`](../../lib/os/ui/render/gl/) and
-[`vk/`](../../lib/os/ui/render/vk/).
+[`core/os/ui/render/mod.ny`](../../core/os/ui/render/mod.ny); backend implementations
+live under [`gl/`](../../core/os/ui/render/gl/) and
+[`vk/`](../../core/os/ui/render/vk/).
 
 ### Stalls and performance
 

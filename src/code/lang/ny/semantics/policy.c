@@ -2,14 +2,14 @@
  * Versioned proof-obligation / proof-certificate interface and the single
  * policy funnel for compiler proof sites.
  *
- * lib/proof.ny owns the language-level core.proof policy and shares this
+ * core/proof.ny owns the language-level core.proof policy and shares this
  * versioned encoding through the __proof_policy_solve and
  * __proof_policy_check runtime builtins. This file is a compiler-side adapter
  * for compiler proof sites: caller-driven fold first (via
  * ny_proof_policy_mark_fold, mirroring core.proof tactic_fold), then lemma
  * instantiation (cc), known ranges (range), solver kernels
  * (presburger/z3/auto), and the bounded interval candidate — i.e. the
- * lib/proof.ny tactic order fold → range → solver (proof.ny:637-647)
+ * core/proof.ny tactic order fold → range → solver (proof.ny:637-647)
  * with the compiler-only cc/interval steps preserved. Budgets stay
  * compiler-enforced (Ny 8/32/64 in proof.ny:34-37; checker caps larger so
  * it never starves). Before reporting a compiler verdict, every path
@@ -555,7 +555,7 @@ bool ny_proof_policy_decide(codegen_t *cg, scope *scopes, size_t depth,
     return false;
   }
   /*
-   * Tactic order mirrors lib/proof.ny:solve (fold → range → solver).
+   * Tactic order mirrors core/proof.ny:solve (fold → range → solver).
    * Fold is caller-driven (ny_proof_policy_mark_fold) before this funnel;
    * cc is the compiler-only lemma step, then range, solver kernels, and
    * the bounded interval candidate. policy/check.c re-derives every verdict.

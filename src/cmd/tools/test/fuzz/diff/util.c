@@ -3673,7 +3673,7 @@ static bool path_join(char *out, size_t out_sz, const char *base,
 static bool looks_like_repo(const char *path) {
   char a[4096], b[4096], c[4096], d[4096];
   (void)path_join(a, sizeof(a), path, "src");
-  (void)path_join(b, sizeof(b), path, "lib");
+  (void)path_join(b, sizeof(b), path, "core");
   (void)path_join(c, sizeof(c), path, "etc");
   (void)path_join(d, sizeof(d), path, "CMakeLists.txt");
   return exists_path(a) && exists_path(b) && exists_path(c) && exists_path(d);
@@ -8678,7 +8678,7 @@ static char *module_name_from_lib_path(const char *ny_root, const char *path) {
   if (!ny_root || !*ny_root || !path || !*path)
     return NULL;
   char prefix[4096];
-  int pn = snprintf(prefix, sizeof(prefix), "%s/lib/", ny_root);
+  int pn = snprintf(prefix, sizeof(prefix), "%s/core/", ny_root);
   if (pn <= 0 || (size_t)pn >= sizeof(prefix))
     return NULL;
   if (strncmp(path, prefix, (size_t)pn) != 0)
@@ -8705,11 +8705,11 @@ static char *module_name_from_lib_path(const char *ny_root, const char *path) {
 static bool lib_smoke_hot_path(const char *path) {
   if (!path)
     return false;
-  return strstr(path, "/lib/mod.ny") || strstr(path, "/math/mod.ny") ||
+  return strstr(path, "/core/mod.ny") || strstr(path, "/math/mod.ny") ||
          strstr(path, "/math/crypto/mod.ny") || strstr(path, "/os/mod.ny") ||
          strstr(path, "/parse/mod.ny") || strstr(path, "/parse/img/mod.ny") ||
-         strstr(path, "/lib/str.ny") || strstr(path, "/lib/dict.ny") ||
-         strstr(path, "/lib/iter.ny") || strstr(path, "/os/path.ny") ||
+         strstr(path, "/core/str.ny") || strstr(path, "/core/dict.ny") ||
+         strstr(path, "/core/iter.ny") || strstr(path, "/os/path.ny") ||
          strstr(path, "/parse/syntax.ny") || strstr(path, "/math/simmd.ny");
 }
 
@@ -9137,7 +9137,7 @@ static int cmd_public_fuzz_libs_smoke(int argc, char **argv) {
   char *scratch_root = nytrix_absolute_scratch_root(scratch_root_arg);
 
   char *lib_dir = NULL, *work_dir = NULL;
-  (void)asprintf(&lib_dir, "%s/lib", ny_root);
+  (void)asprintf(&lib_dir, "%s/core", ny_root);
   if (scratch_root && *scratch_root)
     ny_ensure_dir_recursive(scratch_root);
   (void)asprintf(&work_dir, "%s/nytrix_libs_smoke_%ld",

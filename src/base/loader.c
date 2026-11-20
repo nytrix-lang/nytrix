@@ -457,7 +457,7 @@ static void ny_scan_std_or_lib_roots(const char *src_root, const char *pkg) {
   char path_root[4096];
   char path_local_src[64];
   snprintf(path_src, sizeof(path_src), "%s/src/%s", src_root, pkg);
-  const char *fallback_prefix = strcmp(pkg, "std") == 0 ? "core." : "lib.";
+  const char *fallback_prefix = "core.";
   if (ny_scan_recursive_if_dir(path_src, path_src, fallback_prefix))
     return;
   snprintf(path_root, sizeof(path_root), "%s/%s", src_root, pkg);
@@ -797,7 +797,7 @@ static void ny_std_init_modules(void) {
   long long m1 = ny_get_dir_mtime(root);
   char pstd[4096], plib[4096];
   snprintf(pstd, sizeof(pstd), "%s/std", root);
-  snprintf(plib, sizeof(plib), "%s/lib", root);
+  snprintf(plib, sizeof(plib), "%s/core", root);
   long long m2 = ny_get_tree_mtime(pstd);
   long long m3 = ny_get_tree_mtime(plib);
   long long total_mtime = m1 ^ m2 ^ m3 ^ ny_std_overlay_mtime();
@@ -820,7 +820,7 @@ static void ny_std_init_modules(void) {
   ny_tick_t t0 = ny_ticks_now();
   ny_scan_std_overlays();
   ny_scan_std_or_lib_roots(root, "std");
-  ny_scan_std_or_lib_roots(root, "lib");
+  ny_scan_std_or_lib_roots(root, "core");
   if (ny_std_mods_len > 0) {
     qsort(ny_std_mods, ny_std_mods_len, sizeof(ny_std_mod), mod_cmp);
   }
@@ -1673,11 +1673,11 @@ static char *find_project_demo_module(const char *name, const char *base_dir) {
   snprintf(cur, sizeof(cur), "%s", (base_dir && *base_dir) ? base_dir : ".");
   while (cur[0]) {
     char path[4096];
-    int nw = snprintf(path, sizeof(path), "%s/lib/%s.ny", cur, leaf);
+    int nw = snprintf(path, sizeof(path), "%s/core/%s.ny", cur, leaf);
     if (nw > 0 && (size_t)nw < sizeof(path) && ny_access(path, R_OK) == 0)
       return ny_strdup(path);
 
-    nw = snprintf(path, sizeof(path), "%s/lib/%s/mod.ny", cur, leaf);
+    nw = snprintf(path, sizeof(path), "%s/core/%s/mod.ny", cur, leaf);
     if (nw > 0 && (size_t)nw < sizeof(path) && ny_access(path, R_OK) == 0)
       return ny_strdup(path);
 

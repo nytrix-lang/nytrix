@@ -574,7 +574,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     /*
      * Method-call dispatch lowers through this alias; it must target the
      * raw-count entry. The stdlib binds `__str_repeat` to `rt_str_repeat_raw`
-     * (lib/str.ny) because typed callers pass untagged i64 counts, and the
+     * (core/str.ny) because typed callers pass untagged i64 counts, and the
      * tagged entry `rt_str_repeat` would wrongly halve odd raw counts via
      * RT_UNTAG_INT (raw 3 looks tagged, become 1).
      */
@@ -3057,15 +3057,15 @@ static const char *ny_native_runtime_symbol_for_expr(const char *name,
         (decl_leaf == decl_name ||
          (strncmp(decl_name, "core.", 5) == 0 && decl_leaf == decl_name + 5));
     /*
-     * Root stdlib files (lib/<name>.ny: core.str, core.dict, core.term,
+     * Root stdlib files (core/<name>.ny: core.str, core.dict, core.term,
      * ...) are the intrinsic facades; modules in subdirectories are not.
      */
     if (!root_decl && decl_leaf) {
       const char *file = e->semantic.canonical_callee_stmt->tok.filename;
-      const char *lib = file ? strstr(file, "/lib/") : NULL;
-      if (!lib && file && strncmp(file, "lib/", 4) == 0)
-        lib = file - 1;
-      if (lib && !strchr(lib + 5, '/'))
+      const char *core = file ? strstr(file, "/core/") : NULL;
+      if (!core && file && strncmp(file, "core/", 5) == 0)
+        core = file - 1;
+      if (core && !strchr(core + 6, '/'))
         root_decl = true;
     }
     decl_sym = root_decl ? nyr_runtime_symbol(decl_leaf) : NULL;

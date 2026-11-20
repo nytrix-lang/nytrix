@@ -482,7 +482,7 @@ endif()
 add_custom_target(nytrix_version_header ALL
   COMMAND ${CMAKE_COMMAND} -P "${NYTRIX_VERSION_GENERATOR}"
   COMMAND ${CMAKE_COMMAND}
-    "-DNYTRIX_STD_LIBDIR=${NYTRIX_ROOT}/lib"
+    "-DNYTRIX_STD_LIBDIR=${NYTRIX_ROOT}/core"
     "-DNYTRIX_STD_ID_OUT=${STD_ID_HEADER}" -P "${_NYTRIX_STD_ID_SCRIPT}"
   COMMENT "Refreshing Git-derived version header"
   VERBATIM
@@ -989,7 +989,7 @@ file(WRITE "${_NYTRIX_STD_ID_SCRIPT}"
   "if(NOT _id_old STREQUAL _id_contents)\n"
   "  file(WRITE \"\${NYTRIX_STD_ID_OUT}\" \"\${_id_contents}\")\n"
   "endif()\n")
-file(GLOB_RECURSE STD_SOURCES_LIB CONFIGURE_DEPENDS "${NYTRIX_ROOT}/lib/*.ny")
+file(GLOB_RECURSE STD_SOURCES_LIB CONFIGURE_DEPENDS "${NYTRIX_ROOT}/core/*.ny")
 set(STD_SOURCES ${STD_SOURCES_LIB})
 
 option(NYTRIX_STD_VERBOSE "Verbose core.ny generation output" OFF)
@@ -2850,7 +2850,7 @@ if (NYTRIX_CORE_BC_CHECKER)
       "--output=${NYTRIX_CORE_BC_CHECKER_OBJECT}"
       "${NYTRIX_CORE_BC_CHECKER_SOURCE}"
     DEPENDS ny-full "${NYTRIX_CORE_BC_CHECKER_SOURCE}"
-      "${NYTRIX_ROOT}/lib/compiler/tools/core_bc_cache.ny"
+      "${NYTRIX_ROOT}/core/compiler/tools/core_bc_cache.ny"
     WORKING_DIRECTORY "${NYTRIX_ROOT}"
     COMMENT "Compiling Ny shared-core cache checker"
     VERBATIM
@@ -3105,7 +3105,7 @@ install(FILES "${CORE_NY}"
   DESTINATION ${CMAKE_INSTALL_DATADIR}/nytrix
   RENAME core.ny
 )
-install(DIRECTORY "${NYTRIX_ROOT}/lib" DESTINATION ${CMAKE_INSTALL_DATADIR}/nytrix
+install(DIRECTORY "${NYTRIX_ROOT}/core" DESTINATION ${CMAKE_INSTALL_DATADIR}/nytrix
   FILES_MATCHING PATTERN "*.ny"
 )
 install(DIRECTORY "${NYTRIX_ROOT}/etc/assets" DESTINATION ${CMAKE_INSTALL_DATADIR}/nytrix/etc)

@@ -12,13 +12,13 @@ use core.compiler.tools.doc.rank (fuzzy_score, score, rank)
 def entries = [
    {"kind":"function", "name":"parse", "full_name":"core.math.parse",
     "signature":"parse source", "keywords":"parser syntax",
-    "path":"lib/math/parse.ny", "doc":"bounded parser", "code":""},
+    "path":"core/math/parse.ny", "doc":"bounded parser", "code":""},
    {"kind":"doc", "name":"Compiler", "full_name":"Compiler",
     "keywords":"compiler parser", "path":"docs/compiler.md",
     "doc":"", "code":""},
    {"kind":"function", "name":"_parse_internal",
     "full_name":"core.math._parse_internal", "signature":"internal",
-    "keywords":"parser", "path":"lib/math/parse.ny", "doc":"", "code":""}
+    "keywords":"parser", "path":"core/math/parse.ny", "doc":"", "code":""}
 ]
 
 assert(fuzzy_score("core.math.parse", "parse") > 10000,
@@ -51,7 +51,7 @@ assert(score(private_name_without_qualification, "needle") == 15800,
 def private_parser_entry = {
    "kind":"function", "name":"_parse_internal",
    "full_name":"core.math._parse_internal", "signature":"internal",
-   "keywords":"parser", "path":"lib/math/parse.ny", "doc":"", "code":""
+   "keywords":"parser", "path":"core/math/parse.ny", "doc":"", "code":""
 }
 assert(score(private_parser_entry, "parser") == 16950,
        "native and AOT scoring retain subsequence matches in name fields")

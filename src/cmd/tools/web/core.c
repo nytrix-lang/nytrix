@@ -1325,7 +1325,7 @@ static int bundle_has_source_markers(const char *text) {
 static int append_system_source_roots(sb_t *bundle, const char *asset_root,
                                       const char *input, int *source_count) {
   int before = source_count ? *source_count : 0;
-  char lib_path[PATH_MAX];
+  char core_path[PATH_MAX];
   char input_abs[PATH_MAX];
   const char *input_root = input;
   if (input && *input && input[0] != '/') {
@@ -1338,10 +1338,10 @@ static int append_system_source_roots(sb_t *bundle, const char *asset_root,
         input_root = input_abs;
     }
   }
-  if (asset_root && join_path(lib_path, sizeof(lib_path), asset_root, "lib") &&
-      path_is_dir(lib_path) &&
-      (!input_root || !paths_overlap(input_root, lib_path)))
-    append_sources_from_dir(bundle, lib_path, source_count);
+  if (asset_root && join_path(core_path, sizeof(core_path), asset_root, "core") &&
+      path_is_dir(core_path) &&
+      (!input_root || !paths_overlap(input_root, core_path)))
+    append_sources_from_dir(bundle, core_path, source_count);
 
   const char *env_lib = getenv("NYTRIX_LIB_PATH");
   if (env_lib && *env_lib) {
@@ -1349,12 +1349,12 @@ static int append_system_source_roots(sb_t *bundle, const char *asset_root,
     while (*p) {
       const char *colon = strchr(p, ':');
       size_t n = colon ? (size_t)(colon - p) : strlen(p);
-      if (n > 0 && n < sizeof(lib_path)) {
-        memmove(lib_path, p, n);
-        lib_path[n] = '\0';
-        if (path_is_dir(lib_path) &&
-            (!input_root || !paths_overlap(input_root, lib_path)))
-          append_sources_from_dir(bundle, lib_path, source_count);
+      if (n > 0 && n < sizeof(core_path)) {
+        memmove(core_path, p, n);
+        core_path[n] = '\0';
+        if (path_is_dir(core_path) &&
+            (!input_root || !paths_overlap(input_root, core_path)))
+          append_sources_from_dir(bundle, core_path, source_count);
       }
       if (!colon)
         break;
@@ -1416,14 +1416,14 @@ static int docs_origin_is_lib(const char *root, const char *orig) {
       strncmp(rel, "etc/tests/", 10) == 0 || strstr(rel, "/etc/projects/") ||
       strstr(rel, "/etc/tests/"))
     return 0;
-  char lib_dir[PATH_MAX];
-  if (join_path(lib_dir, sizeof(lib_dir), root, "lib")) {
-    size_t n = strlen(lib_dir);
-    if (strncmp(norm, lib_dir, n) == 0 && (norm[n] == '/' || norm[n] == '\0'))
+  char core_dir[PATH_MAX];
+  if (join_path(core_dir, sizeof(core_dir), root, "core")) {
+    size_t n = strlen(core_dir);
+    if (strncmp(norm, core_dir, n) == 0 && (norm[n] == '/' || norm[n] == '\0'))
       return 1;
   }
-  if (strcmp(rel, "lib") == 0 || strncmp(rel, "lib/", 4) == 0 ||
-      strstr(rel, "/lib/"))
+  if (strcmp(rel, "core") == 0 || strncmp(rel, "core/", 5) == 0 ||
+      strstr(rel, "/core/"))
     return 1;
   if (root && *root && path_is_under(root, norm))
     return 0;
@@ -1434,10 +1434,10 @@ static char *docs_origin_relative(const char *root, const char *orig) {
   if (!orig || !*orig)
     return strdup("unknown");
   const char *rel = NULL;
-  char lib_dir[PATH_MAX];
-  if (join_path(lib_dir, sizeof(lib_dir), root, "lib")) {
-    size_t n = strlen(lib_dir);
-    if (strncmp(orig, lib_dir, n) == 0 &&
+  char core_dir[PATH_MAX];
+  if (join_path(core_dir, sizeof(core_dir), root, "core")) {
+    size_t n = strlen(core_dir);
+    if (strncmp(orig, core_dir, n) == 0 &&
         (orig[n] == '/' || orig[n] == '\\' || orig[n] == '\0')) {
       rel = orig + n;
       while (*rel == '/' || *rel == '\\')
@@ -1445,17 +1445,17 @@ static char *docs_origin_relative(const char *root, const char *orig) {
     }
   }
   if (!rel) {
-    const char *slash = strstr(orig, "/lib/");
-    const char *backslash = strstr(orig, "\\lib\\");
+    const char *slash = strstr(orig, "/core/");
+    const char *backslash = strstr(orig, "\\core\\");
     if (slash)
-      rel = slash + 5;
+      rel = slash + 6;
     else if (backslash)
-      rel = backslash + 5;
-    else if (strncmp(orig, "lib/", 4) == 0 || strncmp(orig, "lib\\", 4) == 0)
-      rel = orig + 4;
+      rel = backslash + 6;
+    else if (strncmp(orig, "core/", 5) == 0 || strncmp(orig, "core\\", 5) == 0)
+      rel = orig + 5;
   }
   sb_t out = {0};
-  const char *prefix = "lib/";
+  const char *prefix = "core/";
   char cwd[PATH_MAX];
   if (!rel && getcwd(cwd, sizeof(cwd))) {
     size_t n = strlen(cwd);
@@ -1481,8 +1481,8 @@ static char *docs_origin_relative(const char *root, const char *orig) {
 static char *docs_origin_module_name(const char *root, const char *orig) {
   char *rel = docs_origin_relative(root, orig);
   const char *p = rel ? rel : (orig ? orig : "source");
-  if (strncmp(p, "lib/", 4) == 0 || strncmp(p, "lib\\", 4) == 0)
-    p += 4;
+  if (strncmp(p, "core/", 5) == 0 || strncmp(p, "core\\", 5) == 0)
+    p += 5;
   else if (strncmp(p, "./", 2) == 0 || strncmp(p, ".\\", 2) == 0)
     p += 2;
 
@@ -3556,7 +3556,7 @@ static const char *doc_search_resolve_input(const char *root, const char *input,
                                             char *default_input) {
   if (input)
     return input;
-  if (join_path(default_input, PATH_MAX, root, "lib") &&
+  if (join_path(default_input, PATH_MAX, root, "core") &&
       path_is_dir(default_input))
     return default_input;
   return root;
@@ -4569,7 +4569,7 @@ static char *static_href_for_doc_route(const char *from_route,
                                        const char *anchor) {
   if (!to_route)
     return NULL;
-  if (!strncmp(to_route, "src/", 4) || !strncmp(to_route, "lib/", 4) ||
+  if (!strncmp(to_route, "src/", 4) || !strncmp(to_route, "core/", 5) ||
       !strncmp(to_route, "etc/", 4) || !strncmp(to_route, "info/", 5) ||
       !strcmp(to_route, "LICENSE")) {
     sb_t source = {0};
@@ -6167,7 +6167,7 @@ static const char *web_resolve_input(const char *root, const char *input,
                                      char *default_input) {
   if (input)
     return input;
-  if (join_path(default_input, PATH_MAX, root, "lib") &&
+  if (join_path(default_input, PATH_MAX, root, "core") &&
       path_is_dir(default_input))
     return default_input;
   return root;

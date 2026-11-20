@@ -25,7 +25,7 @@ use core.os.ui.render.viewer.editor.palette as pal
 mut any V = dict(8)
 fn get(str k) any { borrow(V.get(k, nil)) }
 fn buffer_rows() list {
-   return [["set.ny", "buffer:0", "current", "lib/set.ny", "buffer"], ["dict.ny", "buffer:1", "", "lib/dict.ny", "buffer"], ["mod.ny", "buffer:2", "", "lib/mod.ny", "buffer"]]
+   return [["set.ny", "buffer:0", "current", "core/set.ny", "buffer"], ["dict.ny", "buffer:1", "", "core/dict.ny", "buffer"], ["mod.ny", "buffer:2", "", "core/mod.ny", "buffer"]]
 }
 fn chosen_id() str {
    def row = pal.selected(get("p"))

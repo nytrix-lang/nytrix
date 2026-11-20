@@ -311,7 +311,7 @@ fn rank(list entries, str query) list {
 #main {
    def entries = [
       {"kind":"function", "name":"parse", "full_name":"core.math.parse",
-         "signature":"parse source", "keywords":"parser syntax", "path":"lib/math/parse.ny"},
+         "signature":"parse source", "keywords":"parser syntax", "path":"core/math/parse.ny"},
       {"kind":"doc", "name":"Compiler", "full_name":"Compiler",
          "keywords":"compiler parser", "path":"docs/compiler.md"}
    ]

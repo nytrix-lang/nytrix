@@ -107,7 +107,7 @@ static int fmt_migrate_operator_files(const StrVec *files, int assume_legacy,
 
 static int run_migrate_operators_mode(const FmtOpts *opts) {
   StrVec files = {0};
-  const char *roots[] = {"src", "lib", "etc/tests"};
+  const char *roots[] = {"src", "core", "etc/tests"};
   const char *const *collect_roots =
       opts->paths.len ? (const char *const *)opts->paths.items : roots;
   size_t root_count = opts->paths.len ? opts->paths.len : 3;
@@ -655,7 +655,7 @@ static int path_is_std_lib_source(const char *path) {
     return 0;
   while (path[0] == '.' && path[1] == '/')
     path += 2;
-  if (strncmp(path, "lib/", 4) == 0)
+  if (strncmp(path, "core/", 5) == 0)
     return 1;
   if (path[0] == '/') {
     char root[PATH_MAX];
@@ -663,7 +663,7 @@ static int path_is_std_lib_source(const char *path) {
       size_t rn = strlen(root);
       if (strncmp(path, root, rn) == 0 && path[rn] == '/') {
         const char *rel = path + rn + 1;
-        return strncmp(rel, "lib/", 4) == 0;
+        return strncmp(rel, "core/", 5) == 0;
       }
     }
   }
@@ -7621,7 +7621,7 @@ static void audit_add_constant_findings(const char *path, const char *txt,
   if (!nyt_ends_with(path, ".ny"))
     return;
   if (strstr(path, "/window/platform/") ||
-      strstr(path, "lib/os/ui/window/platform/"))
+      strstr(path, "core/os/ui/window/platform/"))
     return;
   if (!(audit_wants(mode, "constants") || audit_wants(mode, "trim") ||
         audit_wants(mode, "dead") || audit_wants(mode, "meta")))
@@ -7695,7 +7695,7 @@ static void audit_add_constant_findings(const char *path, const char *txt,
 static int audit_backend_path(const char *path) {
   return path &&
          (strstr(path, "/window/platform/") ||
-          strstr(path, "lib/os/ui/window/platform/") ||
+          strstr(path, "core/os/ui/window/platform/") ||
           strstr(path, "/render/vk/mod.ny") || strstr(path, "/render/term.ny"));
 }
 
@@ -9635,7 +9635,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
   StrVec scan = {0};
 
   if (paths->len == 0) {
-    const char *roots[] = {"lib", "src", "etc/projects", "etc/tests"};
+    const char *roots[] = {"core", "src", "etc/projects", "etc/tests"};
     if (!fmt_collect_via_library(roots, sizeof(roots) / sizeof(roots[0]),
                                  "code", &scan)) {
       nyt_err("ny-fmt", "Ny source collection failed; audit aborted");
@@ -9997,7 +9997,7 @@ static int run_analyze_simple(StrVec *paths, int json_mode, int limit) {
   AnalyzeStats stats = {0};
   StrVec files = {0};
   if (paths->len == 0) {
-    const char *roots[] = {"src", "lib", "etc/tests"};
+    const char *roots[] = {"src", "core", "etc/tests"};
     if (!fmt_collect_via_library(roots, sizeof(roots) / sizeof(roots[0]),
                                  "code", &files)) {
       nyt_err("ny-fmt", "Ny source collection failed; analysis aborted");
@@ -10131,7 +10131,7 @@ static int cloc_bucket_from_path(const char *path) {
     return CLOC_BUCKET_PROJECTS;
   if (strncmp(p, "src/", 4) == 0 || strstr(p, "/src/"))
     return CLOC_BUCKET_SRC;
-  if (strncmp(p, "lib/", 4) == 0 || strstr(p, "/lib/"))
+  if (strncmp(p, "core/", 5) == 0 || strstr(p, "/core/"))
     return CLOC_BUCKET_LIB;
   if (strncmp(p, "etc/tests/", 10) == 0 || strstr(p, "/etc/tests/"))
     return CLOC_BUCKET_TESTS;
@@ -10384,7 +10384,7 @@ static void cloc_attach_git_diff(const char *repo_root, ClocStats *stats,
     return;
   const char *argv[] = {
       "git",          "-C",        repo_root, "diff", "--numstat",
-      "--no-renames", "HEAD",      "--",      "src",  "lib",
+      "--no-renames", "HEAD",      "--",      "src",  "core",
       "etc/projects", "etc/tests", NULL};
   char *out = NULL;
   if (ny_process_capture(argv, &out, false) != 0 || !out) {
@@ -10432,7 +10432,7 @@ static void print_cloc_json(const ClocStats *s, const ClocRow *rows,
   printf("{\n");
   printf("  \"files\": %d,\n", s->files);
   printf("  \"loc_total\": %d,\n", s->loc_total);
-  printf("  \"loc\": {\"src\": %d, \"lib\": %d, \"projects\": %d, \"tests\": "
+  printf("  \"loc\": {\"src\": %d, \"core\": %d, \"projects\": %d, \"tests\": "
          "%d, \"other\": %d},\n",
          s->loc_src, s->loc_lib, s->loc_projects, s->loc_tests, s->loc_other);
   printf(
@@ -10471,7 +10471,7 @@ static void print_cloc_json(const ClocStats *s, const ClocRow *rows,
   printf("}\n");
 }
 static int run_cloc_mode(const FmtOpts *o) {
-  static const char *default_roots[] = {"src", "lib", "etc/projects",
+  static const char *default_roots[] = {"src", "core", "etc/projects",
                                         "etc/tests", NULL};
   StrVec files = {0};
   ClocStats stats = {0};
@@ -10618,7 +10618,7 @@ static int run_cloc_mode(const FmtOpts *o) {
     cloc_fmt_int(stats.h_files, h_files_s, sizeof(h_files_s));
     cloc_fmt_int(stats.h_loc, h_loc_s, sizeof(h_loc_s));
     printf("%sfiles%s  %s%s%s\n", gray, rs, bold, files_s, rs);
-    printf("%sloc%s    %s%s%s  %s(src%s %s | lib %s | proj %s | tests %s | "
+    printf("%sloc%s    %s%s%s  %s(src%s %s | core %s | proj %s | tests %s | "
            "other %s)%s\n",
            gray, rs, bold, loc_total_s, rs, gray, rs, loc_src_s, loc_lib_s,
            loc_proj_s, loc_tests_s, loc_other_s, rs);

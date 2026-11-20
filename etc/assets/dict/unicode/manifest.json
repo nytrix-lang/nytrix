@@ -22,7 +22,7 @@
     }
   ],
   "generated": [
-    "lib/unicode.ny",
+    "core/unicode.ny",
     "src/code/lang/ny/parser/unicode.c",
     "src/code/lang/ny/parser/unicode.h"
   ],

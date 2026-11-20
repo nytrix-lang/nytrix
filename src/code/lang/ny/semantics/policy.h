@@ -10,7 +10,7 @@
  *
  * The proof *policy* — which tactics to try, in which order, with which
  * budgets, and how to combine backend results — is authored in Ny
- * (lib/proof.ny, module core.proof).  The compiler and the Ny policy
+ * (core/proof.ny, module core.proof).  The compiler and the Ny policy
  * speak through the versioned obligation/certificate texts defined here.
  * Trust never crosses that boundary by assertion: every certificate is
  * validated by the independent bounded checker in policy/check.c,

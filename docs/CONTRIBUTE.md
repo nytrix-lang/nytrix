@@ -326,7 +326,7 @@ Fixtures live under these roots:
 | `etc/tests/lang/errors/` | Rejected source and expected diagnostics |
 | `etc/tests/code/` | IR, backend, ABI, target, format, and compiler probes |
 | `etc/tests/bench/` | Benchmark fixtures, including paired C/Ny workloads |
-| `lib/` | Module-local `#main` checks |
+| `core/` | Module-local `#main` checks |
 
 Test observable results, errors, boundaries, cleanup, and state transitions.
 Avoid assertions about copied source text, forwarding, mock echoes, or
@@ -350,7 +350,7 @@ Core bitcode generation defaults to 16 standard-library loader threads. Set
 memory-constrained host; this changes only the core bitcode precompile, not
 fixture worker parallelism.
 
-The wrapper hashes `etc/tests/` and `lib/` before a test or benchmark gate and
+The wrapper hashes `etc/tests/` and `core/` before a test or benchmark gate and
 checks them again before reporting its verdict. If either tree changes, or an
 input cannot be read for the recheck, the result is `INVALIDATED` (exit 2),
 not a pass or failure. Rerun after source edits stop.

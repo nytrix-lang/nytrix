@@ -3616,7 +3616,7 @@ int clone_run(const CloneOptions *opts) {
 
   StrVec files;
   memset(&files, 0, sizeof(files));
-  const char *roots[] = {"src", "lib"};
+  const char *roots[] = {"src", "core"};
   const char *const *use_paths =
       opts->path_count ? opts->paths : (const char *const *)roots;
   size_t path_count = opts->path_count ? opts->path_count : 2;

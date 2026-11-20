@@ -64,7 +64,7 @@ file boundaries.
 Check the documented signature, argument order, return type, effects, ownership,
 and failure result. Prefer the narrowest module that owns the behavior. If an
 entry is missing or its contract is unclear, inspect the defining module under
-`lib/` and add or improve its source documentation; do not duplicate an
+`core/` and add or improve its source documentation; do not duplicate an
 unverified signature in a tutorial.
 
 Related guides: [Networking](networking.md), [Native interfaces](native.md),

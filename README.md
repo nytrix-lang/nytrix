@@ -126,17 +126,14 @@ Compiler contributors can start with the [contribution guide](docs/CONTRIBUTE.md
 | Path            | Purpose                                              |
 | --------------- | ---------------------------------------------------- |
 | `src/`          | Compiler, runtime, native backend, and tools         |
-| `lib/`          | Standard library                                     |
+| `core/`         | Standard library                                     |
 | `etc/tests/`    | Tests, fixtures, and benchmarks                      |
 | `etc/projects/` | Examples and larger projects                         |
 | `docs/`         | Manual, guides, specification, and API documentation |
 
 ## Status
 
-Nytrix is a work in progress. Feature support varies across LLVM, the
-Nytrix-owned native backend, and WebAssembly, so check
-[Status and execution routes](docs/learn/status.md) and the
-[language quick reference](docs/learn/quirks.md) before choosing a backend.
+Nytrix is actively evolving. Check the [status and execution routes](docs/learn/status.md) and [language quick reference](docs/learn/quirks.md) for current backend support and capabilities.
 
 Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
 

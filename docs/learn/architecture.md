@@ -24,7 +24,7 @@ Prerequisites: a source checkout and a concrete behavior or subsystem to locate.
 | Runtime | `src/code/backend/runtime/` | Allocation, managed values, platform services, and runtime helpers |
 | C frontend | `src/code/lang/c/` | Clang integration and the in-tree C frontend |
 | CLI tools | `src/cmd/` | Compiler, formatter, test, documentation, and platform commands |
-| Standard library | `lib/` | User-facing modules and host APIs |
+| Standard library | `core/` | User-facing modules and host APIs |
 
 These are source ownership guides, not a promise that every feature has a single
 file or that each backend supports the same shapes. Follow the public headers
@@ -118,9 +118,9 @@ when the negated proposition is proven unsatisfiable, so they cannot admit a
 false proof; unknown falls through to constant evaluation.
 `src/code/lang/ny/semantics/policy.c` is the versioned obligation/certificate
 funnel (`ny-proof-obligation-v1` / `ny-proof-certificate-v1`, percent-encoded
-fields), mirroring the `lib/proof.ny` tactic order fold → range → solver
+fields), mirroring the `core/proof.ny` tactic order fold → range → solver
 with the compiler-only `cc`/interval steps; `policy/check.c`'s bounded
-checker is the sole verdict decider. `lib/proof.ny` owns the language-side
+checker is the sole verdict decider. `core/proof.ny` owns the language-side
 `core.proof` policy, where `unknown` is first-class and never stands in for
 false.
 

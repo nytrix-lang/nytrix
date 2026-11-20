@@ -40,7 +40,7 @@ int main(void) {
   for (size_t i = 0; registered[i]; ++i)
     normalized_registered[i] = registered[i] == '\\' ? '/' : registered[i];
   normalized_registered[strlen(registered)] = '\0';
-  const char *relative_suffix = strstr(normalized_registered, "/lib/mod.ny");
+  const char *relative_suffix = strstr(normalized_registered, "/core/mod.ny");
   if (!relative_suffix) {
     fprintf(
         stderr,
@@ -49,7 +49,7 @@ int main(void) {
   }
   relative_suffix++;
   if (ny_std_find_module_id_by_path(relative_suffix) != expected ||
-      ny_std_find_module_id_by_path("lib/./mod.ny") != expected) {
+      ny_std_find_module_id_by_path("core/./mod.ny") != expected) {
     fprintf(
         stderr,
         "[module_identity] source-root-relative paths lost module identity\n");

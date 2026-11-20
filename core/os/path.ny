@@ -596,7 +596,7 @@ fn splitext(any p) list {
    assert(splitext("README") == ["README", ""], "path splitext no ext")
    assert(is_str(home_dir()) && home_dir().len > 0, "path home_dir")
    assert(is_str(temp_dir()) && temp_dir().len > 0, "path temp_dir")
-   def resolved = resolve_repo_asset("lib/os/path.ny")
+   def resolved = resolve_repo_asset("core/os/path.ny")
    assert(is_abs(resolved), "path resolve repo asset")
    assert(basename(resolved) == "path.ny", "path resolve basename")
    assert(_search_asset_root_for_rel("etc/assets", "fonts/jetbrains.ttf").len > 0, "path resolve asset root suffix")

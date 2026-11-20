@@ -141,7 +141,7 @@ def clean = compare(["--analyze", "--json", clean_path], "empty analyzer JSON")
 assert(clean.get("code", 127) == 0, "empty JSON analysis succeeds")
 
 def doc_tag = to_str(pid())
-def doc_path = root + "/lib/.fmt-analyze-doc-" + doc_tag + ".ny"
+def doc_path = root + "/core/.fmt-analyze-doc-" + doc_tag + ".ny"
 assert(is_ok(file_write(doc_path,
    "fn undocumented() { return 1 }\nfn documented() {\n   \"doc string\"\n   return 1\n}\n" +
    "fn forwarding() { return other.module.fn() }\n;; documentation comment\nfn commented() { return 1 }\n")),

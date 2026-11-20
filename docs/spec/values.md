@@ -69,8 +69,8 @@ and `__cstr_eq` compare and join raw C strings, `__i64_to_cstr_raw` and
 `__f64_to_cstr_raw` render raw fixed text, and `__cstr_to_str` copies into a
 managed string. The same pattern holds for the container, OS, and GC
 families: `__str_*`, `__list_*`, `__dict_*`, `__gc_*`, and friends are the
-raw substrates behind the matching `lib/` APIs; `__is_nil` and `__is_int`
-are the library-facing spellings that `lib/mod.ny` and dynamic-value
+raw substrates behind the matching `core/` APIs; `__is_nil` and `__is_int`
+are the library-facing spellings that `core/mod.ny` and dynamic-value
 fixtures call, while programs keep the `is_nil`/`is_int` predicates. The
 C-string helpers take raw FFI-pointer `cstr` values, not managed `str`s.
 Application code keeps using the operators, predicates, and

@@ -101,7 +101,7 @@ fn _route_for(str base, str href) dict {
 }
 
 fn _href(str from, str to, str anchor) str {
-   if str.startswith(to, "src/") || str.startswith(to, "lib/") || str.startswith(to, "etc/") || str.startswith(to, "info/") || to == "LICENSE" {
+   if str.startswith(to, "src/") || str.startswith(to, "core/") || str.startswith(to, "etc/") || str.startswith(to, "info/") || to == "LICENSE" {
       def int slash = str.find_last(to, "/")
       def str name = slash >= 0 ? str._substr(to, slash + 1, to.len) : to
       mut str kind = "tree"

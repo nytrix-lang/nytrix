@@ -1,5 +1,5 @@
 /*
- * Unicode 18.0 table generator: updates lib/unicode.ny data tables and parser XID tables in place.
+ * Unicode 18.0 table generator: updates core/unicode.ny data tables and parser XID tables in place.
  */
 #define _POSIX_C_SOURCE 200809L
 #include "unicode.h"
@@ -243,7 +243,7 @@ static int ensure_sources(const char *root) {
   }
   sb_puts(&m, "  ],\n");
   sb_puts(&m, "  \"generated\": [\n");
-  sb_puts(&m, "    \"lib/unicode.ny\",\n");
+  sb_puts(&m, "    \"core/unicode.ny\",\n");
   sb_puts(&m, "    \"src/code/lang/ny/parser/unicode.c\",\n");
   sb_puts(&m, "    \"src/code/lang/ny/parser/unicode.h\"\n");
   sb_puts(&m, "  ],\n");
@@ -1125,9 +1125,9 @@ static int generate_unicode(const char *root) {
   }
 
   /*
-   * Regenerate the generated-data region in lib/unicode.ny in place.
+   * Regenerate the generated-data region in core/unicode.ny in place.
    *
-   * Region markers in lib/unicode.ny:
+   * Region markers in core/unicode.ny:
    *   ;; ny-make:unicode:data:begin
    *   ;; ny-make:unicode:data:end
    *
@@ -1136,7 +1136,7 @@ static int generate_unicode(const char *root) {
    * Only the table definitions between the markers are rewritten.
    */
   char data_out_path[PATH_MAX];
-  snprintf(data_out_path, sizeof(data_out_path), "%s/lib/unicode.ny", root);
+  snprintf(data_out_path, sizeof(data_out_path), "%s/core/unicode.ny", root);
   size_t old_len = 0;
   char *old_ny = read_file_all(data_out_path, &old_len);
   if (!old_ny) {
