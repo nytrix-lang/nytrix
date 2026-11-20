@@ -12,8 +12,8 @@
 
 </div>
 
-Nytrix is an experimental statically typed language for native code,
-compile-time generation, and explicit machine-level interfaces.
+Nytrix is a statically typed language for native code, compile-time
+generation, and explicit machine-level interfaces.
 
 The [manual](docs/README.md) covers language rules, tools, and the library.
 
@@ -133,10 +133,10 @@ Compiler contributors can start with the [contribution guide](docs/CONTRIBUTE.md
 
 ## Status
 
-Nytrix is experimental. Feature support varies across LLVM, the Nytrix-owned
-native backend, and WebAssembly. Before choosing a backend or relying on
-partial contracts, read [Status and execution routes](docs/learn/status.md) and the
-[language quick reference](docs/learn/quirks.md).
+Nytrix is a work in progress. Feature support varies across LLVM, the
+Nytrix-owned native backend, and WebAssembly, so check
+[Status and execution routes](docs/learn/status.md) and the
+[language quick reference](docs/learn/quirks.md) before choosing a backend.
 
 Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
 

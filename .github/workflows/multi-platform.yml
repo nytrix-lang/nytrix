@@ -2,10 +2,6 @@ name: Native CI
 run-name: "${{ inputs.mode || 'checks' }} · ${{ inputs.platform || 'all' }} · ${{ github.ref_name }}"
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
@@ -49,7 +45,7 @@ on:
 permissions:
   contents: read
 
-# New pushes replace stale checks; manual investigations are not interrupted.
+# A new dispatch replaces a stale run; an in-flight one is left alone.
 concurrency:
   group: native-${{ github.ref }}-${{ github.event_name }}-${{ inputs.mode || 'checks' }}-${{ inputs.platform || 'all' }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
