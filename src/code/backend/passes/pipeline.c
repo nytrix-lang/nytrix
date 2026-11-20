@@ -36,7 +36,7 @@
 #include "base/debug.h"
 #include "base/util.h"
 #include "code/backend/core/nyr.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -2244,23 +2244,34 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
         nyr_run_pass(f, nyr_compact_if_sparse, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_loop_unswitch, stats, dump, &ok);
-      if (ok && !nyr_pass_stopped)
-        nyr_run_pass(f, nyr_loop_unroll_ssa, stats, dump, &ok);
       /*
-       * Late O3 vectorization runs by default again: the historical PBKDF2
-       * checksum corruption was isolated to two x64 machine-encoder defects
-       * (inverted VEX R/B extension bits in vextracti128, and SIB-LEA
-       * folding under vector load/store consumers), both fixed with the
-       * `vec8_reduce_loop` executable regression. Strict f64 reductions are
-       * eligible when the vector reducer preserves lane order; remaining
-       * legality and profitability checks stay in the vectorizer.
+       * Run loop vectorization before SSA unrolling so fixed-trip vectorizable
+       * inner loops (e.g., 32-element C/NY matrix rows) widen into vector loops
+       * instead of expanding into large scalar unrolled bodies first. Re-run
+       * vectorization only if SSA unrolling exposes a new outer candidate.
        */
       if (ok && !nyr_pass_stopped && f->untagged_values) {
+        static bool (*const c_canon_pre_vec[])(nyr_func_t *) = {
+            nyr_cse, nyr_copy_prop, nyr_dce};
+        nyr_run_seq(f, c_canon_pre_vec, 3, stats, dump, &ok);
+      }
+      if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
+          !nyr_pass_stopped)
+        nyr_run_pass(f,
+                     (options & NYR_IR_OPT_AVX2_VECTORIZE)
+                         ? nyr_loop_vectorize_avx2
+                         : nyr_loop_vectorize,
+                     stats, dump, &ok);
+      size_t pre_unroll_len = f->len;
+      if (ok && !nyr_pass_stopped)
+        nyr_run_pass(f, nyr_loop_unroll_ssa, stats, dump, &ok);
+      bool unrolled_ssa = f->len != pre_unroll_len;
+      if (ok && unrolled_ssa && !nyr_pass_stopped && f->untagged_values) {
         static bool (*const c_canon_late[])(nyr_func_t *) = {
             nyr_cse, nyr_copy_prop, nyr_dce};
         nyr_run_seq(f, c_canon_late, 3, stats, dump, &ok);
       }
-      if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
+      if (ok && unrolled_ssa && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
           !nyr_pass_stopped)
         nyr_run_pass(f,
                      (options & NYR_IR_OPT_AVX2_VECTORIZE)

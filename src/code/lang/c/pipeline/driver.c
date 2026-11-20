@@ -1071,7 +1071,8 @@ static void nyc_parameter_asm_escapes(const nyc_unit_t *unit,
  */
 static bool nyc_specialize_private_parameters(nyc_unit_t *unit,
                                               const nyc_driver_t *driver,
-                                              char *err, size_t err_len) {
+                                              unsigned opt_options, char *err,
+                                              size_t err_len) {
   if (!unit->count || unit->count > SIZE_MAX / 2)
     return unit->count == 0;
   size_t capacity = 16;
@@ -1229,10 +1230,7 @@ static bool nyc_specialize_private_parameters(nyc_unit_t *unit,
       entry->applied |= apply;
       changed = true;
       nyr_refresh_metadata(func);
-      ok = nyr_optimize_with_options(func, driver->optimization,
-                                     driver->disable_vectorization
-                                         ? NYR_OPT_DISABLE_VECTORIZATION
-                                         : 0,
+      ok = nyr_optimize_with_options(func, driver->optimization, opt_options,
                                      err, err_len) &&
            nyr_verify(func, err, err_len);
     }
@@ -2018,6 +2016,13 @@ static int compile_source(int argc, char **argv, int source_arg,
      * destroyed further down.
      */
     nyr_set_preserve_phis(true);
+    unsigned opt_options =
+        driver->disable_vectorization
+            ? NYR_OPT_DISABLE_VECTORIZATION
+            : ((!driver->disable_sse && abi == NYC_ABI_SYSV_X86_64 &&
+                (target_info.caps & NY_NATIVE_CAP_MACH_AVX2))
+                   ? NYR_OPT_AVX2_VECTORIZE
+                   : 0u);
     for (size_t i = 0; ok && i < unit.count; i++) {
       const char *stage = "before optimization";
       if (abi != NYC_ABI_I386 && driver->disable_sse)
@@ -2052,10 +2057,8 @@ static int compile_source(int argc, char **argv, int source_arg,
           nyr_refresh_metadata(&unit.funcs[i]);
       } else if (ok) {
         stage = "during optimization";
-        ok = nyr_optimize_with_options(
-            &unit.funcs[i], driver->optimization,
-            driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-            err, sizeof(err));
+        ok = nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
+                                       opt_options, err, sizeof(err));
       }
       /*
        * Keep NYC's whole-unit pipeline aligned with the native language
@@ -2069,10 +2072,8 @@ static int compile_source(int argc, char **argv, int source_arg,
         if (ok && unit.funcs[i].len != before_tail_call) {
           stage = "during recursive-add cleanup";
           unit.funcs[i].untagged_values = true;
-          ok = nyr_optimize_with_options(
-              &unit.funcs[i], driver->optimization,
-              driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-              err, sizeof(err));
+          ok = nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
+                                         opt_options, err, sizeof(err));
         }
       }
       if (ok && driver->disable_vectorization &&
@@ -2148,10 +2149,7 @@ static int compile_source(int argc, char **argv, int source_arg,
           }
           unit.funcs[i].untagged_values = true;
           if (!nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
-                                         driver->disable_vectorization
-                                             ? NYR_OPT_DISABLE_VECTORIZATION
-                                             : 0,
-                                         err, sizeof(err)) ||
+                                         opt_options, err, sizeof(err)) ||
               !nyr_verify(&unit.funcs[i], err, sizeof(err))) {
             char detail[sizeof(err)];
             memcpy(detail, err, sizeof(detail));
@@ -2236,10 +2234,7 @@ static int compile_source(int argc, char **argv, int source_arg,
             continue;
           ok = nyr_inline_general(func) &&
                nyr_optimize_with_options(func, driver->optimization,
-                                         driver->disable_vectorization
-                                             ? NYR_OPT_DISABLE_VECTORIZATION
-                                             : 0,
-                                         err, sizeof(err));
+                                         opt_options, err, sizeof(err));
         }
         if (!ok && !err[0])
           snprintf(err, sizeof(err), "size-oriented C helper inlining failed");
@@ -2279,7 +2274,8 @@ static int compile_source(int argc, char **argv, int source_arg,
         snprintf(err, sizeof(err), "late C small-call cleanup failed");
     }
     if (ok && driver->optimization >= 1)
-      ok = nyc_specialize_private_parameters(&unit, driver, err, sizeof(err));
+      ok = nyc_specialize_private_parameters(&unit, driver, opt_options, err,
+                                             sizeof(err));
     if (inline_callee_count) {
       nyr_set_inline_callees(NULL, 0);
       nyr_inline_set_c_unit_abi(false);

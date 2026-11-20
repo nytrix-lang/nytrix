@@ -25,7 +25,7 @@
  *   R4  add(add(b, C1), C2) -> add(b, C1 + C2) when C2 has no other use.
  */
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <math.h>
 #include <limits.h>
@@ -968,10 +968,112 @@ static bool scf_fold_step_chain(nyr_func_t *f) {
   return true;
 }
 
+static bool scf_is_bool01(const nyr_func_t *f, const int *defs, int v,
+                          unsigned depth) {
+  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 || depth > 12)
+    return false;
+  const nyr_inst_t *d = &f->data[(size_t)defs[v]];
+  if (d->op == NYIR_CMP_I64 || d->op == NYIR_CMP_F64 || d->op == NYIR_CMP_F32)
+    return true;
+  if (d->op == NYIR_CONST_I64)
+    return d->imm == 0 || d->imm == 1;
+  if (d->op == NYIR_COPY)
+    return scf_is_bool01(f, defs, d->a, depth + 1);
+  if (d->op == NYIR_AND_I64 || d->op == NYIR_OR_I64 || d->op == NYIR_XOR_I64)
+    return scf_is_bool01(f, defs, d->a, depth + 1) &&
+           scf_is_bool01(f, defs, d->b, depth + 1);
+  if (d->op == NYIR_SELECT_I64)
+    return scf_is_bool01(f, defs, d->b, depth + 1) &&
+           scf_is_bool01(f, defs, d->c, depth + 1);
+  return false;
+}
+
+static int scf_strip_copy_defs(const nyr_func_t *f, const int *defs, int v) {
+  for (unsigned d = 0; d < 16 && v >= 0 && v < f->next_value && defs[v] >= 0;
+       ++d) {
+    if (f->data[(size_t)defs[v]].op != NYIR_COPY)
+      break;
+    v = f->data[(size_t)defs[v]].a;
+  }
+  return v;
+}
+
+/*
+ * Simplify boolean selects emitted by if-conversion:
+ *   select(b0, b1, 0)       -> and(b0, b1)   when b0, b1 in {0, 1}
+ *   select(b0, x + 1, x)    -> add(x, b0)    when b0 in {0, 1}
+ */
+static bool scf_fold_bool_selects(nyr_func_t *f) {
+  if (!f || !f->len || f->next_value <= 0)
+    return true;
+  int *defs = nyr_build_defs(f);
+  if (!defs)
+    return false;
+  bool changed = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_SELECT_I64 || in->dst < 0)
+      continue;
+    if (!scf_is_bool01(f, defs, in->a, 0))
+      continue;
+    int vb = scf_strip_copy_defs(f, defs, in->b);
+    int vc = scf_strip_copy_defs(f, defs, in->c);
+    if (vc >= 0 && vc < f->next_value && defs[vc] >= 0 &&
+        f->data[(size_t)defs[vc]].op == NYIR_CONST_I64 &&
+        f->data[(size_t)defs[vc]].imm == 0 && scf_is_bool01(f, defs, vb, 0)) {
+      in->op = NYIR_AND_I64;
+      in->b = vb;
+      in->c = -1;
+      in->scalar_class = NYIR_SCALAR_I64_RAW;
+      in->effects = nyr_inst_effects(in);
+      nyr_clear_derived_facts(in);
+      changed = true;
+      continue;
+    }
+    if (vb >= 0 && vb < f->next_value && defs[vb] >= 0) {
+      const nyr_inst_t *add = &f->data[(size_t)defs[vb]];
+      if (add->op == NYIR_ADD_I64 &&
+          add->scalar_class == NYIR_SCALAR_I64_RAW) {
+        int aa = scf_strip_copy_defs(f, defs, add->a);
+        int ab = scf_strip_copy_defs(f, defs, add->b);
+        bool matches =
+            (aa == vc && ab >= 0 && ab < f->next_value && defs[ab] >= 0 &&
+             f->data[(size_t)defs[ab]].op == NYIR_CONST_I64 &&
+             f->data[(size_t)defs[ab]].imm == 1) ||
+            (ab == vc && aa >= 0 && aa < f->next_value && defs[aa] >= 0 &&
+             f->data[(size_t)defs[aa]].op == NYIR_CONST_I64 &&
+             f->data[(size_t)defs[aa]].imm == 1);
+        if (matches) {
+          int cond = in->a;
+          in->op = NYIR_ADD_I64;
+          in->a = in->c;
+          in->b = cond;
+          in->c = -1;
+          in->scalar_class = NYIR_SCALAR_I64_RAW;
+          in->effects = nyr_inst_effects(in);
+          nyr_clear_derived_facts(in);
+          changed = true;
+          continue;
+        }
+      }
+    }
+  }
+  free(defs);
+  if (changed)
+    nyr_refresh_metadata(f);
+  return true;
+}
+
 bool nyr_select_chain_fold(nyr_func_t *f) {
   if (!f || !f->len || getenv("NYTRIX_NO_SELECT_CHAIN_FOLD"))
     return true;
+  /*
+   * Keep boolean-delta selects intact until recurrence folding has matched
+   * the full chain.
+   */
   if (!scf_fold_step_chain(f))
+    return false;
+  if (!scf_fold_bool_selects(f))
     return false;
   for (int round = 0; round < 4; ++round) {
     bool changed = false;

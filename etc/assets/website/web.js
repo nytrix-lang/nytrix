@@ -215,7 +215,9 @@ const MARKDOWN_DOC_PRIORITY = [
 const OVERVIEW_DOC_ROUTES = {
   learn: new Set([
     "learn/start",
+    "learn/programs",
     "learn/status",
+    "learn/testing",
     "learn/ui",
     "learn/native",
   ]),

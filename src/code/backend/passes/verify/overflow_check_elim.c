@@ -18,7 +18,7 @@
  *  with NYIR_INST_F_NO_OVERFLOW for codegen to skip checking.
  */
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <limits.h>
 #include <stdio.h>

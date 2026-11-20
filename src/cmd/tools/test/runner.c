@@ -85,12 +85,15 @@
 #define NY_TEST_PARALLEL_TIMEOUT_GRACE_MS 1000.0
 #define NY_TEST_WAIT_HEARTBEAT_MS 45000.0
 /*
- * Typical fixtures stay well under 1 GiB; only windowing/renderer fixtures
- * reach the 2.2 GiB peak, so they have their own, smaller concurrency budget.
+ * Fixture memory varies widely. Use the heavy-fixture peak for the overall
+ * worker budget so a large pool of ordinary fixtures cannot crowd out the
+ * desktop when several unexpectedly large cases overlap.
  */
-#define NY_TEST_WORKER_MEMORY_GIB 0.8
-#define NY_TEST_HEAVY_WORKER_MEMORY_GIB 2.5
-#define NY_TEST_MAX_HEAVY_JOBS 12
+#define NY_TEST_WORKER_MEMORY_GIB 2.5
+#define NY_TEST_HEAVY_WORKER_MEMORY_GIB 6.0
+#define NY_TEST_MAX_HEAVY_JOBS 4
+#define NY_TEST_DEFAULT_FIXTURE_RSS_GIB 12.0
+#define NY_TEST_MAX_AUTO_JOBS 4
 #define NY_TEST_LOAD_SCALE 2
 #define NY_TEST_FAILURE_TAIL_LINES 24
 #define NY_TEST_MAX_FAILURE_REPLAYS 8
@@ -220,8 +223,9 @@ static int ny_test_capture_path_ok(const char *path, char *resolved,
 /*
  * Fixture child memory policy: a single runaway compile must not take the
  * host down, so each fixture child runs under an optional RLIMIT_AS cap and
- * the scheduler evicts groups whose resident set exceeds the configured
- * limit.  Limits come from the environment; absent limits disable the cap.
+ * the scheduler evicts groups whose resident set exceeds its limit.
+ * Apply an address-space cap only when explicitly requested; sanitizers
+ * can map large virtual address ranges without using that much RAM.
  */
 static double test_mem_limit_gib(void) {
   const char *raw = getenv("NYTRIX_TEST_MEM_LIMIT_GIB");
@@ -246,52 +250,64 @@ static void apply_test_child_mem_limit(void) {
 
 #ifdef __linux__
 /*
- * Linux resident set of a process group (leader + direct children), in KiB.
- * Returns -1 when /proc gives us nothing (exited group).
+ * Linux resident memory of a fixture and its descendants, in KiB.
+ * PSS divides shared pages among the processes that map them.
  */
-static long test_group_rss_kib(int pid) {
+static long test_process_memory_kib(int pid, const char *file,
+                                    const char *field) {
   char path[64];
-  snprintf(path, sizeof(path), "/proc/%d/status", pid);
+  snprintf(path, sizeof(path), "/proc/%d/%s", pid, file);
   FILE *f = fopen(path, "r");
   if (!f)
     return -1;
-  long total = 0;
+  long kib = -1;
+  size_t field_len = strlen(field);
   char line[256];
   while (fgets(line, sizeof(line), f)) {
-    if (strncmp(line, "VmRSS:", 6) == 0) {
-      long kib = strtol(line + 6, NULL, 10);
-      if (kib > total)
-        total = kib;
+    if (strncmp(line, field, field_len) == 0) {
+      kib = strtol(line + field_len, NULL, 10);
+      break;
     }
   }
   fclose(f);
-  /*
-   * Direct children of the leader (fixture compile helpers).
-   */
+  return kib;
+}
+
+static long test_tree_memory_kib(int pid, unsigned depth, bool proportional) {
+  long total = proportional
+                   ? test_process_memory_kib(pid, "smaps_rollup", "Pss:")
+                   : -1;
+  if (total < 0)
+    total = test_process_memory_kib(pid, "status", "VmRSS:");
+  if (total < 0)
+    return -1;
+  if (depth == 0)
+    return total;
+  char path[64];
   snprintf(path, sizeof(path), "/proc/%d/task/%d/children", pid, pid);
   FILE *kids = fopen(path, "r");
   if (kids) {
-    long child = -1;
-    while (fscanf(kids, "%ld", &child) == 1) {
-      char cpath[64];
-      snprintf(cpath, sizeof(cpath), "/proc/%ld/status", child);
-      FILE *cf = fopen(cpath, "r");
-      if (cf) {
-        char cline[256];
-        while (fgets(cline, sizeof(cline), cf)) {
-          if (strncmp(cline, "VmRSS:", 6) == 0) {
-            long kib = strtol(cline + 6, NULL, 10);
-            if (kib > 0)
-              total += kib;
-            break;
-          }
-        }
-        fclose(cf);
-      }
+    int child = -1;
+    while (fscanf(kids, "%d", &child) == 1) {
+      long kib = test_tree_memory_kib(child, depth - 1, proportional);
+      if (kib > 0)
+        total += kib;
     }
     fclose(kids);
   }
   return total > 0 ? total : -1;
+}
+
+static double test_fixture_memory_over_cap_gib(int pid, double cap_gib) {
+  const double kib_per_gib = 1024.0 * 1024.0;
+  if (test_tree_memory_kib(pid, 16, false) <= cap_gib * kib_per_gib)
+    return 0.0;
+  /*
+   * Confirm the cheap RSS estimate before killing a fixture. Forked compiler
+   * workers share the parent's pages until they write to them.
+   */
+  double used_gib = test_tree_memory_kib(pid, 16, true) / kib_per_gib;
+  return used_gib > cap_gib ? used_gib : 0.0;
 }
 #endif
 
@@ -316,6 +332,19 @@ static double test_mem_available_gib(void) {
   return -1.0;
 #endif
 }
+
+#ifdef __linux__
+static double test_fixture_rss_cap_gib(void) {
+  double explicit_cap = test_mem_limit_gib();
+  if (explicit_cap > 0.0 || getenv("NYTRIX_TEST_NO_RAM_GUARD"))
+    return explicit_cap;
+  double available = test_mem_available_gib();
+  return available > 0.0
+             ? fmin(NY_TEST_DEFAULT_FIXTURE_RSS_GIB,
+                    fmax(2.0, available - NY_TEST_HOST_MEMORY_RESERVE_GIB))
+             : 0.0;
+}
+#endif
 
 /*
  * Number of flags_matrix variants a shape fixture executes; rows are
@@ -3560,6 +3589,10 @@ static int run_debug_argv_capture(char *const argv[], int timeout_sec,
   int status = 0;
   double start_ms = now_ms();
   double timeout_ms = (double)timeout_sec * 1000.0;
+#ifdef __linux__
+  const double cap_gib = test_fixture_rss_cap_gib();
+  double last_mem_check_ms = start_ms;
+#endif
   for (;;) {
     pid_t r = waitpid(pid, &status, WNOHANG);
     if (r == pid)
@@ -3569,7 +3602,22 @@ static int run_debug_argv_capture(char *const argv[], int timeout_sec,
         continue;
       return 127;
     }
-    if (now_ms() - start_ms >= timeout_ms) {
+    double now = now_ms();
+#ifdef __linux__
+    if (cap_gib > 0.0 && now - last_mem_check_ms >= 500.0) {
+      last_mem_check_ms = now;
+      double used_gib = test_fixture_memory_over_cap_gib(pid, cap_gib);
+      if (used_gib > 0.0) {
+        fprintf(stderr, "[test] stopped replay: resident memory %.1f GiB "
+                        "exceeded the %.1f GiB fixture cap\n", used_gib, cap_gib);
+        ny_test_kill_group(pid);
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+        return 128 + SIGKILL;
+      }
+    }
+#endif
+    if (now - start_ms >= timeout_ms) {
       ny_test_kill_group(pid);
       while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
       }
@@ -5392,9 +5440,11 @@ static int auto_test_jobs(void) {
   if (logical <= 0)
     logical = 1;
   /*
-   * Use all logical CPUs unless the available-memory budget limits workers.
+   * Leave at least half the logical CPUs free for the desktop by default.
    */
-  int jobs = logical;
+  int jobs = (int)(logical / 2);
+  if (jobs < 1)
+    jobs = 1;
   /*
    * Budget automatic workers against memory available right now. The latest
    * full suite peaked at 2.2 GiB per fixture; budget 2.5 GiB per worker and
@@ -5410,6 +5460,8 @@ static int auto_test_jobs(void) {
     if (jobs > ram_jobs)
       jobs = ram_jobs;
   }
+  if (jobs > NY_TEST_MAX_AUTO_JOBS)
+    jobs = NY_TEST_MAX_AUTO_JOBS;
   return jobs;
 }
 
@@ -6369,6 +6421,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
     int matrix_count;
     int active;
     int timed_out;
+    bool memory_limited;
     int timeout_sec;
     int expected_compile_fail;
     int native_oracle;
@@ -6386,6 +6439,11 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
   }
 
   int max_heavy = test_max_heavy_jobs(jobs);
+  const bool ram_guard = !getenv("NYTRIX_TEST_NO_RAM_GUARD");
+#ifdef __linux__
+  const double mem_cap = test_fixture_rss_cap_gib();
+  double last_mem_check_ms = 0.0;
+#endif
   while (completed < total) {
     int active_count = 0;
     int exclusive_active = 0;
@@ -6399,12 +6457,17 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
       if (test_is_memory_heavy(run[i].path))
         heavy_active++;
     }
+    double available = ram_guard && active_count < jobs
+                           ? test_mem_available_gib()
+                           : -1.0;
+    const bool memory_known = available >= 0.0;
     for (int i = 0; i < jobs; i++) {
       if (fail_fast && *failed != failures_at_start)
         break;
       if (run[i].active)
         continue;
       size_t candidate = total;
+      double candidate_gib = 0.0;
       for (size_t k = 0; k < total; k++) {
         const char *queued = selected.items[k];
         if (!queued || started[k])
@@ -6412,7 +6475,13 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
         int exclusive = test_requires_host_exclusive(queued);
         if (exclusive_active || (exclusive && active_count > 0))
           continue;
-        if (heavy_active >= max_heavy && test_is_memory_heavy(queued))
+        const bool heavy = test_is_memory_heavy(queued);
+        if (heavy && heavy_active >= max_heavy)
+          continue;
+        candidate_gib = heavy ? NY_TEST_HEAVY_WORKER_MEMORY_GIB
+                              : NY_TEST_WORKER_MEMORY_GIB;
+        if (active_count > 0 && memory_known &&
+            available < NY_TEST_HOST_MEMORY_RESERVE_GIB + candidate_gib)
           continue;
         candidate = k;
         break;
@@ -6488,9 +6557,11 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
       run[i].path = p;
       run[i].start_ms = now_ms();
       run[i].timed_out = 0;
+      run[i].memory_limited = false;
       run[i].timeout_sec = test_timeout_for_path(p, timeout_sec);
       run[i].active = 1;
       active_count++;
+      available -= candidate_gib;
       if (test_requires_host_exclusive(p))
         exclusive_active = 1;
       if (test_is_memory_heavy(p))
@@ -6564,26 +6635,22 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
        * cadence as poll_sleep, far faster than memory can spike safely.
        */
       {
-        static double last_mem_check_ms = 0.0;
-        double mem_cap = test_mem_limit_gib();
         if (mem_cap > 0.0 && t - last_mem_check_ms >= 500.0) {
           last_mem_check_ms = t;
           for (int i = 0; i < jobs; i++) {
             if (!run[i].active || run[i].timed_out)
               continue;
-            long rss_kib = test_group_rss_kib(run[i].pid);
-            if (rss_kib < 0)
-              continue;
-            double used_gib = (double)rss_kib / (1024.0 * 1024.0);
-            if (used_gib > mem_cap) {
+            double used_gib = test_fixture_memory_over_cap_gib(run[i].pid,
+                                                             mem_cap);
+            if (used_gib > 0.0) {
               fprintf(stderr,
-                      "[test] killed fixture=%s: RSS %.1f GiB exceeded the "
+                      "[test] killed fixture=%s: resident memory %.1f GiB exceeded the "
                       "%.1f GiB fixture cap; set "
-                      "NYTRIX_TEST_MEM_LIMIT_GIB or "
-                      "NYTRIX_TEST_MEM_LIMIT_PERCENT to override\n",
+                      "NYTRIX_TEST_MEM_LIMIT_GIB to override\n",
                       disp_path(run[i].path), used_gib, mem_cap);
               fflush(stderr);
               run[i].timed_out = 1;
+              run[i].memory_limited = true;
               ny_test_kill_group(run[i].pid);
               if (!ny_test_proc_valid(done))
                 done = run[i].pid;
@@ -6785,7 +6852,13 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
           remove(run[i].tmp_out);
         if (run[i].materialized_path[0])
           shape_remove_materialized(run[i].materialized_path);
-        if (timed_out || rc == NY_TEST_TIMEOUT_RC) {
+        if (run[i].memory_limited) {
+          char time_label[32];
+          format_test_time(time_label, sizeof(time_label), dur);
+          print_test_progress_line(pct, "✗", NYT_RED, "✗", NYT_RED, "✗",
+                                   NYT_RED, time_label, run[i].path,
+                                   "(memory limit exceeded)");
+        } else if (timed_out || rc == NY_TEST_TIMEOUT_RC) {
           char time_label[32];
           char suffix[64];
           format_test_time(time_label, sizeof(time_label), dur);
@@ -6817,7 +6890,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
           cache_save(cache, cache_path);
       }
       timings_push(timings, run[i].path, dur, row_suite,
-                   rc == 0 ? "pass"
+                   run[i].memory_limited ? "fail" : rc == 0 ? "pass"
                            : (timed_out || rc == NY_TEST_TIMEOUT_RC ? "timeout"
                                                                     : "fail"));
       if (fail_fast && rc != 0) {
@@ -7281,6 +7354,11 @@ static void print_test_help(void) {
   nyt_subheading("Runner");
   printf("  %s--bin BIN --jobs N --timeout SEC --pattern PAT%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  Default parallelism: at most 4 workers, further limited by available memory.\n");
+#ifdef __linux__
+  printf("  Default Linux fixture memory cap: up to %.0f GiB, based on available RAM.\n",
+         NY_TEST_DEFAULT_FIXTURE_RSS_GIB);
+#endif
   printf("  %s--fail-fast%s  Stop queueing fixtures after the first failure\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   nyt_subheading("Fixture selection");

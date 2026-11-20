@@ -28,7 +28,7 @@
  * `nyr_ir_verify` accepts; otherwise the function is byte-for-byte unchanged.
  */
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <limits.h>
 #include <stdlib.h>

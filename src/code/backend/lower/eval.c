@@ -991,6 +991,9 @@ static bool nyr_ir_eval_with_calls_profile_impl(
     case NYIR_VEC4_SET1_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_CMP_I64:
+    case NYIR_VEC8_SELECT_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_AND_I64:
     case NYIR_VEC8_AND_I64:
@@ -1039,7 +1042,8 @@ static bool nyr_ir_eval_with_calls_profile_impl(
           ptr[lane] = vec[lane];
         break;
       }
-      if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64) {
+      if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
+          in->op == NYIR_VEC8_SHL_I64) {
         const int64_t *vec = NULL;
         if (!nyr_eval_read_vector(&eval_slot, in->a, 4, &vec))
           goto unsupported;
@@ -1047,7 +1051,26 @@ static bool nyr_ir_eval_with_calls_profile_impl(
           eval_slot.vector_values[(size_t)in->dst * 4 + lane] =
               in->op == NYIR_VEC8_SHR_I64
                   ? (int64_t)((uint64_t)vec[lane] >> in->imm)
-                  : vec[lane] >> in->imm;
+                  : (in->op == NYIR_VEC8_SHL_I64
+                         ? (int64_t)((uint64_t)vec[lane] << in->imm)
+                         : vec[lane] >> in->imm);
+        eval_slot.vector_width[in->dst] = 4;
+        values[in->dst] = eval_slot.vector_values[(size_t)in->dst * 4];
+        known[in->dst] = true;
+        nyr_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->op == NYIR_VEC8_SELECT_I64) {
+        const int64_t *mv = NULL;
+        const int64_t *tv = NULL;
+        const int64_t *fv = NULL;
+        if (!nyr_eval_read_vector(&eval_slot, in->a, 4, &mv) ||
+            !nyr_eval_read_vector(&eval_slot, in->b, 4, &tv) ||
+            !nyr_eval_read_vector(&eval_slot, in->c, 4, &fv))
+          goto unsupported;
+        for (unsigned lane = 0; lane < 4; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] =
+              (mv[lane] < 0) ? tv[lane] : fv[lane];
         eval_slot.vector_width[in->dst] = 4;
         values[in->dst] = eval_slot.vector_values[(size_t)in->dst * 4];
         known[in->dst] = true;
@@ -1113,6 +1136,33 @@ static bool nyr_ir_eval_with_calls_profile_impl(
         case NYIR_VEC8_MUL_I64:
           uv = ua * ub;
           break;
+        case NYIR_VEC8_CMP_I64: {
+          bool res = false;
+          switch (in->cmp) {
+          case NYIR_CMP_EQ:
+            res = lhs[lane] == rhs[lane];
+            break;
+          case NYIR_CMP_NE:
+            res = lhs[lane] != rhs[lane];
+            break;
+          case NYIR_CMP_LT:
+            res = lhs[lane] < rhs[lane];
+            break;
+          case NYIR_CMP_LE:
+            res = lhs[lane] <= rhs[lane];
+            break;
+          case NYIR_CMP_GT:
+            res = lhs[lane] > rhs[lane];
+            break;
+          case NYIR_CMP_GE:
+            res = lhs[lane] >= rhs[lane];
+            break;
+          default:
+            goto unsupported;
+          }
+          uv = res ? ~(uint64_t)0 : 0u;
+          break;
+        }
         case NYIR_VEC4_SHL_I64:
           uv = ua << (ub & 63u);
           break;
@@ -1474,6 +1524,9 @@ bool nyr_is_pure_i64_straightline(const nyr_func_t *f) {
     case NYIR_VEC4_SET1_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_CMP_I64:
+    case NYIR_VEC8_SELECT_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_REDUCE_ADD_I64:
     case NYIR_VEC4_ADD_I64:

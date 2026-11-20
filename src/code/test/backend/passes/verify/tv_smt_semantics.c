@@ -1,7 +1,7 @@
 /*
  * The Z3 translation evaluator must preserve NYIR's hardware-masked shifts.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 #include <inttypes.h>
 #include <math.h>

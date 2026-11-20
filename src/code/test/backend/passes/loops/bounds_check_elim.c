@@ -3,7 +3,7 @@
  */
 #include <stdint.h>
 
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int emit_tbuf_new(nyr_func_t *f, int count, int width) {

@@ -404,6 +404,11 @@ static void rt_rc_forget(int64_t ptr) {
 }
 
 static inline int ny_mem_pool_slot(size_t total) {
+  /*
+   * ASan needs each managed block to have its own redzones and lifetime.
+   */
+  if (NY_WITH_ASAN)
+    return -1;
   for (int i = 0; i < (int)NUM_POOLS; i++) {
     if (total <= g_pool_sizes[i])
       return i;

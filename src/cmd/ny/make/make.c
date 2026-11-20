@@ -38,6 +38,9 @@
 #define PATH_MAX 4096
 #endif
 
+#define NY_MAKE_TEST_WORKER_MEMORY_GIB 2.5
+#define NY_MAKE_TEST_MAX_AUTO_JOBS 4
+
 typedef struct {
   const char *cmds[64];
   int cmd_count;
@@ -1064,28 +1067,21 @@ static int resolve_test_jobs(int cli_jobs) {
   if (logical <= 0)
     logical = 1;
   /*
-   * Keep some host headroom, while letting fixture workers use most of a
-   * large CPU. The live-memory cap below prevents oversubscription.
+   * Keep automatic fixture parallelism modest on interactive machines.
    */
-  int jobs = (int)(logical * 0.75);
-  if (logical >= 2 && jobs < 2)
-    jobs = 2;
+  int jobs = (int)(logical * 0.5);
   if (jobs < 1)
     jobs = 1;
   double mem_gib = linux_mem_available_gib();
   if (mem_gib > 0.0) {
-    int mem_cap = (int)((mem_gib - 8.0) / 4.0);
+    int mem_cap = (int)((mem_gib - 8.0) / NY_MAKE_TEST_WORKER_MEMORY_GIB);
     if (mem_cap < 1)
       mem_cap = 1;
     if (jobs > mem_cap)
       jobs = mem_cap;
   }
-  /*
-   * Avoid turning one invocation into a memory-bandwidth/IO storm even on
-   * hosts with hundreds of cores and very large RAM.
-   */
-  if (jobs > 24)
-    jobs = 24;
+  if (jobs > NY_MAKE_TEST_MAX_AUTO_JOBS)
+    jobs = NY_MAKE_TEST_MAX_AUTO_JOBS;
   return jobs;
 }
 
@@ -1478,6 +1474,20 @@ int ny_make_main(int argc, char **argv) {
   int jobs = 0;
   char jobs_note[256];
   resolve_jobs(a.jobs, &jobs, jobs_note, sizeof(jobs_note));
+  int has_test_command = 0;
+  for (int i = 0; i < a.cmd_count; ++i) {
+    if (strcmp(a.cmds[i], "test") == 0) {
+      has_test_command = 1;
+      break;
+    }
+  }
+  if (has_test_command && a.jobs <= 0 && jobs > 4 &&
+      !(getenv("NYTRIX_BUILD_JOBS") && *getenv("NYTRIX_BUILD_JOBS"))) {
+    jobs = 4;
+    snprintf(jobs_note, sizeof(jobs_note),
+             "test build jobs=4 automatically; override with -j or "
+             "NYTRIX_BUILD_JOBS");
+  }
   if (jobs_note[0])
     nyt_msg("HOST", NYT_MAGENTA, "%s", jobs_note);
 

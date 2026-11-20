@@ -268,7 +268,9 @@ static LLVMTypeRef ny_llvm_vector_type(ny_llvm_context_t *cg, nyr_op_t op) {
       op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
       op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_MUL_I64 ||
       op == NYIR_VEC8_REDUCE_ADD_I64 || op == NYIR_VEC8_SET1_I64 ||
-      op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64)
+      op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64 ||
+      op == NYIR_VEC8_SHL_I64 || op == NYIR_VEC8_CMP_I64 ||
+      op == NYIR_VEC8_SELECT_I64)
     return LLVMVectorType(cg->type_i64, 4);
   return NULL;
 }
@@ -359,6 +361,7 @@ static bool ny_llvm_infer_vector_value_types(ny_llvm_context_t *cg,
       break;
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
       valid = ny_llvm_vector_mark(types, parents, count, in->dst, type) &&
@@ -366,6 +369,7 @@ static bool ny_llvm_infer_vector_value_types(ny_llvm_context_t *cg,
       break;
     case NYIR_VEC4_FMA_F64:
     case NYIR_VEC8_FMA_F32:
+    case NYIR_VEC8_SELECT_I64:
       valid = ny_llvm_vector_mark(types, parents, count, in->dst, type) &&
               ny_llvm_vector_mark(types, parents, count, in->a, type) &&
               ny_llvm_vector_mark(types, parents, count, in->b, type) &&
@@ -1718,6 +1722,9 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     case NYIR_VEC8_MUL_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_CMP_I64:
+    case NYIR_VEC8_SELECT_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC8_REDUCE_ADD_I64: {
       LLVMTypeRef vector_type = ny_llvm_vector_type(cg, in->op);
@@ -1759,7 +1766,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         LLVMSetAlignment(store, 1);
         break;
       }
-      if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64) {
+      if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
+          in->op == NYIR_VEC8_SHL_I64) {
         LLVMValueRef lhs =
             ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
         LLVMValueRef count = ny_llvm_vector_splat(
@@ -1767,7 +1775,38 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
             vector_type);
         vals[in->dst] = in->op == NYIR_VEC8_SHR_I64
                             ? LLVMBuildLShr(cg->builder, lhs, count, "")
-                            : LLVMBuildAShr(cg->builder, lhs, count, "");
+                            : (in->op == NYIR_VEC8_SHL_I64
+                                   ? LLVMBuildShl(cg->builder, lhs, count, "")
+                                   : LLVMBuildAShr(cg->builder, lhs, count, ""));
+        break;
+      }
+      if (in->op == NYIR_VEC8_CMP_I64) {
+        LLVMValueRef lhs =
+            ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
+        LLVMValueRef rhs =
+            ny_llvm_vector_slot(cg, vals, val_count, in->b, vector_type);
+        LLVMIntPredicate pred = in->cmp == NYIR_CMP_EQ   ? LLVMIntEQ
+                                : in->cmp == NYIR_CMP_NE ? LLVMIntNE
+                                : in->cmp == NYIR_CMP_LT ? LLVMIntSLT
+                                : in->cmp == NYIR_CMP_LE ? LLVMIntSLE
+                                : in->cmp == NYIR_CMP_GT ? LLVMIntSGT
+                                                         : LLVMIntSGE;
+        LLVMValueRef cmpv = LLVMBuildICmp(cg->builder, pred, lhs, rhs, "");
+        vals[in->dst] = LLVMBuildSExt(cg->builder, cmpv, vector_type, "");
+        break;
+      }
+      if (in->op == NYIR_VEC8_SELECT_I64) {
+        LLVMValueRef mask =
+            ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
+        LLVMValueRef tval =
+            ny_llvm_vector_slot(cg, vals, val_count, in->b, vector_type);
+        LLVMValueRef fval =
+            ny_llvm_vector_slot(cg, vals, val_count, in->c, vector_type);
+        LLVMValueRef zero = LLVMConstNull(vector_type);
+        LLVMValueRef cond =
+            LLVMBuildICmp(cg->builder, LLVMIntSLT, mask, zero, "");
+        vals[in->dst] =
+            LLVMBuildSelect(cg->builder, cond, tval, fval, "");
         break;
       }
       if (in->op == NYIR_VEC4_SET1_F64 || in->op == NYIR_VEC8_SET1_F32 ||

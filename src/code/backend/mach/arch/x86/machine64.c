@@ -267,7 +267,8 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC8_XOR_I64 ||
         in->op == NYIR_VEC8_MUL_I64 || in->op == NYIR_VEC4_SHL_I64 ||
         in->op == NYIR_VEC4_SAR_I64 || in->op == NYIR_VEC8_SAR_I64 ||
-        in->op == NYIR_VEC8_SHR_I64;
+        in->op == NYIR_VEC8_SHR_I64 || in->op == NYIR_VEC8_SHL_I64 ||
+        in->op == NYIR_VEC8_CMP_I64 || in->op == NYIR_VEC8_SELECT_I64;
     if (i64_vector_result && in->dst >= 0 && in->dst < NY_X64_NIR_MAX_SLOTS)
       c->value_i64v2[in->dst] = true;
     if ((in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
@@ -992,7 +993,9 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
         op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64 ||
         op == NYIR_VEC8_MUL_I64 || op == NYIR_VEC8_SAR_I64 ||
-        op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
+        op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_SHL_I64 ||
+        op == NYIR_VEC8_CMP_I64 || op == NYIR_VEC8_SELECT_I64 ||
+        op == NYIR_VEC8_REDUCE_ADD_I64 ||
         op == NYIR_VEC8_LOAD_F32 || op == NYIR_VEC8_STORE_F32 ||
         op == NYIR_VEC8_ADD_F32 || op == NYIR_VEC8_SUB_F32 ||
         op == NYIR_VEC8_MUL_F32 || op == NYIR_VEC8_DIV_F32 ||
@@ -3227,21 +3230,60 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
   }
   case NYIR_VEC8_SAR_I64:
-  case NYIR_VEC8_SHR_I64: {
+  case NYIR_VEC8_SHR_I64:
+  case NYIR_VEC8_SHL_I64: {
     /*
      * Lane-wise shift by the immediate count; each lane is its own 8-byte
-     * slot here, so plain scalar sarq/shrq is exact.
+     * slot here, so plain scalar sarq/shrq/shlq is exact.
      */
     int a = ny_x64_nir_slot(c, in->a);
     int dst = ny_x64_nir_slot(c, in->dst);
     if (a < 0 || dst < 0 || in->imm < 0 || in->imm > 63)
       return false;
+    const char *fmt = in->op == NYIR_VEC8_SHR_I64   ? "\tshrq\t$%d, %%rax\n"
+                      : in->op == NYIR_VEC8_SHL_I64 ? "\tshlq\t$%d, %%rax\n"
+                                                    : "\tsarq\t$%d, %%rax\n";
+    for (int lane = 0; lane < 4; ++lane)
+      if (!ny_x64_nir_load(c, a + lane) || !nyr_printf(c->w, fmt, (int)in->imm) ||
+          !ny_x64_nir_store(c, dst + lane))
+        return false;
+    return true;
+  }
+  case NYIR_VEC8_CMP_I64: {
+    int a = ny_x64_nir_slot(c, in->a);
+    int b = ny_x64_nir_slot(c, in->b);
+    int dst = ny_x64_nir_slot(c, in->dst);
+    const char *setcc = in->cmp == NYIR_CMP_EQ   ? "sete"
+                        : in->cmp == NYIR_CMP_NE ? "setne"
+                        : in->cmp == NYIR_CMP_LT ? "setl"
+                        : in->cmp == NYIR_CMP_LE ? "setle"
+                        : in->cmp == NYIR_CMP_GT ? "setg"
+                                                 : "setge";
+    if (a < 0 || b < 0 || dst < 0)
+      return false;
     for (int lane = 0; lane < 4; ++lane)
       if (!ny_x64_nir_load(c, a + lane) ||
           !nyr_printf(c->w,
-                      in->op == NYIR_VEC8_SHR_I64 ? "\tshrq\t$%d, %%rax\n"
-                                                  : "\tsarq\t$%d, %%rax\n",
-                      (int)in->imm) ||
+                      "\tcmpq\t-%d(%%rbp), %%rax\n\t%s\t%%al\n"
+                      "\tmovzbq\t%%al, %%rax\n\tnegq\t%%rax\n",
+                      c->slot_offset[b + lane], setcc) ||
+          !ny_x64_nir_store(c, dst + lane))
+        return false;
+    return true;
+  }
+  case NYIR_VEC8_SELECT_I64: {
+    int m = ny_x64_nir_slot(c, in->a);
+    int tv = ny_x64_nir_slot(c, in->b);
+    int fv = ny_x64_nir_slot(c, in->c);
+    int dst = ny_x64_nir_slot(c, in->dst);
+    if (m < 0 || tv < 0 || fv < 0 || dst < 0)
+      return false;
+    for (int lane = 0; lane < 4; ++lane)
+      if (!ny_x64_nir_load(c, m + lane) ||
+          !nyr_printf(c->w,
+                      "\ttestq\t%%rax, %%rax\n\tmovq\t-%d(%%rbp), %%rax\n"
+                      "\tcmovsq\t-%d(%%rbp), %%rax\n",
+                      c->slot_offset[fv + lane], c->slot_offset[tv + lane]) ||
           !ny_x64_nir_store(c, dst + lane))
         return false;
     return true;

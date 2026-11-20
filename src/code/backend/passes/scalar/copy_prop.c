@@ -14,7 +14,7 @@
 #include "base/compat.h"
 #include "base/debug.h"
 #include "code/backend/core/nyr.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <stdio.h>
 #include <stdlib.h>

@@ -116,7 +116,7 @@ static const MakeHelp commands[] = {
          "auxiliary backend checks.\n--with-stdlib|Include library "
          "fixtures.\n--with-replay|Print failure replays.\n--pattern PATH|Run "
          "matching fixtures only.\n--jobs N|Parallel fixture "
-         "workers.\n--fail-fast|Stop queueing after the first "
+         "workers (default up to 4, RAM guarded).\n--fail-fast|Stop queueing after the first "
          "failure.\n--timeout SEC|Set per-fixture "
          "timeout.\n--debug-failures|Produce trace and debugger artifacts.\n"
          "[Examples]\n./make test|Run the suite.\n./make test --cold "

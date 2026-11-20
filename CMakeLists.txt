@@ -1218,6 +1218,13 @@ file(GLOB SRC_BASE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/base/*.c")
 file(GLOB SRC_SEMA CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/sema/*.c")
 file(GLOB_RECURSE SRC_BACKEND_PASSES CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/backend/passes/*.c")
+# These verification drivers are invoked by ny-full --backend-test.
+set(NYR_BACKEND_VERIFY_DRIVERS
+  "${NYTRIX_ROOT}/src/code/backend/passes/verify/differential.c"
+  "${NYTRIX_ROOT}/src/code/backend/passes/verify/passes.c"
+  "${NYTRIX_ROOT}/src/code/backend/passes/verify/rules.c")
+list(REMOVE_ITEM SRC_BACKEND_PASSES
+  ${NYR_BACKEND_VERIFY_DRIVERS})
 file(GLOB SRC_CODE CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/*.c"
   "${NYTRIX_ROOT}/src/code/lang/c/parser/lex.c"
@@ -1793,7 +1800,7 @@ endif()
 
 if (BUILD_TESTING)
   add_executable(nyr-jit-layout-test
-    "${NYTRIX_ROOT}/etc/tests/native/jit_layout_test.c")
+    "${NYTRIX_ROOT}/src/code/test/backend/lower/jit_layout.c")
   target_include_directories(nyr-jit-layout-test PRIVATE "${NYTRIX_ROOT}/src")
   add_test(NAME nyr-jit-layout COMMAND nyr-jit-layout-test)
 endif()
@@ -2645,7 +2652,7 @@ if (NYTRIX_USE_LLVM)
     # operation-specific TV selectors do not require the multi-minute
     # aggregate optimizer suite.
     add_executable(ny-tv-smt-test
-      "${NYTRIX_ROOT}/src/code/test/backend/passes/analysis/tv_smt_semantics.c"
+      "${NYTRIX_ROOT}/src/code/test/backend/passes/verify/tv_smt_semantics.c"
       $<TARGET_OBJECTS:nytrix_compiler>
       $<TARGET_OBJECTS:nytrix_runtime>
     )

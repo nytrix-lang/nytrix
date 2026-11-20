@@ -32,7 +32,7 @@
  *   (ICS 1992).  Fusion legality under dependences.
  *  Cooper & Torczon - Engineering a Compiler, 2nd Ed., Ch.8 §8.5.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <limits.h>
 #include <stdlib.h>

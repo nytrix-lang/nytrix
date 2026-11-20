@@ -4956,16 +4956,6 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     bool is_dict = !is_bytes && !is_set &&
                    (nyr_expr_is_dict(b, e->as.memcall.target) ||
                     (local && local->is_dict));
-    if (!is_module_namespace && is_set &&
-        (strcmp(method, "remove") == 0 || strcmp(method, "delete") == 0 ||
-         strcmp(method, "sub") == 0) &&
-        e->as.memcall.args.len == 1) {
-      int set = nyr_lower_expr(b, e->as.memcall.target);
-      int key = nyr_lower_expr(b, e->as.memcall.args.data[0].val);
-      return set < 0 || key < 0 ? -1
-                                : nyr_emit_runtime_call(b, "rt_set_remove", set,
-                                                        key, -1, 2, 0);
-    }
     if (!is_dict && !is_module_namespace && strcmp(method, "contains") == 0 &&
         e->as.memcall.args.len == 1 && e->as.memcall.args.data[0].val) {
       int container = nyr_lower_expr(b, e->as.memcall.target);

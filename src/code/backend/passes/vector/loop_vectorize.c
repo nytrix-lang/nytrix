@@ -445,6 +445,54 @@ static bool tbuf_branch_phi_bytes(const nyr_func_t *f, const int *defs,
   return size > 0;
 }
 
+static bool tbuf_select_pair(const nyr_func_t *f, const int *defs,
+                             int a_value, int b_value, int64_t *bytes_out) {
+  if (!f || !defs || a_value < 0 || b_value < 0 || a_value >= f->next_value ||
+      b_value >= f->next_value || a_value == b_value || defs[a_value] < 0 ||
+      defs[b_value] < 0)
+    return false;
+  const nyr_inst_t *a = &f->data[(size_t)defs[a_value]];
+  const nyr_inst_t *b = &f->data[(size_t)defs[b_value]];
+  if (a->op != NYIR_SELECT_I64 || b->op != NYIR_SELECT_I64)
+    return false;
+  int ca = nyr_vectorize_resolve_value(f, defs, a->a);
+  int cb = nyr_vectorize_resolve_value(f, defs, b->a);
+  if (ca < 0 || ca != cb)
+    return false;
+  int ab = nyr_vectorize_resolve_value(f, defs, a->b);
+  int ac = nyr_vectorize_resolve_value(f, defs, a->c);
+  int bb = nyr_vectorize_resolve_value(f, defs, b->b);
+  int bc = nyr_vectorize_resolve_value(f, defs, b->c);
+  int64_t sab = 0, sac = 0, sbb = 0, sbc = 0;
+  if (ab == bb || ac == bc || !tbuf_alloc_bytes(f, defs, ab, &sab) ||
+      !tbuf_alloc_bytes(f, defs, ac, &sac) ||
+      !tbuf_alloc_bytes(f, defs, bb, &sbb) ||
+      !tbuf_alloc_bytes(f, defs, bc, &sbc) || sab != sac || sab != sbb ||
+      sab != sbc || sab <= 0)
+    return false;
+  if (bytes_out)
+    *bytes_out = sab;
+  return true;
+}
+
+static bool tbuf_select_bytes(const nyr_func_t *f, const int *defs, int value,
+                              int64_t *bytes) {
+  if (!f || !defs || value < 0 || value >= f->next_value || defs[value] < 0 ||
+      !bytes)
+    return false;
+  const nyr_inst_t *def = &f->data[(size_t)defs[value]];
+  if (def->op != NYIR_SELECT_I64)
+    return false;
+  int vb = nyr_vectorize_resolve_value(f, defs, def->b);
+  int vc = nyr_vectorize_resolve_value(f, defs, def->c);
+  int64_t sb = 0, sc = 0;
+  if (!tbuf_alloc_bytes(f, defs, vb, &sb) ||
+      !tbuf_alloc_bytes(f, defs, vc, &sc) || sb != sc || sb <= 0)
+    return false;
+  *bytes = sb;
+  return true;
+}
+
 static bool tbuf_phi_bytes(const nyr_func_t *f, const int *defs, int value,
                            int64_t *bytes) {
   if (!f || !defs || value < 0 || value >= f->next_value || defs[value] < 0 ||
@@ -612,6 +660,8 @@ static bool root_is_private_memory(const nyr_func_t *f, const int *defs,
   int64_t bytes = 0;
   if (def->op == NYIR_PHI)
     return tbuf_phi_bytes(f, defs, root, &bytes);
+  if (def->op == NYIR_SELECT_I64)
+    return tbuf_select_bytes(f, defs, root, &bytes);
   if (def->op != NYIR_CALL || !def->symbol)
     return false;
   if (strcmp(def->symbol, "rt_tbuf_new_raw") == 0 ||
@@ -624,6 +674,8 @@ static bool known_alloc_bytes(const nyr_func_t *f, const int *defs, int root,
                               int64_t *out) {
   const nyr_inst_t *def = &f->data[(size_t)defs[root]];
   if (def->op == NYIR_PHI && tbuf_phi_bytes(f, defs, root, out))
+    return true;
+  if (def->op == NYIR_SELECT_I64 && tbuf_select_bytes(f, defs, root, out))
     return true;
   if (def->op == NYIR_ALLOCA) {
     if (def->imm <= 0)
@@ -681,6 +733,8 @@ static int tbuf_payload_root(const nyr_func_t *f, const int *defs, int value,
     return tbuf_payload_root(f, defs, in->a, depth + 1);
   int64_t bytes = 0;
   if (in->op == NYIR_PHI && tbuf_phi_bytes(f, defs, value, &bytes))
+    return value;
+  if (in->op == NYIR_SELECT_I64 && tbuf_select_bytes(f, defs, value, &bytes))
     return value;
   return -1;
 }
@@ -1568,6 +1622,7 @@ static bool fresh_labels(const nyr_func_t *f, int64_t *a, int64_t *b,
 }
 static bool use_allowed(const nyr_func_t *f, const nyr_cfg_t *cfg,
                         const bool *in_loop, const bool *vec_value,
+                        const bool *mask_value, const bool *rewritten,
                         const bool *broadcast_value, size_t user,
                         size_t reduction_update_idx, int reduction_term) {
   if (!f || !cfg || !in_loop || user >= f->len ||
@@ -1580,9 +1635,18 @@ static bool use_allowed(const nyr_func_t *f, const nyr_cfg_t *cfg,
             (in->b == reduction_term && in->a >= 0)) &&
            vec_value[reduction_term];
   if (in->op == NYIR_STORE_I64)
-    return in->c >= 0 && vec_value[in->c];
+    return in->c >= 0 && vec_value[in->c] &&
+           !(mask_value && mask_value[in->c]);
   if (in->op == NYIR_COPY)
     return in->a >= 0 && vec_value[in->a];
+  /*
+   * Shifts, compares and selects were fully validated (operand widths,
+   * masks, invariant splats) when the analysis marked them for rewriting.
+   */
+  if ((in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64 ||
+       in->op == NYIR_CMP_I64 || in->op == NYIR_SELECT_I64) &&
+      rewritten && rewritten[user])
+    return true;
   if (!op_is_vec_i64_bin(in->op) && !op_is_vec_f64_bin(in->op))
     return false;
   if (in->a < 0 || in->b < 0)
@@ -2604,15 +2668,19 @@ static bool track_root_access(const nyr_func_t *f, const int *defs,
     affine_t prior_access = seen[r].access;
     int root = access.root;
     if (prior_access.root != root) {
-      bool root_is_phi = root >= 0 && root < f->next_value && defs[root] >= 0 &&
-                         f->data[(size_t)defs[root]].op == NYIR_PHI;
+      bool root_is_choice = root >= 0 && root < f->next_value &&
+                            defs[root] >= 0 &&
+                            (f->data[(size_t)defs[root]].op == NYIR_PHI ||
+                             f->data[(size_t)defs[root]].op == NYIR_SELECT_I64);
       int prior = prior_access.root;
-      bool prior_is_phi = prior >= 0 && prior < f->next_value &&
-                          defs[prior] >= 0 &&
-                          f->data[(size_t)defs[prior]].op == NYIR_PHI;
-      if ((root_is_phi || prior_is_phi) &&
+      bool prior_is_choice =
+          prior >= 0 && prior < f->next_value && defs[prior] >= 0 &&
+          (f->data[(size_t)defs[prior]].op == NYIR_PHI ||
+           f->data[(size_t)defs[prior]].op == NYIR_SELECT_I64);
+      if ((root_is_choice || prior_is_choice) &&
           !tbuf_swap_phi_pair(f, defs, root, prior, NULL) &&
-          !tbuf_branch_phi_pair(f, defs, root, prior, NULL))
+          !tbuf_branch_phi_pair(f, defs, root, prior, NULL) &&
+          !tbuf_select_pair(f, defs, root, prior, NULL))
         return false;
       continue;
     }
@@ -3229,7 +3297,13 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     }
 
     size_t scalar_value_count = (size_t)f->next_value;
-    bool *vec = calloc(scalar_value_count, sizeof(*vec));
+    /*
+     * One allocation holds two maps: vec[v] (value is widened) and, right
+     * after it, vmask[v] (the widened value is a -1/0 lane mask produced by a
+     * vector compare rather than the scalar 0/1 boolean).
+     */
+    bool *vec = calloc(scalar_value_count * 2 + 1, sizeof(*vec));
+    bool *vmask = vec ? vec + scalar_value_count : NULL;
     bool *rewrite = calloc(f->len, sizeof(*rewrite));
     bool *broadcast_value =
         calloc(scalar_value_count, sizeof(*broadcast_value));
@@ -3374,15 +3448,122 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       }
       if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0 && vec[in->a]) {
         vec[in->dst] = true;
+        vmask[in->dst] = vmask[in->a];
         rewrite[i] = true;
         continue;
+      }
+      /*
+       * AVX2 four-lane forms: constant shifts, signed compares producing
+       * -1/0 lane masks, and mask-driven selects (if-converted diamonds,
+       * abs/clamp, conditional counts). They need the VEC8 width.
+       */
+      {
+        bool lva =
+            in->a >= 0 && (size_t)in->a < scalar_value_count && vec[in->a];
+        bool lvb =
+            in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
+        bool lvc =
+            in->c >= 0 && (size_t)in->c < scalar_value_count && vec[in->c];
+        bool lane_shift =
+            (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64) && lva;
+        bool lane_cmp = in->op == NYIR_CMP_I64 && (lva || lvb);
+        bool lane_select = in->op == NYIR_SELECT_I64 && (lva || lvb || lvc);
+        if ((lane_shift || lane_cmp || lane_select) && in->dst >= 0) {
+          const char *why = NULL;
+          if (vf != 4 || !supports_vec8_i64_broadcast ||
+              getenv("NYTRIX_NO_VEC_LANE_OPS"))
+            why = "lane shift/compare/select needs the four-lane AVX2 form";
+          int64_t k = -1;
+          if (!why && lane_shift &&
+              (vmask[in->a] || !nyr_const_i64(f, defs, in->b, &k) || k < 0 ||
+               k > 63))
+            why = "vector shift count is not a constant 0..63";
+          if (!why && lane_cmp &&
+              ((lva && vmask[in->a]) || (lvb && vmask[in->b])))
+            why = "vector compare of a lane mask";
+          if (!why && lane_select && (!lva || !vmask[in->a]))
+            why = "select condition is not a vector lane mask";
+          bool result_mask = lane_cmp;
+          if (!why && lane_select) {
+            bool mb = lvb && vmask[in->b], mc = lvc && vmask[in->c];
+            int64_t z = 1;
+            if (mb || mc) {
+              bool b_ok = mb || (!lvb && nyr_const_i64(f, defs, in->b, &z) &&
+                                 z == 0);
+              z = 1;
+              bool c_ok = mc || (!lvc && nyr_const_i64(f, defs, in->c, &z) &&
+                                 z == 0);
+              if (!b_ok || !c_ok)
+                why = "select mixes a lane mask with a non-mask value";
+              result_mask = true;
+            }
+          }
+          /*
+           * Non-widened operands must be loop-invariant: they become splats.
+           */
+          int arms[3] = {lane_cmp || lane_select ? in->a : -1,
+                         lane_cmp || lane_select ? in->b : -1,
+                         lane_select ? in->c : -1};
+          bool arm_vec[3] = {lva, lvb, lvc};
+          for (int k2 = 0; !why && k2 < 3; ++k2) {
+            int v = arms[k2];
+            if (v < 0 || arm_vec[k2])
+              continue;
+            bool in_loop_v = value_defined_in_loop(f, defs, &cfg, in_loop, v);
+            if ((size_t)v >= scalar_value_count ||
+                (in_loop_v &&
+                 affine_value(f, defs, &cfg, in_loop, v, iv, 0).stride != 0))
+              why = vector_mixed_operand_reason(f, defs, v, "i64");
+          }
+          if (why) {
+            bad = true;
+            reject_reason = why;
+            reject_pc = i;
+            break;
+          }
+          for (int k2 = 0; k2 < 3; ++k2)
+            if (arms[k2] >= 0 && !arm_vec[k2])
+              broadcast_value[arms[k2]] = true;
+          vec[in->dst] = true;
+          vmask[in->dst] = result_mask;
+          rewrite[i] = true;
+          is_i64 = true;
+          /*
+           * Like the packed multiply, these forms exist only at four lanes;
+           * the flag keeps later width heuristics from narrowing to VF=2.
+           */
+          has_i64_mul = true;
+          vec_ops++;
+          continue;
+        }
       }
       if (op_is_vec_i64_bin(in->op) && in->dst >= 0) {
         bool va =
             in->a >= 0 && (size_t)in->a < scalar_value_count && vec[in->a];
         bool vb =
             in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
+        bool ma = va && vmask[in->a], mb = vb && vmask[in->b];
+        bool result_mask = false;
+        if (ma || mb) {
+          /*
+           * Lane masks stay -1/0 through AND/OR/XOR with another mask;
+           * `x + bool` and `x - bool` become `x - mask` and `x + mask`.
+           */
+          bool logic = (in->op == NYIR_AND_I64 || in->op == NYIR_OR_I64 ||
+                        in->op == NYIR_XOR_I64) &&
+                       ma && mb;
+          bool add_bool = in->op == NYIR_ADD_I64 && ma != mb;
+          bool sub_bool = in->op == NYIR_SUB_I64 && mb && !ma;
+          if (!logic && !add_bool && !sub_bool) {
+            bad = true;
+            reject_reason = "lane mask has an unsupported arithmetic consumer";
+            reject_pc = i;
+            break;
+          }
+          result_mask = logic;
+        }
         if (va || vb) {
+          vmask[in->dst] = result_mask;
           /*
            * Packed i64 multiply exists only as the four-lane VEC8 form (an
            * AVX2 VPMULUDQ sequence, or per-lane imul in the fallbacks).
@@ -3758,13 +3939,20 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                     reduction_phi_dst, reduction_phi_init,
                     (long long)reduction_preheader_label, vf,
                     (long long)fixed_trip, is_var_trip ? "yes" : "no");
+    if (!bad && reduction_term >= 0 &&
+        (size_t)reduction_term < scalar_value_count && vmask[reduction_term] &&
+        !vector_accumulator_safe) {
+      bad = true;
+      reject_reason = "lane-mask reduction requires a vector accumulator";
+      reject_pc = reduction_update_idx;
+    }
     if (!bad) {
       for (int v = 0; v < f->next_value && !bad; ++v) {
         if (!vec[v])
           continue;
         for (size_t u = uses.offsets[v]; u < uses.offsets[v + 1]; ++u)
-          if (!use_allowed(f, &cfg, in_loop, vec, broadcast_value,
-                           uses.users[u], reduction_update_idx,
+          if (!use_allowed(f, &cfg, in_loop, vec, vmask, rewrite,
+                           broadcast_value, uses.users[u], reduction_update_idx,
                            reduction_term)) {
             bad = true;
             reject_reason =
@@ -3779,6 +3967,13 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
      * halving its dynamic execution count would otherwise change observable
      * results even if the memory stream itself vectorizes.
      */
+    if (!bad && reduction_term >= 0 &&
+        (size_t)reduction_term < scalar_value_count && vmask[reduction_term] &&
+        !vector_accumulator_safe) {
+      bad = true;
+      reject_reason = "lane-mask reduction requires a vector accumulator";
+      reject_pc = reduction_update_idx;
+    }
     if (!bad) {
       for (size_t i = head_idx + 1; i < back && !bad; ++i) {
         if (!in_loop[cfg.inst_block[i]])
@@ -3803,6 +3998,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     size_t drop_reduction_add = SIZE_MAX;
     if (!bad && vector_accumulator_safe && !is_var_trip &&
         fixed_trip % vf == 0 && reduction_term >= 0 &&
+        ((size_t)reduction_term >= scalar_value_count ||
+         !vmask[reduction_term]) &&
         defs[reduction_term] >= 0 &&
         uses.offsets[reduction_term + 1] == uses.offsets[reduction_term] + 1 &&
         uses.users[uses.offsets[reduction_term]] == reduction_update_idx) {
@@ -4083,7 +4280,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       nyr_inst_t *in = &f->data[i];
       if (i == reduction_update_idx) {
         if (vector_accumulator) {
-          in->op = vf == 4 ? NYIR_VEC8_ADD_I64 : NYIR_VEC4_ADD_I64;
+          bool mask_term = reduction_term >= 0 &&
+                           (size_t)reduction_term < scalar_value_count &&
+                           vmask[reduction_term];
+          in->op = mask_term ? NYIR_VEC8_SUB_I64
+                             : (vf == 4 ? NYIR_VEC8_ADD_I64
+                                        : NYIR_VEC4_ADD_I64);
           in->dst = vector_acc_update;
           in->a = vector_acc_phi;
           in->b = reduction_term;
@@ -4128,17 +4330,65 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         in->c = -1;
         in->effects = nyr_inst_effects(in);
         nyr_clear_derived_facts(in);
-      } else {
+      } else if (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64) {
+        int64_t k = 0;
+        (void)nyr_const_i64(f, defs, in->b, &k);
+        in->op = in->op == NYIR_SHL_I64 ? NYIR_VEC8_SHL_I64 : NYIR_VEC8_SAR_I64;
+        in->imm = k;
+        in->b = -1;
+        in->flags = 0;
+        in->effects = nyr_inst_effects(in);
+        nyr_clear_derived_facts(in);
+      } else if (in->op == NYIR_CMP_I64) {
         if (in->a >= 0 && (size_t)in->a < scalar_value_count &&
             broadcast_map[in->a] >= 0)
           in->a = broadcast_map[in->a];
         if (in->b >= 0 && (size_t)in->b < scalar_value_count &&
             broadcast_map[in->b] >= 0)
           in->b = broadcast_map[in->b];
-        if (is_f64)
+        in->op = NYIR_VEC8_CMP_I64;
+        in->flags = 0;
+        in->effects = nyr_inst_effects(in);
+        nyr_clear_derived_facts(in);
+      } else if (in->op == NYIR_SELECT_I64) {
+        if (in->a >= 0 && (size_t)in->a < scalar_value_count &&
+            broadcast_map[in->a] >= 0)
+          in->a = broadcast_map[in->a];
+        if (in->b >= 0 && (size_t)in->b < scalar_value_count &&
+            broadcast_map[in->b] >= 0)
+          in->b = broadcast_map[in->b];
+        if (in->c >= 0 && (size_t)in->c < scalar_value_count &&
+            broadcast_map[in->c] >= 0)
+          in->c = broadcast_map[in->c];
+        in->op = NYIR_VEC8_SELECT_I64;
+        in->flags = 0;
+        in->effects = nyr_inst_effects(in);
+        nyr_clear_derived_facts(in);
+      } else {
+        bool ma = in->a >= 0 && (size_t)in->a < scalar_value_count &&
+                  vmask[in->a];
+        bool mb = in->b >= 0 && (size_t)in->b < scalar_value_count &&
+                  vmask[in->b];
+        if (in->a >= 0 && (size_t)in->a < scalar_value_count &&
+            broadcast_map[in->a] >= 0)
+          in->a = broadcast_map[in->a];
+        if (in->b >= 0 && (size_t)in->b < scalar_value_count &&
+            broadcast_map[in->b] >= 0)
+          in->b = broadcast_map[in->b];
+        if (in->op == NYIR_ADD_I64 && ma != mb) {
+          if (ma) {
+            int tmp = in->a;
+            in->a = in->b;
+            in->b = tmp;
+          }
+          in->op = NYIR_VEC8_SUB_I64;
+        } else if (in->op == NYIR_SUB_I64 && mb && !ma) {
+          in->op = NYIR_VEC8_ADD_I64;
+        } else if (is_f64) {
           in->op = vec_f64_bin(in->op);
-        else
+        } else {
           in->op = vec_i64_bin(in->op, vf);
+        }
         in->flags = 0;
         in->effects = nyr_inst_effects(in);
         nyr_clear_derived_facts(in);
@@ -4438,6 +4688,577 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
   return 0;
 }
 
+/*
+ * Element-wise f64 update vectorization with a runtime dependence guard.
+ *
+ * Candidate: an innermost two-block loop
+ *   header: i = phi(pre: lo, latch: i + 1); if (i < hi) goto latch else exit
+ *   latch:  x_k = load.f64 (q_k + i * 8); t = fadd/fsub/fmul ...; store.f64 (p + i * 8), t
+ * where p, q_k, lo, and hi are loop-invariant. Emits a runtime alias/trip
+ * guard (|p - q_k| >= 32 or p == q_k, n > 3) and falls back to the scalar
+ * remainder loop.
+ */
+enum { FU_MAX_LOADS = 8, FU_MAX_OPS = 32 };
+
+typedef struct {
+  nyr_func_t *f;
+  nyr_cfg_t cfg;
+  int *defs;
+  size_t header, latch, preheader;
+  int iv, lo, hi, iv_next;
+  int store_base, store_value;
+  size_t store_at;
+  int load_dst[FU_MAX_LOADS], load_base[FU_MAX_LOADS];
+  size_t load_count;
+  size_t op_at[FU_MAX_OPS];
+  size_t op_count;
+  int inv[FU_MAX_OPS * 2];
+  size_t inv_count;
+  const int64_t *done_headers;
+  size_t done_count;
+} fu_ctx_t;
+
+static bool fu_trace(void) { return getenv("NYTRIX_TRACE_F64_UPDATE_VEC"); }
+
+#define FU_REJECT(why)                                                         \
+  do {                                                                         \
+    if (fu_trace())                                                            \
+      fprintf(stderr, "f64-update-vectorize: reject header=b%zu: %s\n",        \
+              c->header, why);                                                 \
+    return false;                                                              \
+  } while (0)
+
+static const nyr_inst_t *fu_def(const fu_ctx_t *c, int v) {
+  if (v < 0 || v >= c->f->next_value || c->defs[v] < 0)
+    return NULL;
+  return &c->f->data[(size_t)c->defs[v]];
+}
+
+static bool fu_in_loop(const fu_ctx_t *c, int v) {
+  if (v < 0 || v >= c->f->next_value || c->defs[v] < 0)
+    return false; /* parameters and entry values are invariant */
+  size_t b = c->cfg.inst_block[(size_t)c->defs[v]];
+  return b == c->header || b == c->latch;
+}
+
+static int fu_resolve(const fu_ctx_t *c, int v) {
+  for (int depth = 0; depth < 16; ++depth) {
+    const nyr_inst_t *d = fu_def(c, v);
+    if (!d || d->op != NYIR_COPY || d->a < 0)
+      return v;
+    v = d->a;
+  }
+  return v;
+}
+
+static bool fu_const(const fu_ctx_t *c, int v, int64_t *out) {
+  const nyr_inst_t *d = fu_def(c, fu_resolve(c, v));
+  if (!d || d->op != NYIR_CONST_I64)
+    return false;
+  *out = d->imm;
+  return true;
+}
+
+static bool fu_is_iv_bytes(const fu_ctx_t *c, int v) {
+  const nyr_inst_t *d = fu_def(c, fu_resolve(c, v));
+  int64_t k = 0;
+  if (!d)
+    return false;
+  if (d->op == NYIR_SHL_I64)
+    return fu_resolve(c, d->a) == c->iv && fu_const(c, d->b, &k) && k == 3;
+  if (d->op == NYIR_MUL_I64)
+    return (fu_resolve(c, d->a) == c->iv && fu_const(c, d->b, &k) && k == 8) ||
+           (fu_resolve(c, d->b) == c->iv && fu_const(c, d->a, &k) && k == 8);
+  return false;
+}
+
+static int fu_address_base(const fu_ctx_t *c, int v) {
+  const nyr_inst_t *d = fu_def(c, fu_resolve(c, v));
+  if (!d || d->op != NYIR_ADD_I64)
+    return -1;
+  if (fu_is_iv_bytes(c, d->b) && !fu_in_loop(c, d->a))
+    return d->a;
+  if (fu_is_iv_bytes(c, d->a) && !fu_in_loop(c, d->b))
+    return d->b;
+  return -1;
+}
+
+static bool fu_plain_f64_memory(const nyr_inst_t *in) {
+  return in->scalar_class == NYIR_SCALAR_F64 &&
+         !(in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                        NYIR_INST_F_MEM_I32 | NYIR_INST_F_MEM_VOLATILE));
+}
+
+static int fu_load_index(const fu_ctx_t *c, int v) {
+  for (size_t k = 0; k < c->load_count; ++k)
+    if (c->load_dst[k] == v)
+      return (int)k;
+  return -1;
+}
+
+static bool fu_is_op_value(const fu_ctx_t *c, int v) {
+  for (size_t k = 0; k < c->op_count; ++k)
+    if (c->f->data[c->op_at[k]].dst == v)
+      return true;
+  return false;
+}
+
+static bool fu_operand_ok(fu_ctx_t *c, int v) {
+  v = fu_resolve(c, v);
+  if (fu_load_index(c, v) >= 0 || fu_is_op_value(c, v))
+    return true;
+  if (fu_in_loop(c, v))
+    return false;
+  const nyr_inst_t *d = fu_def(c, v);
+  if (d && d->scalar_class != NYIR_SCALAR_F64 && d->op != NYIR_CONST_F64)
+    return false;
+  if (!d)
+    return false;
+  for (size_t k = 0; k < c->inv_count; ++k)
+    if (c->inv[k] == v)
+      return true;
+  if (c->inv_count >= sizeof(c->inv) / sizeof(c->inv[0]))
+    return false;
+  c->inv[c->inv_count++] = v;
+  return true;
+}
+
+static bool fu_analyse(fu_ctx_t *c, size_t latch, size_t header) {
+  nyr_func_t *f = c->f;
+  const nyr_cfg_t *cfg = &c->cfg;
+  c->header = header;
+  c->latch = latch;
+  c->load_count = c->op_count = c->inv_count = 0;
+  c->store_base = c->store_value = -1;
+  c->store_at = SIZE_MAX;
+  if (latch == header)
+    FU_REJECT("single-block loop");
+  if (cfg->block_label[header] >= 0) {
+    for (size_t d = 0; d < c->done_count; ++d)
+      if (c->done_headers[d] == cfg->block_label[header])
+        FU_REJECT("already transformed header");
+  }
+  if (cfg->succ_offsets[latch + 1] - cfg->succ_offsets[latch] != 1 ||
+      cfg->succ_blocks[cfg->succ_offsets[latch]] != header)
+    FU_REJECT("latch is not a single backedge block");
+  if (cfg->pred_offsets[latch + 1] - cfg->pred_offsets[latch] != 1 ||
+      cfg->pred_blocks[cfg->pred_offsets[latch]] != header)
+    FU_REJECT("latch has another predecessor");
+  size_t preheader = SIZE_MAX;
+  for (size_t e = cfg->pred_offsets[header]; e < cfg->pred_offsets[header + 1];
+       ++e) {
+    size_t p = cfg->pred_blocks[e];
+    if (p == latch)
+      continue;
+    if (preheader != SIZE_MAX)
+      FU_REJECT("several outside predecessors");
+    preheader = p;
+  }
+  if (preheader == SIZE_MAX || cfg->block_label[preheader] < 0 ||
+      cfg->block_label[header] < 0 || cfg->block_label[latch] < 0)
+    FU_REJECT("unlabeled preheader/header/latch");
+  c->preheader = preheader;
+
+  c->iv = -1;
+  int cond = -1;
+  bool branch_to_latch = false;
+  for (size_t i = cfg->block_start[header]; i < cfg->block_end[header]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_LABEL:
+    case NYIR_NOP:
+      break;
+    case NYIR_PHI: {
+      if (c->iv >= 0 || in->phi_incoming_len != 2)
+        FU_REJECT("header PHI is not a lone induction");
+      c->iv = in->dst;
+      for (size_t k = 0; k < 2; ++k) {
+        if (in->phi_incoming[k].predecessor_label == cfg->block_label[latch])
+          c->iv_next = in->phi_incoming[k].value;
+        else if (in->phi_incoming[k].predecessor_label ==
+                 cfg->block_label[preheader])
+          c->lo = in->phi_incoming[k].value;
+        else
+          FU_REJECT("induction PHI edge mismatch");
+      }
+      break;
+    }
+    case NYIR_COPY:
+      if (fu_resolve(c, in->a) != c->iv)
+        FU_REJECT("header copy of a non-induction value");
+      break;
+    case NYIR_CMP_I64:
+      if (cond >= 0 || in->cmp != NYIR_CMP_LT ||
+          fu_resolve(c, in->a) != c->iv || fu_in_loop(c, in->b))
+        FU_REJECT("header compare is not i < invariant");
+      cond = in->dst;
+      c->hi = in->b;
+      break;
+    case NYIR_BR_IF:
+      if (cond < 0 || fu_resolve(c, in->a) != cond ||
+          in->imm != cfg->block_label[latch])
+        FU_REJECT("header branch does not enter the latch");
+      branch_to_latch = true;
+      break;
+    case NYIR_BR:
+      if (!branch_to_latch)
+        FU_REJECT("header branch shape");
+      break;
+    default:
+      FU_REJECT("header has other work");
+    }
+  }
+  if (c->iv < 0 || !branch_to_latch || c->lo < 0 || c->hi < 0)
+    FU_REJECT("no canonical header");
+  {
+    int lo_r = fu_resolve(c, c->lo);
+    const nyr_inst_t *lod = fu_def(c, lo_r);
+    if (lod && lod->op == NYIR_PHI &&
+        c->cfg.inst_block[(size_t)c->defs[lo_r]] == preheader)
+      FU_REJECT("preheader resume phi");
+  }
+  const nyr_inst_t *next = fu_def(c, c->iv_next);
+  int64_t step = 0;
+  if (!next || next->op != NYIR_ADD_I64 ||
+      c->cfg.inst_block[(size_t)c->defs[c->iv_next]] != latch ||
+      !((fu_resolve(c, next->a) == c->iv && fu_const(c, next->b, &step)) ||
+        (fu_resolve(c, next->b) == c->iv && fu_const(c, next->a, &step))) ||
+      step != 1)
+    FU_REJECT("induction step is not +1");
+
+  for (size_t i = cfg->block_start[latch]; i < cfg->block_end[latch]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_LABEL:
+    case NYIR_NOP:
+    case NYIR_CONST_I64:
+      break;
+    case NYIR_COPY:
+    case NYIR_SHL_I64:
+    case NYIR_MUL_I64:
+      if (in->op == NYIR_COPY && fu_resolve(c, in->a) != c->iv)
+        FU_REJECT("latch copy of a non-induction value");
+      if (in->op != NYIR_COPY && !fu_is_iv_bytes(c, in->dst))
+        FU_REJECT("latch arithmetic is not an induction byte offset");
+      break;
+    case NYIR_ADD_I64:
+      if (in->dst == c->iv_next)
+        break;
+      if (fu_address_base(c, in->dst) < 0)
+        FU_REJECT("latch add is not base + i * 8");
+      break;
+    case NYIR_LOAD_I64:
+      if (!fu_plain_f64_memory(in) || c->load_count >= FU_MAX_LOADS)
+        FU_REJECT("load is not a plain f64 load");
+      c->load_base[c->load_count] = fu_address_base(c, in->a);
+      if (c->load_base[c->load_count] < 0)
+        FU_REJECT("load address is not invariant base + i * 8");
+      c->load_dst[c->load_count++] = in->dst;
+      break;
+    case NYIR_ADD_F64:
+    case NYIR_SUB_F64:
+    case NYIR_MUL_F64:
+      if (c->op_count >= FU_MAX_OPS || !fu_operand_ok(c, in->a) ||
+          !fu_operand_ok(c, in->b))
+        FU_REJECT("f64 op operand is not vectorizable");
+      c->op_at[c->op_count++] = i;
+      break;
+    case NYIR_STORE_I64:
+      if (c->store_at != SIZE_MAX || !fu_plain_f64_memory(in))
+        FU_REJECT("store is not the lone plain f64 store");
+      c->store_base = fu_address_base(c, in->a);
+      if (c->store_base < 0 || !fu_operand_ok(c, in->c))
+        FU_REJECT("store address/value shape");
+      c->store_value = fu_resolve(c, in->c);
+      c->store_at = i;
+      break;
+    case NYIR_BR:
+      if (in->imm != cfg->block_label[header])
+        FU_REJECT("latch branch target");
+      break;
+    default:
+      FU_REJECT("latch has unsupported work");
+    }
+  }
+  if (c->store_at == SIZE_MAX || c->load_count == 0)
+    FU_REJECT("no load/store stream");
+  for (size_t i = 0; i < f->len; ++i) {
+    size_t b = cfg->inst_block[i];
+    if (b == c->latch)
+      continue;
+    const nyr_inst_t *in = &f->data[i];
+    const int ops[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
+    for (size_t k = 0; k < 6; ++k)
+      if (ops[k] >= 0 && ops[k] < f->next_value && c->defs[ops[k]] >= 0 &&
+          cfg->inst_block[(size_t)c->defs[ops[k]]] == c->latch &&
+          ops[k] != c->iv_next)
+        FU_REJECT("latch value escapes");
+  }
+  return true;
+}
+
+static int fu_emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c2,
+                   int64_t imm, nyr_cmp_t cmp, nyr_scalar_class_t cls) {
+  nyr_inst_t in = {.op = op, .dst = -1, .a = a, .b = b, .c = c2, .d = -1,
+                   .e = -1, .f = -1, .imm = imm, .cmp = cmp,
+                   .scalar_class = cls};
+  return nyr_ir_emit(f, in);
+}
+
+static int fu_i64(nyr_func_t *f, nyr_op_t op, int a, int b, nyr_cmp_t cmp) {
+  return fu_emit(f, op, a, b, -1, 0, cmp, NYIR_SCALAR_I64_RAW);
+}
+
+static int fu_const_value(nyr_func_t *f, int64_t k) {
+  return fu_emit(f, NYIR_CONST_I64, -1, -1, -1, k, NYIR_CMP_EQ,
+                 NYIR_SCALAR_I64_RAW);
+}
+
+static bool fu_ctl(nyr_func_t *f, nyr_op_t op, int a, int64_t label) {
+  nyr_inst_t in = {.op = op, .dst = -1, .a = a, .b = -1, .c = -1, .d = -1,
+                   .e = -1, .f = -1, .imm = label};
+  size_t before = f->len;
+  nyr_ir_emit(f, in);
+  return f->len == before + 1;
+}
+
+static int fu_phi(nyr_func_t *f, int64_t l0, int v0, int64_t l1, int v1,
+                  size_t *at) {
+  nyr_phi_incoming_t *inc = malloc(2 * sizeof(*inc));
+  if (!inc)
+    return -1;
+  inc[0] = (nyr_phi_incoming_t){.predecessor_label = l0, .value = v0};
+  inc[1] = (nyr_phi_incoming_t){.predecessor_label = l1, .value = v1};
+  nyr_inst_t phi = {.op = NYIR_PHI, .dst = -1, .a = -1, .b = -1, .c = -1,
+                    .d = -1, .e = -1, .f = -1, .phi_incoming = inc,
+                    .phi_incoming_len = 2,
+                    .scalar_class = NYIR_SCALAR_I64_RAW};
+  if (at)
+    *at = f->len;
+  return nyr_ir_emit(f, phi);
+}
+
+static nyr_op_t fu_vec_op(nyr_op_t op) {
+  return op == NYIR_ADD_F64   ? NYIR_VEC4_ADD_F64
+         : op == NYIR_SUB_F64 ? NYIR_VEC4_SUB_F64
+                              : NYIR_VEC4_MUL_F64;
+}
+
+static bool fu_transform(fu_ctx_t *c) {
+  nyr_func_t *f = c->f;
+  const nyr_cfg_t *cfg = &c->cfg;
+  int64_t base = nyr_fresh_label(f);
+  if (base < 0)
+    return false;
+  const int64_t vp = base, vh = base + 1, vb = base + 2, vx = base + 3,
+                vps = base + 4, vhx = base + 5;
+  const int64_t pre_label = cfg->block_label[c->preheader];
+  const int64_t header_label = cfg->block_label[c->header];
+  int orig_values = f->next_value;
+  int *vmap = malloc((size_t)orig_values * sizeof(*vmap));
+  if (!vmap)
+    return false;
+  for (int v = 0; v < orig_values; ++v)
+    vmap[v] = -1;
+  bool ok = true;
+
+  ok = fu_ctl(f, NYIR_LABEL, -1, vp);
+  int n = fu_i64(f, NYIR_SUB_I64, c->hi, c->lo, NYIR_CMP_EQ);
+  int guard = fu_i64(f, NYIR_CMP_I64, n, fu_const_value(f, 3), NYIR_CMP_GT);
+  int store_base = fu_resolve(c, c->store_base);
+  for (size_t k = 0; ok && k < c->load_count; ++k) {
+    int q = fu_resolve(c, c->load_base[k]);
+    if (q == store_base)
+      continue;
+    int d = fu_i64(f, NYIR_SUB_I64, store_base, q, NYIR_CMP_EQ);
+    int same = fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, 0), NYIR_CMP_EQ);
+    int far_up =
+        fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, 31), NYIR_CMP_GT);
+    int far_down =
+        fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, -31), NYIR_CMP_LT);
+    int any = fu_i64(f, NYIR_OR_I64,
+                     fu_i64(f, NYIR_OR_I64, same, far_up, NYIR_CMP_EQ),
+                     far_down, NYIR_CMP_EQ);
+    guard = fu_i64(f, NYIR_AND_I64, guard, any, NYIR_CMP_EQ);
+  }
+  int vend = fu_i64(f, NYIR_ADD_I64, c->lo,
+                    fu_i64(f, NYIR_AND_I64, n, fu_const_value(f, -4),
+                           NYIR_CMP_EQ),
+                    NYIR_CMP_EQ);
+  for (size_t k = 0; ok && k < c->inv_count; ++k) {
+    int v = c->inv[k];
+    if (v >= orig_values)
+      continue;
+    vmap[v] = fu_emit(f, NYIR_VEC4_SET1_F64, v, -1, -1, 0, NYIR_CMP_EQ,
+                      NYIR_SCALAR_UNKNOWN);
+    ok = vmap[v] >= 0;
+  }
+  ok = ok && fu_ctl(f, NYIR_BR_IF, guard, vh) && fu_ctl(f, NYIR_BR, -1, vps);
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vps) && fu_ctl(f, NYIR_BR, -1, vx);
+
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vh);
+  size_t viv_at = SIZE_MAX;
+  int viv = ok ? fu_phi(f, vp, c->lo, vb, -1, &viv_at) : -1;
+  int vcond = fu_i64(f, NYIR_CMP_I64, viv, vend, NYIR_CMP_LT);
+  ok = ok && viv >= 0 && fu_ctl(f, NYIR_BR_IF, vcond, vb) &&
+       fu_ctl(f, NYIR_BR, -1, vhx);
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vhx) && fu_ctl(f, NYIR_BR, -1, vx);
+
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vb);
+  int bytes = fu_i64(f, NYIR_SHL_I64, viv, fu_const_value(f, 3), NYIR_CMP_EQ);
+  for (size_t k = 0; ok && k < c->load_count; ++k) {
+    int addr = fu_i64(f, NYIR_ADD_I64, c->load_base[k], bytes, NYIR_CMP_EQ);
+    vmap[c->load_dst[k]] = fu_emit(f, NYIR_VEC4_LOAD_F64, addr, -1, -1, 0,
+                                   NYIR_CMP_EQ, NYIR_SCALAR_F64);
+    ok = addr >= 0 && vmap[c->load_dst[k]] >= 0;
+  }
+  for (size_t k = 0; ok && k < c->op_count; ++k) {
+    nyr_inst_t in = f->data[c->op_at[k]];
+    int a = fu_resolve(c, in.a), b = fu_resolve(c, in.b);
+    if (a >= orig_values || b >= orig_values || vmap[a] < 0 || vmap[b] < 0) {
+      ok = false;
+      break;
+    }
+    vmap[in.dst] = fu_emit(f, fu_vec_op(in.op), vmap[a], vmap[b], -1, 0,
+                           NYIR_CMP_EQ, NYIR_SCALAR_F64);
+    ok = vmap[in.dst] >= 0;
+  }
+  if (ok) {
+    int addr = fu_i64(f, NYIR_ADD_I64, c->store_base, bytes, NYIR_CMP_EQ);
+    int value = c->store_value < orig_values ? vmap[c->store_value] : -1;
+    nyr_inst_t st = {.op = NYIR_VEC4_STORE_F64, .dst = -1, .a = addr,
+                     .b = value, .c = -1, .d = -1, .e = -1, .f = -1,
+                     .scalar_class = NYIR_SCALAR_F64};
+    size_t before = f->len;
+    ok = addr >= 0 && value >= 0;
+    if (ok) {
+      nyr_ir_emit(f, st);
+      ok = f->len == before + 1;
+      if (ok)
+        f->data[f->len - 1].dst = -1;
+    }
+  }
+  int viv_next = fu_i64(f, NYIR_ADD_I64, viv, fu_const_value(f, 4),
+                        NYIR_CMP_EQ);
+  ok = ok && viv_next >= 0 && fu_ctl(f, NYIR_BR, -1, vh);
+  if (ok)
+    f->data[viv_at].phi_incoming[1].value = viv_next;
+
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vx);
+  int resume = ok ? fu_phi(f, vps, c->lo, vhx, viv, NULL) : -1;
+  ok = ok && resume >= 0 && fu_ctl(f, NYIR_BR, -1, header_label);
+  free(vmap);
+  if (!ok)
+    return false;
+
+  for (size_t i = cfg->block_start[c->header]; i < cfg->block_end[c->header];
+       ++i) {
+    nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_PHI)
+      continue;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].predecessor_label == pre_label) {
+        in->phi_incoming[k].predecessor_label = vx;
+        in->phi_incoming[k].value = resume;
+      }
+  }
+  bool retargeted = false, explicit_branch = false;
+  for (size_t i = cfg->block_start[c->preheader];
+       i < cfg->block_end[c->preheader]; ++i) {
+    nyr_inst_t *in = &f->data[i];
+    if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) &&
+        in->imm == header_label) {
+      in->imm = vp;
+      retargeted = true;
+    }
+    if (in->op == NYIR_BR)
+      explicit_branch = true;
+  }
+  if (!explicit_branch) {
+    size_t at = cfg->block_end[c->preheader];
+    if (!nir_ensure_inst_space(f, 1))
+      return false;
+    memmove(&f->data[at + 1], &f->data[at], (f->len - at) * sizeof(*f->data));
+    f->len += 1;
+    f->data[at] = (nyr_inst_t){.op = NYIR_BR, .dst = -1, .a = -1, .b = -1,
+                               .c = -1, .d = -1, .e = -1, .f = -1, .imm = vp};
+    f->data[at].effects = nyr_inst_effects(&f->data[at]);
+    retargeted = true;
+  }
+  return retargeted;
+}
+
+static int fu_try(nyr_func_t *f, int64_t *done_headers, size_t *done_count,
+                  size_t done_cap) {
+  fu_ctx_t c = {.f = f, .done_headers = done_headers, .done_count = *done_count};
+  if (f->next_value <= 0 || !nyr_cfg_build(f, &c.cfg))
+    return 0;
+  c.defs = nyr_build_defs(f);
+  if (!c.defs) {
+    nyr_cfg_free(&c.cfg);
+    return -1;
+  }
+  int result = 0;
+  for (size_t latch = 0; latch < c.cfg.block_count && result == 0; ++latch) {
+    for (size_t e = c.cfg.succ_offsets[latch];
+         e < c.cfg.succ_offsets[latch + 1] && result == 0; ++e) {
+      if (!c.cfg.backedge_edges[e] ||
+          !fu_analyse(&c, latch, c.cfg.succ_blocks[e]))
+        continue;
+      int64_t hdr_label = c.cfg.block_label[c.header];
+      nyr_func_t work = {0};
+      if (!nyr_ir_func_clone(f, &work)) {
+        result = -1;
+        break;
+      }
+      c.f = &work;
+      bool done = fu_transform(&c);
+      c.f = f;
+      char err[256] = {0};
+      if (done && nyr_ir_verify(&work, err, sizeof(err))) {
+        work.vectorized_loops++;
+        nyr_func_replace(f, &work);
+        if (hdr_label >= 0 && *done_count < done_cap)
+          done_headers[(*done_count)++] = hdr_label;
+        result = 1;
+      } else {
+        if (fu_trace()) {
+          fprintf(stderr, "f64-update-vectorize: rejected (%s)\n",
+                  done ? err : "transform");
+          if (getenv("NYTRIX_TRACE_F64_UPDATE_VEC_DUMP"))
+            nyr_dump(stderr, &work, "f64-update-rejected");
+        }
+        nyr_ir_func_free(&work);
+      }
+    }
+  }
+  free(c.defs);
+  nyr_cfg_free(&c.cfg);
+  return result;
+}
+
+static bool nyr_loop_vectorize_f64_update(nyr_func_t *f) {
+  const char *on = getenv("NYTRIX_F64_UPDATE_VECTORIZE");
+  if (on && (strcmp(on, "0") == 0 || strcmp(on, "off") == 0))
+    return true;
+  if (!f || f->len == 0 || !nyr_has_loop(f))
+    return true;
+  int64_t done_headers[8];
+  size_t done_count = 0;
+  for (int n = 0; n < 8; ++n) {
+    int r = fu_try(f, done_headers, &done_count, 8);
+    if (r < 0)
+      return false;
+    if (r == 0)
+      break;
+    if (fu_trace())
+      fprintf(stderr, "f64-update-vectorize: widened a loop (len=%zu)\n",
+              f->len);
+  }
+  return true;
+}
+#undef FU_REJECT
+
 static bool nyr_loop_vectorize_impl(nyr_func_t *f,
                                     bool supports_vec8_i64_broadcast) {
   if (!f || f->len < 8 || f->next_value <= 0)
@@ -4450,8 +5271,11 @@ static bool nyr_loop_vectorize_impl(nyr_func_t *f,
    * local promotion into a JIT compilation failure.  Smaller hot kernels still
    * go through the normal legality and profitability checks below.
    */
-  if (f->len > 640)
+  if (f->len > 640) {
+    if (supports_vec8_i64_broadcast && f->len <= 4096)
+      return nyr_loop_vectorize_f64_update(f);
     return true;
+  }
   if (nyr_vectorizer_no_lexical_backedge(f))
     return true;
   nyr_func_t work = {0};
@@ -4480,6 +5304,8 @@ static bool nyr_loop_vectorize_impl(nyr_func_t *f,
     f->vectorize_rejected_loops = work.vectorize_rejected_loops;
     f->vectorized_loops = work.vectorized_loops;
     nyr_ir_func_free(&work);
+    if (supports_vec8_i64_broadcast && f->len <= 4096)
+      return nyr_loop_vectorize_f64_update(f);
     return true;
   }
   char err[256] = {0};
@@ -4492,6 +5318,9 @@ static bool nyr_loop_vectorize_impl(nyr_func_t *f,
     return true; /* reject the speculative transform, preserve input */
   }
   nyr_func_replace(f, &work);
+  if (supports_vec8_i64_broadcast && f->len <= 4096 &&
+      !nyr_loop_vectorize_f64_update(f))
+    return false;
   const char *dump_env = getenv("NY_TRACE_VECTORIZE_DUMP");
   if (dump_env && dump_env[0] && ny_dbg_function_selected(NULL))
     nyr_dump(stderr, f, "post-loop-vectorize");

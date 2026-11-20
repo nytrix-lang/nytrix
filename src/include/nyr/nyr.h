@@ -43,6 +43,7 @@ typedef enum {
 
 enum {
   NYR_OPT_DISABLE_VECTORIZATION = 1u << 0,
+  NYR_OPT_AVX2_VECTORIZE = 1u << 1,
 };
 
 /* Capabilities of this public Nyr API on a reported target. */

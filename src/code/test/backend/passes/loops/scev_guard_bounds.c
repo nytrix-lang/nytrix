@@ -7,7 +7,7 @@
  * pin that proof, and pin the shapes where it must NOT fire so a dropped guard
  * cannot follow from a misread comparison.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int failures;

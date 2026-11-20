@@ -1,5 +1,6 @@
 file(GLOB_RECURSE NYR_BACKEND_TEST_DRIVERS CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_LIST_DIR}/*.c")
+list(APPEND NYR_BACKEND_TEST_DRIVERS ${NYR_BACKEND_VERIFY_DRIVERS})
 list(SORT NYR_BACKEND_TEST_DRIVERS)
 
 # Acceptance kernel baselines and the standalone scaling benchmarks are
@@ -8,6 +9,9 @@ list(SORT NYR_BACKEND_TEST_DRIVERS)
 list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX
   ".*/core/(backend_(monolithic_)?scaling|floating-kernel|integer-kernel)\\.c$")
 list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX ".*/gcfuzz\\.c$")
+
+# CTest runs this standalone even when LLVM is disabled.
+list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX ".*/lower/jit_layout\\.c$")
 
 # Filter out Linux-specific test files that require headers not available on Windows
 # These tests use #if defined(__linux__) && defined(__x86_64__) guards but their
@@ -27,7 +31,11 @@ set(NYR_BACKEND_TEST_ENTRIES "")
 set(NYR_BACKEND_TEST_DIR "${CMAKE_BINARY_DIR}/generated/nyr_backend_tests")
 file(MAKE_DIRECTORY "${NYR_BACKEND_TEST_DIR}")
 foreach(_driver IN LISTS NYR_BACKEND_TEST_DRIVERS)
-  file(RELATIVE_PATH _test_name "${CMAKE_CURRENT_LIST_DIR}" "${_driver}")
+  if(_driver IN_LIST NYR_BACKEND_VERIFY_DRIVERS)
+    file(RELATIVE_PATH _test_name "${NYTRIX_ROOT}/src/code/backend" "${_driver}")
+  else()
+    file(RELATIVE_PATH _test_name "${CMAKE_CURRENT_LIST_DIR}" "${_driver}")
+  endif()
   string(REGEX REPLACE "\\.c$" "" _test_name "${_test_name}")
   get_filename_component(_test_basename "${_driver}" NAME_WE)
   string(MAKE_C_IDENTIFIER "${_test_name}" _test_id)

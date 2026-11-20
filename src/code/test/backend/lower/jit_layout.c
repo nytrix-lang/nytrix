@@ -1,4 +1,7 @@
-#include "code/backend/lower/jit_layout.h"
+/*
+ * Checks native JIT layout bounds and relocation displacements.
+ */
+#include "code/backend/lower/jit.h"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif

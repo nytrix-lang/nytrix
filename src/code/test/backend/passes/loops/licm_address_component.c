@@ -5,7 +5,7 @@
  * float/vector accesses keep their whole address chain in the loop.
  */
 #include "opt.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 
 static bool build_address_loop(nyr_func_t *f, bool float_access) {
   nyr_opt_begin(f);

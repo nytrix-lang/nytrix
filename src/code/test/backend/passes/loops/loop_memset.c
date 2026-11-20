@@ -2,7 +2,7 @@
  * A counted zero-fill may become one raw memset only when its memory accesses
  * cannot trap partway through the loop. Keep byte and i64 widths distinct.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 #include <inttypes.h>

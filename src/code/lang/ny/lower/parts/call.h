@@ -2137,28 +2137,6 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
                                    NYIR_SCALAR_OBJECT);
     }
   }
-  if (e->as.call.callee && e->as.call.callee->kind == NY_E_MEMBER &&
-      e->as.call.callee->as.member.name &&
-      (strcmp(e->as.call.callee->as.member.name, "sub") == 0 ||
-       strcmp(e->as.call.callee->as.member.name, "remove") == 0 ||
-       strcmp(e->as.call.callee->as.member.name, "delete") == 0) &&
-      e->as.call.callee->as.member.target && e->as.call.args.len == 1 &&
-      nyr_expr_is_set(b, e->as.call.callee->as.member.target)) {
-    int set_value = nyr_lower_expr(b, e->as.call.callee->as.member.target);
-    int key =
-        set_value < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[0].val);
-    if (set_value < 0 || key < 0)
-      return -1;
-    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
-      ny_dbg_heuristic_event("native-abi",
-                             "function=%s call=%s receiver=set "
-                             "decision=use-raw-set-remove-runtime-entry",
-                             b->current_fn_name ? b->current_fn_name
-                                                : "<entry>",
-                             e->as.call.callee->as.member.name);
-    return nyr_emit_runtime_call(b, "rt_set_remove_raw", set_value, key, -1, 2,
-                                 0);
-  }
   if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT &&
       e->as.call.callee->as.ident.name && e->as.call.args.len == 2 &&
       nyr_expr_is_set(b, e->as.call.args.data[0].val)) {
@@ -3312,19 +3290,6 @@ ordinary_call:
     leaf = "";
   ny_native_leaf_kind_t leaf_kind = ny_native_leaf_kind(leaf);
   const char *dot = name ? strrchr(name, '.') : NULL;
-
-  if (canon_leaf && strcmp(canon_leaf, "sub") == 0 &&
-      e->as.call.args.len == 2 && !e->as.call.args.data[0].name &&
-      !e->as.call.args.data[1].name) {
-    const expr_t *target = e->as.call.args.data[0].val;
-    if (nyr_expr_is_list(b, target) && !nyr_expr_is_any(b, target)) {
-      int set = nyr_lower_expr(b, target);
-      int key = nyr_lower_expr(b, e->as.call.args.data[1].val);
-      if (set < 0 || key < 0)
-        return -1;
-      return nyr_emit_runtime_call(b, "rt_set_remove_raw", set, key, -1, 2, 0);
-    }
-  }
 
   /* `set(dict, key, value)` is the generic reflective setter.  Once the
    * receiver is known to be a native dictionary, keep the call on the same
@@ -13757,6 +13722,12 @@ ordinary_call:
         (!param_type && (param_rep == NY_SEM_REP_TAGGED_DYNAMIC ||
                          param_rep == NY_SEM_REP_UNRESOLVED)) ||
         untyped_dynamic_scalar;
+    bool core_set_sub_receiver =
+        i == 0 && name &&
+        (strcmp(name, "set.sub") == 0 || strcmp(name, "core.set.sub") == 0) &&
+        nyr_expr_is_set(b, arg_expr);
+    if (core_set_sub_receiver)
+      callee_is_any = true;
     if (ny_native_type_name_is_int(param_type) ||
         param_rep == NY_SEM_REP_RAW_INT)
       callee_is_any = false;
@@ -13857,6 +13828,13 @@ ordinary_call:
        */
       int length = nyr_take_dyn_fact(b, arg, NYR_FACT_DYN_STR_LEN);
       int tag = nyr_take_dyn_fact(b, arg, NYR_FACT_DYN_TAG);
+      if (core_set_sub_receiver) {
+        if (length < 0)
+          length =
+              nyr_emit_runtime_call(b, "rt_set_len_raw", arg, -1, -1, 1, 0);
+        if (tag < 0)
+          tag = nyr_emit_const(b, TAG_SET);
+      }
       /* The argument's BigInt ABI proof already preserved its heap handle
        * above. Numeric objects have no sequence length and a fixed runtime
        * tag, so expanded any formals need no runtime metadata probes. */

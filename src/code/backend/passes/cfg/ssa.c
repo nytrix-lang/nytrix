@@ -565,6 +565,7 @@ bool nyr_prune_phis(nyr_func_t *f) {
       continue;
     size_t block = cfg.inst_block[i];
     size_t out = 0;
+    size_t incoming_pred = 0;
     for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
       int64_t label = phi->phi_incoming[k].predecessor_label;
       bool live = false;
@@ -573,6 +574,7 @@ bool nyr_prune_phis(nyr_func_t *f) {
         size_t pred = cfg.pred_blocks[e];
         if (cfg.block_label[pred] == label) {
           live = true;
+          incoming_pred = pred;
           break;
         }
       }
@@ -583,7 +585,11 @@ bool nyr_prune_phis(nyr_func_t *f) {
       nyr_cfg_free(&cfg);
       return false;
     }
-    if (out == 1) {
+    /*
+     * A PHI may read an incoming definition from a later block in the
+     * instruction stream. A plain copy requires a preceding definition.
+     */
+    if (out == 1 && incoming_pred < block) {
       int src = phi->phi_incoming[0].value;
       nir_make_copy(phi, src);
       continue;

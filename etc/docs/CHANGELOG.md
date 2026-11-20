@@ -25,6 +25,9 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 ### NYC C compiler
 
+- Fixed the NYIR verifier to accept an integer select as another select's
+  condition when both arms produce boolean values. Four Linux translation
+  units now compile through the verifier and emit native dependency files.
 - SysV x86-64 `va_arg` now reads supported two-eightbyte and memory-class
   aggregates. An aggregate that does not fit in the remaining registers
   comes entirely from the stack, leaving both register cursors unchanged.

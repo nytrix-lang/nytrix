@@ -186,6 +186,12 @@ typedef enum {
    * These volatile accesses never materialize a spillable guard pointer. */
   NYIR_STACK_GUARD_LOAD,
   NYIR_STACK_GUARD_STORE,
+  /* Four logical i64 shifts left by the immediate count (0..63), AVX2. */
+  NYIR_VEC8_SHL_I64,
+  /* Four signed i64 comparisons (in->cmp) producing -1/0 masks per lane, AVX2. */
+  NYIR_VEC8_CMP_I64,
+  /* Four-lane i64 select: dst[k] = (a[k] < 0) ? b[k] : c[k] (vblendvpd), AVX2. */
+  NYIR_VEC8_SELECT_I64,
   NYIR_OP_COUNT,
 } nyr_op_t;
 

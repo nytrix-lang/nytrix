@@ -466,6 +466,9 @@ static bool nir_select_condition_is_boolean(const nyr_func_t *f, int value,
     if (def->op == NYIR_OR_I64 || def->op == NYIR_XOR_I64)
       return nir_select_condition_is_boolean(f, def->a, i, depth + 1) &&
              nir_select_condition_is_boolean(f, def->b, i, depth + 1);
+    if (def->op == NYIR_SELECT_I64)
+      return nir_select_condition_is_boolean(f, def->b, i, depth + 1) &&
+             nir_select_condition_is_boolean(f, def->c, i, depth + 1);
     return def->op == NYIR_COPY &&
            nir_select_condition_is_boolean(f, def->a, i, depth + 1);
   }
@@ -1391,6 +1394,7 @@ static bool nir_verify_dominance(const nyr_func_t *f, char *err,
     case NYIR_VEC4_SET1_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
@@ -1415,6 +1419,7 @@ static bool nir_verify_dominance(const nyr_func_t *f, char *err,
       CHECK_DOMINATES(in->b >= 0 ? in->b : in->c);
       break;
     case NYIR_VEC4_FMA_F64:
+    case NYIR_VEC8_SELECT_I64:
     case NYIR_SELECT_I64:
       CHECK_DOMINATES(in->a);
       CHECK_DOMINATES(in->b);
@@ -2939,6 +2944,7 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
     case NYIR_VEC4_SET1_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
       if (in->imm < 0 || in->imm > 63) {
         free(defined);
         return nir_verify_inst_err(
@@ -3143,6 +3149,7 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
       break;
     case NYIR_VEC4_FMA_F64:
     case NYIR_VEC8_FMA_F32:
+    case NYIR_VEC8_SELECT_I64:
       if (in->dst < 0 || !nir_value_defined(f, defined, in->a) ||
           !nir_value_defined(f, defined, in->b) ||
           !nir_value_defined(f, defined, in->c)) {

@@ -10,7 +10,7 @@
  * the ranges do not decide `init < limit`, so no symbolic trip exists and the
  * check stays in the body.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include "opt.h"
 

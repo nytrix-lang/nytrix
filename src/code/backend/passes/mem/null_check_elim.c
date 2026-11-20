@@ -13,7 +13,7 @@
  *   redundancy elimination for null checks.
  */
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <stdio.h>
 #include <stdlib.h>

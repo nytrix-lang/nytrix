@@ -6,7 +6,7 @@
  * (100+0+1+2 = 103), loop2 adds twice its index (100+0+2+4 = 106), and
  * the exit sums the two header phis.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int root_copy(const nyr_func_t *f, const int *defs, int value) {

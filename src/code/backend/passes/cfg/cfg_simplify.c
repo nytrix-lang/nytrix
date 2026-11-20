@@ -465,6 +465,107 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
     }
   }
 
+  /*
+   * Merge single-predecessor fallthrough blocks (`BR L; LABEL L` where L has
+   * no other predecessors and no PHIs). If-conversion leaves trivial
+   * unconditional join blocks inside loop bodies; merging them collapses the
+   * loop body back into a single block for vectorization and regalloc.
+   */
+  for (int pass = 0; pass < 8; ++pass) {
+    nyr_cfg_t mcfg = {0};
+    if (!nyr_cfg_build(f, &mcfg))
+      break;
+    bool merged = false;
+    for (size_t b = 0; b + 1 < mcfg.block_count; ++b) {
+      if (!mcfg.reachable[b])
+        continue;
+      size_t succ_n = mcfg.succ_offsets[b + 1] - mcfg.succ_offsets[b];
+      if (succ_n != 1 || mcfg.succ_blocks[mcfg.succ_offsets[b]] != b + 1)
+        continue;
+      size_t s = b + 1;
+      if (mcfg.pred_offsets[s + 1] - mcfg.pred_offsets[s] != 1 ||
+          mcfg.pred_blocks[mcfg.pred_offsets[s]] != b)
+        continue;
+      int64_t s_label = mcfg.block_label[s];
+      if (s_label < 0)
+        continue;
+      /* Target block must begin with LABEL s_label and contain no PHIs. */
+      size_t s_start = mcfg.block_start[s];
+      size_t s_end = mcfg.block_end[s];
+      if (s_start >= s_end || f->data[s_start].op != NYIR_LABEL ||
+          f->data[s_start].imm != s_label)
+        continue;
+      size_t s_first = nir_next_non_nop(f, s_start + 1);
+      if (s_first < s_end && f->data[s_first].op == NYIR_PHI)
+        continue;
+      /* Check block b ends with an unconditional BR s_label. */
+      size_t b_end = nyr_block_last_non_nop(f, &mcfg, b);
+      if (b_end <= mcfg.block_start[b])
+        continue;
+      size_t br_pc = b_end - 1;
+      if (f->data[br_pc].op != NYIR_BR || f->data[br_pc].imm != s_label)
+        continue;
+      /* Ensure no other BR/BR_IF anywhere targets s_label (even dead ones). */
+      bool other_ref = false;
+      bool phi_ref = false;
+      for (size_t k = 0; k < f->len; ++k) {
+        const nyr_inst_t *ki = &f->data[k];
+        if (k != br_pc && (ki->op == NYIR_BR || ki->op == NYIR_BR_IF) &&
+            ki->imm == s_label) {
+          other_ref = true;
+          break;
+        }
+        if (ki->op == NYIR_PHI && ki->phi_incoming) {
+          for (size_t pi = 0; pi < ki->phi_incoming_len; ++pi)
+            if (ki->phi_incoming[pi].predecessor_label == s_label) {
+              phi_ref = true;
+              break;
+            }
+        }
+      }
+      if (other_ref)
+        continue;
+      int64_t b_label = mcfg.block_label[b];
+      if (phi_ref && b_label < 0)
+        continue;
+      if (phi_ref) {
+        /* Refuse if any PHI referencing s_label already has b_label. */
+        bool dup = false;
+        for (size_t k = 0; k < f->len && !dup; ++k) {
+          const nyr_inst_t *ki = &f->data[k];
+          if (ki->op != NYIR_PHI || !ki->phi_incoming)
+            continue;
+          bool has_s = false, has_b = false;
+          for (size_t pi = 0; pi < ki->phi_incoming_len; ++pi) {
+            if (ki->phi_incoming[pi].predecessor_label == s_label)
+              has_s = true;
+            if (ki->phi_incoming[pi].predecessor_label == b_label)
+              has_b = true;
+          }
+          if (has_s && has_b)
+            dup = true;
+        }
+        if (dup)
+          continue;
+        for (size_t k = 0; k < f->len; ++k) {
+          nyr_inst_t *ki = &f->data[k];
+          if (ki->op != NYIR_PHI || !ki->phi_incoming)
+            continue;
+          for (size_t pi = 0; pi < ki->phi_incoming_len; ++pi)
+            if (ki->phi_incoming[pi].predecessor_label == s_label)
+              ki->phi_incoming[pi].predecessor_label = b_label;
+        }
+      }
+      nyr_inst_discard(&f->data[br_pc]);
+      nyr_inst_discard(&f->data[s_start]);
+      merged = true;
+      break;
+    }
+    nyr_cfg_free(&mcfg);
+    if (!merged)
+      break;
+  }
+
   free(known);
   free(value);
   free(dominated);

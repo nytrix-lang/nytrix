@@ -205,6 +205,13 @@ static bool ifc_boolean_condition(const nyr_func_t *f, const int *defs,
     return true;
   if (def->op == NYIR_CONST_I64)
     return def->imm == 0 || def->imm == 1;
+  if (def->op == NYIR_SELECT_I64)
+    return ifc_boolean_condition(f, defs, def->b, depth + 1) &&
+           ifc_boolean_condition(f, defs, def->c, depth + 1);
+  if (def->op == NYIR_AND_I64 || def->op == NYIR_OR_I64 ||
+      def->op == NYIR_XOR_I64)
+    return ifc_boolean_condition(f, defs, def->a, depth + 1) &&
+           ifc_boolean_condition(f, defs, def->b, depth + 1);
   return def->op == NYIR_COPY &&
          ifc_boolean_condition(f, defs, def->a, depth + 1);
 }
@@ -720,16 +727,19 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
  * is a copy/PHI (a running max carried by the loop header PHI) whose every
  * source is raw. A cycle back to the PHI being converted is consistent.
  */
-static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v, int root,
-                          unsigned depth) {
+static bool ifc_value_raw_visited(const nyr_func_t *f, const int *defs, int v,
+                                  int root, int *visited, unsigned depth) {
   /*
-   * Only a cycle reached through another PHI may close on the root; an arm
-   * value that is the join PHI itself would make the SELECT read its own
-   * result.
+   * Only a cycle reached through another PHI may close on the root or an
+   * enclosing loop PHI; an arm value that is the join PHI itself would make
+   * the SELECT read its own result.
    */
   if (v == root)
     return depth > 0;
-  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 || depth > 6)
+  for (unsigned k = 0; k < depth; ++k)
+    if (visited[k] == v)
+      return true;
+  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 || depth >= 16)
     return false;
   const nyr_inst_t *def = &f->data[(size_t)defs[v]];
   if (def->scalar_class == NYIR_SCALAR_I64_RAW)
@@ -742,16 +752,222 @@ static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v, int root,
    */
   if (def->op == NYIR_CONST_I64 && !getenv("NYTRIX_NO_IFCONV_PHI_RAW"))
     return true;
+  visited[depth] = v;
   if (def->op == NYIR_COPY)
-    return ifc_value_raw(f, defs, def->a, root, depth + 1);
+    return ifc_value_raw_visited(f, defs, def->a, root, visited, depth + 1);
   if (def->op != NYIR_PHI || !def->phi_incoming || !def->phi_incoming_len)
     return false;
   for (size_t k = 0; k < def->phi_incoming_len; ++k) {
     int in = def->phi_incoming[k].value;
-    if (in != v && !ifc_value_raw(f, defs, in, root, depth + 1))
+    if (in != v &&
+        !ifc_value_raw_visited(f, defs, in, root, visited, depth + 1))
       return false;
   }
   return true;
+}
+
+static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v, int root,
+                          unsigned depth) {
+  int visited[16];
+  (void)depth;
+  return ifc_value_raw_visited(f, defs, v, root, visited, 0);
+}
+
+static bool ifc_block_has_phi(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                              size_t block);
+
+/*
+ * Flatten short-circuit boolean conjunctions (`if (c1 && c2)`) and
+ * disjunctions (`if (c1 || c2)`) whose second test block B2 has header as its
+ * sole predecessor, contains only pure non-trapping ops, and shares its
+ * bypassed target `common` (PHI-free) with header. Moving B2's pure test into
+ * header and combining with AND/OR eliminates the multi-predecessor bypass
+ * edge so the next iteration of nyr_if_convert can convert the resulting
+ * single-condition diamond.
+ */
+static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
+                                          const int *defs, size_t header,
+                                          size_t branch, size_t true_entry,
+                                          size_t false_entry) {
+  if (!f || !cfg || !defs || header >= cfg->block_count ||
+      true_entry >= cfg->block_count || false_entry >= cfg->block_count)
+    return false;
+  const nyr_inst_t *hbr = &f->data[branch];
+  if (hbr->op != NYIR_BR_IF || !ifc_boolean_condition(f, defs, hbr->a, 0))
+    return false;
+  int c1 = hbr->a;
+  /* Check header has no instructions after branch other than optional BR. */
+  size_t h_end = cfg->block_end[header];
+  while (h_end > cfg->block_start[header] && f->data[h_end - 1].op == NYIR_NOP)
+    --h_end;
+  size_t h_trail_br = SIZE_MAX;
+  if (branch + 1 < h_end) {
+    size_t nx = branch + 1;
+    while (nx < h_end && f->data[nx].op == NYIR_NOP)
+      ++nx;
+    if (nx == h_end - 1 && f->data[nx].op == NYIR_BR)
+      h_trail_br = nx;
+    else if (nx < h_end)
+      return false;
+  }
+
+  for (int is_or = 0; is_or < 2; ++is_or) {
+    size_t b2 = is_or ? false_entry : true_entry;
+    size_t common = is_or ? true_entry : false_entry;
+    if (b2 == header || b2 == common || b2 >= cfg->block_count ||
+        common >= cfg->block_count)
+      continue;
+    if (!ifc_single_predecessor(cfg, b2, header))
+      continue;
+    if (cfg->succ_offsets[b2 + 1] - cfg->succ_offsets[b2] != 2)
+      continue;
+    if (ifc_block_has_phi(f, cfg, b2))
+      continue;
+    int64_t b2_label = cfg->block_label[b2];
+    if (b2_label < 0 && ifc_block_has_phi(f, cfg, common))
+      continue;
+    /* Ensure no PHI anywhere references b2_label. */
+    if (b2_label >= 0) {
+      bool phi_ref = false;
+      for (size_t k = 0; k < f->len && !phi_ref; ++k) {
+        const nyr_inst_t *ki = &f->data[k];
+        if (ki->op != NYIR_PHI || !ki->phi_incoming)
+          continue;
+        for (size_t pi = 0; pi < ki->phi_incoming_len; ++pi)
+          if (ki->phi_incoming[pi].predecessor_label == b2_label)
+            phi_ref = true;
+      }
+      if (phi_ref)
+        continue;
+    }
+    /* Parse b2: LABEL, <= 8 pure non-local ops, BR_IF c2 -> t2, optional BR. */
+    size_t b2_start = cfg->block_start[b2];
+    size_t b2_end = cfg->block_end[b2];
+    while (b2_end > b2_start && f->data[b2_end - 1].op == NYIR_NOP)
+      --b2_end;
+    size_t b2_br_if = SIZE_MAX;
+    size_t b2_trail_br = SIZE_MAX;
+    size_t pure_idx[8];
+    size_t pure_count = 0;
+    bool ok = true;
+    for (size_t pc = b2_start; pc < b2_end; ++pc) {
+      const nyr_inst_t *in = &f->data[pc];
+      if (in->op == NYIR_NOP || (pc == b2_start && in->op == NYIR_LABEL))
+        continue;
+      if (in->op == NYIR_BR_IF && b2_br_if == SIZE_MAX) {
+        b2_br_if = pc;
+        continue;
+      }
+      if (b2_br_if != SIZE_MAX) {
+        if (in->op == NYIR_BR && b2_trail_br == SIZE_MAX && pc + 1 == b2_end) {
+          b2_trail_br = pc;
+          continue;
+        }
+        ok = false;
+        break;
+      }
+      if (in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
+          !ifc_safe_arm_op(in) || pure_count >= 8) {
+        ok = false;
+        break;
+      }
+      pure_idx[pure_count++] = pc;
+    }
+    if (!ok || b2_br_if == SIZE_MAX)
+      continue;
+    int c2 = f->data[b2_br_if].a;
+    if (!ifc_boolean_condition(f, defs, c2, 0))
+      continue;
+    size_t t2 = ifc_label_block(cfg, f->data[b2_br_if].imm);
+    size_t f2 = SIZE_MAX;
+    for (size_t e = cfg->succ_offsets[b2]; e < cfg->succ_offsets[b2 + 1]; ++e) {
+      size_t succ = cfg->succ_blocks[e];
+      if (succ != t2)
+        f2 = succ;
+    }
+    if (t2 >= cfg->block_count || f2 >= cfg->block_count || t2 == f2)
+      continue;
+    /* Resolve empty jump-only bridges (e.g. unlabeled `BR L49` after BR_IF). */
+    size_t r_common = ifc_resolve_empty_bridges(f, cfg, common);
+    size_t r_f2 = ifc_resolve_empty_bridges(f, cfg, f2);
+    size_t r_t2 = ifc_resolve_empty_bridges(f, cfg, t2);
+    /* Check shared target matches AND or OR pattern. */
+    if (!is_or && r_f2 != r_common)
+      continue;
+    if (is_or && r_t2 != r_common)
+      continue;
+    size_t new_true = is_or ? common : t2;
+    size_t new_false = is_or ? f2 : common;
+    int64_t new_true_label = cfg->block_label[new_true];
+    int64_t new_false_label = cfg->block_label[new_false];
+    if (new_true_label < 0 || (is_or && new_false_label < 0))
+      continue;
+    /*
+     * For AND: header's fallthrough edge already goes to `common` (whose
+     * bridge resolves to r_common), so we leave header's fallthrough intact
+     * and only update header's BR_IF condition & target!
+     * For OR: header fell through to b2 (which we are deleting), so we emit
+     * an explicit BR new_false_label right after header's BR_IF.
+     */
+    bool need_trail_br = is_or && (h_trail_br == SIZE_MAX);
+    size_t extra = pure_count + 1u + (need_trail_br ? 1u : 0u);
+    nyr_inst_t moved[8];
+    for (size_t k = 0; k < pure_count; ++k)
+      moved[k] = f->data[pure_idx[k]];
+    /* Make space before `branch` (and after `branch` if adding trail BR). */
+    size_t pre_extra = pure_count + 1u;
+    if (!nir_ensure_inst_space(f, extra))
+      return false;
+    /* Discard b2 instructions BEFORE shifting indices! */
+    for (size_t pc = b2_start; pc < b2_end; ++pc)
+      nyr_inst_discard(&f->data[pc]);
+    /* Insert pure_count + 1 instructions right before `branch`. */
+    memmove(&f->data[branch + pre_extra], &f->data[branch],
+            (f->len - branch) * sizeof(*f->data));
+    f->len += pre_extra;
+    for (size_t k = 0; k < pure_count; ++k)
+      f->data[branch + k] = moved[k];
+    int comb = f->next_value++;
+    f->data[branch + pure_count] = (nyr_inst_t){
+        .op = is_or ? NYIR_OR_I64 : NYIR_AND_I64,
+        .dst = comb,
+        .a = c1,
+        .b = c2,
+        .c = -1,
+        .d = -1,
+        .e = -1,
+        .f = -1,
+        .scalar_class = NYIR_SCALAR_I64_RAW,
+    };
+    f->data[branch + pure_count].effects =
+        nyr_inst_effects(&f->data[branch + pure_count]);
+    size_t new_br_if = branch + pre_extra;
+    f->data[new_br_if].a = comb;
+    f->data[new_br_if].imm = new_true_label;
+    if (is_or && h_trail_br != SIZE_MAX) {
+      f->data[h_trail_br + pre_extra].imm = new_false_label;
+    } else if (need_trail_br) {
+      size_t ins_at = new_br_if + 1;
+      memmove(&f->data[ins_at + 1], &f->data[ins_at],
+              (f->len - ins_at) * sizeof(*f->data));
+      f->len += 1;
+      f->data[ins_at] = (nyr_inst_t){
+          .op = NYIR_BR,
+          .dst = -1,
+          .a = -1,
+          .b = -1,
+          .c = -1,
+          .d = -1,
+          .e = -1,
+          .f = -1,
+          .imm = new_false_label,
+      };
+      f->data[ins_at].effects = nyr_inst_effects(&f->data[ins_at]);
+    }
+    nyr_refresh_metadata(f);
+    return true;
+  }
+  return false;
 }
 
 bool nyr_if_convert(nyr_func_t *f) {
@@ -798,6 +1014,11 @@ bool nyr_if_convert(nyr_func_t *f) {
       }
       size_t false_block = false_entry;
       size_t true_block = true_entry;
+      if (ifc_try_flatten_short_circuit(f, &cfg, defs, header, branch,
+                                        true_entry, false_entry)) {
+        changed = true;
+        break;
+      }
       if (false_block < cfg.block_count)
         false_block = ifc_resolve_empty_bridges(f, &cfg, false_block);
       if (true_block != SIZE_MAX)

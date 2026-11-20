@@ -20,6 +20,9 @@ int ny_test_ui_replay_main(int argc, char **argv) {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -214,10 +217,21 @@ static pid_t child_start(const char *compiler, const char *app,
   args[n++] = "--no-progress";
   args[n++] = project;
   args[n] = NULL;
+#ifdef __linux__
+  const pid_t parent = getpid();
+#endif
   pid_t pid = fork();
   if (pid < 0)
     return -1;
   if (!pid) {
+#ifdef __linux__
+    /*
+     * A replay route has its own session, so it must follow the helper's
+     * lifetime even when the outer fixture is killed.
+     */
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) < 0 || getppid() != parent)
+      _exit(126);
+#endif
     setsid();
     int fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd < 0)
@@ -460,7 +474,13 @@ int ny_test_ui_replay_main(int argc, char **argv) {
   }
   compiler = resolved_compiler;
   char output[PATH_MAX];
-  snprintf(output, sizeof(output), "%s/build/diagnostics/ui-replay", root);
+  const char *output_dir = getenv("NYTRIX_TEST_UI_REPLAY_LOG_DIR");
+  int output_len = output_dir && *output_dir
+                       ? snprintf(output, sizeof(output), "%s", output_dir)
+                       : snprintf(output, sizeof(output),
+                                  "%s/build/diagnostics/ui-replay", root);
+  if (output_len < 0 || (size_t)output_len >= sizeof(output))
+    return 2;
   if (mkdirs(output)) {
     perror(output);
     return 2;

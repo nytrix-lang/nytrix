@@ -122,7 +122,8 @@ static bool verify_nonclobbered_value_stays_resident_across_div(void) {
   return ok;
 }
 
-static bool verify_magic_division_splits_scratch_color_live_ranges(void) {
+static bool verify_magic_division_splits_scratch_color_live_ranges(
+    bool constant_divisor) {
   nyr_mach_func_t mach = {0};
   nyr_mach_regalloc_t alloc = {0};
   nyr_mach_reg_t live[12], dividend, divisor, remainder, sum, next;
@@ -138,9 +139,12 @@ static bool verify_magic_division_splits_scratch_color_live_ranges(void) {
        nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &remainder) &&
        nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &sum) &&
        emit(&mach, NYR_MACH_COPY, vreg(dividend), imm(123456),
-            (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE) &&
-       emit(&mach, NYR_MACH_COPY, vreg(divisor), imm(1000),
             (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE);
+  ok = ok && (constant_divisor
+                  ? emit(&mach, NYR_MACH_COPY, vreg(divisor), imm(1000),
+                         (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE)
+                  : emit(&mach, NYR_MACH_ADD, vreg(divisor), vreg(live[0]),
+                         vreg(live[1]), NYR_MACH_EFFECT_NONE));
   size_t mod_index = mach.inst_len;
   ok = ok && emit(&mach, NYR_MACH_MOD, vreg(remainder), vreg(dividend),
                   vreg(divisor), NYR_MACH_EFFECT_NONE);
@@ -161,22 +165,28 @@ static bool verify_magic_division_splits_scratch_color_live_ranges(void) {
             (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_CONTROL) &&
        nyr_mach_verify(&mach, 0, err, sizeof(err)) &&
        nyr_mach_regalloc_build(&mach, 12, &alloc);
+  const uint64_t scratch_colors = constant_divisor ? UINT64_C(1) << 11
+                                                   : UINT64_C(0xf) << 8;
+  uint64_t clobbers = 0;
+  ok = ok && nyr_mach_regalloc_fixed_clobbers(
+                 &mach, mod_index, NYR_MACH_REGCLASS_GPR, false, &clobbers) &&
+       clobbers == scratch_colors;
   for (size_t i = 0; ok && i < 12; ++i) {
     const nyr_mach_live_segment_t *before =
         nyr_mach_regalloc_segment_at(&alloc, live[i], mod_index - 1);
     const nyr_mach_live_segment_t *after =
         nyr_mach_regalloc_segment_at(&alloc, live[i], mod_index + 1);
-    if (before && after && before == after && before->color >= 8 &&
-        before->color <= 11) {
+    if (before && after && before == after && before->color >= 0 &&
+        (scratch_colors & (UINT64_C(1) << before->color))) {
       ok = false;
       break;
     }
   }
   if (!ok)
     fprintf(stderr,
-            "[magic-div] magic division must split live ranges in its "
-            "R8/R9/RCX/RDX scratch colors: %s\n",
-            err[0] ? err : "a value remained resident across MOD");
+            "[magic-div] %s MOD scratch clobbers: %s\n",
+            constant_divisor ? "constant" : "dynamic",
+            err[0] ? err : "wrong mask or a value remained resident");
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);
   return ok;
@@ -208,8 +218,8 @@ static bool verify_pow2_div_keeps_rcx_live_ranges_resident(void) {
   size_t mod_pc = mach.inst_len;
   ok = ok && emit(&mach, NYR_MACH_MOD, vreg(remainder), vreg(dividend),
                   vreg(divisor_copy), NYR_MACH_EFFECT_NONE);
-  ok = ok && emit(&mach, NYR_MACH_COPY, vreg(dynamic_divisor), vreg(dividend),
-                  (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE);
+  ok = ok && emit(&mach, NYR_MACH_ADD, vreg(dynamic_divisor), vreg(dividend),
+                  vreg(divisor), NYR_MACH_EFFECT_NONE);
   size_t dynamic_div_pc = mach.inst_len;
   ok = ok && emit(&mach, NYR_MACH_DIV, vreg(dynamic_quotient), vreg(dividend),
                   vreg(dynamic_divisor), NYR_MACH_EFFECT_NONE) &&
@@ -439,7 +449,8 @@ static bool verify_text_pow2_mod(void) {
 int main(void) {
   if (!verify_fixed_register_result_is_colorable() ||
       !verify_nonclobbered_value_stays_resident_across_div() ||
-      !verify_magic_division_splits_scratch_color_live_ranges() ||
+      !verify_magic_division_splits_scratch_color_live_ranges(true) ||
+      !verify_magic_division_splits_scratch_color_live_ranges(false) ||
       !verify_pow2_div_keeps_rcx_live_ranges_resident() ||
       !verify_call_clobbers_are_limited_to_live_through_values() ||
       !verify_nir_constant_pow2_division_lowers_immediate() ||

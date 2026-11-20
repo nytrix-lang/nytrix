@@ -4,7 +4,7 @@
 #include "base/common.h"
 #include "base/compat.h"
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -473,12 +473,26 @@ static bool licm_load_in_bounds(const nyr_func_t *f, const int *defs,
         (size_t)defs[base] >= f->len || off < 0 || off >= f->next_value)
       continue;
     const nyr_inst_t *alloc = &f->data[defs[base]];
-    int64_t count = 0, size = 0;
-    if (alloc->op != NYIR_CALL || !alloc->symbol ||
-        strcmp(alloc->symbol, "rt_tbuf_new_typed_raw") != 0 ||
-        !licm_const_value(f, defs, alloc->a, &count) ||
-        !licm_const_value(f, defs, alloc->b, &size) || count <= 0 ||
-        size < 8 || count > (INT64_C(1) << 31) / size)
+    int64_t total_bytes = 0;
+    if (alloc->op != NYIR_CALL || !alloc->symbol)
+      continue;
+    if (strcmp(alloc->symbol, "rt_tbuf_new_typed_raw") == 0 ||
+        strcmp(alloc->symbol, "calloc") == 0) {
+      int64_t count = 0, size = 0;
+      if (!licm_const_value(f, defs, alloc->a, &count) ||
+          !licm_const_value(f, defs, alloc->b, &size) || count <= 0 ||
+          size <= 0 || count > (INT64_C(1) << 31) / size)
+        continue;
+      total_bytes = count * size;
+    } else if (strcmp(alloc->symbol, "malloc") == 0 ||
+               strcmp(alloc->symbol, "rt_tbuf_new_raw") == 0) {
+      if (!licm_const_value(f, defs, alloc->a, &total_bytes) ||
+          total_bytes < 8 || total_bytes > (INT64_C(1) << 31))
+        continue;
+    } else {
+      continue;
+    }
+    if (total_bytes < 8)
       continue;
     nyr_range_t r = facts[off].range;
     nyr_scev_affine_t affine;
@@ -496,7 +510,7 @@ static bool licm_load_in_bounds(const nyr_func_t *f, const int *defs,
         r.max = ar->max;
       }
     }
-    if (r.has_min && r.has_max && r.min >= 0 && r.max <= (count - 1) * size)
+    if (r.has_min && r.has_max && r.min >= 0 && r.max <= total_bytes - 8)
       return true;
   }
   return false;

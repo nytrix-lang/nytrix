@@ -26,7 +26,7 @@
 #include "base/debug.h"
 #include "code/backend/core/api.h"
 #include "code/backend/core/nyr.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <inttypes.h>
 #include <limits.h>

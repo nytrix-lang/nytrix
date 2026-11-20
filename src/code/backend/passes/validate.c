@@ -4,7 +4,7 @@
  */
 #include "base/trace.h"
 #include "code/backend/core/nyr.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include <nyr/ir.h>
 
 #include <inttypes.h>
@@ -200,6 +200,7 @@ static Z3_ast nyr_smt_vector_i64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
       value = Z3_mk_bvmul(z3, a, b);
       break;
     case NYIR_VEC4_SHL_I64:
+    case NYIR_VEC8_SHL_I64:
       value = Z3_mk_bvshl(z3, a, nyr_smt_i64_shift_count(z3, lane_sort, b));
       break;
     case NYIR_VEC4_SAR_I64:
@@ -212,6 +213,61 @@ static Z3_ast nyr_smt_vector_i64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
     default:
       return NULL;
     }
+    packed = packed ? Z3_mk_concat(z3, packed, value) : value;
+  }
+  return packed;
+}
+
+static Z3_ast nyr_smt_vector_i64_cmp(Z3_context z3, nyr_cmp_t cmp, Z3_ast lhs,
+                                     Z3_ast rhs) {
+  Z3_sort lane_sort = Z3_mk_bv_sort(z3, 64);
+  Z3_ast all_ones = Z3_mk_int64(z3, -1, lane_sort);
+  Z3_ast zero = Z3_mk_int64(z3, 0, lane_sort);
+  Z3_ast packed = NULL;
+  for (unsigned lane = 4; lane-- > 0;) {
+    unsigned low = lane * 64u;
+    Z3_ast a = Z3_mk_extract(z3, low + 63u, low, lhs);
+    Z3_ast b = Z3_mk_extract(z3, low + 63u, low, rhs);
+    Z3_ast cond = NULL;
+    switch (cmp) {
+    case NYIR_CMP_EQ:
+      cond = Z3_mk_eq(z3, a, b);
+      break;
+    case NYIR_CMP_NE:
+      cond = Z3_mk_not(z3, Z3_mk_eq(z3, a, b));
+      break;
+    case NYIR_CMP_LT:
+      cond = Z3_mk_bvslt(z3, a, b);
+      break;
+    case NYIR_CMP_LE:
+      cond = Z3_mk_bvsle(z3, a, b);
+      break;
+    case NYIR_CMP_GT:
+      cond = Z3_mk_bvsgt(z3, a, b);
+      break;
+    case NYIR_CMP_GE:
+      cond = Z3_mk_bvsge(z3, a, b);
+      break;
+    default:
+      return NULL;
+    }
+    Z3_ast value = Z3_mk_ite(z3, cond, all_ones, zero);
+    packed = packed ? Z3_mk_concat(z3, packed, value) : value;
+  }
+  return packed;
+}
+
+static Z3_ast nyr_smt_vector_i64_select(Z3_context z3, Z3_ast mask, Z3_ast tval,
+                                        Z3_ast fval) {
+  Z3_sort bit_sort = Z3_mk_bv_sort(z3, 1);
+  Z3_ast one = Z3_mk_int(z3, 1, bit_sort);
+  Z3_ast packed = NULL;
+  for (unsigned lane = 4; lane-- > 0;) {
+    unsigned low = lane * 64u;
+    Z3_ast sign = Z3_mk_extract(z3, low + 63u, low + 63u, mask);
+    Z3_ast tv = Z3_mk_extract(z3, low + 63u, low, tval);
+    Z3_ast fv = Z3_mk_extract(z3, low + 63u, low, fval);
+    Z3_ast value = Z3_mk_ite(z3, Z3_mk_eq(z3, sign, one), tv, fv);
     packed = packed ? Z3_mk_concat(z3, packed, value) : value;
   }
   return packed;
@@ -1508,9 +1564,16 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       break;
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
       r = nyr_smt_vector_i64_binop(
           z3, in->op, a,
           nyr_smt_pack_i64_lanes(z3, Z3_mk_int64(z3, in->imm, bv), 4), 4);
+      break;
+    case NYIR_VEC8_CMP_I64:
+      r = nyr_smt_vector_i64_cmp(z3, in->cmp, a, b);
+      break;
+    case NYIR_VEC8_SELECT_I64:
+      r = nyr_smt_vector_i64_select(z3, a, b, select_false);
       break;
     case NYIR_VEC8_SET1_I64:
       r = nyr_smt_pack_i64_lanes(z3, a, 4);
@@ -2129,9 +2192,16 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
       break;
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
       r = nyr_smt_vector_i64_binop(
           z3, in->op, a,
           nyr_smt_pack_i64_lanes(z3, Z3_mk_int64(z3, in->imm, bv), 4), 4);
+      break;
+    case NYIR_VEC8_CMP_I64:
+      r = nyr_smt_vector_i64_cmp(z3, in->cmp, a, b);
+      break;
+    case NYIR_VEC8_SELECT_I64:
+      r = nyr_smt_vector_i64_select(z3, a, b, select_false);
       break;
     case NYIR_VEC8_SET1_I64:
       r = nyr_smt_pack_i64_lanes(z3, a, 4);

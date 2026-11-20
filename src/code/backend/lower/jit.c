@@ -7,7 +7,7 @@
 #include "base/util.h"
 #include "code/backend/core/abi.h"
 #include "code/backend/lower/machine.h"
-#include "code/backend/lower/jit_layout.h"
+#include "code/backend/lower/jit.h"
 #include "code/backend/core/module.h"
 #include "code/backend/lower/native.h"
 #include "code/backend/mach/object.h"

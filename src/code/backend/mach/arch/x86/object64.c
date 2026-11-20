@@ -316,6 +316,14 @@ typedef struct {
   size_t frame_ops;
   size_t home_fold_ops;
   size_t alu_commute_ops;
+  size_t bundle_reloads_elided;
+  /*
+   * P2/P1 EdgeBundles + per-value residency bitset: bit (b, v) is set when
+   * every reachable predecessor exiting into block b's incoming edge bundle
+   * provably leaves v seeded in block b's entry segment color.
+   */
+  uint64_t *bundle_entry_resident;
+  size_t bundle_vreg_words;
   const unsigned char *home_dead; /* second pass, indexed by -off */
   size_t home_limit;
   /*
@@ -411,6 +419,9 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   free(e->loop_fpr_entry);
   e->loop_fpr = NULL;
   e->loop_fpr_entry = NULL;
+  free(e->bundle_entry_resident);
+  e->bundle_entry_resident = NULL;
+  e->bundle_vreg_words = 0;
   free(e->seg_start_offsets);
   free(e->seg_start_vregs);
   free(e->seg_end_offsets);
@@ -824,14 +835,19 @@ static bool mach_is_known_copy(const nyr_mach_inst_t *in) {
 }
 
 /*
- * Fixed-width block sets for the loop-register proofs. 256 blocks (four
- * 64-bit words); the vector extension gives |, & and ~ per word.
+ * Fixed-width block sets for fast-path bitmask intersection up to 256 blocks
+ * (four 64-bit words); larger CFGs use the general CFG/dominator analysis and
+ * budgeted range checks instead of falling off a hard cliff.
  */
 #define MACH_SET_BLOCKS 256u
 /*
- * Whole-function home proof cap; see the comment at mach_select_loop_gpr.
+ * Work and memory budgets for the whole-function loop-home allocator (P3).
+ * Functions exceeding these budgets retain block-local register allocation
+ * via the P16 fast tier instead of demoting every value to stack reads.
  */
-#define MACH_LOOP_GPR_MAX_VREGS 640u
+#define MACH_LOOP_GPR_MAX_RANGE_CELLS 262144u
+#define MACH_LOOP_GPR_MAX_BLOCKS 2048u
+#define MACH_LOOP_GPR_WORK_BUDGET 200000u
 typedef uint64_t mach_set_t __attribute__((vector_size(32)));
 static inline mach_set_t mach_set_bit(size_t b) {
   mach_set_t s = {0, 0, 0, 0};
@@ -840,12 +856,6 @@ static inline mach_set_t mach_set_bit(size_t b) {
 }
 static inline bool mach_set_any(mach_set_t s) {
   return (s[0] | s[1] | s[2] | s[3]) != 0;
-}
-static inline bool mach_set_has(mach_set_t s, size_t b) {
-  return (s[b >> 6] >> (b & 63u)) & 1u;
-}
-static inline bool mach_set_eq(mach_set_t a, mach_set_t b) {
-  return !mach_set_any(a ^ b);
 }
 /*
  * Lowest set bit index; the set must be non-empty.
@@ -864,20 +874,6 @@ static inline mach_set_t mach_set_clear_first(mach_set_t s) {
     }
   return s;
 }
-/*
- * Bits 0..n-1 set (n <= 256).
- */
-static inline mach_set_t mach_set_prefix(size_t n) {
-  mach_set_t s = {0, 0, 0, 0};
-  for (unsigned w = 0; w < 4; ++w) {
-    size_t lo = (size_t)w * 64u;
-    if (n >= lo + 64u)
-      s[w] = ~(uint64_t)0;
-    else if (n > lo)
-      s[w] = ((uint64_t)1 << (n - lo)) - 1u;
-  }
-  return s;
-}
 
 /*
  * A candidate's colour is rejected by interference with an already coloured
@@ -890,7 +886,8 @@ static size_t mach_loop_gpr_color_blocker(const mach_loop_gpr_ranges_t *ranges,
                                           const size_t *color_heads,
                                           const size_t *next_colored,
                                           const mach_set_t *present,
-                                          uint32_t vreg, int color) {
+                                          uint32_t vreg, int color,
+                                          size_t *work) {
   bool has_interval = false;
   if (present)
     has_interval = mach_set_any(present[vreg]);
@@ -902,6 +899,8 @@ static size_t mach_loop_gpr_color_blocker(const mach_loop_gpr_ranges_t *ranges,
     return MACH_LOOP_GPR_NO_INTERVAL;
   for (size_t other = color_heads[color]; other != SIZE_MAX;
        other = next_colored[other]) {
+    if (work)
+      ++(*work);
     if (present) {
       mach_set_t common = present[vreg] & present[other];
       while (mach_set_any(common)) {
@@ -931,9 +930,10 @@ static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
                                           const size_t *color_heads,
                                           const size_t *next_colored,
                                           const mach_set_t *present,
-                                          uint32_t vreg, int color) {
+                                          uint32_t vreg, int color,
+                                          size_t *work) {
   return mach_loop_gpr_color_blocker(ranges, color_heads, next_colored, present,
-                                     vreg, color) == SIZE_MAX;
+                                     vreg, color, work) == SIZE_MAX;
 }
 static bool mach_loop_gpr_call_safe(const nyr_mach_func_t *m,
                                     const mach_loop_gpr_ranges_t *ranges,
@@ -1441,6 +1441,250 @@ static bool mach_recolor_interval_safe(
   return safe;
 }
 
+typedef struct {
+  size_t block_len;
+  size_t *succ_off;
+  size_t *succ_list;
+  size_t *pred_off;
+  size_t *pred_list;
+  bool *reachable;
+  size_t *rpo;
+  size_t *rpo_idx;
+  size_t rpo_len;
+  size_t *idom;
+} mach_cfg_t;
+
+static void mach_cfg_free(mach_cfg_t *cfg) {
+  if (!cfg)
+    return;
+  free(cfg->succ_off);
+  free(cfg->succ_list);
+  free(cfg->pred_off);
+  free(cfg->pred_list);
+  free(cfg->reachable);
+  free(cfg->rpo);
+  free(cfg->rpo_idx);
+  free(cfg->idom);
+  memset(cfg, 0, sizeof(*cfg));
+}
+
+static bool mach_cfg_dominates(const mach_cfg_t *cfg, size_t a, size_t b) {
+  if (!cfg || a >= cfg->block_len || b >= cfg->block_len ||
+      !cfg->reachable[a] || !cfg->reachable[b])
+    return false;
+  size_t a_rpo = cfg->rpo_idx[a];
+  while (b != a && b != 0 && b != SIZE_MAX && cfg->rpo_idx[b] > a_rpo)
+    b = cfg->idom[b];
+  return b == a;
+}
+
+/*
+ * General machine-CFG, RPO, and Cooper-Harvey-Kennedy immediate-dominator
+ * analysis. Scales past the 256-block fixed bitset ceiling in O(B + E).
+ */
+static bool mach_cfg_build(const nyr_mach_func_t *m, mach_cfg_t *cfg) {
+  memset(cfg, 0, sizeof(*cfg));
+  if (!m || !m->block_len)
+    return false;
+  size_t nb = m->block_len;
+  cfg->block_len = nb;
+  cfg->succ_off = calloc(nb + 1, sizeof(*cfg->succ_off));
+  cfg->pred_off = calloc(nb + 1, sizeof(*cfg->pred_off));
+  cfg->reachable = calloc(nb, sizeof(*cfg->reachable));
+  cfg->rpo = malloc(nb * sizeof(*cfg->rpo));
+  cfg->rpo_idx = malloc(nb * sizeof(*cfg->rpo_idx));
+  cfg->idom = malloc(nb * sizeof(*cfg->idom));
+  if (!cfg->succ_off || !cfg->pred_off || !cfg->reachable || !cfg->rpo ||
+      !cfg->rpo_idx || !cfg->idom) {
+    mach_cfg_free(cfg);
+    return false;
+  }
+  size_t total_edges = 0;
+  for (size_t b = 0; b < nb; ++b) {
+    const nyr_mach_block_t *block = &m->blocks[b];
+    bool falls = true;
+    size_t deg = 0;
+    for (size_t n = 0; n < block->inst_count; ++n) {
+      const nyr_mach_inst_t *in = &m->insts[block->first_inst + n];
+      if ((in->opcode == NYR_MACH_BR || in->opcode == NYR_MACH_BR_IF) &&
+          in->src1.kind == NYR_MACH_OPERAND_BLOCK &&
+          in->src1.as.block_index < nb) {
+        ++deg;
+        if (in->opcode == NYR_MACH_BR)
+          falls = false;
+      } else if (in->opcode == NYR_MACH_RET) {
+        falls = false;
+      }
+    }
+    if (falls && b + 1 < nb)
+      ++deg;
+    cfg->succ_off[b] = total_edges;
+    total_edges += deg;
+  }
+  cfg->succ_off[nb] = total_edges;
+  cfg->succ_list = malloc((total_edges ? total_edges : 1) * sizeof(*cfg->succ_list));
+  cfg->pred_list = malloc((total_edges ? total_edges : 1) * sizeof(*cfg->pred_list));
+  if (!cfg->succ_list || !cfg->pred_list) {
+    mach_cfg_free(cfg);
+    return false;
+  }
+  size_t write_edge = 0;
+  for (size_t b = 0; b < nb; ++b) {
+    const nyr_mach_block_t *block = &m->blocks[b];
+    size_t start = write_edge;
+    cfg->succ_off[b] = start;
+    bool falls = true;
+    for (size_t n = 0; n < block->inst_count; ++n) {
+      const nyr_mach_inst_t *in = &m->insts[block->first_inst + n];
+      if ((in->opcode == NYR_MACH_BR || in->opcode == NYR_MACH_BR_IF) &&
+          in->src1.kind == NYR_MACH_OPERAND_BLOCK &&
+          in->src1.as.block_index < nb) {
+        size_t t = in->src1.as.block_index;
+        bool dup = false;
+        for (size_t k = start; k < write_edge; ++k)
+          if (cfg->succ_list[k] == t) {
+            dup = true;
+            break;
+          }
+        if (!dup) {
+          cfg->succ_list[write_edge++] = t;
+          cfg->pred_off[t + 1]++;
+        }
+        if (in->opcode == NYR_MACH_BR)
+          falls = false;
+      } else if (in->opcode == NYR_MACH_RET) {
+        falls = false;
+      }
+    }
+    if (falls && b + 1 < nb) {
+      size_t t = b + 1;
+      bool dup = false;
+      for (size_t k = start; k < write_edge; ++k)
+        if (cfg->succ_list[k] == t) {
+          dup = true;
+          break;
+        }
+      if (!dup) {
+        cfg->succ_list[write_edge++] = t;
+        cfg->pred_off[t + 1]++;
+      }
+    }
+  }
+  cfg->succ_off[nb] = write_edge;
+  for (size_t b = 0; b < nb; ++b)
+    cfg->pred_off[b + 1] += cfg->pred_off[b];
+  size_t *pred_fill = malloc((nb + 1) * sizeof(*pred_fill));
+  size_t *dfs_blk = malloc(nb * sizeof(*dfs_blk));
+  size_t *dfs_edge = malloc(nb * sizeof(*dfs_edge));
+  if (!pred_fill || !dfs_blk || !dfs_edge) {
+    free(pred_fill);
+    free(dfs_blk);
+    free(dfs_edge);
+    mach_cfg_free(cfg);
+    return false;
+  }
+  memcpy(pred_fill, cfg->pred_off, (nb + 1) * sizeof(*pred_fill));
+  for (size_t b = 0; b < nb; ++b)
+    for (size_t ei = cfg->succ_off[b]; ei < cfg->succ_off[b + 1]; ++ei)
+      cfg->pred_list[pred_fill[cfg->succ_list[ei]]++] = b;
+  free(pred_fill);
+
+  for (size_t b = 0; b < nb; ++b) {
+    cfg->rpo_idx[b] = SIZE_MAX;
+    cfg->idom[b] = SIZE_MAX;
+  }
+  size_t sp = 0, post_n = 0;
+  cfg->reachable[0] = true;
+  dfs_blk[sp] = 0;
+  dfs_edge[sp] = cfg->succ_off[0];
+  ++sp;
+  while (sp) {
+    size_t b = dfs_blk[sp - 1];
+    size_t ei = dfs_edge[sp - 1];
+    if (ei < cfg->succ_off[b + 1]) {
+      size_t s = cfg->succ_list[ei];
+      dfs_edge[sp - 1] = ei + 1;
+      if (!cfg->reachable[s]) {
+        cfg->reachable[s] = true;
+        dfs_blk[sp] = s;
+        dfs_edge[sp] = cfg->succ_off[s];
+        ++sp;
+      }
+    } else {
+      cfg->rpo[post_n++] = b;
+      --sp;
+    }
+  }
+  free(dfs_blk);
+  free(dfs_edge);
+  cfg->rpo_len = post_n;
+  for (size_t i = 0; i < post_n / 2; ++i) {
+    size_t tmp = cfg->rpo[i];
+    cfg->rpo[i] = cfg->rpo[post_n - 1 - i];
+    cfg->rpo[post_n - 1 - i] = tmp;
+  }
+  for (size_t i = 0; i < post_n; ++i)
+    cfg->rpo_idx[cfg->rpo[i]] = i;
+
+  cfg->idom[0] = 0;
+  bool dom_changed = true;
+  while (dom_changed) {
+    dom_changed = false;
+    for (size_t ri = 1; ri < cfg->rpo_len; ++ri) {
+      size_t b = cfg->rpo[ri];
+      size_t new_idom = SIZE_MAX;
+      for (size_t ei = cfg->pred_off[b]; ei < cfg->pred_off[b + 1]; ++ei) {
+        size_t p = cfg->pred_list[ei];
+        if (!cfg->reachable[p] || cfg->idom[p] == SIZE_MAX)
+          continue;
+        if (new_idom == SIZE_MAX) {
+          new_idom = p;
+        } else {
+          size_t f1 = p, f2 = new_idom;
+          while (f1 != f2) {
+            while (cfg->rpo_idx[f1] > cfg->rpo_idx[f2])
+              f1 = cfg->idom[f1];
+            while (cfg->rpo_idx[f2] > cfg->rpo_idx[f1])
+              f2 = cfg->idom[f2];
+          }
+          new_idom = f1;
+        }
+      }
+      if (new_idom != SIZE_MAX && cfg->idom[b] != new_idom) {
+        cfg->idom[b] = new_idom;
+        dom_changed = true;
+      }
+    }
+  }
+  return true;
+}
+
+typedef struct {
+  uint32_t vreg;
+  size_t score;
+  size_t def_pc;
+  bool carried;
+  bool single_use_const_div;
+} mach_loop_cand_t;
+
+static int mach_loop_cand_cmp(const void *pa, const void *pb) {
+  const mach_loop_cand_t *a = (const mach_loop_cand_t *)pa;
+  const mach_loop_cand_t *b = (const mach_loop_cand_t *)pb;
+  if (a->score != b->score)
+    return a->score > b->score ? -1 : 1;
+  if (a->carried != b->carried)
+    return a->carried ? -1 : 1;
+  if (a->def_pc != b->def_pc)
+    return a->def_pc < b->def_pc ? -1 : 1;
+  return a->vreg < b->vreg ? -1 : (a->vreg > b->vreg ? 1 : 0);
+}
+
+static bool mach_loop_gpr_within_budget(const nyr_mach_func_t *m) {
+  return m && m->vreg_len > 0 && m->block_len > 0 &&
+         m->block_len <= MACH_LOOP_GPR_MAX_BLOCKS &&
+         m->vreg_len <= MACH_LOOP_GPR_MAX_RANGE_CELLS / m->block_len;
+}
+
 static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
                                     bool private_spill_homes) {
   const nyr_mach_func_t *m = e->mach;
@@ -1462,19 +1706,10 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
       strcmp(disable_loop_gpr, "off") != 0 &&
       strcmp(disable_loop_gpr, "false") != 0)
     return;
-  /*
-   * The whole-function home proof is intentionally bounded to smaller CFGs.
-   * Larger functions can have enough alternate paths that keeping a vreg in
-   * one register without publishing its canonical home is not yet justified
-   * by the current edge analysis (notably, call-heavy tree traversals).
-   *
-   * An indirect store may overwrite a canonical spill home if private-home
-   * separation is unproven. Reject only candidates live across such stores;
-   * unrelated store-free ranges retain their register-home eligibility.
-   * All candidates still require the call, edge and fixed-register proofs.
-   */
-  if (!m->vreg_len || m->vreg_len > MACH_LOOP_GPR_MAX_VREGS || m->block_len > MACH_SET_BLOCKS ||
-      getenv("NYTRIX_FORCE_STACK_GPR"))
+  if (!mach_loop_gpr_within_budget(m) || getenv("NYTRIX_FORCE_STACK_GPR"))
+    return;
+  mach_cfg_t cfg = {0};
+  if (!mach_cfg_build(m, &cfg))
     return;
   size_t *score = calloc(m->vreg_len, sizeof(*score));
   unsigned *defs = calloc(m->vreg_len, sizeof(*defs));
@@ -1482,9 +1717,17 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
   size_t *def_pc = malloc(m->vreg_len * sizeof(*def_pc));
   bool *other_def = calloc(m->vreg_len, sizeof(*other_def));
   bool *loop_carried = calloc(m->vreg_len, sizeof(*loop_carried));
+  bool *loop_def = calloc(m->vreg_len, sizeof(*loop_def));
+  bool *loop_cmp_use = calloc(m->vreg_len, sizeof(*loop_cmp_use));
+  bool *has_loop_activity = calloc(m->vreg_len, sizeof(*has_loop_activity));
+  unsigned *max_use_depth = calloc(m->vreg_len, sizeof(*max_use_depth));
+  uint32_t *hint_peer = malloc(m->vreg_len * sizeof(*hint_peer));
+  size_t *hint_weight = calloc(m->vreg_len, sizeof(*hint_weight));
   bool *vector_safe = calloc(m->vreg_len, sizeof(*vector_safe));
   bool *store_safe = calloc(m->vreg_len, sizeof(*store_safe));
   unsigned *depth = calloc(m->block_len, sizeof(*depth));
+  size_t *loop_stamp = calloc(m->block_len, sizeof(*loop_stamp));
+  size_t *loop_work = malloc(m->block_len * sizeof(*loop_work));
   int *colors = malloc(m->vreg_len * sizeof(*colors));
   size_t *next_colored = malloc(m->vreg_len * sizeof(*next_colored));
   bool *call_safe_callee = calloc(m->vreg_len, sizeof(*call_safe_callee));
@@ -1498,20 +1741,31 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
   bool *folded_known = calloc(m->vreg_len, sizeof(*folded_known));
   mach_loop_gpr_ranges_t ranges = {0};
   if (!score || !defs || !uses || !def_pc || !other_def || !loop_carried ||
-      !vector_safe || !store_safe || !depth || !colors || !next_colored ||
+      !loop_def || !loop_cmp_use || !has_loop_activity || !max_use_depth ||
+      !hint_peer || !hint_weight || !vector_safe || !store_safe || !depth ||
+      !loop_stamp || !loop_work || !colors || !next_colored ||
       !call_safe_callee || !call_safe_caller || !fixed_safe_cache ||
       !folded_value || !folded_known ||
       !mach_build_imm_fold(m, folded_value, folded_known) ||
       !mach_loop_gpr_ranges_build(e, &ranges)) {
+    mach_cfg_free(&cfg);
     free(score);
     free(defs);
     free(uses);
     free(def_pc);
     free(other_def);
     free(loop_carried);
+    free(loop_def);
+    free(loop_cmp_use);
+    free(has_loop_activity);
+    free(max_use_depth);
+    free(hint_peer);
+    free(hint_weight);
     free(vector_safe);
     free(store_safe);
     free(depth);
+    free(loop_stamp);
+    free(loop_work);
     free(colors);
     free(next_colored);
     free(call_safe_callee);
@@ -1532,12 +1786,12 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
    * loads/stores. calloc only guarantees 16-byte alignment, and a mask whose
    * address lands on a 16-byte boundary faults on the first OR (movaps).
    * Over-allocate and align the base manually so every element is 32-byte
-   * aligned; present_raw is what gets freed.
+   * aligned; present_raw is what gets freed. Only used up to 256 blocks.
    */
   uint8_t *present_raw = NULL;
   mach_set_t *present = NULL;
-  if (m->block_len >= 8 && m->vreg_len >= 16 &&
-      !getenv("NYTRIX_X64_NO_BLOCK_MASK")) {
+  if (m->block_len <= MACH_SET_BLOCKS && m->block_len >= 8 &&
+      m->vreg_len >= 16 && !getenv("NYTRIX_X64_NO_BLOCK_MASK")) {
     present_raw =
         calloc(1, m->vreg_len * sizeof(mach_set_t) + sizeof(mach_set_t));
     if (present_raw)
@@ -1560,112 +1814,94 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
   for (size_t v = 0; v < m->vreg_len; ++v) {
     colors[v] = -1;
     def_pc[v] = SIZE_MAX;
+    hint_peer[v] = UINT32_MAX;
   }
   /*
-   * Build actual CFG edges; block-number intervals include unrelated exits.
+   * Discover natural loops via the general dominator tree and reverse BFS.
    */
-  mach_set_t succ[MACH_SET_BLOCKS] = {{0}}, pred[MACH_SET_BLOCKS] = {{0}},
-             dom[MACH_SET_BLOCKS] = {{0}};
-  mach_set_t header_loops[MACH_SET_BLOCKS] = {{0}};
-  const mach_set_t valid_blocks = mach_set_prefix(m->block_len);
-  for (size_t b = 0; b < m->block_len; ++b) {
-    const nyr_mach_block_t *block = &m->blocks[b];
-    bool falls = true;
-    for (size_t n = 0; n < block->inst_count; ++n) {
-      const nyr_mach_inst_t *in = &m->insts[block->first_inst + n];
-      if ((in->opcode == NYR_MACH_BR || in->opcode == NYR_MACH_BR_IF) &&
-          in->src1.kind == NYR_MACH_OPERAND_BLOCK &&
-          in->src1.as.block_index < m->block_len) {
-        succ[b] |= mach_set_bit(in->src1.as.block_index);
-        if (in->opcode == NYR_MACH_BR)
-          falls = false;
-      } else if (in->opcode == NYR_MACH_RET) {
-        falls = false;
-      }
-    }
-    if (falls && b + 1 < m->block_len)
-      succ[b] |= mach_set_bit(b + 1);
-  }
-  for (size_t b = 0; b < m->block_len; ++b)
-    for (size_t t = 0; t < m->block_len; ++t)
-      if (mach_set_has(succ[b], t))
-        pred[t] |= mach_set_bit(b);
-  mach_set_t reachable = mach_set_bit(0);
-  for (;;) {
-    mach_set_t next = reachable;
-    for (size_t b = 0; b < m->block_len; ++b)
-      if (mach_set_has(reachable, b))
-        next |= succ[b];
-    next &= valid_blocks;
-    if (mach_set_eq(next, reachable))
-      break;
-    reachable = next;
-  }
-  for (size_t b = 0; b < m->block_len; ++b)
-    if (mach_set_has(reachable, b))
-      dom[b] = b == 0 ? mach_set_bit(0) : reachable;
-  bool dom_changed;
-  do {
-    dom_changed = false;
-    for (size_t b = 1; b < m->block_len; ++b) {
-      mach_set_t bit = mach_set_bit(b);
-      if (!mach_set_has(reachable, b))
+  for (size_t header = 0; header < m->block_len; ++header) {
+    if (!cfg.reachable[header])
+      continue;
+    size_t stamp = header + 1;
+    size_t work_len = 0;
+    bool has_backedge = false;
+    for (size_t ei = cfg.pred_off[header]; ei < cfg.pred_off[header + 1]; ++ei) {
+      size_t latch = cfg.pred_list[ei];
+      if (!cfg.reachable[latch] || !mach_cfg_dominates(&cfg, header, latch))
         continue;
-      mach_set_t incoming = pred[b] & reachable;
-      mach_set_t intersection = reachable;
-      if (!mach_set_any(incoming))
-        intersection = mach_set_prefix(0);
-      else
-        for (size_t p = 0; p < m->block_len; ++p)
-          if (mach_set_has(incoming, p))
-            intersection &= dom[p];
-      mach_set_t value = intersection | bit;
-      if (!mach_set_eq(value, dom[b])) {
-        dom[b] = value;
-        dom_changed = true;
+      if (!has_backedge) {
+        has_backedge = true;
+        loop_stamp[header] = stamp;
+        ++depth[header];
       }
-    }
-  } while (dom_changed);
-  for (size_t latch = 0; latch < m->block_len; ++latch) {
-    for (size_t header = 0; header <= latch; ++header) {
-      mach_set_t hbit = mach_set_bit(header);
-      if (!mach_set_has(succ[latch], header) ||
-          !mach_set_has(reachable, header) || !mach_set_has(dom[latch], header))
-        continue;
-      mach_set_t members = hbit | mach_set_bit(latch);
-      size_t work[MACH_SET_BLOCKS], work_len = 1;
-      work[0] = latch;
-      for (size_t wi = 0; wi < work_len; ++wi) {
-        size_t block = work[wi];
-        if (block == header)
-          continue;
-        mach_set_t incoming = pred[block] & reachable & ~members;
-        for (size_t p = 0; p < m->block_len; ++p)
-          if (mach_set_has(incoming, p)) {
-            members |= mach_set_bit(p);
-            work[work_len++] = p;
-          }
+      if (loop_stamp[latch] != stamp) {
+        loop_stamp[latch] = stamp;
+        loop_work[work_len++] = latch;
+        ++depth[latch];
       }
-      header_loops[header] |= members;
       for (size_t v = 0; v < m->vreg_len; ++v)
         if (nyr_mach_regalloc_live_out(&e->regalloc, latch, (uint32_t)v) &&
             nyr_mach_regalloc_live_in(&e->regalloc, header, (uint32_t)v))
           loop_carried[v] = true;
     }
+    if (!has_backedge)
+      continue;
+    for (size_t wi = 0; wi < work_len; ++wi) {
+      size_t blk = loop_work[wi];
+      for (size_t ei = cfg.pred_off[blk]; ei < cfg.pred_off[blk + 1]; ++ei) {
+        size_t p = cfg.pred_list[ei];
+        if (cfg.reachable[p] && loop_stamp[p] != stamp) {
+          loop_stamp[p] = stamp;
+          loop_work[work_len++] = p;
+          ++depth[p];
+        }
+      }
+    }
   }
-  for (size_t header = 0; header < m->block_len; ++header)
-    for (size_t b = 0; b < m->block_len; ++b)
-      if (mach_set_has(header_loops[header], b))
-        ++depth[b];
+  free(loop_stamp);
+  free(loop_work);
+  mach_cfg_free(&cfg);
+  unsigned *block_local_defs = calloc(m->block_len, sizeof(*block_local_defs));
+  uint32_t *block_color_mask = calloc(m->block_len, sizeof(*block_color_mask));
+  bool *cross_block_loop = calloc(m->vreg_len, sizeof(*cross_block_loop));
+  for (size_t b = 0; b < m->block_len; ++b) {
+    if (!depth[b])
+      continue;
+    const nyr_mach_block_t *block = &m->blocks[b];
+    for (size_t n = 0; n < block->inst_count; ++n) {
+      const nyr_mach_inst_t *in = &m->insts[block->first_inst + n];
+      if (in->opcode != NYR_MACH_STORE &&
+          in->dst.kind == NYR_MACH_OPERAND_VREG &&
+          in->dst.as.reg < m->vreg_len &&
+          m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_I64 &&
+          !folded_known[in->dst.as.reg] &&
+          !nyr_mach_regalloc_live_in(&e->regalloc, b, in->dst.as.reg) &&
+          !nyr_mach_regalloc_live_out(&e->regalloc, b, in->dst.as.reg)) {
+        if (block_local_defs)
+          ++block_local_defs[b];
+      }
+    }
+    if (cross_block_loop)
+      for (uint32_t v = 0; v < m->vreg_len; ++v)
+        if (nyr_mach_regalloc_live_in(&e->regalloc, b, v) ||
+            nyr_mach_regalloc_live_out(&e->regalloc, b, v))
+          cross_block_loop[v] = true;
+  }
   /*
-   * Call-home publication is not yet proven across loop backedges and joins.
-   * The per-vreg range proof below excludes values that cross a call, while
-   * allowing unrelated call-free loops in the same function to use registers.
+   * P4 cost model (modeled after LLVM CalcSpillWeights + SplitKit):
+   * - Weight loop reads and writes by 16^depth so inner loops dominate
+   *   unrolled outer loops.
+   * - Cross-block loop values (carried PHIs and loop-invariant values) weight
+   *   both reads and writes x2 so they outrank single-block temporaries.
+   * - Recognize loop-exiting IVs (x3) and loop-updated carried values (x2).
+   * - Discount values live-through a deeper loop without being used there.
+   * - Record weighted COPY hints so copy-linked values coalesce to one color.
    */
   for (size_t b = 0; b < m->block_len; ++b) {
     const nyr_mach_block_t *block = &m->blocks[b];
     size_t weight =
-        depth[b] ? (size_t)1 << (depth[b] > 5 ? 15 : depth[b] * 3) : 0;
+        depth[b] ? (size_t)1 << (depth[b] > 4 ? 16 : depth[b] * 4) : 0;
+    size_t hint_w = weight ? weight : 1;
     for (size_t n = 0; n < block->inst_count; ++n) {
       const nyr_mach_inst_t *in = &m->insts[block->first_inst + n];
       if (in->dst.kind == NYR_MACH_OPERAND_VREG &&
@@ -1673,6 +1909,14 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
         uint32_t v = in->dst.as.reg;
         ++defs[v];
         def_pc[v] = block->first_inst + n;
+        if (weight) {
+          if (loop_carried[v] || (cross_block_loop && cross_block_loop[v]))
+            score[v] += weight * 2u;
+          has_loop_activity[v] = true;
+          loop_def[v] = true;
+          if (depth[b] > max_use_depth[v])
+            max_use_depth[v] = depth[b];
+        }
         bool loop_home_def =
             (in->opcode == NYR_MACH_COPY &&
              (in->src0.kind == NYR_MACH_OPERAND_VREG ||
@@ -1697,22 +1941,67 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
                in->src1.as.reg < m->vreg_len &&
                folded_known[in->src1.as.reg])));
         other_def[in->dst.as.reg] |= !loop_home_def;
+        if (in->opcode == NYR_MACH_COPY && !in->narrow32 &&
+            in->src0.kind == NYR_MACH_OPERAND_VREG &&
+            in->src0.as.reg < m->vreg_len && in->src0.as.reg != v &&
+            m->vreg_types[v] == NYR_MACH_TYPE_I64 &&
+            m->vreg_types[in->src0.as.reg] == NYR_MACH_TYPE_I64) {
+          uint32_t s = in->src0.as.reg;
+          if (hint_w > hint_weight[v]) {
+            hint_weight[v] = hint_w;
+            hint_peer[v] = s;
+          }
+          if (hint_w > hint_weight[s]) {
+            hint_weight[s] = hint_w;
+            hint_peer[s] = v;
+          }
+        }
       }
       const nyr_mach_operand_t *ops[] = {&in->src0, &in->src1, &in->src2};
       for (size_t k = 0; k < 3; ++k)
         if (ops[k]->kind == NYR_MACH_OPERAND_VREG &&
             ops[k]->as.reg < m->vreg_len) {
           uint32_t v = ops[k]->as.reg;
-          score[v] += weight;
+          if (weight) {
+            bool xblk =
+                loop_carried[v] || (cross_block_loop && cross_block_loop[v]);
+            score[v] += xblk ? weight * 2u : weight;
+            has_loop_activity[v] = true;
+            if (depth[b] > max_use_depth[v])
+              max_use_depth[v] = depth[b];
+            if (in->opcode == NYR_MACH_CMP)
+              loop_cmp_use[v] = true;
+          }
           ++uses[v];
         }
       if (in->opcode == NYR_MACH_STORE &&
-          in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg < m->vreg_len)
-        ++uses[in->dst.as.reg];
+          in->dst.kind == NYR_MACH_OPERAND_VREG &&
+          in->dst.as.reg < m->vreg_len) {
+        uint32_t v = in->dst.as.reg;
+        if (weight) {
+          bool xblk =
+              loop_carried[v] || (cross_block_loop && cross_block_loop[v]);
+          score[v] += xblk ? weight * 2u : weight;
+          has_loop_activity[v] = true;
+          if (depth[b] > max_use_depth[v])
+            max_use_depth[v] = depth[b];
+        }
+        ++uses[v];
+      }
       for (size_t ai = 0; in->args && ai < in->args_len; ++ai)
         if (in->args[ai].kind == NYR_MACH_OPERAND_VREG &&
-            in->args[ai].as.reg < m->vreg_len)
-          ++uses[in->args[ai].as.reg];
+            in->args[ai].as.reg < m->vreg_len) {
+          uint32_t v = in->args[ai].as.reg;
+          if (weight) {
+            bool xblk =
+                loop_carried[v] || (cross_block_loop && cross_block_loop[v]);
+            score[v] += xblk ? weight * 2u : weight;
+            has_loop_activity[v] = true;
+            if (depth[b] > max_use_depth[v])
+              max_use_depth[v] = depth[b];
+          }
+          ++uses[v];
+        }
     }
   }
   for (uint32_t v = 0; v < m->vreg_len; ++v) {
@@ -1720,126 +2009,158 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
         mach_loop_gpr_call_safe_indexed(m, &ranges, depth, v, true, &hazard);
     call_safe_caller[v] =
         mach_loop_gpr_call_safe_indexed(m, &ranges, depth, v, false, &hazard);
-  }
-  bool reserved[MIR_COLOR_N] = {false};
-  size_t selected = 0;
-  for (int color = 0; color < MIR_COLOR_N; ++color) {
-    int preg = mach_color_preg[color];
-    bool callee_saved = color < MIR_CALLEE_COLOR_N;
-    /*
-     * R8, R9, RCX and RDX are fixed scratch only at instructions the
-     * shared fixed-clobber contract names (division, remainder, variable
-     * shifts, reductions) and at calls. mach_loop_gpr_fixed_safe proves the
-     * former over the whole range; the call proof covers the rest.
-     */
-    bool r8_caller_saved = color >= 8;
-    /*
-     * C allocates ordinary values in rsi/rdi first, and the overlap check
-     * does not yet see every conflict with a loop register there.
-     */
-    bool data_caller_saved = !m->c_abi && (color == 5 || color == 6);
-    if (!callee_saved && !r8_caller_saved && !data_caller_saved)
-      continue;
-    if (preg == 11)
-      continue;
-    for (;;) {
-      size_t best = SIZE_MAX, best_score = 0;
-      bool best_is_carried = false;
-      for (size_t v = 0; v < m->vreg_len; ++v) {
-        bool vector_ok = callee_saved || data_caller_saved || vector_safe[v];
-        if (ny_dbg_is_enabled(NY_DBG_DEEP) && defs[v] > 0 &&
-            m->vreg_types[v] == NYR_MACH_TYPE_I64 &&
-            (loop_carried[v] || score[v] >= 16)) {
-          bool simple_defs = !other_def[v];
-          bool safe_stores = store_safe[v];
-          bool unassigned = colors[v] < 0;
-          bool score_ok = true;
-          bool call_safe =
-              callee_saved ? call_safe_callee[v] : call_safe_caller[v];
-          bool fixed_safe = callee_saved ||
-                            (r8_caller_saved && mach_loop_gpr_fixed_cached(
-                                                    m, &ranges, (uint32_t)v,
-                                                    color, fixed_safe_cache)) ||
-                            data_caller_saved;
-          bool is_unfolded = !folded_known[v];
-          size_t color_blocker = mach_loop_gpr_color_blocker(
-              &ranges, color_heads, next_colored, present, (uint32_t)v, color);
-          bool color_available = color_blocker == SIZE_MAX;
-          ny_dbg_enter_context(name);
-          ny_dbg_heuristic_event(
-              "X64_LOOP_HOME",
-              "candidate v%zu preg=%d score=%zu carried=%d eligible=%d "
-              "defs=%d "
-              "simple=%d unassigned=%d unfolded=%d call-safe=%d fixed-safe=%d "
-              "vector-safe=%d store-safe=%d available=%d blocker=%ld",
-              v, mach_color_preg[color], score[v], (int)loop_carried[v],
-              (int)(simple_defs && unassigned && score_ok && call_safe &&
-                    fixed_safe && vector_ok && is_unfolded && safe_stores &&
-                    color_available),
-              1, (int)simple_defs, (int)unassigned, (int)is_unfolded,
-              (int)call_safe, (int)fixed_safe, (int)vector_ok, (int)safe_stores,
-              (int)color_available,
-              color_blocker == SIZE_MAX
-                  ? -1L
-                  : (color_blocker == MACH_LOOP_GPR_NO_INTERVAL
-                         ? -2L
-                         : (long)color_blocker));
-          ny_dbg_exit_context(name);
-        }
-        bool fixed_safe = callee_saved ||
-                          (r8_caller_saved && mach_loop_gpr_fixed_cached(
-                                                  m, &ranges, (uint32_t)v,
-                                                  color, fixed_safe_cache)) ||
-                          data_caller_saved;
-        bool single_use_constant_div =
-            defs[v] == 1 && uses[v] == 1 && def_pc[v] < m->inst_len &&
-            m->insts[def_pc[v]].opcode == NYR_MACH_DIV &&
-            m->insts[def_pc[v]].src1.kind == NYR_MACH_OPERAND_IMM;
-        bool candidate_loop_local = loop_carried[v] || score[v] >= 16 ||
-                                    (!callee_saved && single_use_constant_div);
-        /*
-         * Rank by loop-weighted uses, with carry only breaking equal costs.
-         * An outer-loop carry must not displace a more frequently used
-         * temporary in an inner loop merely because it crosses a backedge.
-         * The range, interference, and call proofs apply to both kinds.
-         *
-         * A dedicated color has the same meaning on every CFG edge. Caller-
-         * saved colors require call-free ranges; R8 additionally avoids
-         * constant div/mod scratch. Share colors only between disjoint
-         * ranges and reserve them from the ordinary allocator.
-         */
-        if (defs[v] > 0 && candidate_loop_local && !other_def[v] &&
-            colors[v] < 0 && m->vreg_types[v] == NYR_MACH_TYPE_I64 &&
-            !folded_known[v] && store_safe[v] &&
-            (callee_saved ? call_safe_callee[v] : call_safe_caller[v]) &&
-            fixed_safe && vector_ok &&
-            (best == SIZE_MAX || score[v] > best_score ||
-             (score[v] == best_score && loop_carried[v] && !best_is_carried) ||
-             (best != SIZE_MAX && score[v] == best_score &&
-              loop_carried[v] == best_is_carried && def_pc[v] < def_pc[best])) &&
-            mach_loop_gpr_color_available(&ranges, color_heads, next_colored,
-                                          present, (uint32_t)v, color)) {
-          best = v;
-          best_score = score[v];
-          best_is_carried = loop_carried[v];
-        }
-      }
-      if (best == SIZE_MAX)
-        break;
-      colors[best] = color;
-      next_colored[best] = color_heads[color];
-      color_heads[color] = best;
-      reserved[color] = true;
-      ++selected;
-      if (ny_dbg_is_enabled(NY_DBG_DEEP)) {
-        ny_dbg_enter_context(name);
-        ny_dbg_heuristic_event(
-            "X64_LOOP_HOME", "v%zu preg=%d weighted-uses=%zu carried=%d", best,
-            mach_color_preg[color], best_score, (int)best_is_carried);
-        ny_dbg_exit_context(name);
+    if (score[v]) {
+      if (loop_carried[v] && loop_def[v])
+        score[v] *= loop_cmp_use[v] ? 3u : 2u;
+      unsigned max_live_depth = 0;
+      for (size_t b = 0; b < ranges.block_len; ++b)
+        if (ranges.starts[(size_t)v * ranges.block_len + b] != SIZE_MAX &&
+            depth[b] > max_live_depth)
+          max_live_depth = depth[b];
+      if (max_live_depth > max_use_depth[v]) {
+        unsigned idle = max_live_depth - max_use_depth[v];
+        score[v] >>= (idle > 4 ? 8 : idle * 2);
+        if (!score[v])
+          score[v] = 1;
       }
     }
   }
+  size_t gp_limit = mach_gpr_color_count(m, e->target);
+  mach_loop_cand_t *cands = malloc(m->vreg_len * sizeof(*cands));
+  size_t cand_len = 0;
+  if (cands) {
+    for (uint32_t v = 0; v < m->vreg_len; ++v) {
+      if (!defs[v] || other_def[v] || m->vreg_types[v] != NYR_MACH_TYPE_I64 ||
+          folded_known[v] || !store_safe[v])
+        continue;
+      bool single_use_const_div =
+          defs[v] == 1 && uses[v] == 1 && def_pc[v] < m->inst_len &&
+          m->insts[def_pc[v]].opcode == NYR_MACH_DIV &&
+          m->insts[def_pc[v]].src1.kind == NYR_MACH_OPERAND_IMM;
+      if (!loop_carried[v] && (!has_loop_activity[v] || score[v] < 32) &&
+          !single_use_const_div)
+        continue;
+      cands[cand_len++] = (mach_loop_cand_t){
+          .vreg = v,
+          .score = score[v],
+          .def_pc = def_pc[v],
+          .carried = loop_carried[v],
+          .single_use_const_div = single_use_const_div,
+      };
+    }
+    if (cand_len > 1)
+      qsort(cands, cand_len, sizeof(*cands), mach_loop_cand_cmp);
+  }
+  bool reserved[MIR_COLOR_N] = {false};
+  size_t selected = 0;
+  size_t work = 0;
+  static const int default_order[MIR_COLOR_N] = {0, 1, 2,  3,  4, 8,
+                                                 9, 10, 11, 5, 6, 7};
+  static const int callee_only_order[MIR_CALLEE_COLOR_N] = {0, 1, 2, 3, 4};
+  for (size_t ci = 0; ci < cand_len && cands; ++ci) {
+    if (++work >= MACH_LOOP_GPR_WORK_BUDGET)
+      break;
+    const mach_loop_cand_t *cand = &cands[ci];
+    uint32_t v = cand->vreg;
+    if (colors[v] >= 0)
+      continue;
+    bool allow_callee =
+        cand->carried || (has_loop_activity[v] && score[v] >= 32);
+    int hint_color = -1;
+    if (hint_peer[v] < m->vreg_len && colors[hint_peer[v]] >= 0)
+      hint_color = colors[hint_peer[v]];
+    bool try_caller = call_safe_caller[v] && gp_limit > MIR_CALLEE_COLOR_N;
+    const int *order = try_caller ? default_order : callee_only_order;
+    size_t order_len =
+        try_caller ? (size_t)MIR_COLOR_N : (size_t)MIR_CALLEE_COLOR_N;
+    int chosen = -1;
+    for (size_t pass = 0; pass < 2 && chosen < 0; ++pass) {
+      size_t limit = pass == 0 ? (hint_color >= 0 ? 1u : 0u) : order_len;
+      for (size_t oi = 0; oi < limit; ++oi) {
+        int color = pass == 0 ? hint_color : order[oi];
+        if (pass == 1 && color == hint_color)
+          continue;
+        if (color < 0 || (size_t)color >= gp_limit)
+          continue;
+        int preg = mach_color_preg[color];
+        if (preg == 11)
+          continue;
+        bool callee_saved = color < MIR_CALLEE_COLOR_N;
+        if (callee_saved && !allow_callee)
+          continue;
+        bool r8_caller_saved = color >= 8;
+        bool data_caller_saved = color == 5 || color == 6;
+        if (!callee_saved && !r8_caller_saved && !data_caller_saved)
+          continue;
+        if (!(callee_saved ? call_safe_callee[v] : call_safe_caller[v]))
+          continue;
+        bool vector_ok = callee_saved || data_caller_saved || vector_safe[v];
+        if (!vector_ok)
+          continue;
+        bool fixed_safe = callee_saved ||
+                          (r8_caller_saved && mach_loop_gpr_fixed_cached(
+                                                  m, &ranges, v, color,
+                                                  fixed_safe_cache)) ||
+                          data_caller_saved;
+        if (!fixed_safe)
+          continue;
+        /*
+         * Per-block distinct-color pressure reserve: adding a NEW color to a
+         * heavy local-expression block (>=16 local defs) is capped at 9
+         * distinct loop-home colors so >=3 scratch colors stay available for
+         * block-local temporaries. Reusing a color already present in that
+         * block (disjoint live range) adds zero concurrent pressure.
+         */
+        bool color_pressure_blocked = false;
+        if (block_local_defs && block_color_mask && gp_limit > 9) {
+          uint32_t cbit = 1u << (unsigned)color;
+          for (size_t b = 0; b < ranges.block_len; ++b) {
+            if (ranges.starts[(size_t)v * ranges.block_len + b] == SIZE_MAX)
+              continue;
+            if (block_local_defs[b] >= 16 && !(block_color_mask[b] & cbit) &&
+                __builtin_popcount(block_color_mask[b]) >= 9) {
+              color_pressure_blocked = true;
+              break;
+            }
+          }
+        }
+        if (color_pressure_blocked)
+          continue;
+        if (mach_loop_gpr_color_available(&ranges, color_heads, next_colored,
+                                          present, v, color, &work)) {
+          chosen = color;
+          break;
+        }
+        if (work >= MACH_LOOP_GPR_WORK_BUDGET)
+          break;
+      }
+    }
+    if (chosen < 0)
+      continue;
+    colors[v] = chosen;
+    next_colored[v] = color_heads[chosen];
+    color_heads[chosen] = v;
+    reserved[chosen] = true;
+    ++selected;
+    if (block_color_mask)
+      for (size_t b = 0; b < ranges.block_len; ++b)
+        if (ranges.starts[(size_t)v * ranges.block_len + b] != SIZE_MAX)
+          block_color_mask[b] |= 1u << (unsigned)chosen;
+    if (ny_dbg_is_enabled(NY_DBG_DEEP)) {
+      ny_dbg_enter_context(name);
+      ny_dbg_heuristic_event(
+          "X64_LOOP_HOME",
+          "v%u preg=%d weighted-uses=%zu carried=%d iv=%d hint=%d", v,
+          mach_color_preg[chosen], cand->score, (int)cand->carried,
+          (int)(loop_carried[v] && loop_def[v] && loop_cmp_use[v]),
+          (int)(chosen == hint_color));
+      ny_dbg_exit_context(name);
+    }
+  }
+  free(cands);
+  free(block_local_defs);
+  free(block_color_mask);
+  free(cross_block_loop);
   if (selected) {
     e->loop_gpr = colors;
     colors = NULL;
@@ -2045,15 +2366,6 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
       if (s->spill_reason != NYR_MACH_SPILL_FIXED_CLOBBER)
         s->spill_reason = NYR_MACH_SPILL_REGISTER_PRESSURE;
     }
-    if (evicted_local) {
-      mach_loop_cover_t cover = {coverage, m->inst_len};
-      mach_mark_local_spills(e, m, evicted_local);
-      nyr_mach_regalloc_recolor_locals(m, &e->regalloc, NYR_MACH_REGCLASS_GPR,
-                                       evicted_local, mach_loop_cover_blocks,
-                                       &cover);
-      free(evicted_local);
-    }
-    free(coverage);
     for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
       nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
       int c = e->loop_gpr[s->vreg];
@@ -2063,6 +2375,15 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
       s->carried = s->acyclic_carried = false;
       s->reload = s->spill = true;
     }
+    if (evicted_local) {
+      mach_loop_cover_t cover = {coverage, m->inst_len};
+      mach_mark_local_spills(e, m, evicted_local);
+      nyr_mach_regalloc_recolor_locals(m, &e->regalloc, NYR_MACH_REGCLASS_GPR,
+                                       evicted_local, mach_loop_cover_blocks,
+                                       &cover);
+      free(evicted_local);
+    }
+    free(coverage);
   }
   free(score);
   free(defs);
@@ -2070,6 +2391,12 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
   free(def_pc);
   free(other_def);
   free(loop_carried);
+  free(loop_def);
+  free(loop_cmp_use);
+  free(has_loop_activity);
+  free(max_use_depth);
+  free(hint_peer);
+  free(hint_weight);
   free(vector_safe);
   free(store_safe);
   free(depth);
@@ -2611,6 +2938,16 @@ static bool mach_seg_index_build(const nyr_mach_regalloc_t *alloc, size_t n,
   return true;
 }
 
+static inline bool mach_bundle_entry_resident(const nyr_x64_mach_enc_t *e,
+                                              size_t block, uint32_t vreg) {
+  if (!e || !e->bundle_entry_resident || !e->mach ||
+      block >= e->mach->block_len || vreg >= e->mach->vreg_len ||
+      !e->bundle_vreg_words)
+    return false;
+  return (e->bundle_entry_resident[block * e->bundle_vreg_words + (vreg >> 6)] &
+          (UINT64_C(1) << (vreg & 63u))) != 0;
+}
+
 static bool mach_publish_gpr_home(nyr_x64_mach_enc_t *e, uint32_t v, int preg);
 
 static bool mach_begin_segments(nyr_x64_mach_enc_t *e) {
@@ -2658,8 +2995,16 @@ static bool mach_begin_segments(nyr_x64_mach_enc_t *e) {
      * A carried segment arrives in its preg with no reload: the regalloc
      * pass coalesced the phi-edge copy chain to one color, so the value
      * survived the loop backedge without flushing to its stack home.
+     * Similarly, a P2/P1 bundle-resident entry segment arrives seeded in its
+     * color across every reachable predecessor exiting into this block's
+     * incoming edge bundle.
      */
-    bool carried = seg->carried || mach_segment_carries(e, v, seg);
+    bool bundle_res =
+        e->cur_block_valid &&
+        e->cur_inst == e->mach->blocks[e->cur_block].first_inst &&
+        mach_bundle_entry_resident(e, e->cur_block, v);
+    bool carried =
+        seg->carried || bundle_res || mach_segment_carries(e, v, seg);
     /*
      * The allocator marks a chunk carried when the previous chunk is
      * contiguous and same-color, but the encoder only loads a reload chunk
@@ -2678,11 +3023,11 @@ static bool mach_begin_segments(nyr_x64_mach_enc_t *e) {
      * separate CFG regions with different colors; consulting any carried
      * segment for the vreg can incorrectly seed this segment from an
      * unrelated register. The block-entry seed is established only for a
-     * carried segment whose incoming edges share this preg, while an
-     * intra-block split is covered by mach_segment_carries().
+     * carried or bundle-resident segment whose incoming edges share this
+     * preg, while an intra-block split is covered by mach_segment_carries().
      */
-    e->color_seeded[v] =
-        !seg->reload && current_preg >= 0 && e->color_seeded[v] && carried;
+    e->color_seeded[v] = (!seg->reload || bundle_res) && current_preg >= 0 &&
+                         e->color_seeded[v] && carried;
   }
   return true;
 }
@@ -2772,7 +3117,7 @@ static bool mach_end_segments(nyr_x64_mach_enc_t *e) {
      * the def itself skipped its home write (the chain is carried), so this
      * store is the only thing keeping that home current.
      */
-    if (mach_vreg_used_in_later_block(e, v) && !seg->spill)
+    if (mach_vreg_used_in_later_block(e, v) && !(seg->carried && seg->spill))
       needs_home = false;
     if (needs_home && seg->color >= 0 && e->color_seeded[v] &&
         !e->force_stack_reads) {
@@ -2867,6 +3212,8 @@ static bool mach_seed_colored_preg(nyr_x64_mach_enc_t *e, uint32_t vreg) {
     if (!mach_remat_addr_preg(e, preg, &e->addr_fold[vreg]))
       return false;
   } else {
+    if (!e->home_store_counts)
+      e->home_load_ops++;
     if (!mach_rex(e, true, preg >= 8, false, false) || !mach_u8(e, 0x8b) ||
         !mach_rbp_disp(e, (unsigned)preg, off))
       return false;
@@ -3228,18 +3575,26 @@ static void mach_invalidate_callee_scratch_colors(nyr_x64_mach_enc_t *e) {
  */
 static bool mach_loop_gprs_call_home(nyr_x64_mach_enc_t *e, bool restore,
                                      bool preserve_callee) {
-  if (!e || !e->loop_gpr)
+  if (!e || !e->loop_gpr || preserve_callee)
     return true;
   const nyr_mach_func_t *m = e->mach;
   size_t pc = e->cur_inst;
   size_t bi = mach_block_for_inst(e, pc);
-  if (bi >= m->block_len)
+  if (bi >= m->block_len || !m->vreg_len)
     return true;
-  if (m->vreg_len > MACH_LOOP_GPR_MAX_VREGS)
-    return mach_err(e, "x64: loop-home count exceeds allocation limit");
 
   const nyr_mach_block_t *block = &m->blocks[bi];
-  size_t first[640], last[640];
+  size_t first_stack[640], last_stack[640];
+  size_t *first = first_stack, *last = last_stack;
+  if (m->vreg_len > 640) {
+    first = malloc(m->vreg_len * sizeof(*first));
+    last = malloc(m->vreg_len * sizeof(*last));
+    if (!first || !last) {
+      free(first);
+      free(last);
+      return mach_err(e, "x64: OOM in loop-home call sync");
+    }
+  }
   for (size_t v = 0; v < m->vreg_len; ++v) {
     if (e->loop_gpr[v] < 0 || e->loop_gpr[v] >= MIR_CALLEE_COLOR_N) {
       first[v] = SIZE_MAX;
@@ -3262,6 +3617,7 @@ static bool mach_loop_gprs_call_home(nyr_x64_mach_enc_t *e, bool restore,
     if (seg->end > last[v])
       last[v] = seg->end;
   }
+  bool ok = true;
   const nyr_mach_inst_t *call = &m->insts[pc];
   for (size_t v = 0; v < m->vreg_len; ++v) {
     int color = e->loop_gpr[v];
@@ -3280,29 +3636,27 @@ static bool mach_loop_gprs_call_home(nyr_x64_mach_enc_t *e, bool restore,
     if (!used_as_arg && call->src0.kind == NYR_MACH_OPERAND_VREG &&
         call->src0.as.reg == v)
       used_as_arg = true;
-    if (preserve_callee) {
-      /*
-       * Callee-saved loop registers survive the call by ABI, and argument
-       * placement can move a seeded loop register directly into its ABI
-       * destination.  Leave every loop value resident; an unseeded value
-       * still has its canonical home for argument placement to read.
-       */
-      continue;
-    }
     if (restore ? !live_after : !(live_after || used_as_arg))
       continue;
     int preg = mach_color_preg[color];
     int off = mach_vreg_home_off(e, (uint32_t)v);
     if (restore) {
-      if (!mach_load_home_preg(e, off, (unsigned)preg))
-        return false;
+      if (!mach_load_home_preg(e, off, (unsigned)preg)) {
+        ok = false;
+        break;
+      }
     } else if (!mach_store_preg_home(e, preg, off)) {
-      return false;
+      ok = false;
+      break;
     }
     if (e->color_seeded)
       e->color_seeded[v] = restore;
   }
-  return true;
+  if (first != first_stack) {
+    free(first);
+    free(last);
+  }
+  return ok;
 }
 
 /*
@@ -6436,7 +6790,7 @@ static bool mach_prepare_select_bit_test(nyr_x64_mach_enc_t *e,
   bool has_candidate = false;
   for (size_t i = 0; i < m->inst_len; ++i) {
     const nyr_mach_inst_t *in = &m->insts[i];
-    if (in->opcode == NYR_MACH_SELECT &&
+    if (in->opcode == NYR_MACH_SELECT && mach_is_i64(m, &in->dst) &&
         in->src0.kind == NYR_MACH_OPERAND_VREG && in->src0.as.reg < n &&
         (in->condition == NYR_MACH_COND_EQ ||
          in->condition == NYR_MACH_COND_NE)) {
@@ -6472,7 +6826,7 @@ static bool mach_prepare_select_bit_test(nyr_x64_mach_enc_t *e,
   } while (0)
   for (size_t si = 0; si < m->inst_len; ++si) {
     const nyr_mach_inst_t *select = &m->insts[si];
-    if (select->opcode != NYR_MACH_SELECT ||
+    if (select->opcode != NYR_MACH_SELECT || !mach_is_i64(m, &select->dst) ||
         select->src0.kind != NYR_MACH_OPERAND_VREG ||
         select->src0.as.reg >= m->vreg_len ||
         (select->condition != NYR_MACH_COND_EQ &&
@@ -7209,26 +7563,35 @@ static bool mach_same_block_alu_src1_uses_color(const nyr_x64_mach_enc_t *e,
   size_t use_block = mach_block_for_inst(e, use_idx);
   if (def_block == SIZE_MAX || def_block != use_block)
     return false;
-  bool commutative_alu =
-      in->opcode == NYR_MACH_ADD || in->opcode == NYR_MACH_MUL ||
-      in->opcode == NYR_MACH_AND || in->opcode == NYR_MACH_OR ||
-      in->opcode == NYR_MACH_XOR;
-  if (!commutative_alu || !mach_is_i64(e->mach, &in->dst) ||
+  bool reg_alu = in->opcode == NYR_MACH_ADD || in->opcode == NYR_MACH_SUB ||
+                 in->opcode == NYR_MACH_MUL || in->opcode == NYR_MACH_AND ||
+                 in->opcode == NYR_MACH_OR || in->opcode == NYR_MACH_XOR;
+  if (!reg_alu || !mach_is_i64(e->mach, &in->dst) ||
       !mach_is_i64(e->mach, &in->src0) || !mach_is_i64(e->mach, &in->src1))
+    return false;
+  if (e->imm_fold_known && vreg < e->mach->vreg_len && e->imm_fold_known[vreg])
     return false;
   const nyr_mach_live_segment_t *source_now =
       mach_segment_at(e, vreg, e->cur_inst);
   const nyr_mach_live_segment_t *source_use = mach_segment_at(e, vreg, use_idx);
   const nyr_mach_live_segment_t *dest_use =
       mach_segment_at(e, in->dst.as.reg, use_idx);
-  if (!source_now || !source_use || !dest_use || source_now->spill ||
-      source_use->spill || source_now->color < 0 || dest_use->color < 0 ||
-      source_now->color != source_use->color ||
-      source_now->color == dest_use->color)
+  if (!source_now || source_now != source_use || source_now->spill ||
+      source_now->color < 0)
     return false;
-  for (size_t j = e->cur_inst + 1; j < use_idx; ++j)
-    if (e->mach->insts[j].opcode == NYR_MACH_CALL)
+  if (dest_use && dest_use->color >= 0 && dest_use->color == source_now->color)
+    return false;
+  for (size_t j = e->cur_inst + 1; j < use_idx; ++j) {
+    const nyr_mach_inst_t *mid = &e->mach->insts[j];
+    if (mid->opcode == NYR_MACH_CALL || mid->opcode == NYR_MACH_INLINE_ASM ||
+        mid->opcode == NYR_MACH_INTRINSIC || mid->opcode == NYR_MACH_DIV ||
+        mid->opcode == NYR_MACH_MOD || mid->opcode == NYR_MACH_REDUCE_ADD ||
+        ((mid->opcode == NYR_MACH_SHL || mid->opcode == NYR_MACH_SAR ||
+          mid->opcode == NYR_MACH_SHR || mid->opcode == NYR_MACH_ROR ||
+          mid->opcode == NYR_MACH_ROR32) &&
+         mid->src1.kind != NYR_MACH_OPERAND_IMM))
       return false;
+  }
   return true;
 }
 
@@ -9321,20 +9684,27 @@ static bool mach_vector_ymm_sar(nyr_x64_mach_enc_t *e,
         !mach_ymm_qword_shift_imm(e, d, a, 2, 1) ||
         !mach_ymm_op_reg(e, d, 15, 0xeb))
       return false;
+  } else if (count == 63) {
+    /*
+     * vpxor ymm15,ymm15,ymm15; vpcmpgtq ymmD,ymm15,ymmA
+     */
+    unsigned char vex2 =
+        (unsigned char)((d < 8 ? 0x80u : 0u) | 0x40u | (a < 8 ? 0x20u : 0u) |
+                        0x02u);
+    if (!mach_ymm_op_reg(e, 15, 15, 0xef) || !mach_u8(e, 0xc4) ||
+        !mach_u8(e, vex2) || !mach_u8(e, 0x05) || !mach_u8(e, 0x37) ||
+        !mach_u8(e, (unsigned char)(0xc0u | ((d & 7u) << 3) | (a & 7u))))
+      return false;
   } else {
     /*
      * vpxor ymm15,ymm15,ymm15; vpcmpgtq ymm15,ymm15,ymmA
      */
     if (!mach_ymm_op_reg(e, 15, 15, 0xef) || !mach_u8(e, 0xc4) ||
         !mach_u8(e, a >= 8 ? 0x42 : 0x62) || !mach_u8(e, 0x05) ||
-        !mach_u8(e, 0x37) || !mach_u8(e, 0xf8 | (a & 7)))
-      return false;
-    if (count == 63) {
-      if (!mach_ymm_mov_reg(e, d, 15))
-        return false;
-    } else if (!mach_ymm_qword_shift_imm(e, d, a, 2, count) ||
-               !mach_ymm_qword_shift_imm(e, 15, 15, 6, 64 - count) ||
-               !mach_ymm_op_reg(e, d, 15, 0xeb)) {
+        !mach_u8(e, 0x37) || !mach_u8(e, 0xf8 | (a & 7)) ||
+        !mach_ymm_qword_shift_imm(e, d, a, 2, count) ||
+        !mach_ymm_qword_shift_imm(e, 15, 15, 6, 64 - count) ||
+        !mach_ymm_op_reg(e, d, 15, 0xeb)) {
       return false;
     }
   }
@@ -9435,6 +9805,183 @@ static bool mach_vector_ymm_shr(nyr_x64_mach_enc_t *e,
       return false;
   } else if (!mach_ymm_qword_shift_imm(e, d, a, 2, count)) {
     return false;
+  }
+  if (assigned >= 0) {
+    if (e->vec_color_seeded)
+      e->vec_color_seeded[in->dst.as.reg] = true;
+    return true;
+  }
+  return mach_ymm_store_v256(e, dst_off, d);
+}
+
+/*
+ * vpsllq ymmD, ymmA, imm: packed logical i64 shift left.
+ */
+static bool mach_vector_ymm_shl(nyr_x64_mach_enc_t *e,
+                                const nyr_mach_inst_t *in, int dst_off) {
+  int assigned = in->dst.kind == NYR_MACH_OPERAND_VREG
+                     ? mach_vreg_vpreg(e, in->dst.as.reg)
+                     : -1;
+  unsigned d = assigned >= 0 ? (unsigned)assigned : 14;
+  unsigned a = 14;
+  if (in->src1.kind != NYR_MACH_OPERAND_IMM || in->src1.as.imm < 0 ||
+      in->src1.as.imm > 63 || !mach_load_vector_operand(e, &in->src0, 14, &a))
+    return mach_err(e, "x64: vec8.shl.i64 needs an immediate count 0..63");
+  unsigned count = (unsigned)in->src1.as.imm;
+  if (count == 0) {
+    if (a != d && !mach_ymm_mov_reg(e, d, a))
+      return false;
+  } else if (!mach_ymm_qword_shift_imm(e, d, a, 6, count)) {
+    return false;
+  }
+  if (assigned >= 0) {
+    if (e->vec_color_seeded)
+      e->vec_color_seeded[in->dst.as.reg] = true;
+    return true;
+  }
+  return mach_ymm_store_v256(e, dst_off, d);
+}
+
+/*
+ * Four-lane signed i64 comparison producing -1 / 0 lane masks via
+ * vpcmpeqq (0F38 29) and vpcmpgtq (0F38 37), plus all-ones xor for NE/LE/GE.
+ */
+static bool mach_vector_ymm_cmp_i64(nyr_x64_mach_enc_t *e,
+                                    const nyr_mach_inst_t *in, int dst_off) {
+  if (!e->target || !(e->target->caps & NY_NATIVE_CAP_MACH_AVX2))
+    return mach_err(e, "x64: vec8.cmp.i64 requires AVX2");
+  bool swap = false, invert = false;
+  unsigned char opc = 0;
+  switch (in->condition) {
+  case NYR_MACH_COND_EQ:
+    opc = 0x29;
+    break;
+  case NYR_MACH_COND_NE:
+    opc = 0x29;
+    invert = true;
+    break;
+  case NYR_MACH_COND_GT:
+    opc = 0x37;
+    break;
+  case NYR_MACH_COND_LT:
+    opc = 0x37;
+    swap = true;
+    break;
+  case NYR_MACH_COND_LE:
+    opc = 0x37;
+    invert = true;
+    break;
+  case NYR_MACH_COND_GE:
+    opc = 0x37;
+    swap = true;
+    invert = true;
+    break;
+  default:
+    return mach_err(e, "x64: unsupported vec8.cmp.i64 condition");
+  }
+  const nyr_mach_operand_t *op_a = swap ? &in->src1 : &in->src0;
+  const nyr_mach_operand_t *op_b = swap ? &in->src0 : &in->src1;
+  int assigned = in->dst.kind == NYR_MACH_OPERAND_VREG
+                     ? mach_vreg_vpreg(e, in->dst.as.reg)
+                     : -1;
+  unsigned d = assigned >= 0 ? (unsigned)assigned : 14u;
+  unsigned a = 15u;
+  if (!mach_load_vector_operand(e, op_a, 15u, &a))
+    return false;
+  unsigned char vex3 = (unsigned char)(0x05u | ((~a & 0x0fu) << 3));
+  if (op_b->kind == NYR_MACH_OPERAND_VREG) {
+    int breg = mach_vreg_vpreg(e, op_b->as.reg);
+    if (breg >= 0) {
+      if (!mach_seed_vector_preg(e, op_b->as.reg))
+        return false;
+      unsigned b = (unsigned)breg;
+      unsigned char vex2 =
+          (unsigned char)((d < 8 ? 0x80u : 0u) | 0x40u | (b < 8 ? 0x20u : 0u) |
+                          0x02u);
+      if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
+          !mach_u8(e, opc) ||
+          !mach_u8(e, (unsigned char)(0xc0u | ((d & 7u) << 3) | (b & 7u))))
+        return false;
+    } else {
+      unsigned char vex2 = (unsigned char)(d >= 8 ? 0x62u : 0xe2u);
+      if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
+          !mach_u8(e, opc) ||
+          !mach_u8(e, (unsigned char)(0x85u | ((d & 7u) << 3))) ||
+          !mach_i32(e, mach_slot_off(e, op_b)))
+        return false;
+    }
+  } else if (op_b->kind == NYR_MACH_OPERAND_FRAME) {
+    unsigned char vex2 = (unsigned char)(d >= 8 ? 0x62u : 0xe2u);
+    if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
+        !mach_u8(e, opc) ||
+        !mach_u8(e, (unsigned char)(0x85u | ((d & 7u) << 3))) ||
+        !mach_i32(e, mach_slot_off(e, op_b)))
+      return false;
+  } else {
+    return mach_err(e, "x64: unsupported vec8.cmp.i64 operand");
+  }
+  if (invert) {
+    if (!mach_ymm_op_reg(e, 15, 15, 0x76) || !mach_ymm_op_reg(e, d, 15, 0xef))
+      return false;
+  }
+  if (assigned >= 0) {
+    if (e->vec_color_seeded)
+      e->vec_color_seeded[in->dst.as.reg] = true;
+    return true;
+  }
+  return mach_ymm_store_v256(e, dst_off, d);
+}
+
+/*
+ * Four-lane i64 blend selected by the sign bit (bit 63) of each mask lane:
+ *   vblendvpd ymmD, ymmF, ymmT/m256, ymmM  (VEX.NDS.256.66.0F3A.W0 4B /r /is4)
+ * Operand mapping: src0=mask, src1=true_val, src2=false_val.
+ */
+static bool mach_vector_ymm_select_i64(nyr_x64_mach_enc_t *e,
+                                       const nyr_mach_inst_t *in, int dst_off) {
+  if (!e->target || !(e->target->caps & NY_NATIVE_CAP_MACH_AVX2))
+    return mach_err(e, "x64: vec8.select.i64 requires AVX2");
+  int assigned = in->dst.kind == NYR_MACH_OPERAND_VREG
+                     ? mach_vreg_vpreg(e, in->dst.as.reg)
+                     : -1;
+  unsigned d = assigned >= 0 ? (unsigned)assigned : 14u;
+  unsigned m = 14u, f = 15u;
+  if (!mach_load_vector_operand(e, &in->src0, 14u, &m) ||
+      !mach_load_vector_operand(e, &in->src2, 15u, &f))
+    return false;
+  unsigned char vex3 = (unsigned char)(0x05u | ((~f & 0x0fu) << 3));
+  unsigned char is4 = (unsigned char)((m & 0x0fu) << 4);
+  if (in->src1.kind == NYR_MACH_OPERAND_VREG) {
+    int treg = mach_vreg_vpreg(e, in->src1.as.reg);
+    if (treg >= 0) {
+      if (!mach_seed_vector_preg(e, in->src1.as.reg))
+        return false;
+      unsigned t = (unsigned)treg;
+      unsigned char vex2 =
+          (unsigned char)((d < 8 ? 0x80u : 0u) | 0x40u | (t < 8 ? 0x20u : 0u) |
+                          0x03u);
+      if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
+          !mach_u8(e, 0x4b) ||
+          !mach_u8(e, (unsigned char)(0xc0u | ((d & 7u) << 3) | (t & 7u))) ||
+          !mach_u8(e, is4))
+        return false;
+    } else {
+      unsigned char vex2 = (unsigned char)(d >= 8 ? 0x63u : 0xe3u);
+      if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
+          !mach_u8(e, 0x4b) ||
+          !mach_u8(e, (unsigned char)(0x85u | ((d & 7u) << 3))) ||
+          !mach_i32(e, mach_slot_off(e, &in->src1)) || !mach_u8(e, is4))
+        return false;
+    }
+  } else if (in->src1.kind == NYR_MACH_OPERAND_FRAME) {
+    unsigned char vex2 = (unsigned char)(d >= 8 ? 0x63u : 0xe3u);
+    if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
+        !mach_u8(e, 0x4b) ||
+        !mach_u8(e, (unsigned char)(0x85u | ((d & 7u) << 3))) ||
+        !mach_i32(e, mach_slot_off(e, &in->src1)) || !mach_u8(e, is4))
+      return false;
+  } else {
+    return mach_err(e, "x64: unsupported vec8.select.i64 true operand");
   }
   if (assigned >= 0) {
     if (e->vec_color_seeded)
@@ -11581,6 +12128,697 @@ static void mach_audit_function(const nyr_x64_mach_enc_t *e, const char *name) {
           ra_spilled, ra_reload, ra_colors, ra_spill_live, ra_spill_dying);
 }
 
+static size_t mach_eb_find(size_t *parent, size_t x) {
+  while (parent[x] != x) {
+    parent[x] = parent[parent[x]];
+    x = parent[x];
+  }
+  return x;
+}
+
+static void mach_eb_union(size_t *parent, size_t a, size_t b) {
+  size_t ra = mach_eb_find(parent, a);
+  size_t rb = mach_eb_find(parent, b);
+  if (ra != rb) {
+    if (ra < rb)
+      parent[rb] = ra;
+    else
+      parent[ra] = rb;
+  }
+}
+
+/*
+ * Conservative bitmask of GPR colors (indices into mach_color_preg[]) that
+ * instruction `in` may clobber during x64 emission. Color 7 (r11) is always
+ * marked clobbered because the encoder uses r11 as implicit scratch.
+ */
+static uint32_t mach_inst_bundle_clobber_mask(const nyr_x64_mach_enc_t *e,
+                                              const nyr_mach_inst_t *in) {
+  const uint32_t all_mask = (UINT32_C(1) << (unsigned)MIR_COLOR_N) - 1u;
+  const uint32_t callee_mask =
+      (UINT32_C(1) << (unsigned)MIR_CALLEE_COLOR_N) - 1u;
+  const uint32_t caller_mask = all_mask & ~callee_mask;
+  uint32_t mask = (UINT32_C(1) << 7u); /* r11 implicit scratch */
+  if (!e || !e->mach || !in)
+    return all_mask;
+  const nyr_mach_func_t *m = e->mach;
+  mask |= (uint32_t)(nyr_mach_inst_fixed_clobbers(m, in, NYR_MACH_REGCLASS_GPR) &
+                     all_mask);
+  const nyr_mach_operand_t *ops[] = {&in->dst, &in->src0, &in->src1, &in->src2};
+  for (size_t k = 0; k < 4; ++k) {
+    if (mach_loop_gpr_operand_is_vector(m, ops[k])) {
+      mask |= (UINT32_C(1) << 8u) | (UINT32_C(1) << 9u) | (UINT32_C(1) << 10u) |
+              (UINT32_C(1) << 11u);
+      break;
+    }
+  }
+  for (size_t k = 0; k < in->args_len; ++k) {
+    if (mach_loop_gpr_operand_is_vector(m, &in->args[k])) {
+      mask |= (UINT32_C(1) << 8u) | (UINT32_C(1) << 9u) | (UINT32_C(1) << 10u) |
+              (UINT32_C(1) << 11u);
+      break;
+    }
+  }
+  switch (in->opcode) {
+  case NYR_MACH_INLINE_ASM:
+  case NYR_MACH_INTRINSIC:
+  case NYR_MACH_VA_SAVE:
+  case NYR_MACH_VA_START:
+  case NYR_MACH_VA_ARG:
+    return all_mask;
+  case NYR_MACH_CALL:
+    if (e->bare_syscalls && e->target && e->target->syscalls.available)
+      return all_mask;
+    return mask | caller_mask;
+  case NYR_MACH_SIN:
+  case NYR_MACH_COS:
+  case NYR_MACH_REDUCE_ADD:
+    return mask | caller_mask;
+  case NYR_MACH_DIV:
+  case NYR_MACH_MOD:
+    return mask | (UINT32_C(1) << 8u) | (UINT32_C(1) << 9u) |
+           (UINT32_C(1) << 10u) | (UINT32_C(1) << 11u);
+  case NYR_MACH_SHL:
+  case NYR_MACH_SAR:
+  case NYR_MACH_SHR:
+  case NYR_MACH_ROR:
+  case NYR_MACH_ROR32:
+  case NYR_MACH_VSHR:
+    if (in->src1.kind != NYR_MACH_OPERAND_IMM)
+      mask |= caller_mask;
+    return mask;
+  case NYR_MACH_STORE:
+    return mask | (UINT32_C(1) << 8u) | (UINT32_C(1) << 9u);
+  case NYR_MACH_NOP:
+  case NYR_MACH_COPY:
+  case NYR_MACH_CONVERT:
+  case NYR_MACH_LOAD:
+  case NYR_MACH_LEA:
+  case NYR_MACH_ADD:
+  case NYR_MACH_SUB:
+  case NYR_MACH_MUL:
+  case NYR_MACH_AND:
+  case NYR_MACH_OR:
+  case NYR_MACH_XOR:
+  case NYR_MACH_BSWAP64:
+  case NYR_MACH_BSWAP32:
+  case NYR_MACH_FMA:
+  case NYR_MACH_SQRT:
+  case NYR_MACH_SHUFFLE:
+  case NYR_MACH_SELECT:
+  case NYR_MACH_CMP:
+  case NYR_MACH_RET:
+  case NYR_MACH_BR:
+  case NYR_MACH_BR_IF:
+  case NYR_MACH_TRAP:
+  case NYR_MACH_POPCOUNT64:
+    return mask;
+  default:
+    return all_mask;
+  }
+}
+
+/*
+ * P2 (EdgeBundles + SpillPlacement Hopfield relaxation + cross-bundle color
+ * alignment) and P1 (load-side conditional residency): proves which live-in
+ * segments already arrive in their assigned physical register across every
+ * reachable predecessor edge, allowing block-entry seeding without reloading
+ * from the canonical stack home.
+ */
+static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
+                                          const char *name) {
+  const char *no_bundle = getenv("NYTRIX_NO_BUNDLE_RESIDENCY");
+  if (no_bundle && strcmp(no_bundle, "0") != 0 &&
+      strcmp(no_bundle, "off") != 0 && strcmp(no_bundle, "false") != 0)
+    return true;
+  if (!e || !e->mach || e->force_stack_reads ||
+      !mach_loop_gpr_within_budget(e->mach) || e->mach->block_len < 2 ||
+      !e->mach->vreg_len || !e->regalloc.segments)
+    return true;
+  const nyr_mach_func_t *m = e->mach;
+  const size_t nb = m->block_len;
+  const size_t nv = m->vreg_len;
+  const size_t max_colors = mach_gpr_color_count(m, e->target);
+  const size_t vreg_words = (nv + 63u) / 64u;
+  if (nb > SIZE_MAX / vreg_words / sizeof(uint64_t))
+    return true;
+
+  mach_cfg_t cfg = {0};
+  if (!mach_cfg_build(m, &cfg))
+    return true;
+
+  /* 1. EdgeBundles union-find over 2*nb half-edges. */
+  size_t *uf = malloc(2 * nb * sizeof(*uf));
+  size_t *dense = malloc(2 * nb * sizeof(*dense));
+  size_t *in_bundle = malloc(nb * sizeof(*in_bundle));
+  size_t *out_bundle = malloc(nb * sizeof(*out_bundle));
+  unsigned *depth = calloc(nb, sizeof(*depth));
+  size_t *loop_stamp = calloc(nb, sizeof(*loop_stamp));
+  size_t *loop_work = malloc(nb * sizeof(*loop_work));
+  uint64_t *freq = malloc(nb * sizeof(*freq));
+  size_t *first_exit_pc = malloc(nb * sizeof(*first_exit_pc));
+  uint16_t *inst_clobber =
+      malloc((m->inst_len ? m->inst_len : 1) * sizeof(*inst_clobber));
+  uint32_t *block_loop_colors = calloc(nb, sizeof(*block_loop_colors));
+  size_t *blk_seg_off = calloc(nb + 1, sizeof(*blk_seg_off));
+  size_t *blk_seg_list =
+      malloc((e->regalloc.segment_len ? e->regalloc.segment_len : 1) *
+             sizeof(*blk_seg_list));
+  uint32_t *vreg_colored_blocks = calloc(nv, sizeof(*vreg_colored_blocks));
+  if (!uf || !dense || !in_bundle || !out_bundle || !depth || !loop_stamp ||
+      !loop_work || !freq || !first_exit_pc || !inst_clobber ||
+      !block_loop_colors || !blk_seg_off || !blk_seg_list ||
+      !vreg_colored_blocks) {
+    mach_cfg_free(&cfg);
+    free(uf);
+    free(dense);
+    free(in_bundle);
+    free(out_bundle);
+    free(depth);
+    free(loop_stamp);
+    free(loop_work);
+    free(freq);
+    free(first_exit_pc);
+    free(inst_clobber);
+    free(block_loop_colors);
+    free(blk_seg_off);
+    free(blk_seg_list);
+    free(vreg_colored_blocks);
+    return true;
+  }
+
+  for (size_t i = 0; i < 2 * nb; ++i) {
+    uf[i] = i;
+    dense[i] = SIZE_MAX;
+  }
+  for (size_t b = 0; b < nb; ++b) {
+    if (!cfg.reachable[b])
+      continue;
+    for (size_t ei = cfg.succ_off[b]; ei < cfg.succ_off[b + 1]; ++ei) {
+      size_t s = cfg.succ_list[ei];
+      mach_eb_union(uf, 2 * b + 1, 2 * s);
+    }
+  }
+  size_t num_bundles = 0;
+  for (size_t i = 0; i < 2 * nb; ++i) {
+    size_t r = mach_eb_find(uf, i);
+    if (dense[r] == SIZE_MAX)
+      dense[r] = num_bundles++;
+  }
+  for (size_t b = 0; b < nb; ++b) {
+    in_bundle[b] = dense[mach_eb_find(uf, 2 * b)];
+    out_bundle[b] = dense[mach_eb_find(uf, 2 * b + 1)];
+  }
+
+  /* Natural loop depths via dominator backedges. */
+  size_t stamp_id = 0;
+  for (size_t b = 0; b < nb; ++b) {
+    if (!cfg.reachable[b])
+      continue;
+    for (size_t ei = cfg.succ_off[b]; ei < cfg.succ_off[b + 1]; ++ei) {
+      size_t h = cfg.succ_list[ei];
+      if (!mach_cfg_dominates(&cfg, h, b))
+        continue;
+      ++stamp_id;
+      size_t head = 0, tail = 0;
+      loop_stamp[h] = stamp_id;
+      depth[h]++;
+      if (b != h) {
+        loop_stamp[b] = stamp_id;
+        depth[b]++;
+        loop_work[tail++] = b;
+      }
+      while (head < tail) {
+        size_t cur = loop_work[head++];
+        for (size_t pi = cfg.pred_off[cur]; pi < cfg.pred_off[cur + 1]; ++pi) {
+          size_t p = cfg.pred_list[pi];
+          if (!cfg.reachable[p] || loop_stamp[p] == stamp_id)
+            continue;
+          loop_stamp[p] = stamp_id;
+          depth[p]++;
+          loop_work[tail++] = p;
+        }
+      }
+    }
+  }
+  for (size_t b = 0; b < nb; ++b) {
+    unsigned d = depth[b] > 4u ? 4u : depth[b];
+    freq[b] = UINT64_C(16384) << (d * 3u);
+    const nyr_mach_block_t *blk = &m->blocks[b];
+    size_t fexit = blk->inst_count ? blk->first_inst + blk->inst_count - 1
+                                   : blk->first_inst;
+    for (size_t n = 0; n < blk->inst_count; ++n) {
+      const nyr_mach_inst_t *in = &m->insts[blk->first_inst + n];
+      if (in->opcode == NYR_MACH_BR || in->opcode == NYR_MACH_BR_IF ||
+          in->opcode == NYR_MACH_RET) {
+        fexit = blk->first_inst + n;
+        break;
+      }
+    }
+    first_exit_pc[b] = fexit;
+  }
+  for (size_t pc = 0; pc < m->inst_len; ++pc)
+    inst_clobber[pc] =
+        (uint16_t)mach_inst_bundle_clobber_mask(e, &m->insts[pc]);
+
+  /* Index segments per block and record loop_gpr occupancy per block. */
+  for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+    const nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
+    if (s->block < nb)
+      blk_seg_off[s->block + 1]++;
+    if (s->color >= 0 && s->vreg < nv)
+      vreg_colored_blocks[s->vreg]++;
+  }
+  for (size_t b = 0; b < nb; ++b)
+    blk_seg_off[b + 1] += blk_seg_off[b];
+  size_t *blk_seg_fill = malloc((nb + 1) * sizeof(*blk_seg_fill));
+  if (blk_seg_fill) {
+    memcpy(blk_seg_fill, blk_seg_off, (nb + 1) * sizeof(*blk_seg_fill));
+    for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+      size_t b = e->regalloc.segments[i].block;
+      if (b < nb)
+        blk_seg_list[blk_seg_fill[b]++] = i;
+    }
+    free(blk_seg_fill);
+  }
+  if (e->loop_gpr) {
+    for (uint32_t v = 0; v < nv && v < e->colors_len; ++v) {
+      int lc = e->loop_gpr[v];
+      if (lc < 0 || lc >= MIR_COLOR_N)
+        continue;
+      for (size_t b = 0; b < nb; ++b)
+        if (nyr_mach_regalloc_live_in(&e->regalloc, b, v) ||
+            nyr_mach_regalloc_live_out(&e->regalloc, b, v))
+          block_loop_colors[b] |= UINT32_C(1) << (unsigned)lc;
+    }
+    for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+      const nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
+      if (s->block < nb && s->vreg < e->colors_len &&
+          e->loop_gpr[s->vreg] >= 0 && e->loop_gpr[s->vreg] < MIR_COLOR_N)
+        block_loop_colors[s->block] |=
+            UINT32_C(1) << (unsigned)e->loop_gpr[s->vreg];
+    }
+  }
+
+  /* Per-value scratch arrays for Hopfield relaxation & soundness proof. */
+  int *in_color = malloc(nb * sizeof(*in_color));
+  int *out_color = malloc(nb * sizeof(*out_color));
+  bool *self_seeds = malloc(nb * sizeof(*self_seeds));
+  bool *pass_through = malloc(nb * sizeof(*pass_through));
+  int *block_entry_color = malloc(nb * sizeof(*block_entry_color));
+  int64_t *bias_p = malloc(num_bundles * sizeof(*bias_p));
+  int64_t *bias_n = malloc(num_bundles * sizeof(*bias_n));
+  int8_t *bval = malloc(num_bundles * sizeof(*bval));
+  size_t *link_from = malloc(nb * sizeof(*link_from));
+  size_t *link_to = malloc(nb * sizeof(*link_to));
+  int64_t *link_w = malloc(nb * sizeof(*link_w));
+  uint64_t *res_bits = calloc(nb * vreg_words, sizeof(*res_bits));
+
+  size_t aligned_segs = 0;
+  size_t proven_entries = 0;
+  if (in_color && out_color && self_seeds && pass_through &&
+      block_entry_color && bias_p && bias_n && bval && link_from && link_to &&
+      link_w && res_bits) {
+    const int64_t must_spill = INT64_MAX / 4;
+    const int64_t threshold = 2; /* entryFreq >> 13 */
+    const size_t entry_bundle = in_bundle[0];
+
+    for (uint32_t v = 0; v < nv && v < e->colors_len; ++v) {
+      if (m->vreg_types[v] != NYR_MACH_TYPE_I64 ||
+          vreg_colored_blocks[v] < 2 || (e->loop_gpr && e->loop_gpr[v] >= 0))
+        continue;
+      if ((e->imm_fold_known && e->imm_fold_known[v]) ||
+          (e->addr_fold_known && e->addr_fold_known[v]) ||
+          (e->vreg_literal_rhs_only && e->vreg_literal_rhs_only[v]) ||
+          (e->cmp_elision_action && e->cmp_elision_action[v] != MACH_CMP_KEEP) ||
+          (e->select_skip_alu && e->select_skip_alu[v]))
+        continue;
+
+      /*
+       * Optional cross-bundle color alignment before residency analysis:
+       * run two RPO passes so alignment propagates across straight chains.
+       */
+      for (int apass = 0; apass < 2; ++apass) {
+        bool achanged = false;
+        for (size_t ri = 1; ri < cfg.rpo_len; ++ri) {
+          size_t b = cfg.rpo[ri];
+          if (!nyr_mach_regalloc_live_in(&e->regalloc, b, v))
+            continue;
+          const nyr_mach_block_t *blk = &m->blocks[b];
+          if (!blk->inst_count)
+            continue;
+          nyr_mach_live_segment_t *seg_in =
+              (nyr_mach_live_segment_t *)mach_segment_at(e, v, blk->first_inst);
+          if (!seg_in || seg_in->color < 0 ||
+              seg_in->start != blk->first_inst || seg_in->carried ||
+              seg_in->acyclic_carried)
+            continue;
+          size_t blk_last = blk->first_inst + blk->inst_count - 1;
+          if (seg_in->end < blk_last) {
+            const nyr_mach_live_segment_t *nxt =
+                mach_segment_at(e, v, seg_in->end + 1);
+            if (nxt && nxt->color == seg_in->color)
+              continue;
+          }
+          int want = -2;
+          for (size_t pi = cfg.pred_off[b]; pi < cfg.pred_off[b + 1]; ++pi) {
+            size_t p = cfg.pred_list[pi];
+            if (!cfg.reachable[p])
+              continue;
+            const nyr_mach_block_t *pblk = &m->blocks[p];
+            if (!pblk->inst_count) {
+              want = -1;
+              break;
+            }
+            const nyr_mach_live_segment_t *pseg = mach_segment_at(
+                e, v, pblk->first_inst + pblk->inst_count - 1);
+            int pc_col =
+                (pseg && pseg->end == pblk->first_inst + pblk->inst_count - 1)
+                    ? pseg->color
+                    : -1;
+            if (pc_col < 0 || pc_col == 7 || (size_t)pc_col >= max_colors) {
+              want = -1;
+              break;
+            }
+            if (want == -2)
+              want = pc_col;
+            else if (want != pc_col) {
+              want = -1;
+              break;
+            }
+          }
+          if (want < 0 || want == seg_in->color)
+            continue;
+          if (want < MIR_CALLEE_COLOR_N && !(e->save_mask & (1u << want)))
+            continue;
+          if (block_loop_colors[b] & (UINT32_C(1) << (unsigned)want))
+            continue;
+          bool ok = true;
+          for (size_t pc = seg_in->start; pc <= seg_in->end && ok; ++pc) {
+            if (inst_clobber[pc] & (UINT32_C(1) << (unsigned)want))
+              ok = false;
+          }
+          for (size_t si = blk_seg_off[b]; si < blk_seg_off[b + 1] && ok; ++si) {
+            const nyr_mach_live_segment_t *other =
+                &e->regalloc.segments[blk_seg_list[si]];
+            if (other->vreg == v || other->color != want)
+              continue;
+            if (other->start <= seg_in->end && seg_in->start <= other->end)
+              ok = false;
+          }
+          if (ok) {
+            seg_in->color = want;
+            ++aligned_segs;
+            achanged = true;
+          }
+        }
+        if (!achanged)
+          break;
+      }
+
+      /* Compute per-block entry/exit color and transfer properties. */
+      bool any_live_in = false;
+      for (size_t b = 0; b < nb; ++b) {
+        in_color[b] = -1;
+        out_color[b] = -1;
+        self_seeds[b] = false;
+        pass_through[b] = false;
+        if (!cfg.reachable[b])
+          continue;
+        const nyr_mach_block_t *blk = &m->blocks[b];
+        if (!blk->inst_count)
+          continue;
+        size_t blk_first = blk->first_inst;
+        size_t blk_last = blk_first + blk->inst_count - 1;
+        if (b > 0 && nyr_mach_regalloc_live_in(&e->regalloc, b, v)) {
+          const nyr_mach_live_segment_t *seg_in =
+              mach_segment_at(e, v, blk_first);
+          if (seg_in && seg_in->color >= 0 && seg_in->color != 7 &&
+              (size_t)seg_in->color < max_colors &&
+              seg_in->start == blk_first) {
+            in_color[b] = seg_in->color;
+            any_live_in = true;
+          }
+        }
+        if (!nyr_mach_regalloc_live_out(&e->regalloc, b, v))
+          continue;
+        const nyr_mach_live_segment_t *seg_out =
+            mach_segment_at(e, v, blk_last);
+        if (!seg_out || seg_out->color < 0 || seg_out->color == 7 ||
+            (size_t)seg_out->color >= max_colors || seg_out->end != blk_last)
+          continue;
+        int c = seg_out->color;
+        size_t last_def = SIZE_MAX;
+        bool def_after_exit = false;
+        for (size_t pc = blk_first; pc <= blk_last; ++pc) {
+          const nyr_mach_inst_t *in = &m->insts[pc];
+          if (in->opcode != NYR_MACH_STORE &&
+              in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg == v) {
+            last_def = pc;
+            if (pc > first_exit_pc[b])
+              def_after_exit = true;
+          }
+        }
+        if (last_def != SIZE_MAX) {
+          if (def_after_exit || last_def < seg_out->start)
+            continue;
+          const nyr_mach_inst_t *def_in = &m->insts[last_def];
+          /* Guard against SIB-folded LEA that elides its register write. */
+          if (def_in->opcode == NYR_MACH_LEA &&
+              def_in->src0.kind == NYR_MACH_OPERAND_VREG &&
+              def_in->src1.kind == NYR_MACH_OPERAND_VREG &&
+              def_in->src2.kind == NYR_MACH_OPERAND_IMM &&
+              (def_in->src2.as.imm == 2 || def_in->src2.as.imm == 4 ||
+               def_in->src2.as.imm == 8))
+            continue;
+          bool clobbered = false;
+          for (size_t pc = last_def + 1; pc <= blk_last; ++pc) {
+            if (inst_clobber[pc] & (UINT32_C(1) << (unsigned)c)) {
+              clobbered = true;
+              break;
+            }
+            const nyr_mach_inst_t *in = &m->insts[pc];
+            if (in->opcode != NYR_MACH_STORE &&
+                in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg != v &&
+                in->dst.as.reg < e->colors_len) {
+              const nyr_mach_live_segment_t *dseg =
+                  mach_segment_at(e, in->dst.as.reg, pc);
+              int dc = (e->loop_gpr && e->loop_gpr[in->dst.as.reg] >= 0)
+                           ? e->loop_gpr[in->dst.as.reg]
+                           : (dseg ? dseg->color : -1);
+              if (dc == c) {
+                clobbered = true;
+                break;
+              }
+            }
+          }
+          if (!clobbered) {
+            out_color[b] = c;
+            self_seeds[b] = true;
+          }
+        } else if (in_color[b] == c && seg_out->start == blk_first) {
+          bool clobbered = false;
+          for (size_t pc = blk_first; pc <= blk_last; ++pc) {
+            if (inst_clobber[pc] & (UINT32_C(1) << (unsigned)c)) {
+              clobbered = true;
+              break;
+            }
+            const nyr_mach_inst_t *in = &m->insts[pc];
+            if (in->opcode != NYR_MACH_STORE &&
+                in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg != v &&
+                in->dst.as.reg < e->colors_len) {
+              const nyr_mach_live_segment_t *dseg =
+                  mach_segment_at(e, in->dst.as.reg, pc);
+              int dc = (e->loop_gpr && e->loop_gpr[in->dst.as.reg] >= 0)
+                           ? e->loop_gpr[in->dst.as.reg]
+                           : (dseg ? dseg->color : -1);
+              if (dc == c) {
+                clobbered = true;
+                break;
+              }
+            }
+          }
+          if (!clobbered) {
+            out_color[b] = c;
+            pass_through[b] = true;
+          }
+        }
+      }
+      if (!any_live_in)
+        continue;
+
+      /* 2. LLVM SpillPlacement Hopfield relaxation over EdgeBundles. */
+      memset(bias_p, 0, num_bundles * sizeof(*bias_p));
+      memset(bias_n, 0, num_bundles * sizeof(*bias_n));
+      memset(bval, 0, num_bundles * sizeof(*bval));
+      bias_n[entry_bundle] = must_spill;
+      size_t nlinks = 0;
+
+      for (size_t b = 0; b < nb; ++b) {
+        if (!cfg.reachable[b])
+          continue;
+        if (nyr_mach_regalloc_live_in(&e->regalloc, b, v)) {
+          size_t ib = in_bundle[b];
+          if (in_color[b] >= 0) {
+            if (bias_p[ib] < must_spill - (int64_t)freq[b])
+              bias_p[ib] += (int64_t)freq[b];
+          } else {
+            if (bias_n[ib] < must_spill - (int64_t)freq[b])
+              bias_n[ib] += (int64_t)freq[b];
+          }
+        }
+        if (nyr_mach_regalloc_live_out(&e->regalloc, b, v)) {
+          size_t ob = out_bundle[b];
+          if (self_seeds[b]) {
+            if (bias_p[ob] < must_spill - (int64_t)freq[b])
+              bias_p[ob] += (int64_t)freq[b];
+          } else if (pass_through[b]) {
+            if (in_bundle[b] != ob) {
+              link_from[nlinks] = in_bundle[b];
+              link_to[nlinks] = ob;
+              link_w[nlinks] = (int64_t)freq[b];
+              ++nlinks;
+            }
+          } else {
+            bias_n[ob] = must_spill;
+          }
+        }
+      }
+
+      size_t max_iters = num_bundles * 10u;
+      if (max_iters > 256u)
+        max_iters = 256u;
+      for (size_t iter = 0; iter < max_iters; ++iter) {
+        bool changed = false;
+        for (size_t B = 0; B < num_bundles; ++B) {
+          int64_t sum_p = bias_p[B];
+          int64_t sum_n = bias_n[B];
+          for (size_t li = 0; li < nlinks; ++li) {
+            size_t peer = SIZE_MAX;
+            if (link_from[li] == B)
+              peer = link_to[li];
+            else if (link_to[li] == B)
+              peer = link_from[li];
+            if (peer == SIZE_MAX)
+              continue;
+            if (bval[peer] > 0 && sum_p < must_spill - link_w[li])
+              sum_p += link_w[li];
+            else if (bval[peer] < 0 && sum_n < must_spill - link_w[li])
+              sum_n += link_w[li];
+          }
+          int8_t nv_val = 0;
+          if (sum_p >= sum_n + threshold)
+            nv_val = 1;
+          else if (sum_n >= sum_p + threshold)
+            nv_val = -1;
+          if (nv_val != bval[B]) {
+            bval[B] = nv_val;
+            changed = true;
+          }
+        }
+        if (!changed)
+          break;
+      }
+
+      /*
+       * 3. Exact greatest-fixed-point soundness proof over reachable CFG
+       * predecessors, seeded from the positive Hopfield region.
+       */
+      for (size_t b = 0; b < nb; ++b) {
+        block_entry_color[b] =
+            (b > 0 && cfg.reachable[b] && in_color[b] >= 0 &&
+             bval[in_bundle[b]] > 0)
+                ? in_color[b]
+                : -1;
+      }
+      bool shrink = true;
+      while (shrink) {
+        shrink = false;
+        for (size_t b = 1; b < nb; ++b) {
+          int c = block_entry_color[b];
+          if (c < 0)
+            continue;
+          bool ok = false;
+          bool any_pred = false;
+          for (size_t pi = cfg.pred_off[b]; pi < cfg.pred_off[b + 1]; ++pi) {
+            size_t p = cfg.pred_list[pi];
+            if (!cfg.reachable[p])
+              continue;
+            any_pred = true;
+            if ((self_seeds[p] && out_color[p] == c) ||
+                (pass_through[p] && out_color[p] == c &&
+                 block_entry_color[p] == c)) {
+              ok = true;
+            } else {
+              ok = false;
+              break;
+            }
+          }
+          if (!any_pred || !ok) {
+            block_entry_color[b] = -1;
+            shrink = true;
+          }
+        }
+      }
+
+      for (size_t b = 1; b < nb; ++b) {
+        if (block_entry_color[b] < 0)
+          continue;
+        res_bits[b * vreg_words + (v >> 6)] |= UINT64_C(1) << (v & 63u);
+        nyr_mach_live_segment_t *seg_in = (nyr_mach_live_segment_t *)
+            mach_segment_at(e, v, m->blocks[b].first_inst);
+        if (seg_in && seg_in->start == m->blocks[b].first_inst)
+          seg_in->reload = false;
+        ++proven_entries;
+      }
+    }
+  }
+
+  if (proven_entries) {
+    e->bundle_entry_resident = res_bits;
+    e->bundle_vreg_words = vreg_words;
+    res_bits = NULL;
+  }
+  if (ny_dbg_is_enabled(NY_DBG_DEEP) && ny_dbg_function_selected(name)) {
+    ny_dbg_enter_context(name ? name : "<unknown>");
+    ny_dbg_heuristic_event(
+        "X64_EDGE_BUNDLES",
+        "function=%s blocks=%zu bundles=%zu aligned=%zu proven_entries=%zu",
+        name ? name : "<unknown>", nb, num_bundles, aligned_segs,
+        proven_entries);
+    ny_dbg_exit_context(name ? name : "<unknown>");
+  }
+
+  mach_cfg_free(&cfg);
+  free(uf);
+  free(dense);
+  free(in_bundle);
+  free(out_bundle);
+  free(depth);
+  free(loop_stamp);
+  free(loop_work);
+  free(freq);
+  free(first_exit_pc);
+  free(inst_clobber);
+  free(block_loop_colors);
+  free(blk_seg_off);
+  free(blk_seg_list);
+  free(vreg_colored_blocks);
+  free(in_color);
+  free(out_color);
+  free(self_seeds);
+  free(pass_through);
+  free(block_entry_color);
+  free(bias_p);
+  free(bias_n);
+  free(bval);
+  free(link_from);
+  free(link_to);
+  free(link_w);
+  free(res_bits);
+  return true;
+}
+
 static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                  bool tag_return) {
   (void)tag_return;
@@ -11802,26 +13040,63 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
    * opaque use that needs every resident value in a canonical home.
    */
   bool inline_asm_needs_homes = has_inline_asm;
+  bool force_local_fast_tier = getenv("NYTRIX_FORCE_LOCAL_FAST_TIER") != NULL;
+  bool over_proof_budget =
+      mach->vreg_len > 0 && mach->block_len > 0 &&
+      (!mach_loop_gpr_within_budget(mach) || force_local_fast_tier);
   const char *stack_reason = env_forces_stack         ? "environment"
                              : inline_asm_needs_homes ? "inline-asm"
                              : indirect_store && !private_spill_homes
                                  ? "indirect-store-live-ranges"
-                             : mach->block_len > MACH_SET_BLOCKS ? "block-count"
-                             : mach->vreg_len > MACH_LOOP_GPR_MAX_VREGS              ? "value-count"
-                                                                 : "none";
+                             : over_proof_budget ? "local-fast-tier"
+                                                 : "none";
   /*
-   * Call count alone is not a reason to abandon register homes: a function
-   * can have many calls in cold setup/reporting code while its hot loops are
-   * call-free. The block/value caps below still bound the whole-function
-   * edge proofs for genuinely large bodies.
+   * Call count alone is not a reason to abandon register homes, and functions
+   * above the global loop-proof budget degrade to the P16 block-local fast
+   * tier (keeping strictly block-local segments in registers while cross-block
+   * values use canonical homes) instead of demoting every value to stack.
    */
-  e->force_stack_reads = env_forces_stack || inline_asm_needs_homes ||
-                         mach->block_len > MACH_SET_BLOCKS ||
-                         mach->vreg_len > MACH_LOOP_GPR_MAX_VREGS;
+  e->force_stack_reads = env_forces_stack || inline_asm_needs_homes;
+  if (over_proof_budget && !e->force_stack_reads) {
+    if (e->loop_gpr) {
+      free(e->loop_gpr);
+      e->loop_gpr = NULL;
+    }
+    for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+      nyr_mach_live_segment_t *seg = &e->regalloc.segments[i];
+      if (seg->color < 0)
+        continue;
+      bool cross_block =
+          seg->carried || seg->acyclic_carried || seg->reload || seg->spill ||
+          nyr_mach_regalloc_live_in(&e->regalloc, seg->block, seg->vreg) ||
+          nyr_mach_regalloc_live_out(&e->regalloc, seg->block, seg->vreg);
+      if (!cross_block)
+        continue;
+      seg->color = -1;
+      seg->reload = true;
+      seg->spill = true;
+      seg->carried = seg->acyclic_carried = false;
+      if (seg->spill_reason != NYR_MACH_SPILL_FIXED_CLOBBER)
+        seg->spill_reason = NYR_MACH_SPILL_BLOCK_CONFLICT;
+    }
+    mach_recolor_local_spills(e, mach);
+  }
   if (indirect_store && !private_spill_homes && !e->force_stack_reads) {
     bool kept = mach_keep_homes_for_store_live_values(e);
     if (!kept)
       e->force_stack_reads = true;
+  }
+  save_mask = 0;
+  if (!e->force_stack_reads) {
+    if (e->loop_gpr)
+      for (size_t v = 0; v < e->colors_len; ++v)
+        if (e->loop_gpr[v] >= 0 && e->loop_gpr[v] < MIR_CALLEE_COLOR_N)
+          save_mask |= 1u << e->loop_gpr[v];
+    for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+      int c = e->regalloc.segments[i].color;
+      if (c >= 0 && c < MIR_CALLEE_COLOR_N)
+        save_mask |= 1u << c;
+    }
   }
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC) && ny_dbg_function_selected(name)) {
     ny_dbg_enter_context(name ? name : "<unknown>");
@@ -12093,6 +13368,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
     return mach_err(e, "x64 machine form encode: OOM (vreg use counts)");
   if (!mach_build_block_align(e))
     return mach_err(e, "x64 machine form encode: OOM (block alignment)");
+  if (!mach_compute_bundle_residency(e, name))
+    return false;
   e->block_off = calloc(mach->block_len ? mach->block_len : 1, sizeof(size_t));
   if (!e->block_off && mach->block_len)
     return mach_err(e, "x64 machine form encode: OOM");
@@ -12177,9 +13454,13 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       const nyr_mach_live_segment_t *seg =
           mach_segment_at(e, v, blk->first_inst);
       bool allow_loop_carry = e->loop_carry_seeding && seg && seg->carried;
-      if (seg && (seg->acyclic_carried || allow_loop_carry) &&
-          seg->color >= 0 && mach_vreg_assigned_preg(e, v) >= 0)
+      bool bundle_res = mach_bundle_entry_resident(e, bi, v);
+      if (seg && (seg->acyclic_carried || allow_loop_carry || bundle_res) &&
+          seg->color >= 0 && mach_vreg_assigned_preg(e, v) >= 0) {
         e->color_seeded[v] = true;
+        if (bundle_res && !e->home_store_counts)
+          e->bundle_reloads_elided++;
+      }
     }
     for (size_t n = 0; n < blk->inst_count; ++n) {
       e->cur_inst = blk->first_inst + n;
@@ -13558,6 +14839,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               return false;
             break;
           }
+          if (in->opcode == NYR_MACH_SHL && vt == NYR_MACH_TYPE_V256_I64) {
+            if (!mach_vector_ymm_shl(e, in, dst))
+              return false;
+            break;
+          }
           if (in->opcode == NYR_MACH_MUL && vt == NYR_MACH_TYPE_V256_I64) {
             if (!mach_vector_ymm_mul_i64(e, in, dst))
               return false;
@@ -13944,20 +15230,23 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                                              : fold == 9 ? 3
                                                                          : 0)
                                                           : 0;
-              if (in->opcode == NYR_MACH_ADD && dp != ap) {
+              if ((in->opcode == NYR_MACH_ADD ||
+                   (in->opcode == NYR_MACH_SUB && fold != INT32_MIN)) &&
+                  dp != ap) {
                 /*
-                 * lea dst,[src+imm] is the three-operand form of a wrapping
-                 * sum. Encode the SIB explicitly for RSP/R12 bases.
+                 * lea dst,[src+/-imm] is the three-operand form of a wrapping
+                 * add/sub. Encode the SIB explicitly for RSP/R12 bases.
                  */
-                unsigned mod = fold >= INT8_MIN && fold <= INT8_MAX ? 1u : 2u;
+                int64_t disp = in->opcode == NYR_MACH_SUB ? -fold : fold;
+                unsigned mod = disp >= INT8_MIN && disp <= INT8_MAX ? 1u : 2u;
                 unsigned base = (unsigned)ap & 7u;
                 if (!mach_rex(e, true, dp >= 8, false, ap >= 8) ||
                     !mach_u8(e, 0x8d) ||
                     !mach_u8(e,
                              (mod << 6) | (((unsigned)dp & 7u) << 3) | base) ||
                     (base == 4 && !mach_u8(e, 0x24)) ||
-                    !(mod == 1 ? mach_u8(e, (unsigned char)fold)
-                               : mach_i32(e, (int32_t)fold)))
+                    !(mod == 1 ? mach_u8(e, (unsigned char)disp)
+                               : mach_i32(e, (int32_t)disp)))
                   return false;
                 emitted = true;
               } else if (scale) {
@@ -14257,15 +15546,19 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         if (!mach_load_op_rax(e, &in->src0))
           return false;
         /*
-         * Dedicated loop registers stay valid while RAX holds the left
-         * operand. Consume the resident right operand directly as well.
+         * Any seeded resident right operand stays valid while RAX holds the
+         * left operand. Consume it directly from its register instead of
+         * staging a stack store + memory-operand reload.
          */
-        if (in->src1.kind == NYR_MACH_OPERAND_VREG && e->loop_gpr &&
-            e->loop_gpr[in->src1.as.reg] >= 0) {
+        if (in->src1.kind == NYR_MACH_OPERAND_VREG &&
+            !(imm_fold_known && in->src1.as.reg < mach->vreg_len &&
+              imm_fold_known[in->src1.as.reg])) {
           int rhs = mach_vreg_preg(e, in->src1.as.reg);
-          if (rhs >= 0) {
-            if (!mach_alu_preg_preg(e, in->opcode, 0, rhs) ||
-                !mach_commit_vreg(e, &in->dst, dst))
+          if (rhs > 0) {
+            if (!mach_alu_preg_preg(e, in->opcode, 0, rhs))
+              return false;
+            mach_rax_invalidate(e);
+            if (!mach_commit_vreg(e, &in->dst, dst))
               return false;
             break;
           }
@@ -15004,6 +16297,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         mach_record_div_stat(e, false);
         break;
       case NYR_MACH_SELECT: {
+        if (mach_v128_type(mach, &in->dst) == NYR_MACH_TYPE_V256_I64) {
+          if (!mach_vector_ymm_select_i64(e, in, dst))
+            return false;
+          break;
+        }
         size_t fused_cmp = in->src0.kind == NYR_MACH_OPERAND_VREG &&
                                    e->select_cmp_inst &&
                                    in->src0.as.reg < e->mach->vreg_len
@@ -15257,6 +16555,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         break;
       }
       case NYR_MACH_CMP: {
+        if (mach_v128_type(mach, &in->dst) == NYR_MACH_TYPE_V256_I64) {
+          if (!mach_vector_ymm_cmp_i64(e, in, dst))
+            return false;
+          break;
+        }
         uint8_t cmp_action = in->dst.kind == NYR_MACH_OPERAND_VREG &&
                                      e->cmp_elision_action &&
                                      in->dst.as.reg < e->colors_len
@@ -15655,21 +16958,6 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         if (e->uses_ymm && !mach_vzeroupper(e))
           return false;
         /*
-         * Place judged-dead resident arguments before any home loads or
-         * staging can reuse their source registers. The order above only
-         * reverses dependencies between these moves; all other argument
-         * destinations are written afterwards.
-         */
-        for (size_t k = 0; k < call_arg_order_n; ++k) {
-          int ai = call_arg_order[k];
-          if (ai < 0 || !call_arg_resident[ai])
-            continue;
-          if (!mach_load_call_arg_preg(e, &in->args[ai],
-                                       (unsigned)call_gp_dest[ai],
-                                       call_arg_src_preg[ai]))
-            return false;
-        }
-        /*
          * Bare runtime operations end in mach_bare_call_finish, which
          * reloads every dedicated loop register from its home. The call
          * bridge above skipped callee-saved ones (an ABI call preserves
@@ -15809,22 +17097,34 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         }
         if (direct_call && e->target && e->target->syscalls.available &&
             runtime_operation == NY_NATIVE_RUNTIME_OP_LINUX_SYSCALL) {
-          static const int syscall_arg_regs[] = {7, 6, 2, 10, 8, 9};
-          if (in->args_len < 1 || in->args_len > 7)
+          static const unsigned syscall_arg_regs[] = {7, 6, 2, 10, 8, 9};
+          const size_t max_args =
+              sizeof(syscall_arg_regs) / sizeof(*syscall_arg_regs);
+          if (in->args_len < 1 || in->args_len > max_args + 1)
             return mach_err(
                 e, "x64 machine form encode: raw syscall needs 1-7 args");
-          for (size_t ai = 1; ai < 7; ++ai) {
-            if (ai < in->args_len) {
-              if (!mach_load_call_arg_rax(e, &in->args[ai]) ||
-                  !mach_mov_reg_rax(e, syscall_arg_regs[ai - 1]))
-                return false;
-            } else if (!mach_mov_preg_imm(e, (unsigned)syscall_arg_regs[ai - 1],
-                                          0)) {
+          /*
+           * Reloading an operand can seed a register used by the syscall ABI.
+           * Read every operand before placing any of them in those registers.
+           */
+          for (size_t ai = 1; ai < in->args_len; ++ai)
+            if (!mach_load_call_arg_rax(e, &in->args[ai]) || !mach_u8(e, 0x50))
               return false;
-            }
+          if (!mach_load_call_arg_rax(e, &in->args[0]))
+            return false;
+          for (size_t ai = in->args_len - 1; ai > 0; --ai) {
+            unsigned reg = syscall_arg_regs[ai - 1];
+            if ((reg >= 8 && !mach_u8(e, 0x41)) ||
+                !mach_u8(e, 0x58 | (reg & 7)))
+              return false;
           }
-          if (!mach_load_call_arg_rax(e, &in->args[0]) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, 0x05))
+          for (size_t ai = in->args_len - 1; ai < max_args; ++ai)
+            if (!mach_mov_preg_imm(e, syscall_arg_regs[ai], 0))
+              return false;
+          if (!mach_u8(e, 0x0f) || !mach_u8(e, 0x05))
+            return false;
+          mach_invalidate_call_clobbered_colors(e);
+          if (!mach_loop_gprs_call_home(e, true, true))
             return false;
           mach_rax_invalidate(e);
           mach_r10_index_invalidate(e);
@@ -15941,7 +17241,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              * the staging loop's %rax traffic would invalidate the tag
              * before the direct placement runs.
              */
-            int sp = mach_vreg_preg(e, arg->as.reg);
+            int sp = mach_vreg_assigned_preg(e, arg->as.reg);
             int off = mach_vreg_home_off(e, arg->as.reg);
             bool sticky_rax = mach_rax_tag_hit(e, off, (int)arg->as.reg) ||
                               mach_pending_rax_hit(e, off, (int)arg->as.reg);
@@ -15990,6 +17290,17 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               (int)(outgoing_bytes + (size_t)gp_spill_index[ai] * 8);
           if (!mach_load_call_arg_rax(e, &in->args[ai]) ||
               !mach_store_rax_rsp(e, stage_off))
+            return false;
+        }
+        /*
+         * Staging can reload a caller-saved color. Finish it before writing
+         * the ABI destinations, which can use those same registers.
+         */
+        for (size_t k = 0; k < call_arg_order_n; ++k) {
+          int ai = call_arg_order[k];
+          if (!mach_load_call_arg_preg(e, &in->args[ai],
+                                       (unsigned)call_gp_dest[ai],
+                                       call_arg_src_preg[ai]))
             return false;
         }
         gp_n = fp_n = ordinal_n = 0;
@@ -16801,10 +18112,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC) && ny_dbg_function_selected(name)) {
     ny_dbg_heuristic_event("X64_HOME_TRAFFIC",
                            "function=%s stores=%zu loads=%zu frame_ops=%zu "
-                           "home_folds=%zu alu_commutes=%zu",
+                           "home_folds=%zu alu_commutes=%zu "
+                           "bundle_reloads_elided=%zu",
                            name ? name : "<unknown>", e->home_store_ops,
                            e->home_load_ops, e->frame_ops, e->home_fold_ops,
-                           e->alu_commute_ops);
+                           e->alu_commute_ops, e->bundle_reloads_elided);
   }
 
   return true;

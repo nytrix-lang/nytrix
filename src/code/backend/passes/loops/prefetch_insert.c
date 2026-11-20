@@ -13,7 +13,7 @@
  *  Fog — Optimizing software in C++ (Vol.1), Ch.15: cache prefetch.
  */
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <stdio.h>
 #include <stdlib.h>

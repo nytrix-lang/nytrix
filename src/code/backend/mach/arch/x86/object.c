@@ -1417,6 +1417,9 @@ static uint8_t ny_x64_obj_i64_vector_lanes(nyr_op_t op) {
   case NYIR_VEC8_MUL_I64:
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64:
+  case NYIR_VEC8_SHL_I64:
+  case NYIR_VEC8_CMP_I64:
+  case NYIR_VEC8_SELECT_I64:
     return 4;
   case NYIR_VEC4_LOAD_F64:
   case NYIR_VEC4_STORE_F64:
@@ -3910,6 +3913,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC8_REDUCE_ADD_I64:
     return ny_x64_obj_i64_vec_reduce_add(c, in, 4u);
   case NYIR_VEC4_SHL_I64:
+  case NYIR_VEC8_SHL_I64:
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64: {
     unsigned lanes = in->op == NYIR_VEC4_SHL_I64 ? 2u : 4u;
@@ -3917,7 +3921,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
      * shl rax, imm8: 48 c1 e0 imm (op!=arithmetic uses e0 but shl is e0/e4;
      * easier special case)
      */
-    if (in->op == NYIR_VEC4_SHL_I64) {
+    if (in->op == NYIR_VEC4_SHL_I64 || in->op == NYIR_VEC8_SHL_I64) {
       unsigned shift = (unsigned)(in->imm & 63);
       for (unsigned lane = 0; lane < lanes; ++lane) {
         int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
@@ -3932,6 +3936,53 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     }
     return ny_x64_obj_i64_vec_shift_imm(c, in, lanes,
                                         in->op == NYIR_VEC8_SAR_I64);
+  }
+  case NYIR_VEC8_CMP_I64: {
+    unsigned char setcc = in->cmp == NYIR_CMP_EQ   ? 0x94
+                          : in->cmp == NYIR_CMP_NE ? 0x95
+                          : in->cmp == NYIR_CMP_LT ? 0x9c
+                          : in->cmp == NYIR_CMP_LE ? 0x9e
+                          : in->cmp == NYIR_CMP_GT ? 0x9f
+                                                   : 0x9d;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+      int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      /*
+       * mov rax, [rbp+da]; mov r10, [rbp+db]; cmp rax, r10;
+       * setcc al; movzx rax, al; neg rax; mov [rbp+dd], rax
+       */
+      if (!ny_x64_obj_load_rax(c, da) || !ny_x64_obj_load_r10(c, db) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x39, 0xd0}, 3) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x0f, setcc, 0xc0}, 3) ||
+          !ny_x64_obj_bytes(
+              c, (const unsigned char[]){0x48, 0x0f, 0xb6, 0xc0, 0x48, 0xf7,
+                                         0xd8},
+              7) ||
+          !ny_x64_obj_store_rax(c, dd))
+        return false;
+    }
+    return true;
+  }
+  case NYIR_VEC8_SELECT_I64: {
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int dm = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+      int dt = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+      int df = ny_x64_obj_value_off(c, in->c) - (int)(lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      /*
+       * mov rax, [rbp+dm]; test rax, rax; mov rax, [rbp+df];
+       * mov r10, [rbp+dt]; cmovs rax, r10; mov [rbp+dd], rax
+       */
+      if (!ny_x64_obj_load_rax(c, dm) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x85, 0xc0}, 3) ||
+          !ny_x64_obj_load_rax(c, df) || !ny_x64_obj_load_r10(c, dt) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0x0f, 0x48, 0xc2},
+                            4) ||
+          !ny_x64_obj_store_rax(c, dd))
+        return false;
+    }
+    return true;
   }
   case NYIR_VEC4_SAR_I64: {
     unsigned shift = (unsigned)(in->imm & 63);
@@ -5040,11 +5091,16 @@ static bool ny_x64_obj_classify_values(nyr_x64_obj_ctx_t *c,
     case NYIR_VEC8_OR_I64:
     case NYIR_VEC8_XOR_I64:
     case NYIR_VEC8_MUL_I64:
+    case NYIR_VEC8_CMP_I64:
       need_a = need_b = 4;
       break;
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
       need_a = 4;
+      break;
+    case NYIR_VEC8_SELECT_I64:
+      need_a = need_b = need_c = 4;
       break;
     case NYIR_VEC4_STORE_F64:
     case NYIR_VEC4_REDUCE_ADD_F64:

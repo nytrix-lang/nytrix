@@ -307,12 +307,12 @@ Bars for workloads whose C reference is under 1 ms are drawn lighter: their rati
 ## Latest full benchmark run
 
 Generated automatically by the full `ny-test --bench` run.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:415f4239906aed14`.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:514090b15962faca`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.5; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 27, route workers 1.
-Results: 110 fixtures; 109 passed, 0 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 1 low-time, 1 noisy; 0 fixture budget misses.
+Samples: 3 plus 1 warm-up; fixture workers 19, route workers 1.
+Results: 110 fixtures; 108 passed, 1 failed or mismatched, 1 timer controls.
+Measurement qualifiers: 1 low-time, 0 noisy; 0 fixture budget misses.
 
 ### Runtime relative to Host C
 
@@ -321,32 +321,38 @@ Fixture medians are grouped by **Nytrix / C time**: lower is faster. Only correc
 <svg width="880" height="330" viewBox="0 0 880 330" role="img" aria-label="Distribution of NYR and LLVM benchmark ratios relative to Host C">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Workloads by relative runtime</text>
 <line x1="82" y1="232" x2="780" y2="232" stroke="var(--border)" stroke-width="1"/><text x="70" y="236" text-anchor="end" font-size="11" fill="var(--muted)">0</text>
-<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">15</text>
-<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">30</text>
-<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">45</text>
-<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">60</text>
-<rect x="110" y="226" width="34" height="6" rx="3" fill="var(--c1)"/><text x="127" y="222" text-anchor="middle" font-size="11" fill="currentColor">2</text>
-<rect x="152" y="217" width="34" height="15" rx="3" fill="var(--c2)"/><text x="169" y="213" text-anchor="middle" font-size="11" fill="currentColor">5</text>
+<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">13</text>
+<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">26</text>
+<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">39</text>
+<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">52</text>
+<rect x="110" y="211" width="34" height="21" rx="3" fill="var(--c1)"/><text x="127" y="207" text-anchor="middle" font-size="11" fill="currentColor">6</text>
+<rect x="152" y="204" width="34" height="28" rx="3" fill="var(--c2)"/><text x="169" y="200" text-anchor="middle" font-size="11" fill="currentColor">8</text>
 <text x="148" y="250" text-anchor="middle" font-size="11" fill="var(--muted)"><0.5×</text>
-<rect x="252" y="223" width="34" height="9" rx="3" fill="var(--c1)"/><text x="269" y="219" text-anchor="middle" font-size="11" fill="currentColor">3</text>
-<rect x="294" y="220" width="34" height="12" rx="3" fill="var(--c2)"/><text x="311" y="216" text-anchor="middle" font-size="11" fill="currentColor">4</text>
+<rect x="252" y="215" width="34" height="17" rx="3" fill="var(--c1)"/><text x="269" y="211" text-anchor="middle" font-size="11" fill="currentColor">5</text>
+<rect x="294" y="204" width="34" height="28" rx="3" fill="var(--c2)"/><text x="311" y="200" text-anchor="middle" font-size="11" fill="currentColor">8</text>
 <text x="290" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.5–0.8×</text>
-<rect x="394" y="88" width="34" height="144" rx="3" fill="var(--c1)"/><text x="411" y="84" text-anchor="middle" font-size="11" fill="currentColor">47</text>
-<rect x="436" y="58" width="34" height="174" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">57</text>
+<rect x="394" y="70" width="34" height="162" rx="3" fill="var(--c1)"/><text x="411" y="66" text-anchor="middle" font-size="11" fill="currentColor">46</text>
+<rect x="436" y="59" width="34" height="173" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">49</text>
 <text x="432" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.8–1.25×</text>
-<rect x="536" y="125" width="34" height="107" rx="3" fill="var(--c1)"/><text x="553" y="121" text-anchor="middle" font-size="11" fill="currentColor">35</text>
-<rect x="578" y="144" width="34" height="88" rx="3" fill="var(--c2)"/><text x="595" y="140" text-anchor="middle" font-size="11" fill="currentColor">29</text>
+<rect x="536" y="126" width="34" height="106" rx="3" fill="var(--c1)"/><text x="553" y="122" text-anchor="middle" font-size="11" fill="currentColor">30</text>
+<rect x="578" y="116" width="34" height="116" rx="3" fill="var(--c2)"/><text x="595" y="112" text-anchor="middle" font-size="11" fill="currentColor">33</text>
 <text x="574" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">1.25–2×</text>
-<rect x="678" y="174" width="34" height="58" rx="3" fill="var(--c1)"/><text x="695" y="170" text-anchor="middle" font-size="11" fill="currentColor">19</text>
-<rect x="720" y="199" width="34" height="33" rx="3" fill="var(--c2)"/><text x="737" y="195" text-anchor="middle" font-size="11" fill="currentColor">11</text>
+<rect x="678" y="165" width="34" height="67" rx="3" fill="var(--c1)"/><text x="695" y="161" text-anchor="middle" font-size="11" fill="currentColor">19</text>
+<rect x="720" y="204" width="34" height="28" rx="3" fill="var(--c2)"/><text x="737" y="200" text-anchor="middle" font-size="11" fill="currentColor">8</text>
 <text x="716" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">≥2×</text>
 <text x="26" y="140" text-anchor="middle" font-size="11" fill="var(--muted)">fixture count</text>
 <rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (106)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (106)</text>
 </svg>
 
 
+Checksum and execution failures:
+
+| Fixture | Status | NYR checksum | LLVM checksum | C checksum | NYC checksum | Return codes (NYR/LLVM/C/NYC) | NYC diagnostic |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `spectral` | mismatch | `1274209` | `1274209` | `1287401` | `1274209` | 0/0/0/0 | NYC checksum 1274209 differs from C 1287401 |
+
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261120-062227-3652437.json`.
+Raw report: `build/bench-reports/bench-20261120-235057-945648.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -4186,9 +4192,9 @@ production quality. Each subsystem was compared with the Nytrix equivalent:
 
 | SCBE | Nytrix |
 | --- | --- |
-| `codegen/spiller.cpp`: replaces one operand per instruction with a reserved register | `lower/regalloc.c` spills live segments with homes, rematerializes constants, and recolors local evictions afterwards |
+| `codegen/spiller.cpp`: replaces one operand per instruction with a reserved register | `passes/regalloc/regalloc.c` spills live segments with homes, rematerializes constants, and recolors local evictions afterwards |
 | `graph_color_regalloc.cpp`: Chaitin simplify/select/spill over a color graph, no coalescing | profile heat, loop depth, next-use and use-count eviction, tied-input affinity, dead-input coalescing, callee-save preference |
-| `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `core/ssa.c`, run by DCE |
+| `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `passes/cfg/ssa.c`, run by DCE |
 | `IR/split_critical_edge.cpp`: splits edges only when the target has phis | phi lowering goes through edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass is needed |
 | `ISel/pattern.hpp`: pattern table with cost, covered operands, minimum opt level | `isle.c` and `machine.c` already fuse addressing modes and immediates; porting the table is a rewrite with no measured target |
 | mem2reg, dominator tree, DCE, constant folder, inlining, loop/call heuristics | all present |
@@ -5198,7 +5204,7 @@ magic-division sequence (~10 instructions) instead of the `dividend_u31` fast pa
 fast path; a nested affine dividend is not. `nyr_analyze_values` (`core/verify.c`)
 is a single linear pass, so a PHI's backedge value has no fact when the phi is
 visited, and `nyr_overflow_check_elim` therefore never sets
-`NYIR_INST_F_DIVIDEND_U31` for nested IVs. Files: `passes/analysis/vrp.c` has
+`NYIR_INST_F_DIVIDEND_U31` for nested IVs. Files: `passes/verify/vrp.c` has
 fixpoint+guard narrowing but is not wired into this proof.
 
 Ranking: (1) loop-carried IV range fixpoint → unlocks the cheap modulo for
@@ -5272,7 +5278,7 @@ not a code change.
 
 ### 2026-11-19 vectorizer proof diagnostics (landed)
 
-**Change.** `src/code/backend/passes/vectorize/loop_vectorize.c`: a `const char
+**Change.** `src/code/backend/passes/vector/loop_vectorize.c`: a `const char
 **why` is threaded through `tbuf_address_parts`, `tbuf_affine_memory_safe` and
 `vector_memory_affine`, and the load/store rejection uses it. A rejected access now
 names the failed proof instead of "non-affine, aliasing, escaping, or out of proven
@@ -5322,7 +5328,7 @@ all stopped at the same place. The loop passes PHI classification (`hits` is a
 recognised reduction); its only blocker is the variable-trip window, and that window
 is unknown because the following chain fails:
 
-`compute_range_bounds` (`passes/analysis/scev.c`, ~line 200) sets
+`compute_range_bounds` (`passes/verify/scev.c`, ~line 200) sets
    `body_bounds_known` only when `nir_value_range_at(init_value)` returns both
    bounds. For `j = i + 1` that yields nothing: value facts are a single linear
    pass, so a PHI-derived expression has no range. Its only fallback,

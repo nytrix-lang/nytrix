@@ -93,7 +93,9 @@ static bool nyr_op_v256_i64(nyr_op_t op) {
          op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
          op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
          op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_MUL_I64 ||
-         op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64;
+         op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64 ||
+         op == NYIR_VEC8_SHL_I64 || op == NYIR_VEC8_CMP_I64 ||
+         op == NYIR_VEC8_SELECT_I64;
 }
 
 /*
@@ -268,7 +270,9 @@ static void nyr_type_roots_fill(size_t value_count, const nyr_func_t *nyir,
         in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
         in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
         in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_MUL_I64 ||
-        in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64;
+        in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
+        in->op == NYIR_VEC8_SHL_I64 || in->op == NYIR_VEC8_CMP_I64 ||
+        in->op == NYIR_VEC8_SELECT_I64;
     bool v256_f64_ops =
         in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
         in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
@@ -313,10 +317,13 @@ static void nyr_type_roots_fill(size_t value_count, const nyr_func_t *nyir,
      * producer's independent scalar fact.
      */
     if (in->c >= 0 && (size_t)in->c < value_count &&
-        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32)) {
+        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32 ||
+         in->op == NYIR_VEC8_SELECT_I64)) {
       size_t root = nyr_type_root(parents, (size_t)in->c);
       if (in->op == NYIR_VEC4_FMA_F64)
         root_types[root] |= 64u;
+      else if (in->op == NYIR_VEC8_SELECT_I64)
+        root_types[root] |= 4u | 32u;
       else
         root_types[root] |= 16u;
     }
@@ -766,7 +773,9 @@ static bool ti_fold(const nyr_inst_t *in, size_t value_count) {
       in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
       in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
       in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_MUL_I64 ||
-      in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64;
+      in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
+      in->op == NYIR_VEC8_SHL_I64 || in->op == NYIR_VEC8_CMP_I64 ||
+      in->op == NYIR_VEC8_SELECT_I64;
   bool v256_f64_ops =
       in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
       in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
@@ -811,10 +820,13 @@ static bool ti_fold(const nyr_inst_t *in, size_t value_count) {
    * producer's independent scalar fact.
    */
   if (in->c >= 0 && (size_t)in->c < value_count &&
-      (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32)) {
+      (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32 ||
+       in->op == NYIR_VEC8_SELECT_I64)) {
     size_t root = ti_root(TI_V((size_t)in->c));
     if (in->op == NYIR_VEC4_FMA_F64)
       ti_or(root, 64u);
+    else if (in->op == NYIR_VEC8_SELECT_I64)
+      ti_or(root, 4u | 32u);
     else
       ti_or(root, 16u);
   }
@@ -1612,6 +1624,12 @@ const char *nyr_op_name(nyr_op_t op) {
     return "vec8.sar.i64";
   case NYIR_VEC8_SHR_I64:
     return "vec8.shr.i64";
+  case NYIR_VEC8_SHL_I64:
+    return "vec8.shl.i64";
+  case NYIR_VEC8_CMP_I64:
+    return "vec8.cmp.i64";
+  case NYIR_VEC8_SELECT_I64:
+    return "vec8.select.i64";
   case NYIR_VEC8_SET1_I64:
     return "vec8.set1.i64";
   case NYIR_VEC4_STORE_I64:
@@ -1734,6 +1752,9 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64:
+  case NYIR_VEC8_SHL_I64:
+  case NYIR_VEC8_CMP_I64:
+  case NYIR_VEC8_SELECT_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_SELECT_I64:
   case NYIR_ROR32_I64:
@@ -1859,6 +1880,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64:
+  case NYIR_VEC8_SHL_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_SHUFFLE_F64:
   case NYIR_VEC8_SHUFFLE_F32:
@@ -1880,6 +1902,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
     break;
   case NYIR_VEC4_FMA_F64:
   case NYIR_VEC8_FMA_F32:
+  case NYIR_VEC8_SELECT_I64:
     inst->d = -1;
     inst->e = -1;
     inst->f = -1;
@@ -1905,6 +1928,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
   case NYIR_VEC8_MUL_I64:
+  case NYIR_VEC8_CMP_I64:
     inst->c = -1;
     inst->d = -1;
     inst->e = -1;
@@ -2480,11 +2504,14 @@ bool nyr_fmt_inst(const nyr_inst_t *in, char *buf, size_t n) {
   } else if (in->op == NYIR_ADDR_SYMBOL) {
     APP(" %s", in->symbol ? in->symbol : "?");
   } else {
+    if (in->op == NYIR_VEC8_CMP_I64)
+      APP(".%s", nyr_cmp_i64_name(in->cmp));
     if (in->a >= 0)
       APP(" v%d", in->a);
     if (in->b >= 0)
       APP(" v%d", in->b);
-    if (in->op == NYIR_SELECT_I64 && in->c >= 0)
+    if ((in->op == NYIR_SELECT_I64 || in->op == NYIR_VEC8_SELECT_I64) &&
+        in->c >= 0)
       APP(" v%d", in->c);
     if (in->imm && in->op != NYIR_RET)
       APP(" #%" PRId64, in->imm);

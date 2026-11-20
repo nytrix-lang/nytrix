@@ -1,5 +1,6 @@
 shape viewer-trace-sink {
   family "ui"
+  generator "embedded"
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'

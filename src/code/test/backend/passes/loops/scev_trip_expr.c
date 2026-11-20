@@ -13,7 +13,7 @@
  * covers the symbolic expression, and asserts that the same check stays in
  * the body when no entry guard exists.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include "opt.h"
 

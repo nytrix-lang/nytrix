@@ -9,7 +9,7 @@
  * bounds-check elimination drop live guards. The unknown cases below are as
  * important as the known ones, and they assert that NO range fact is exported.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int failures;

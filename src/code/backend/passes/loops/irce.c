@@ -14,7 +14,7 @@
  *  Pop, Cohen, Silber — SCEV (INRIA TR, 2004). §2–3.
  */
 #include "base/debug.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <limits.h>
 #include <stdlib.h>

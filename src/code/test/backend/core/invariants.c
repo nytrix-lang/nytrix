@@ -176,6 +176,27 @@ static void case_phi_duplicate_edge(void) {
   nyr_ir_func_free(&f);
 }
 
+static void case_nested_select_condition(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int x = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+  int zero = nyr_opt_const(&f, 0);
+  int one = nyr_opt_const(&f, 1);
+  int two = nyr_opt_const(&f, 2);
+  int positive = nyr_opt_cmp(&f, zero, x, NYIR_CMP_LT);
+  int is_one = nyr_opt_cmp(&f, x, one, NYIR_CMP_EQ);
+  size_t inner = f.len;
+  int condition = nyr_opt_select(&f, positive, is_one, zero);
+  nyr_opt_ret(&f, nyr_opt_select(&f, condition, x, two));
+  expect_accept("select with two boolean arms as a condition", &f, true);
+  f.data[inner].c = two;
+  expect_accept("select condition with a non-boolean false arm", &f, false);
+  f.data[inner].c = zero;
+  f.data[inner].b = two;
+  expect_accept("select condition with a non-boolean true arm", &f, false);
+  nyr_ir_func_free(&f);
+}
+
 int main(void) {
   case_control();
   case_undefined_operand();
@@ -187,12 +208,13 @@ int main(void) {
   case_non_dominating_use();
   case_phi_edge_mismatch();
   case_phi_duplicate_edge();
+  case_nested_select_condition();
   if (failures) {
     fprintf(stderr, "[invariants] %d injected defect(s) escaped validation\n",
             failures);
     return 1;
   }
-  printf("[invariants] 10 structural cases: controls accepted, every injected "
+  printf("[invariants] controls accepted, every injected "
          "defect rejected\n");
   return 0;
 }

@@ -1,6 +1,6 @@
 /* Checked JIT mapping layout, branch displacements, and relocation stubs. */
-#ifndef NYTRIX_NATIVE_JIT_LAYOUT_H
-#define NYTRIX_NATIVE_JIT_LAYOUT_H
+#ifndef NYTRIX_NATIVE_JIT_H
+#define NYTRIX_NATIVE_JIT_H
 
 #include <limits.h>
 #include <stdbool.h>

@@ -1,7 +1,7 @@
 /*
  * Vector rewrites must not retain scalar pointer-alias facts.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 #include <stdlib.h>
 #include <string.h>

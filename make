@@ -2601,16 +2601,16 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     if cli_jobs > 0:
         return cli_jobs
     cpu = os.cpu_count() or 1
-    # Fixture jobs are independent processes. Use every logical CPU and let
-    # the live-RAM budget below set the practical limit.
-    auto = max(1, cpu)
+    # Fixture jobs are independent processes, but a large CPU count can make
+    # the desktop unresponsive even when the memory estimate says the suite
+    # fits. Keep the default modest; callers can request more with -j or the
+    # environment override above.
+    auto = min(4, max(1, cpu // 2))
     avail_gib = host_available_mem_gib()
-    # Keep 8 GiB available for the system and budget 0.8 GiB per worker; the
-    # few fixtures that peak near 2.2 GiB are throttled separately by ny-test.
-    # Explicit -j and
-    # NYTRIX_TEST_JOBS win.
+    # Keep 8 GiB available for the system and use the heavy-fixture budget for
+    # every worker. Some fixtures peak well above the old 0.8 GiB estimate.
     if avail_gib > 0.0:
-        auto = min(auto, max(1, int((avail_gib - 8.0) / 0.8)))
+        auto = min(auto, max(1, int((avail_gib - 8.0) / 2.5)))
     else:
         auto = min(auto, 2)
     return auto
@@ -5663,6 +5663,11 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     # Test execution is memory-bound; compiling the test tools is not.  Keep
     # the two budgets separate so a rebuild can use the build-job allowance.
     build_jobs, _ = resolve_jobs(jobs)
+    if jobs <= 0 and not (os.environ.get("NYTRIX_BUILD_JOBS") or "").strip():
+        # A test invocation may rebuild several large compiler translation
+        # units before starting fixtures. Keep its automatic build load modest
+        # too; explicit -j / NYTRIX_BUILD_JOBS remain available to developers.
+        build_jobs = min(build_jobs, 4)
     cold = (os.environ.get("NYTRIX_TEST_COLD") or "").strip().lower() in ("1", "true", "yes", "on")
     pattern_run = any(
         arg == "--pattern" or arg.startswith("--pattern=") for arg in extra
@@ -6080,7 +6085,10 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         gate_core_before = None
         gate_core_error = str(exc)
     suite_timeout = None
-    step(f"run tests: bin=ny jobs={test_jobs} suite_timeout=unbounded")
+    step(
+        f"run tests: bin=ny jobs={test_jobs} build_jobs={build_jobs} "
+        "suite_timeout=unbounded"
+    )
     # `--no-progress` controls this Python bootstrapper.  ny-test deliberately
     # has no corresponding flag, so keep this global presentation option out
     # of its fixture-runner argv.

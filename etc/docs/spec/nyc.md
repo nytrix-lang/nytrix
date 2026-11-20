@@ -305,7 +305,59 @@ The assembly route also rejected a nonzero compiler exit, a nonzero linker
 exit, a wrong program exit, a signal, and a timeout. This evidence applies to
 the common executable helpers, not to every differential or benchmark lane.
 
+The width and mixed-shape regressions exercise assembly output, explicitly
+selected direct objects, and the default machine object route. The machine
+route must show a disassembly of `main`. The retpoline checks require one for
+the variadic indirect caller. Named sections are checked in both object
+modes. The forced-include and preprocessing checks require fresh dependency
+files. Fault injection rejected missing or empty assembly, invalid assembly,
+link failure, stale executables, wrong output or status, a crash, a timeout,
+and silently bypassed machine output.
+
+The two parity programs and six retained frontend stress programs were run
+with GCC 16.2.1, Clang 23.1.5, and three NYC routes at `-O0`, `-O1`, `-O2`,
+`-O3`, `-Os`, and `-Oz`. All 240 executions agreed on status and every byte
+of stdout and stderr. The report at
+`/tmp/nyc-retained-differential._8ctn54u/results.json` records commands, input
+hashes, and outputs. Its machine-preferred object route may select the direct
+writer for individual functions.
+
 ### Current build evidence
+
+A fresh protected Linux 7.3.5 attempt in
+`/tmp/nyc-nov20-kbuild.QxR9yW` used the upstream tarball and
+`NYC_KERNEL_COMPAT=1 make ARCH=x86_64 CC=<frozen-nyc> HOSTCC=gcc AS=as LD=ld
+-j12 V=1 --output-sync=target vmlinux modules bzImage`. It stopped on four
+NYIR verifier failures in `skbuff.o`, `lz4_decompress.o`, `client.o`, and
+`ttm_bo_util.o`. If-conversion can use a select of two boolean values as
+the condition of a second select. The verifier now accepts that case and
+continues to reject either arm if it can produce a non-boolean value.
+All four saved Kbuild commands then produced new objects and dependency
+files in `/tmp/nyc-fixed-select-replay.fpckwxqa`. The setup replay with the
+earlier frozen binary reached 64 sectors and `_end=0x88d0`, above the
+`0x8000` limit.
+
+The protected configuration requests `-fpatchable-function-entry=16,16`
+with `CONFIG_CALL_PADDING=y`. A focused C object probe confirmed that
+kernel compatibility mode accepts the flag without emitting the padding
+or the `__patchable_function_entries` section. GCC put the function at
+offset `0x10` and emitted that section. NYC put it at offset zero. This
+configured protection remains an acceptance blocker.
+
+The fresh retry in `/tmp/nyc-protected-retry.OyKdYd` used the same upstream
+sources and a new output directory. It linked `vmlinux`, the compressed
+kernel, and all 12 configured modules. All 3,002 successful NYC C object
+messages match unique saved Kbuild recipes one for one. Each object exists
+and each recipe passes NYC the dependency flag. All 19 GCC C recipes build
+host tools. The run records 61 objtool warnings (53 redundant UACCESS
+disables and eight calls leaving `.noinstr.text`) and 18 modpost section
+mismatches. GNU ld rejected `setup.elf` at `Setup too big!`, so no
+`bzImage` was available for the QEMU smoke test. Replaying the setup
+recipes with that compiler also gave 64 sectors and `_end=0x88d0`.
+The run directory contains `command.txt`, `inputs.sha256`,
+`object-provenance.json`, `warnings.json`, and the build log. The frozen
+compiler SHA-256 is
+`45d9eabe8156b2becc9e35965426828aa35151da37b3b19c4019126551cf5b74`.
 
 Fresh Linux 7.3.5 runs used the upstream tarball (SHA-256
 `8f293f83d54f0b7b9be56863ebc5e4ea79d73e530b4ae55c572be97ef39f0990`),
@@ -677,11 +729,11 @@ division, 16-bit truncating add/multiply/divide, and sign-versus-zero
 extension produce the same `1431655765 0 1 -32768 0 250`,
 `1844674407370955161 5 9362 65533 1`, `5 4 -4096` output on both routes, and
 both routes preserve `__attribute__((section("mydata")))` and `.mytext`.
-The object route defaults to the frame encoder first and the machine encoder
-second, so a silent `NYC_TRACE_MACHINE_FALLBACK` there does **not** prove that
-the register-allocating encoder ran. Forcing it with `NYC_USE_MACH_OBJECT=1` on
-the mixed floating-point/aggregate/array/control-flow program produces identical
-output with no fallback marker, and that is now pinned by the `mixed-shapes`test. The assembly-route machine text emitter now encodes the C shapes it
+The object route attempts machine emission for eligible functions and uses
+the direct frame encoder for functions that bypass machine lowering or
+fail emission. The `mixed-shapes` test checks equivalent output and requires
+a machine disassembly of `main`. The assembly-route machine text emitter
+now encodes the C shapes it
 previously refused: width-aware loads and stores (`movzwl`, `movslq`, `movl`,
 `movsbq`, `movswq`, plus `movw`/`movl`/`movb` stores), `sext32` as `movslq`,
 unsigned `divq`, and `SHR`. `asm-machine-reject` now requires these shapes to

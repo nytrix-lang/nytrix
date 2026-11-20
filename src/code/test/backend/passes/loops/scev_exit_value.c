@@ -12,7 +12,7 @@
  * The negative cases are the soundness half: no entry proof means the exit
  * value may be the start (offset -8), and `i * 8` is not below `i * 8`.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int failures;

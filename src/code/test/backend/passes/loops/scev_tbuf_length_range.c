@@ -1,7 +1,7 @@
 /*
  * Length-set/query bounds retain null-allocation behavior and stop at barriers.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int call(nyr_func_t *f, const char *symbol, int a, int b,

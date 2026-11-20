@@ -1,7 +1,7 @@
 /*
  * Loop-idiom rewrites must not retain a stale alias class on MUL -> SHL.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static bool build_loop(nyr_func_t *f, size_t *mul_inst) {

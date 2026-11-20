@@ -9,7 +9,7 @@
  * only keepers of some values.  ADCE must reap exactly the dead defs
  * and leave evaluation untouched.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static bool preserves_dead_arithmetic_trap(nyr_op_t op) {

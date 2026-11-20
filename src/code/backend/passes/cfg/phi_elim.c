@@ -159,6 +159,9 @@ static nyr_phi_vec_kind_t nyr_phi_value_vec_kind(const nyr_func_t *f, int value,
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_CMP_I64:
+    case NYIR_VEC8_SELECT_I64:
     case NYIR_VEC8_REDUCE_ADD_I64:
       return NYR_PHI_VEC8_I64;
     case NYIR_VEC4_LOAD_I64:
@@ -226,7 +229,9 @@ static int *nyr_phi_vec_homes(nyr_func_t *f, nyr_phi_vec_kind_t **kinds_out,
                op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
                op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64 ||
                op == NYIR_VEC8_MUL_I64 || op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64 ||
-               op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
+               op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_SHL_I64 ||
+               op == NYIR_VEC8_CMP_I64 || op == NYIR_VEC8_SELECT_I64 ||
+               op == NYIR_VEC8_REDUCE_ADD_I64 ||
                op == NYIR_VEC4_LOAD_I64 || op == NYIR_VEC4_ADD_I64 ||
                op == NYIR_VEC4_SUB_I64 || op == NYIR_VEC4_AND_I64 ||
                op == NYIR_VEC4_OR_I64 || op == NYIR_VEC4_XOR_I64 ||

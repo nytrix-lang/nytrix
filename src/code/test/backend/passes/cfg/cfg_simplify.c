@@ -9,7 +9,7 @@
  * so both runs below (before and after fusion) must stay verifier-clean
  * and evaluate identically.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static bool false_branch_preserves_debug(void) {

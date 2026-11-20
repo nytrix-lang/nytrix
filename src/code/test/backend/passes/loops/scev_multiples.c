@@ -12,7 +12,7 @@
  * divisor must keep the modulo, and a start that is not a multiple leaves the
  * multiple at one.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int failures;

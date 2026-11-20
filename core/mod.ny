@@ -211,13 +211,13 @@ fn set(any obj=8, any key=nil, any val=nil) any {
    "Creates an empty/capacity set with set()/set(cap), a set from a list with
    set(list), or stores val with obj.set(key, val)."
    if key == nil && val == nil {
-      if is_int(obj) { return core_set._set_new(obj) }
+      if is_int(obj) { return _set_new(obj) }
       if is_list(obj) || is_tuple(obj) {
          def int capacity = obj.len * 2 + 8
-         mut s = core_set._set_new(capacity)
+         mut s = _set_new(capacity)
          mut i = 0
          while i < obj.len {
-            s = core_set._set_add(s, obj[i])
+            s = _set_add(s, obj[i])
             i += 1
          }
          return s

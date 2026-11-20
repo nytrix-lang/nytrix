@@ -13,21 +13,20 @@ compares the real implementation against the real reference interpreter:
 
 | Mechanism | Establishes | Where |
 | --- | --- | --- |
-| Fault injection | The structural validator rejects every injected IR defect | `src/code/test/backend/verify/invariants.c` |
-| Bounded exhaustive validation | Two IR forms agree on every value in a fixed domain | `src/code/test/backend/verify/rules.c` |
-| Seeded differential testing | Unoptimized and optimized IR agree on generated programs | `src/code/test/backend/verify/differential.c` |
-| Pass translation validation | A real pass fires, stays valid, kills its target operation and preserves results | `src/code/test/backend/verify/passes.c` |
-| Machine-IR fault injection | The machine verifier rejects undefined vregs, wrong classes, missing terminators and dangling targets | `src/code/test/backend/verify/mach_invariants.c` |
+| Fault injection | The structural validator rejects every injected IR defect | `src/code/test/backend/core/invariants.c` |
+| Bounded exhaustive validation | Two IR forms agree on every value in a fixed domain | `src/code/backend/passes/verify/rules.c` |
+| Seeded differential testing | Unoptimized and optimized IR agree on generated programs | `src/code/backend/passes/verify/differential.c` |
+| Pass translation validation | A real pass fires, stays valid, kills its target operation and preserves results | `src/code/backend/passes/verify/passes.c` |
+| Machine-IR fault injection | The machine verifier rejects undefined vregs, wrong classes, missing terminators and dangling targets | `src/code/test/backend/lower/machine/mach_invariants.c` |
 
-All three are registered by the existing backend-test glob, so they are ordinary
-tests with no extra flag namespace:
+Run each suite through the backend test runner.
 
 ```
-build/release/ny-full --backend-test=verify/invariants
-build/release/ny-full --backend-test=verify/rules
-build/release/ny-full --backend-test=verify/differential
-build/release/ny-full --backend-test=verify/passes
-build/release/ny-full --backend-test=verify/mach_invariants
+build/release/ny-full --backend-test=core/invariants
+build/release/ny-full --backend-test=passes/verify/rules
+build/release/ny-full --backend-test=passes/verify/differential
+build/release/ny-full --backend-test=passes/verify/passes
+build/release/ny-full --backend-test=lower/machine/mach_invariants
 ```
 
 ## What each suite establishes

@@ -3,7 +3,7 @@
  * loop_pipeline.c and loop_vectorize.c. Shared analysis is declared by loop.h.
  */
 
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "base/common.h"
 #include "base/compat.h"
 #include "base/debug.h"

@@ -23,7 +23,7 @@
 #include "base/compat.h"
 #include "base/debug.h"
 #include "base/trace.h"
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include <limits.h>
 #include <nyr/ir.h>

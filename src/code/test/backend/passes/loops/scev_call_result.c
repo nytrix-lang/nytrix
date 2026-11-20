@@ -9,7 +9,7 @@
  *
  * An unknown user call has no such summary and must leave the count unknown.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int failures;

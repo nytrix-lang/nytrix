@@ -6,7 +6,7 @@
  * transitively. Every rejected case is a direction or dominance mistake that
  * would delete a live guard if the proof trusted it.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "opt.h"
 
 static int failures;

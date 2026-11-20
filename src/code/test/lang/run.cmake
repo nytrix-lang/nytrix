@@ -212,14 +212,14 @@ function(nyc_execute_ok error_context)
   endif()
 endfunction()
 
-# A successful status is not evidence that a compiler or linker wrote output.
-# Never let a previous run's artifact stand in for the command under test.
-function(nyc_execute_output error_context path)
+function(nyc_remove_artifact path)
   file(REMOVE "${path}")
   if(EXISTS "${path}" OR IS_SYMLINK "${path}")
     message(FATAL_ERROR "could not remove stale test artifact: ${path}")
   endif()
-  nyc_execute_ok("${error_context}" ${ARGN})
+endfunction()
+
+function(nyc_require_artifact error_context path)
   if(NOT EXISTS "${path}" OR IS_DIRECTORY "${path}")
     message(FATAL_ERROR "${error_context}: no output produced at ${path}")
   endif()
@@ -227,6 +227,54 @@ function(nyc_execute_output error_context path)
   if(size EQUAL 0)
     message(FATAL_ERROR "${error_context}: empty output at ${path}")
   endif()
+endfunction()
+
+# Require an artifact produced by the command under test.
+function(nyc_execute_output error_context path)
+  nyc_remove_artifact("${path}")
+  nyc_execute_ok("${error_context}" ${ARGN})
+  nyc_require_artifact("${error_context}" "${path}")
+  set(stdout "${stdout}" PARENT_SCOPE)
+  set(stderr "${stderr}" PARENT_SCOPE)
+endfunction()
+
+# Require fresh artifacts, bounded execution, and exact program output on each
+# x86-64 route. A machine disassembly is positive evidence for main because
+# functions that bypass machine lowering silently use the direct encoder.
+function(nyc_check_x64_parity name expected)
+  set(source "${BINARY_DIR}/${name}.c")
+  foreach(route IN ITEMS assembly direct machine)
+    set(compiler "${NYC}")
+    set(artifact "${BINARY_DIR}/${name}-${route}.o")
+    set(mode -c)
+    if(route STREQUAL "assembly")
+      set(artifact "${BINARY_DIR}/${name}-${route}.s")
+      set(mode -S)
+    elseif(route STREQUAL "direct")
+      set(compiler "${CMAKE_COMMAND}" -E env NYC_NO_MACH_OBJECT=1 "${NYC}")
+    else()
+      set(compiler "${CMAKE_COMMAND}" -E env NYC_NO_MACH_OBJECT=0
+        NYC_TRACE_MACHINE_FALLBACK=1 "${NYC}" --mixed-disasm=main)
+    endif()
+    nyc_execute_output("${name} ${route} compilation failed" "${artifact}"
+      COMMAND ${compiler} -O2 ${mode} "${source}" -o "${artifact}" TIMEOUT 15)
+    if(route STREQUAL "machine" AND
+       (stderr MATCHES "NYC object fallback" OR NOT stderr MATCHES "== main  src="))
+      message(FATAL_ERROR
+        "${name} did not use the expected machine object route\n${stderr}")
+    endif()
+
+    set(program "${BINARY_DIR}/${name}-${route}")
+    nyc_execute_output("${name} ${route} link failed" "${program}"
+      COMMAND "${CC}" "${artifact}" -o "${program}" TIMEOUT 15)
+    nyc_execute_ok("${name} ${route} execution failed (\${status})"
+      COMMAND "${program}" TIMEOUT 5)
+    if(NOT "${stdout}" STREQUAL "${expected}" OR NOT "${stderr}" STREQUAL "")
+      message(FATAL_ERROR
+        "${name} ${route} output mismatch\nExpected stdout:\n${expected}"
+        "Actual stdout:\n${stdout}Actual stderr:\n${stderr}")
+    endif()
+  endforeach()
 endfunction()
 
 # Common executable route: compile one corpus case to assembly, link it with
@@ -783,65 +831,22 @@ int main(void) {
 }
 ]=])
 set(width_expected "1431655765 0 1 -32768 0 250\n1844674407370955161 5 9362 65533 1\n5 4 -4096\n")
-nyc_execute_ok(
-  [=[width parity object compilation failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/width-parity.c"
-          -o "${BINARY_DIR}/width-parity.o"
-)
-nyc_execute_ok(
-  [=[width parity object link failed\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -o "${BINARY_DIR}/width-parity-obj"
-          "${BINARY_DIR}/width-parity.o"
-)
-execute_process(
-  COMMAND "${BINARY_DIR}/width-parity-obj"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${width_expected}")
-  message(FATAL_ERROR
-    "width parity object mode mismatch (exit ${status}): ${stdout}${stderr}")
-endif()
-nyc_execute_ok(
-  [=[width parity assembly compilation failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/width-parity.c"
-          -o "${BINARY_DIR}/width-parity.s"
-)
-nyc_execute_ok(
-  [=[width parity assembly link failed\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -o "${BINARY_DIR}/width-parity-asm"
-          "${BINARY_DIR}/width-parity.s"
-)
-execute_process(
-  COMMAND "${BINARY_DIR}/width-parity-asm"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${width_expected}")
-  message(FATAL_ERROR
-    "width parity assembly mode mismatch (exit ${status}): ${stdout}${stderr}")
-endif()
-file(READ "${BINARY_DIR}/width-parity.s" width_asm)
+nyc_check_x64_parity(width-parity "${width_expected}")
+file(READ "${BINARY_DIR}/width-parity-assembly.s" width_asm)
 string(FIND "${width_asm}" ".section \"mydata\"" width_asm_data)
 string(FIND "${width_asm}" ".section \".mytext\"" width_asm_text)
 if(width_asm_data EQUAL -1 OR width_asm_text EQUAL -1)
   message(FATAL_ERROR "assembly route dropped a named section")
 endif()
 if(READELF)
-  execute_process(
-    COMMAND "${READELF}" -SW "${BINARY_DIR}/width-parity.o"
-    RESULT_VARIABLE status OUTPUT_VARIABLE sections ERROR_VARIABLE stderr)
-  string(FIND "${sections}" "mydata" width_obj_data)
-  string(FIND "${sections}" ".mytext" width_obj_text)
-  if(NOT status EQUAL 0 OR width_obj_data EQUAL -1 OR width_obj_text EQUAL -1)
-    message(FATAL_ERROR "object route dropped a named section: ${sections}${stderr}")
-  endif()
-endif()
-# These shapes must reach the physical machine encoder, not the stack encoder.
-execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E env NYC_TRACE_MACHINE_FALLBACK=1
-          "${NYC}" -O2 -c "${BINARY_DIR}/width-parity.c"
-          -o "${BINARY_DIR}/width-parity-trace.o"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR stderr MATCHES "object fallback")
-  message(FATAL_ERROR
-    "width shapes reached the stack encoder instead of machine form: ${stderr}")
+  foreach(route IN ITEMS direct machine)
+    nyc_execute_ok("could not read width-parity ${route} sections"
+      COMMAND "${READELF}" -SW "${BINARY_DIR}/width-parity-${route}.o")
+    if(NOT stdout MATCHES "[ \t]mydata[ \t]" OR
+       NOT stdout MATCHES "[ \t][.]mytext[ \t]")
+      message(FATAL_ERROR "${route} route dropped a named section: ${stdout}${stderr}")
+    endif()
+  endforeach()
 endif()
 
 # Floating point, a by-value struct with a 16-bit member and an address-taken
@@ -880,77 +885,7 @@ int main(void) {
 }
 ]=])
 set(mixed_expected "42 87 32.7500 16.3750 16.3750 65 230 1\n")
-nyc_execute_ok(
-  [=[mixed shapes object compilation failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/mixed-shapes.c"
-          -o "${BINARY_DIR}/mixed-shapes.o"
-)
-nyc_execute_ok(
-  [=[mixed shapes object link failed\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-shapes-obj"
-          "${BINARY_DIR}/mixed-shapes.o"
-)
-execute_process(
-  COMMAND "${BINARY_DIR}/mixed-shapes-obj"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${mixed_expected}")
-  message(FATAL_ERROR
-    "mixed shapes object mode mismatch (exit ${status}): ${stdout}${stderr}")
-endif()
-nyc_execute_ok(
-  [=[mixed shapes assembly compilation failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/mixed-shapes.c"
-          -o "${BINARY_DIR}/mixed-shapes.s"
-)
-nyc_execute_ok(
-  [=[mixed shapes assembly link failed\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-shapes-asm"
-          "${BINARY_DIR}/mixed-shapes.s"
-)
-execute_process(
-  COMMAND "${BINARY_DIR}/mixed-shapes-asm"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${mixed_expected}")
-  message(FATAL_ERROR
-    "mixed shapes assembly mode mismatch (exit ${status}): ${stdout}${stderr}")
-endif()
-# The register-allocating object encoder must cover these shapes too. Force it
-# with NYC_USE_MACH_OBJECT=1 and require identical output with no fallback.
-execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E env NYC_USE_MACH_OBJECT=1
-          NYC_TRACE_MACHINE_FALLBACK=1
-          "${NYC}" -O2 -c "${BINARY_DIR}/mixed-shapes.c"
-          -o "${BINARY_DIR}/mixed-shapes-mach.o"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0)
-  message(FATAL_ERROR
-    "forced machine object compilation failed: ${stdout}${stderr}")
-endif()
-if(stderr MATCHES "object fallback")
-  message(FATAL_ERROR
-    "mixed shapes fell back from the forced machine encoder: ${stderr}")
-endif()
-nyc_execute_ok(
-  [=[mixed shapes machine object link failed\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-shapes-mach"
-          "${BINARY_DIR}/mixed-shapes-mach.o"
-)
-execute_process(
-  COMMAND "${BINARY_DIR}/mixed-shapes-mach"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${mixed_expected}")
-  message(FATAL_ERROR
-    "mixed shapes machine object mismatch (exit ${status}): ${stdout}${stderr}")
-endif()
-execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E env NYC_TRACE_MACHINE_FALLBACK=1
-          "${NYC}" -O2 -c "${BINARY_DIR}/mixed-shapes.c"
-          -o "${BINARY_DIR}/mixed-shapes-trace.o"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR stderr MATCHES "object fallback")
-  message(FATAL_ERROR
-    "mixed shapes reached the stack encoder instead of machine form: ${stderr}")
-endif()
+nyc_check_x64_parity(mixed-shapes "${mixed_expected}")
 
 # The assembly-route machine text emitter must encode the 16/32-bit, unsigned,
 # and SHR shapes C lowering produces, so these functions must not fall back to
@@ -2032,25 +1967,28 @@ foreach(thunk IN ITEMS extern inline)
   if(thunk STREQUAL "extern")
     set(thunk_source "${retpoline_thunk}")
   endif()
-  nyc_execute_ok(
-    [=[machine retpoline compilation failed (${thunk})]=]
-    COMMAND "${CMAKE_COMMAND}" -E env NYC_USE_MACH_OBJECT=1
-            NYC_TRACE_MACHINE_FALLBACK=1 "${NYC}" -O2 -c
+  nyc_execute_output("machine retpoline compilation failed (${thunk})"
+    "${BINARY_DIR}/retpoline-machine-${thunk}.o"
+    COMMAND "${CMAKE_COMMAND}" -E env NYC_NO_MACH_OBJECT=0
+            NYC_TRACE_MACHINE_FALLBACK=1 "${NYC}"
+            --mixed-disasm=retpoline_variadic_call -O2 -c
             "-mindirect-branch=thunk-${thunk}" "${retpoline_source}"
             -o "${BINARY_DIR}/retpoline-machine-${thunk}.o"
   )
-  if(stderr MATCHES "NYC object fallback")
-    message(FATAL_ERROR "machine retpoline fell back (${thunk})\n${stderr}")
+  if(stderr MATCHES "NYC object fallback" OR
+     NOT stderr MATCHES "== retpoline_variadic_call  src=")
+    message(FATAL_ERROR
+      "retpoline did not use the expected machine object route (${thunk})\n${stderr}")
   endif()
-  nyc_execute_ok(
-    [=[machine retpoline did not link (${thunk})]=]
+  nyc_execute_output("machine retpoline did not link (${thunk})"
+    "${BINARY_DIR}/retpoline-machine-${thunk}"
     COMMAND "${CC}" -no-pie "${retpoline_harness}" ${thunk_source}
             "${BINARY_DIR}/retpoline-machine-${thunk}.o"
             -o "${BINARY_DIR}/retpoline-machine-${thunk}"
   )
   nyc_execute_ok(
     [=[machine retpoline changed call behavior (${thunk})]=]
-    COMMAND "${BINARY_DIR}/retpoline-machine-${thunk}"
+    COMMAND "${BINARY_DIR}/retpoline-machine-${thunk}" TIMEOUT 5
   )
 endforeach()
 nyc_execute_ok(
@@ -3004,13 +2942,16 @@ if(NOT status EQUAL 0 OR
   message(FATAL_ERROR
     "nyc -fmacro-prefix-map did not honor mapping order\n${stdout}${stderr}")
 endif()
-nyc_execute_ok(
+nyc_remove_artifact("${driver_depfile}")
+nyc_execute_output(
   [=[nyc forced-include compile failed\n${stdout}${stderr}]=]
+  "${driver_object}"
   COMMAND "${NYC}" -c -nostdinc -std=gnu11 -m64 -fno-PIE
             -fms-extensions -Werror "-I${BINARY_DIR}"
             -include "${driver_include}" "-Wp,-MMD,${driver_depfile}"
             "${driver_source}" -o "${driver_object}"
 )
+nyc_require_artifact("nyc forced-include dependencies" "${driver_depfile}")
 file(READ "${driver_depfile}" driver_dependencies)
 if(NOT driver_dependencies MATCHES
    "driver-forced-include\\.h" OR NOT driver_dependencies MATCHES
@@ -3019,8 +2960,9 @@ if(NOT driver_dependencies MATCHES
     "nyc dependency output omitted the forced header or source: ${driver_dependencies}")
 endif()
 
-nyc_execute_ok(
+nyc_execute_output(
   [=[linking forced-include NYC object failed\n${stdout}${stderr}]=]
+  "${BINARY_DIR}/driver-forced-include-host"
   COMMAND "${CC}" -o "${BINARY_DIR}/driver-forced-include-host"
             "${NY_C_CORPUS_driver-forced-include-host.c}" "${driver_object}"
 )
@@ -3040,18 +2982,13 @@ if(NOT status EQUAL 0 OR NOT stdout MATCHES "return 37")
     "nyc forced-include preprocessing from stdin failed\n${stdout}${stderr}")
 endif()
 set(preprocess_depfile "${BINARY_DIR}/driver-preprocess.d")
-execute_process(
+nyc_remove_artifact("${preprocess_depfile}")
+nyc_execute_output("nyc preprocessing failed" "${BINARY_DIR}/driver-preprocess.i"
   COMMAND "${NYC}" -E -I "${BINARY_DIR}" -include "${driver_include}"
           "-Wp,-MMD,${preprocess_depfile}" -o
           "${BINARY_DIR}/driver-preprocess.i" "${driver_source}"
-  RESULT_VARIABLE status
-  OUTPUT_VARIABLE stdout
-  ERROR_VARIABLE stderr
 )
-if(NOT status EQUAL 0 OR NOT EXISTS "${preprocess_depfile}")
-  message(FATAL_ERROR
-    "nyc preprocessing did not produce requested dependencies\n${stdout}${stderr}")
-endif()
+nyc_require_artifact("nyc preprocessing dependencies" "${preprocess_depfile}")
 file(READ "${preprocess_depfile}" preprocess_dependencies)
 if(NOT preprocess_dependencies MATCHES
    "driver-forced-include\\.h" OR NOT preprocess_dependencies MATCHES
@@ -3060,18 +2997,11 @@ if(NOT preprocess_dependencies MATCHES
     "nyc preprocessing dependencies omitted input/header: ${preprocess_dependencies}")
 endif()
 set(stdin_preprocess_depfile "${BINARY_DIR}/stdin-preprocess.d")
-execute_process(
+nyc_execute_output("nyc stdin preprocessing dependencies" "${stdin_preprocess_depfile}"
   COMMAND "${NYC}" -E -I "${BINARY_DIR}"
           "-Wp,-MMD,${stdin_preprocess_depfile}" -
   INPUT_FILE "${driver_source}"
-  RESULT_VARIABLE status
-  OUTPUT_VARIABLE stdout
-  ERROR_VARIABLE stderr
 )
-if(NOT status EQUAL 0 OR NOT EXISTS "${stdin_preprocess_depfile}")
-  message(FATAL_ERROR
-    "nyc stdin preprocessing dependency generation failed\n${stdout}${stderr}")
-endif()
 file(READ "${stdin_preprocess_depfile}" stdin_preprocess_dependencies)
 if(NOT stdin_preprocess_dependencies MATCHES "^-[^:]*:" OR
    NOT stdin_preprocess_dependencies MATCHES

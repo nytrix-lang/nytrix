@@ -12,7 +12,7 @@
  * nothing, and a limit whose range would let the recurrence wrap past INT64_MAX
  * must be rejected rather than turned into an interval.
  */
-#include "code/backend/passes/analysis/loop.h"
+#include "code/backend/passes/verify/loop.h"
 #include "code/backend/passes/util.h"
 #include "opt.h"
 

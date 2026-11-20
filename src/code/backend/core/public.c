@@ -518,7 +518,7 @@ bool nyr_optimize_with_options(nyr_func_t *func, nyr_opt_level_t opt_level,
     nyr_api_error(err, err_len, "optimization level must be between O0 and O3");
     return false;
   }
-  if (options & ~NYR_OPT_DISABLE_VECTORIZATION) {
+  if (options & ~(NYR_OPT_DISABLE_VECTORIZATION | NYR_OPT_AVX2_VECTORIZE)) {
     nyr_api_error(err, err_len, "unknown optimization option");
     return false;
   }
