@@ -6627,4 +6627,9 @@ Four interleaved AOT samples of `bigint-oracle` matched checksum `1968365`;
 retired instructions stayed at 165.34 M, and median cycles went from
 60.50 M to 60.22 M. The wall-time change was within sample variation.
 
+An exponent-based BigFloat integer decoder was tried and reverted.
+`bigint-oracle` retired 165.34 M → 163.40 M instructions, but median
+cycles increased from 60.07 M to 61.80 M and every measured kernel
+sample was slower. Checksums and the padding and rounding tests passed.
+
 </details>
