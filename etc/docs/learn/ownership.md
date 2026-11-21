@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":112,"summary":"Choose borrowed or owned APIs and check cleanup at resource boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":260,"summary":"Choose borrowed or owned APIs and check cleanup at resource boundaries."} -->
 # Ownership
 
 Ownership contracts say whether a callee borrows a value temporarily or takes

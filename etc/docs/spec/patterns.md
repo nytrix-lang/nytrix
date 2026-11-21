@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":170,"summary":"Pattern matching forms, bindings, ranges, and exhaustiveness behavior."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":110,"summary":"Pattern matching forms, bindings, ranges, and exhaustiveness behavior."} -->
 # Patterns
 
 Patterns describe value dispatch in `case` and `match` forms. A branch can be

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":40,"summary":"The language and ABI contract for native compilation, linking, targets, and unsupported shapes."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":320,"summary":"The language and ABI contract for native compilation, linking, targets, and unsupported shapes."} -->
 # Native
 
 Rules for layouts, extern blocks, pointers, handles, strings, ownership, and

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":200,"summary":"Build a browser app or Wasm artifact and check its browser host capabilities."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":440,"summary":"Build a browser app or Wasm artifact and check its browser host capabilities."} -->
 # Browser and WebAssembly
 
 The browser target has its own host API. It does not inherit native filesystem,

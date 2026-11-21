@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"learn","order":150,"summary":"Compiler diagnostics, pass isolation, runtime failures, and filtered instrumentation."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"learn","order":490,"summary":"Compiler diagnostics, pass isolation, runtime failures, and filtered instrumentation."} -->
 # Compiler debugging
 
 Start with one failing source file or fixture and retain its command, route,

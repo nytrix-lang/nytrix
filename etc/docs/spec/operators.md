@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":160,"summary":"Operator precedence, comparisons, arithmetic, assignment, and overload rules."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":90,"summary":"Operator precedence, comparisons, arithmetic, assignment, and overload rules."} -->
 # Operators
 
 Operators cover arithmetic, comparison, logic, bitwise work, ternary selection,

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":195,"summary":"Build, install, and diagnose Nytrix with the repository build driver."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":470,"summary":"Build, install, and diagnose Nytrix with the repository build driver."} -->
 # Build Nytrix
 
 Use the repository's `./make` driver for normal builds. It owns build

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":96,"summary":"Choose an integer or floating-point representation and convert explicitly at boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":150,"summary":"Choose an integer or floating-point representation and convert explicitly at boundaries."} -->
 # Numbers
 
 Choose a numeric type for the range and precision the program needs. Convert at

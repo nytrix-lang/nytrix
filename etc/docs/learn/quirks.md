@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":13,"summary":"A linked field guide to Nytrix syntax and behavior that often surprises newcomers."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":30,"summary":"A linked field guide to Nytrix syntax and behavior that often surprises newcomers."} -->
 # Nytrix quick reference
 
 These are the rules most likely to conflict with habits from C, Rust, or

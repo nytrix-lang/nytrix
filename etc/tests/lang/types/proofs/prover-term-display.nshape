@@ -1,4 +1,4 @@
-shape prover_goal_state_and_tactics {
+shape prover_term_display {
   family "runtime/library"
   generator "embedded"
   features ["ny", "proofs", "prover", "tactics"]
@@ -10,8 +10,8 @@ shape prover_goal_state_and_tactics {
   source ny <<'NY'
 use core
 use core.prover as pr
-def bad_st = pr.auto(pr.begin(pr.goal([], "x * x > x", "x=-5..5")))
-print("auto_err=", bad_st.get("error"))
+def t = pr.term("x + 1 > 0 && (y == x -> y >= 0)")
+print("show=", pr.show(t))
 
 print("PROVER-OK", 3, 2)
 

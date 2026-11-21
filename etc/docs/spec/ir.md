@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":45,"summary":"NYIR SSA and CFG invariants, verification, optimizer diagnostics, and native lowering."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":390,"summary":"NYIR SSA and CFG invariants, verification, optimizer diagnostics, and native lowering."} -->
 # Nytrix IR (NYIR)
 
 > **Note:** Usually needed only for compiler work or when diagnosing a

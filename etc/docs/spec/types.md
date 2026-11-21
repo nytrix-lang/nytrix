@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":20,"summary":"Values, type annotations, inference, mutability, and the boundaries between static and dynamic data."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":70,"summary":"Values, type annotations, inference, mutability, and the boundaries between static and dynamic data."} -->
 # Types
 
 Types describe the values a binding, parameter, return value, or container may

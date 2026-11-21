@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":45,"summary":"The versioned C API for constructing, verifying, optimizing, and executing NYIR."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":350,"summary":"The versioned C API for constructing, verifying, optimizing, and executing NYIR."} -->
 # Nyr API
 
 > **Note:** Usually needed only to implement a frontend, backend, or NYIR host.

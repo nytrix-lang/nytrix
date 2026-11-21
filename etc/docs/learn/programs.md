@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":150,"summary":"Build scripts and modules, then find runnable projects and focused checks."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":160,"summary":"Build and run a program, then choose a focused workflow."} -->
 # Programs
 
 A source file can be a script, a module, or both: use a script for a standalone

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":11,"summary":"Source spellings for Nytrix comments, literals, declarations, blocks, and expressions."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":50,"summary":"Source spellings for Nytrix comments, literals, declarations, blocks, and expressions."} -->
 # Syntax
 
 Topic references define meaning, type rules, and backend limits for these source

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":200,"summary":"Primitive and compound values, collections, mutability, ownership, and representation boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":60,"summary":"Primitive and compound values, collections, mutability, ownership, and representation boundaries."} -->
 # Values
 
 Values include literals, strings, collections, functions, and native handles.

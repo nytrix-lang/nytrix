@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":60,"summary":"Opt-in borrow, resource-move, and usage-count checks with their supported limits."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":250,"summary":"Opt-in borrow, resource-move, and usage-count checks with their supported limits."} -->
 # Ownership
 
 Nytrix ownership checks are opt-in and cover documented source shapes. They are

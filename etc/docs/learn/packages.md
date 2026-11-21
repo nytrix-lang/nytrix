@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":130,"summary":"Create a package manifest, add dependencies, and reproduce installs from the lockfile."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":450,"summary":"Create a package manifest, add dependencies, and reproduce installs from the lockfile."} -->
 # Packages
 
 Nytrix packages are source dependencies resolved to an import root. The package

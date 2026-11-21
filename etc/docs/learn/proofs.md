@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":105,"summary":"Use compile-time assertions, bounded index types, and checked function preconditions."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":230,"summary":"Use compile-time assertions, bounded index types, and checked function preconditions."} -->
 # Proofs
 
 Proof contracts express facts callers or constructors must establish, and the

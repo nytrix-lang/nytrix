@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"learn","order":190,"summary":"Executable C validation for NYIR rewrites: invariant fault injection, exhaustive rule checks, and seeded differential testing."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"learn","order":510,"summary":"Executable C validation for NYIR rewrites: invariant fault injection, exhaustive rule checks, and seeded differential testing."} -->
 # Compiler verification in C
 
 Verification work in this repository is implemented in C and lives beside the

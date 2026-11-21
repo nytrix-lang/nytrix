@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":41,"summary":"NYC's C compiler driver, targets, ABI behavior, and verification evidence."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":340,"summary":"NYC's C compiler driver, targets, ABI behavior, and verification evidence."} -->
 # NYC C compiler
 
 `nyc` compiles C translation units through the [NYIR](ir.md) optimizer and

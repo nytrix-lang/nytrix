@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":55,"summary":"Bind leading function arguments, reuse the resulting closure, and adapt binary callables."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":140,"summary":"Bind leading function arguments, reuse the resulting closure, and adapt binary callables."} -->
 # Currying and partial application
 
 Prerequisites: function declarations, immutable bindings, and the

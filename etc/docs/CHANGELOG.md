@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"project","order":10,"summary":"Release highlights and notable changes for each version."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"project","order":530,"summary":"Release highlights and notable changes for each version."} -->
 # Changelog
 
 Each release starts with a short summary, followed by details when useful.

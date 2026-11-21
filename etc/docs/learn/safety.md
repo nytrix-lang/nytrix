@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":113,"summary":"Catch use-after-free, out-of-bounds, double free, leaks, and allocation failure in your own programs."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":270,"summary":"Catch use-after-free, out-of-bounds, double free, leaks, and allocation failure in your own programs."} -->
 # Safety
 
 Nytrix does not make every program memory-safe by default. This page shows the

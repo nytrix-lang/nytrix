@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":95,"summary":"Run independent work in parallel, share results through channels, and protect shared state."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":410,"summary":"Run independent work in parallel, share results through channels, and protect shared state."} -->
 # Concurrency
 
 Concurrency is easiest to reason about when independent tasks return values

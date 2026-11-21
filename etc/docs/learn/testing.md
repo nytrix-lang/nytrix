@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":50,"summary":"Write executable checks and run the fixture that covers the behavior and target you need."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":190,"summary":"Write executable checks and run the fixture that covers the behavior and target you need."} -->
 # Testing
 
 A Nytrix test is a program that checks an observable result and exits nonzero

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":180,"summary":"Reduce failures to one source, compiler, runtime, or host boundary and reproduce them."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":480,"summary":"Reduce failures to one source, compiler, runtime, or host boundary and reproduce them."} -->
 # Troubleshooting
 
 Keep the failing command, source, flags, and first useful diagnostic. Reduce the

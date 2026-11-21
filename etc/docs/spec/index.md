@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":0,"summary":"A topic map for Nytrix language contracts and implementation boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":5,"summary":"A topic map for Nytrix language contracts and implementation boundaries."} -->
 # Specification
 
 Language contracts define syntax and behavior; backend support varies by source

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":125,"summary":"Short patterns for common Nytrix programming tasks."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":200,"summary":"Short patterns for common Nytrix programming tasks."} -->
 # Cookbook
 
 Use the smallest pattern that fits, then follow its linked contract before

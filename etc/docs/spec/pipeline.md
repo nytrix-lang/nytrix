@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":15,"summary":"How checked source reaches NYIR, machine code, LLVM, or WebAssembly."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":380,"summary":"How checked source reaches NYIR, machine code, LLVM, or WebAssembly."} -->
 # Pipeline
 
 The compiler checks source before selecting a code-generation route. Each

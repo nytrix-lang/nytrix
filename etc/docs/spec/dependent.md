@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":21,"summary":"Design and implementation status for dependent types, GADTs, type-level values, and proof extensions."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":210,"summary":"Design and implementation status for dependent types, GADTs, type-level values, and proof extensions."} -->
 # Dependent types and indexed data
 
 > **Status:** Refinements, compile-time proofs, value-indexed `Fin<N>`,

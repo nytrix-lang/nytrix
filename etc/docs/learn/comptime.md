@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":110,"summary":"Evaluate constants and generate declarations during compilation."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":280,"summary":"Evaluate constants and generate declarations during compilation."} -->
 # Compile-time programming
 
 Compile-time evaluation computes values or declarations from source inputs

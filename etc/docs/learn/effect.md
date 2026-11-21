@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":108,"summary":"Declare and check observable work at function boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":240,"summary":"Declare and check observable work at function boundaries."} -->
 # Effects
 
 An effect contract names the observable work a function may perform and gives

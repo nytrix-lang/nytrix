@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":150,"summary":"Branches, loops, pattern cases, exits, and control-flow expressions."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":100,"summary":"Branches, loops, pattern cases, exits, and control-flow expressions."} -->
 # Control Flow
 
 Control flow selects branches, repeats loops, and runs deferred cleanup when a

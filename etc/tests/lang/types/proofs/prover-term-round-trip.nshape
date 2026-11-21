@@ -1,4 +1,4 @@
-shape prover_goal_state_and_tactics {
+shape prover_term_round_trip {
   family "runtime/library"
   generator "embedded"
   features ["ny", "proofs", "prover", "tactics"]
@@ -11,8 +11,8 @@ shape prover_goal_state_and_tactics {
 use core
 use core.prover as pr
 def t = pr.term("x + 1 > 0 && (y == x -> y >= 0)")
-print("show=", pr.show(t))
-
+assert(pr.show(t) == "((x + 1) > 0) && (!(y == x) || (y >= 0))", "term round trip")
+assert(pr.term("x +").get("kind") == "error", "malformed terms are values, not panics")
 print("PROVER-OK", 3, 2)
 
 NY

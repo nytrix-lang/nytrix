@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":160,"summary":"Use the REPL for interactive experiments and move reproducible checks into files."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":180,"summary":"Use the REPL for interactive experiments and move reproducible checks into files."} -->
 # REPL
 
 The REPL is an interactive scratchpad: it evaluates source and retains imports

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":190,"summary":"Compile-time evaluation, generated values, and the boundaries of comptime execution."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":290,"summary":"Compile-time evaluation, generated values, and the boundaries of comptime execution."} -->
 # Comptime
 
 Compile-time forms run during compilation and produce tables, matches, templates, emitted declarations, and generated modules.

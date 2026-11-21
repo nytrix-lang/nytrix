@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":45,"summary":"Runtime value representation, allocation prefixes, container slots, and ABI conversion boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":300,"summary":"Runtime value representation, allocation prefixes, container slots, and ABI conversion boundaries."} -->
 # Memory
 
 Compiler and runtime code share these representation rules. Ordinary Nytrix

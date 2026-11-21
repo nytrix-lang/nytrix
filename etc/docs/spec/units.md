@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":10,"summary":"Rules for source files, imports, modules, profiles, and entry points."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":40,"summary":"Rules for source files, imports, modules, profiles, and entry points."} -->
 # Units
 
 Use [Programs](../learn/programs.md) for project setup and import workflows.

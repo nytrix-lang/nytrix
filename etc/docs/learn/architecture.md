@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"learn","order":190,"summary":"Locate the compiler layers that own parsing, semantics, lowering, execution, and tools."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"learn","order":500,"summary":"Locate the compiler layers that own parsing, semantics, lowering, execution, and tools."} -->
 # Compiler architecture
 
 Use the layer that owns the invariant. Source syntax belongs in the frontend;

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":60,"summary":"Build a windowed program and check rendering or input support on its target."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":430,"summary":"Build a windowed program and check rendering or input support on its target."} -->
 # UI
 
 Use `core.os.ui.window` for window and input state and

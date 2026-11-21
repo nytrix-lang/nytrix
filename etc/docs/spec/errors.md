@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":180,"summary":"Recoverable results, compiler diagnostics, failure categories, and error propagation."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":120,"summary":"Recoverable results, compiler diagnostics, failure categories, and error propagation."} -->
 # Errors
 
 Errors use assertions, panics, recoverable result values, and compiler

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":140,"summary":"Function declarations, calls, closures, returns, and checked function contracts."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":80,"summary":"Function declarations, calls, closures, returns, and checked function contracts."} -->
 # Functions
 
 Function rules are shared across execution backends; support for a particular

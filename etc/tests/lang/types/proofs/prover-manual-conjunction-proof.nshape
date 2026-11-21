@@ -1,4 +1,4 @@
-shape prover_goal_state_and_tactics {
+shape prover_manual_conjunction_proof {
   family "runtime/library"
   generator "embedded"
   features ["ny", "proofs", "prover", "tactics"]

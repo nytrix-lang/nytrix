@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":30,"summary":"Ownership, cleanup, receivers, asynchronous behavior, and the runtime guarantees programs rely on."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":310,"summary":"Ownership, cleanup, receivers, asynchronous behavior, and the runtime guarantees programs rely on."} -->
 # Runtime
 
 Runtime behavior covers execution modes, memory boundaries, ownership,

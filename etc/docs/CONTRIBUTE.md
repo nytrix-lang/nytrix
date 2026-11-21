@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"project","order":2,"summary":"Build, test, and contribute changes to the Nytrix compiler and documentation."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"project","order":520,"summary":"Build, test, and contribute changes to the Nytrix compiler and documentation."} -->
 # Contributing to Nytrix
 
 Start from the source and a reduced reproducer with a known result. Use

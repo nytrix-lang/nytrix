@@ -1,23 +1,25 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":12,"summary":"Choose an execution route and assess Nytrix's current feature and target limits."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":20,"summary":"Choose an execution route and assess Nytrix's current feature and target limits."} -->
 # Status and execution routes
 
-Nytrix is experimental. Its parser and semantic checks are shared across
-execution routes, but code generation and host APIs have route-specific limits.
-For a project, test the features, ABI signatures, and host services it needs on
-the target it will use.
+Nytrix is a working compiler with native, LLVM, and browser routes; it is still
+under active development. Parsing and semantic checks are shared across those
+routes, so source generally behaves consistently, while code generation and
+host APIs keep route-specific limits. For a project, check the features, ABI
+signatures, and host services it needs on the target it will use.
 
 Prerequisites: none; check the compiler revision and target before using this
 status information.
 
 ## Where Nytrix fits
 
-Small tools, native experiments, and compiler research can use C interop and
-compiler inspection while adapting to compiler changes. APIs, package support,
-and target coverage are still changing; pin a commit for reproducible builds.
+Small tools, native experiments, and compiler research are good fits today:
+C interop, compiler inspection, and executable checks are available. APIs,
+package support, and target coverage are still evolving, so pin a commit for
+reproducible builds and expect to adapt to compiler changes.
 
-Do not treat the bounded proof, ownership, or effect analyses as general formal
-verification. Do not assume a program that runs through LLVM also runs through
-the owned native backend or in a browser.
+The bounded proof, ownership, and effect analyses are useful local checks, not
+general formal verification. A program that runs through LLVM may need a
+different source shape or flag set for the owned native backend or a browser.
 
 ## Execution routes
 

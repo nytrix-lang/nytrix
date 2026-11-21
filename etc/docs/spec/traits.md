@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":22,"summary":"Traits, impl blocks, attached methods, operator declarations, and law verification."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":130,"summary":"Traits, impl blocks, attached methods, operator declarations, and law verification."} -->
 # Traits and impl
 
 Use `impl` to attach methods and operators to a type. A `trait` declares a

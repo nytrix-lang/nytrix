@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":40,"summary":"Declare native layouts and calls, then verify ABI, ownership, and target support."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":330,"summary":"Declare native layouts and calls, then verify ABI, ownership, and target support."} -->
 # Native interfaces
 
 Treat every native declaration as a boundary with an ABI, lifetime, and error

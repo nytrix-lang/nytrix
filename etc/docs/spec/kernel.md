@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":22,"summary":"Trusted kernel rules, erasure and ABI model, and the soundness risk register for dependent and proof-carrying Nytrix."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":220,"summary":"Trusted kernel rules, erasure and ABI model, and the soundness risk register for dependent and proof-carrying Nytrix."} -->
 # Kernel, erasure, and soundness
 
 This page fixes the rules the checker is allowed to trust. Everything else —

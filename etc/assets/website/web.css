@@ -324,6 +324,10 @@ input {
     color: var(--ico-warn);
 }
 
+.ico-nyc {
+    color: var(--ico-net);
+}
+
 .ico-test, .ico-gauge, .ico-history {
     color: var(--ico-media);
 }
@@ -358,10 +362,6 @@ input {
 
 .ico-globe {
     color: var(--ico-net);
-}
-
-.ico-github,
-.ico-new {
 }
 
 .ico-external {

@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":47,"summary":"Embed the Nytrix runtime and execute source or NYIR through its C ABI."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":370,"summary":"Embed the Nytrix runtime and execute source or NYIR through its C ABI."} -->
 # Nytrix Embedding API
 
 > **Note:** Usually needed only when embedding Nytrix in a host application.

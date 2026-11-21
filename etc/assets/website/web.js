@@ -485,7 +485,7 @@ const DOC_ICONS = {
   architecture: "tree", browser: "globe", build: "wrench",
   comptime: "comptime", concurrency: "timer", currying: "functional",
   debugging: "debug", effect: "effect", examples: "script",
-  library: "library", stats: "history", native: "native",
+  library: "library", stats: "history", native: "cpu",
   networking: "network", numbers: "math", ownership: "lock",
   packages: "package", performance: "gauge", programs: "mod",
   proofs: "proof", quirks: "list", repl: "repl", safety: "shield",
@@ -529,8 +529,9 @@ function moduleIconName(route) {
     // `core.query` and `core.inspect` use the search glyph; the pack keeps no
     // separate icon for either.
     if (leaf === "query" || leaf === "inspect") return "search";
-    // `core.native` uses the CPU glyph (the native artwork is named cpu.svg).
     if (leaf === "native") return "cpu";
+    if (leaf === "atomic") return "atom";
+    if (leaf === "editor") return "code_edit";
     if (MODULE_ICONS.has(leaf)) return leaf;
   }
   if (r.includes(".net.server") || r.includes(".http")) return "server";
@@ -2243,7 +2244,7 @@ function renderDocsHome(overviewMod) {
   let html = header(
     "Index",
     "Language reference",
-    "Specification · Src · Docs",
+    "Spec · Src · Docs",
     "book",
   );
   html += `<div class="docs-home">`;

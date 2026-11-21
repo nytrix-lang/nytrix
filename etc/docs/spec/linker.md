@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":46,"summary":"Link request fields, tool selection, and the in-process ELF executable linker."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":360,"summary":"Link request fields, tool selection, and the in-process ELF executable linker."} -->
 # Linking
 
 > **Note:** Use `ny` for applications; use this API to link existing objects.
