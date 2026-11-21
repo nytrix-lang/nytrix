@@ -2,9 +2,9 @@
 # Recorded measurements
 
 This page is the current picture: a dashboard generated from every saved full
-benchmark run, the latest run's detail, and the compile-time baseline. Dated
-investigations, profiles, and rejected experiments are in the [measurement
-log](#measurement-log) at the end of this page.
+benchmark run, the latest run's detail, and the compile-time baseline. The
+[measurement log](#measurement-log) at the end keeps investigations, profiles,
+and rejected experiments in the order they were recorded.
 
 NYR is the native backend, LLVM the LLVM backend, and NYC the C front end. Ratios
 are runtime relative to Host C: below `1×` is faster than C. Matching checksums
@@ -17,7 +17,7 @@ section is written by the C benchmark runner.
 [Benchmark dashboard](#benchmark-dashboard): trend, bands, every benchmark, largest
   gaps
 [Latest full benchmark run](#latest-full-benchmark-run)
-[Compile-time baseline](#compile-time-baseline-and-serial-fixes-2026-11-17)
+[Compile-time baseline](#compile-time-baseline-and-serial-fixes)
 [Reading the results](#reading-the-results)
 [Measurement log](#measurement-log): investigations, profiles, and rejected
   experiments
@@ -355,7 +355,7 @@ Raw report: `build/bench-reports/bench-20261120-235057-945648.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
-## Compile-time baseline and serial fixes (2026-11-17)
+## Compile-time baseline and serial fixes
 
 Host AMD EPYC 7642 (48 cores, 96 threads, 62 GiB), other sessions active.
 the local compile-time baseline script compiles every `etc/labs` target to a native
@@ -509,123 +509,74 @@ Hardware sampling on the recorded host sometimes assigned kernel addresses to us
 
 ## Measurement log
 
-Dated investigations behind the benchmark dashboard above: what was measured, what
-changed, and what was tried and reverted. Entries are historical snapshots, not
-current performance claims; compare only runs with the same source, input, route,
-flags, cache state, and timed region.
+Each entry below records what was measured, what changed, and what was tried and
+reverted. These are historical snapshots, not current performance claims. Compare
+only runs that share the same source, input, route, flags, cache state, and timed
+region.
 
 <details>
-<summary>Dated investigations and remaining leads</summary>
+<summary>Investigations and remaining leads</summary>
 
-Selected investigations:
+Representative entries from each part of the log:
 
--
-  [2026-11-19 runtime linking, registry cache residency, allocation bookkeeping](#2026-11-19-runtime-linking-registry-cache-residency-allocation-bookkeeping)
--
-  [2026-11-19 NYC regression: two encoder bugs, mach-object default reverted](#2026-11-19-nyc-regression-two-encoder-bugs-mach-object-default-reverted)
--
-  [2026-11-19 NYR/C gap re-rank after the NYC fix](#2026-11-19-nyrc-gap-re-rank-after-the-nyc-fix)
--
-  [2026-11-19 full-suite baseline and home-reload diagnosis](#2026-11-19-full-suite-baseline-and-home-reload-diagnosis)
--
-  [2026-11-19 loop-GPR eligibility evidence (sssp main)](#2026-11-19-loop-gpr-eligibility-evidence-sssp-main)
-[2026-11-19 select clamp fusion (landed)](#2026-11-19-select-clamp-fusion-landed)
--
-  [2026-11-19 remaining measured blocker: loop-carried ranges](#2026-11-19-remaining-measured-blocker-loop-carried-ranges)
--
-  [2026-11-19 general bit-reassembly loop folding (landed)](#2026-11-19-general-bit-reassembly-loop-folding-landed)
--
-  [2026-11-19 vectorizer proof diagnostics (landed)](#2026-11-19-vectorizer-proof-diagnostics-landed)
--
-  [2026-11-19 vectorizer window: exact blocker located inside SCEV](#2026-11-19-vectorizer-window-exact-blocker-located-inside-scev)
--
-  [2026-11-19 compile-time: select_chain_fold gate measured, no gain (reverted)](#2026-11-19-compile-time-select_chain_fold-gate-measured-no-gain-reverted)
--
-  [2026-11-19 compile-time and cd vectorization: measured findings](#2026-11-19-compile-time-and-cd-vectorization-measured-findings)
--
-  [2026-11-19 cd: what the address really is, and where the 860 ms goes](#2026-11-19-cd-what-the-address-really-is-and-where-the-860-ms-goes)
--
-  [2026-11-19 why the unreachable-stdlib filter was not shipped](#2026-11-19-why-the-unreachable-stdlib-filter-was-not-shipped)
--
-  [2026-11-19 six-fixture instruction budget (bench-gcc, NYR vs cc -O3)](#2026-11-19-six-fixture-instruction-budget-bench-gcc-nyr-vs-cc--o3)
--
-  [2026-11-19 cd resumed: the gap is vectorization, not scalar code](#2026-11-19-cd-resumed-the-gap-is-vectorization-not-scalar-code)
--
-  [2026-11-19 lbm: the neighbour-offset proof already works](#2026-11-19-lbm-the-neighbour-offset-proof-already-works)
--
-  [2026-11-19 cd: the address is a direct addr.symbol, and the loop dies before the load](#2026-11-19-cd-the-address-is-a-direct-addrsymbol-and-the-loop-dies-before-the-load)
--
-  [2026-11-19 the suite's two alarming rows in the last full run are contention artifacts](#2026-11-19-the-suites-two-alarming-rows-in-the-last-full-run-are-contention-artifacts)
--
-  [2026-11-19 cd: the window that is missing belongs to the init loop, not the movement loop](#2026-11-19-cd-the-window-that-is-missing-belongs-to-the-init-loop-not-the-movement-loop)
--
-  [2026-11-19 VRP read-only slot ranges: built, fired on nothing, reverted](#2026-11-19-vrp-read-only-slot-ranges-built-fired-on-nothing-reverted)
--
-  [2026-11-19 why a symbol-to-initializer table cannot bound a memory-carried IV](#2026-11-19-why-a-symbol-to-initializer-table-cannot-bound-a-memory-carried-iv)
--
-  [2026-11-19 loop_vectorize vector_slot_entry_const the memory-carried IV now gets an entry bound](#2026-11-19-loop_vectorize-vector_slot_entry_const-the-memory-carried-iv-now-gets-an-entry-bound)
--
-  [2026-11-19 cross-block entry bound the preheader store is found through the CFG](#2026-11-19-cross-block-entry-bound-the-preheader-store-is-found-through-the-cfg)
--
-  [2026-11-20 radix-tree, bitcount, Ackermann, and BigInt](#2026-11-20-radix-tree-bitcount-ackermann-and-bigint)
-[2026-11-20 single-limb BigInt division](#2026-11-20-single-limb-bigint-division)
-[2026-11-20 native optimization notes](#2026-11-20-native-optimization-notes)
-[2026-11-20 vector accumulator unrolling](#2026-11-20-vector-accumulator-unrolling)
-[2026-11-20 vectorizer rejection histogram](#2026-11-20-vectorizer-rejection-histogram)
-[2026-11-20 compile phase timing](#2026-11-20-compile-phase-timing)
-[2026-11-20 encoded home traffic and wide-call locality](#2026-11-20-encoded-home-traffic-and-wide-call-locality)
-[2026-11-20 loop-carried home traffic](#2026-11-20-loop-carried-home-traffic)
-[2026-11-20 integer home-fold and edge-sink counters](#2026-11-20-integer-home-fold-and-edge-sink-counters)
-[2026-11-20 BigFloat division sticky bit](#2026-11-20-bigfloat-division-sticky-bit)
--
-  [2026-11-19 pre-vectorize LICM phase: built, measured, reverted](#2026-11-19-pre-vectorize-licm-phase-built-measured-reverted)
+**Runtime and code generation**
 
-Plus 81 older investigations below these.
+- [full-suite baseline and home-reload diagnosis](#full-suite-baseline-and-home-reload-diagnosis)
+- [select clamp fusion (landed)](#select-clamp-fusion-landed)
+- [general bit-reassembly loop folding (landed)](#general-bit-reassembly-loop-folding-landed)
+- [radix-tree, bitcount, Ackermann, and BigInt](#radix-tree-bitcount-ackermann-and-bigint)
+- [native optimization notes](#native-optimization-notes)
+- [spill-slot coloring: value-identity tags, default stays off](#spill-slot-coloring-value-identity-tags-default-stays-off)
+- [encoded home traffic and wide-call locality](#encoded-home-traffic-and-wide-call-locality)
+
+**Vectorization and proofs**
+
+- [remaining measured blocker: loop-carried ranges](#remaining-measured-blocker-loop-carried-ranges)
+- [vectorizer proof diagnostics (landed)](#vectorizer-proof-diagnostics-landed)
+- [vectorizer window: exact blocker located inside SCEV](#vectorizer-window-exact-blocker-located-inside-scev)
+- [lbm: the neighbour-offset proof already works](#lbm-the-neighbour-offset-proof-already-works)
+- [cd resumed: the gap is vectorization, not scalar code](#cd-resumed-the-gap-is-vectorization-not-scalar-code)
+- [vector accumulator unrolling](#vector-accumulator-unrolling)
+- [vectorizer rejection histogram](#vectorizer-rejection-histogram)
+
+**Compile time and rejected experiments**
+
+- [Resolved builtin operator reachability](#resolved-builtin-operator-reachability)
+- [Compile-time cleanup under revised acceptance](#compile-time-cleanup-under-revised-acceptance)
+- [compile-time and cd vectorization: measured findings](#compile-time-and-cd-vectorization-measured-findings)
+- [pre-vectorize LICM phase: built, measured, reverted](#pre-vectorize-licm-phase-built-measured-reverted)
+- [compile phase timing](#compile-phase-timing)
+- [conditional home publication: carried-run attempt](#conditional-home-publication-carried-run-attempt)
+
+**Full runs, regressions, and validity**
+
+- [NYC regression: two encoder bugs, mach-object default reverted](#nyc-regression-two-encoder-bugs-mach-object-default-reverted)
+- [NYR/C gap re-rank after the NYC fix](#nyr-c-gap-re-rank-after-the-nyc-fix)
+- [the suite's two alarming rows in the last full run are contention artifacts](#the-suite-s-two-alarming-rows-in-the-last-full-run-are-contention-artifacts)
+- [full benchmark and shared-home follow-up](#full-benchmark-and-shared-home-follow-up)
+- [isolated native-oracle repeat](#isolated-native-oracle-repeat)
+
+The complete log follows in the order the work was recorded.
 
 ### Resolved builtin operator reachability
 
-A fresh cache-disabled native Pong compilation was sampled at 99 Hz with
-`cpu-clock:u` and 8 KiB DWARF call stacks. The capture contained 5,338 samples and
-zero losses. `ny_native_find_impl_operator_in_stmt` accounted for 1.55% of self
-samples, reached through `ny_native_scan_expr_for_calls` and
+`ny_native_collector_operator` now checks lowering's resolved-builtin fact before
+recomputing operand types or traversing module/impl declarations: resolved
+builtins cost one fact check instead of per-expression module-graph work.
+Explicitly selected operators still take target resolution and its fallback;
+unresolved expressions keep the conservative search. A fresh cache-disabled
+native Pong compile sampled at 99 Hz with `cpu-clock:u` and 8 KiB DWARF stacks
+gave 5,338 samples, zero losses; `ny_native_find_impl_operator_in_stmt` was
+1.55% self via `ny_native_scan_expr_for_calls` and
 `ny_native_collector_operator`.
 
-Lowering already treats a resolved binary expression without a selected operator
-declaration as a builtin. Reachability previously ignored that fact, recomputed
-operand types, and traversed module/impl declarations again.
-`ny_native_collector_operator` now uses the same authoritative fact before those
-probes. For resolved builtins, work proportional to the module graph at each
-expression becomes one fact check. Explicitly selected operator declarations still
-take target resolution and its fallback, and unresolved expressions retain the
-conservative search.
-
-Seven focused fixtures passed: raw integer operators in the presence of BigInt
-overloads, nominal impl operators (including call-result operands), chained operator
-re-exports, scalar multiplication, portable impl laws, and the ambiguous/unresolved
-operator error contracts. The runtime fixtures exercised their declared native/LLVM
-variant matrices. Both `--bin` and `NYTRIX_TEST_NY_FULL_BIN` pinned the candidate,
-with execution, stencil, and stdlib source caches disabled.
-
-Both compilers also built native x86-64 Pong executables from the frozen library
-inputs. Each executable completed two frames and exited successfully under a private
-Vulkan-rendered headless Weston compositor. Their first-frame application traces
-agreed on ball position/velocity, paddles, score, font sizes, and the 1280x688
-framebuffer. A separate candidate `-vvvvvv` smoke confirmed `[gfx] Using Native
-Vulkan Backend` and a shown Wayland surface. These checks establish exercised
-runtime behavior, not pixel equivalence or a startup/steady-state speedup.
-
-The isolated control and candidate compile the same copied lowering source, with
-only the collector header changed. Every other linked compiler object is frozen and
-shared between the pair. A separate 541-file library/Pong/core input snapshot
-prevents concurrent workspace edits from changing the measured source graph; its
-manifest is checked before and after each timed run. Artifacts are retained in
-`build/complexity-overhaul/`.
-
 Three alternating control/candidate pairs used `--native-only -O2 --threads=4
---run=none`, identical absolute input/core paths, and disabled native, AOT, JIT,
-stencil, stdlib source/bitcode, and incremental-inventory caches. These are
-object-compilation measurements, not link, startup, or first-frame times; other
-coding sessions were active on the host.
+--run=none`, identical absolute input/core paths, native/AOT/JIT/stencil/
+stdlib-source-and-bitcode/incremental-inventory caches off, and a frozen
+541-file library/Pong/core snapshot (manifest checked before and after each
+run). Only the collector header differed; other objects were frozen and shared.
+Other coding sessions were active on the host. Artifacts:
+`build/complexity-overhaul/`.
 
 | Metric | Control | Candidate | Change |
 | --- | ---: | ---: | ---: |
@@ -635,57 +586,58 @@ coding sessions were active on the host.
 | Emitted object bytes | 14,040,848 | 13,526,960 | 513,888 fewer |
 | Defined text symbols, including entry | 2,728 | 2,694 | 34 fewer |
 
-Object hashes were stable across all three runs of each compiler, but differ between
-compilers. The harness's initial cross-compiler byte-equality check therefore
-failed. Symbol inspection found 34 removed definitions, no added definitions, and
-size changes in retained functions; this is not a byte-preserving optimization.
-Removed definitions include BigInt comparisons, finite-field equality/shift helpers,
-and polynomial equality helpers that the previous collector rooted through the
-redundant overload search.
+Object hashes were stable per compiler across three runs but differed between
+compilers, so the cross-compiler byte-equality check failed: 34 definitions
+removed, none added, retained functions resized. Removed definitions include
+BigInt comparisons, finite-field equality/shift helpers, and polynomial
+equality helpers previously rooted through the redundant overload search; this
+is not byte-preserving. A separate candidate capture had 4,983 samples, zero
+losses; the target routine fell 1.55% to 0.02% (one sample). Remaining named
+self buckets: `nyr_mach_regalloc_segment_at` 9.35%, CFG construction 2.73%,
+imported-module member recursion 2.13%, type-map initialization 1.85%,
+loop-edge coalescing 1.79%. Two large stripped OpenMP address buckets stay
+unattributed; nearest exported symbols cannot name the private routines.
 
-A separate candidate capture contained 4,983 samples and zero losses.
-`ny_native_find_impl_operator_in_stmt` fell from 1.55% of self samples to 0.02% (one
-sample). The largest named remaining self bucket was `nyr_mach_regalloc_segment_at`
-at 9.35%; CFG construction was 2.73%, imported-module member recursion 2.13%,
-type-map initialization 1.85%, and loop-edge coalescing 1.79%. The two large
-stripped OpenMP address buckets remain unattributed; nearest exported symbols are
-not sufficient evidence to name those private routines.
+Seven focused fixtures passed — raw integer operators with BigInt overloads,
+nominal impl operators including call-result operands, chained operator
+re-exports, scalar multiplication, portable impl laws, and ambiguous/unresolved
+operator error contracts — across declared native/LLVM variant matrices with
+`--bin` and `NYTRIX_TEST_NY_FULL_BIN` pinning the candidate and
+execution/stencil/stdlib source caches off. Both compilers built native x86-64
+Pong executables from frozen library inputs; each ran two frames and exited
+under a private Vulkan-rendered headless Weston compositor. First-frame traces
+agreed on ball position/velocity, paddles, score, font sizes, and the 1280x688
+framebuffer; a candidate `-vvvvvv` smoke confirmed `[gfx] Using Native Vulkan
+Backend` and a shown Wayland surface. Scope: exercised runtime behavior, not
+pixel equivalence or a startup/steady-state speedup; timings are object
+compilation only, not link, startup, or first frame.
 
 ### Incremental inventory and HM tracing
 
-`NYTRIX_INCREMENTAL=1` runs a dependency inventory after parsing. It does not
-restore inferred schemes, substitute an HM cache for validation, or certify that
-compilation of the reported files succeeded. The dependency snapshot must not be
-mistaken for checked semantic state.
+`NYTRIX_INCREMENTAL=1` runs a dependency inventory after parsing only; it does
+not restore inferred schemes, replace HM validation, or certify that reported
+files compiled, so the dependency snapshot is not checked semantic state. The
+inventory now schedules all inputs on cold/forced builds, detects missing
+sources, propagates changes through previous and current graphs, retains
+ambiguous basename dependencies, matches bare module names to `.ny` files,
+selects per-project-root snapshots, and honors the current cache directory on
+reconfiguration. Moving the pathname free after edge reconstruction fixed a
+use-after-free; allocation failures, failed invalidation, and failed snapshot
+publication no longer report success.
 
-The inventory now schedules all inputs on cold and forced builds, detects missing
-sources, propagates changes through both the previous and current graphs, and
-conservatively retains ambiguous basename dependencies. Bare module names match
-`.ny` filenames. Project roots select separate snapshots; reconfiguration honors the
-current cache directory. Graph reconstruction previously freed a pathname before
-using it for outgoing edges; moving the free after edge reconstruction fixes that
-use-after-free. Allocation failures, failed invalidation, and failed snapshot
-publication no longer become success.
-
-`incremental_graph.c` covers cold/unchanged/forced transitions, provider edits,
-provider deletion, unrelated additions, cache reconfiguration, ambiguous providers,
-and sources disappearing after graph construction. The standalone driver passed.
-Valgrind Memcheck reported zero errors and zero definitely, indirectly, or possibly
-lost bytes; shared-library process-global allocations remained reachable at exit.
-
-HM now captures type-detail and deep tracing bits at the start of each normal or
-reachable-fact pass. `hm_unify` reads those fields instead of calling
-`ny_dbg_is_enabled` for each constraint. Quiet and `-vvvvvv` smoke checks passed;
-verbose output retained `HM_CONSTRAINT` and `HM_SUBST`. A deliberately invalid,
-unused function still failed HM validation. No wall-time speedup is claimed for this
-small tracing-policy change.
-
-After rebuilding `build/release/ny-full`, its integrated
-`--ir-opt-test=incremental_graph` group passed. The cold module-use selection, with
-explicit compiler and `core.ny` paths, passed 45/45, including positive and
-fail-closed portable refinement cases.
-
-The architecture audit distinguishes existing work from open designs:
+`incremental_graph.c` covers cold/unchanged/forced transitions, provider
+edits/deletion, unrelated additions, cache reconfiguration, ambiguous
+providers, and sources disappearing after graph construction; the standalone
+driver passed with Valgrind Memcheck at zero errors and zero definitely,
+indirectly, or possibly lost bytes (shared-library globals reachable at exit).
+HM captures type-detail and deep-tracing bits per normal or reachable-fact
+pass; `hm_unify` reads them instead of calling `ny_dbg_is_enabled` per
+constraint. Quiet and `-vvvvvv` smokes passed with `HM_CONSTRAINT`/`HM_SUBST`
+retained; an invalid unused function still failed validation. Rebuilt
+`build/release/ny-full`: `--ir-opt-test=incremental_graph` passed, and cold
+module-use with explicit compiler/`core.ny` paths passed 45/45 including
+positive and fail-closed portable refinement cases. No wall-time speedup is
+claimed for the small tracing-policy change.
 
 | Area | Current implementation |
 | --- | --- |
@@ -696,44 +648,32 @@ The architecture audit distinguishes existing work from open designs:
 | Import lookup | Existing exact module/member result caches and snapshot-owned import-declaration index preserve source order and re-export traversal; not every transitive query is one lookup. |
 | Refinement lookup | Already indexed in the codegen compilation context; no second root cache was added. |
 
-Preserving full-program diagnostics was explicitly selected for this pass.
-Persistent per-module schemes/facts with dependency invalidation and independent HM
-partitions with deterministic merging remain necessary before claiming the first and
-third architectural blockers solved. The dirty-file inventory alone does not satisfy
-either requirement.
+Full-program diagnostics were explicitly preserved. Persistent per-module
+schemes/facts with dependency invalidation and independent HM partitions with
+deterministic merging remain necessary before the first and third architectural
+blockers can be called solved; the dirty-file inventory satisfies neither.
 
 ### Compile-time cleanup under revised acceptance
 
-The compile-time TODO pass now uses measured improvement and preserved behavior, not
-the former 3–5 s compile/link/window cutoff. The user explicitly retired that
-cutoff. Earlier target-miss statements below are historical; removing the TODO
-section does not mean compilation costs disappeared or that incremental or parallel
-HM was implemented.
-
-The retained changes are confined to two compiler translation units:
-
-`src/code/backend/core/verify.c` builds a last-definition index during its existing
-  verification setup. Scalar-class and ownership checks use constant time definition
-  lookup instead of repeatedly scanning the whole function. Same-block
-  reaching-store checks, recursion bounds, and all ABI/ownership checks remain. PHI,
-  select, and local-store helpers avoid building analyses when there are no
-  corresponding instructions.
+The compile-time TODO pass now uses measured improvement and preserved
+behavior; the user retired the 3–5 s compile/link/window cutoff, and earlier
+target-miss statements are historical. Removing the TODO section does not mean
+compilation costs vanished or incremental/parallel HM landed. Two translation
+units changed: `src/code/backend/core/verify.c` builds a last-definition index
+in existing verification setup for constant-time scalar-class/ownership lookups
+(keeping same-block reaching-store checks, recursion bounds, all ABI/ownership
+checks, and skipping PHI/select/local-store analyses when idle);
 `src/code/lang/ny/lower/lower.c` indexes immediate valid `use` declarations per
-  module or block for each compilation snapshot. Recursive re-export lookup visits
-  those declarations in the same source order, without rescanning unrelated function
-  and variable declarations. Alias, wildcard, cycle, and depth rules are unchanged.
-  The index resets with the function/module snapshot and is freed with its owner;
-  allocation failure or table saturation falls back to the original body walk.
+module/block per snapshot for source-ordered recursive re-export lookup
+(alias/wildcard/cycle/depth rules unchanged; index resets and frees with its
+owner and falls back to the body walk on allocation failure or saturation).
 
-An isolated control was relinked with only those two pre-change translation units,
-using the candidate's remaining compiler objects and dependencies. Frozen
-executables prevented concurrent workspace rebuilds from changing the comparison.
-Both compiled the same `etc/labs/pong.ny` through native x86-64 at `-O2
---threads=4 --run=none`; standard-source, automatic bitcode, native, AOT, and JIT
-caches were disabled, with `CCACHE_DISABLE=1`. This is source-cache-disabled
-compilation, not an OS-page-cache drop.
-
-Three runs per arm alternated control/candidate order:
+An isolated control relinked only those two pre-change units against the
+candidate's remaining objects and dependencies; frozen executables prevented
+concurrent rebuilds. Both compiled `etc/labs/pong.ny` via native x86-64 at
+`-O2 --threads=4 --run=none` with standard-source, automatic-bitcode, native,
+AOT, and JIT caches disabled and `CCACHE_DISABLE=1` (source-cache-disabled, not
+an OS-page-cache drop), three alternating runs per arm:
 
 | Measurement | Control | Candidate |
 | --- | ---: | ---: |
@@ -741,114 +681,100 @@ Three runs per arm alternated control/candidate order:
 | Wall-time range | 40.214–41.025 s | 39.075–40.601 s |
 | Median user CPU | 51.094 s | 49.102 s |
 
-The local wall median decreased 2.6%, and user CPU decreased 3.9%. Each paired
-candidate finished sooner, but the wall-time ranges overlap; this is a modest local
-improvement, not a universal speedup or an end-to-end startup result. Other coding
-sessions were active on the host. All six objects were identical: SHA-256
-`8af9128875b2432eb2a168c5ca95f1fc19111e1cdfe8ce7ef6689fbf775240d5`.
+Median wall fell 2.6% and user CPU 3.9%; each paired candidate finished sooner
+but the ranges overlap, so this is a modest local result, not a universal or
+end-to-end startup speedup; other sessions were active on the host. All six
+objects matched SHA-256
+`8af9128875b2432eb2a168c5ca95f1fc19111e1cdfe8ce7ef6689fbf775240d5`. Compiler
+identities: control
+`0414b30f69e975401a51d5aa7cf9db155e017510ca2157275faf8bfa74b7e913`, candidate
+`0c2dcd34a25b70a26870580c14b68219bbb8155024466b9dc5c11305a6fea866`.
 
-Compiler SHA-256 identities:
+The initial 199 Hz `cpu-clock:u` DWARF profile had 10,609 samples, zero losses,
+and identified imported-member recursion, register-segment lookup, CFG
+construction, type-map construction, and scalar verification. A candidate
+capture overlapped the AOT smoke and lost 253 samples in ten chunks, so it was
+not used for per-symbol claims. Raw captures, frozen binaries, timing logs,
+objects, and `comparison.json` are under `build/compile-overhaul/`, outside
+source control. Verification with frozen binaries and
+`--std=build/release/core.ny` passed the full module-use selection 45/45 on
+both arms; the named-reexport fixture now also checks chained constant aliases,
+negative constants, unrelated declarations around imports, and identical member
+spellings across providers in four backend variants. A first default-path
+runner call reported 32/45 with an installed-stdlib path error and timeouts —
+not the explicit-binary comparison or a passing run.
 
-```text
-control:   0414b30f69e975401a51d5aa7cf9db155e017510ca2157275faf8bfa74b7e913
-candidate: 0c2dcd34a25b70a26870580c14b68219bbb8155024466b9dc5c11305a6fea866
-```
-
-The initial 199 Hz `cpu-clock:u` DWARF profile contained 10,609 samples and zero
-lost samples. It identified imported-member recursion, register-segment lookup, CFG
-construction, type-map construction, and scalar verification. A candidate capture
-overlapped the AOT smoke and lost 253 samples in ten chunks; it is not used to
-establish per-symbol improvements. Raw captures, frozen binaries, timing logs,
-objects, and `comparison.json` are retained under `build/compile-overhaul/`, outside
-source control.
-
-Verification used explicit frozen compiler binaries and
-`--std=build/release/core.ny`: the full module-use selection passed
-45/45 on both control and candidate. The existing named-reexport fixture now also
-checks chained constant aliases, negative constants, unrelated declarations
-surrounding imports, and identical member spellings in separate providers across its
-four backend variants. The first default-path runner invocation reported 32/45,
-including an installed-stdlib path error and timeouts; it is not the explicit-binary
-comparison or a passing run.
-
-The cache-disabled candidate also completed native AOT compilation, link, launch,
-and two Pong frames under a private Weston Vulkan `kiosk-shell` compositor. Both the
-Wayland surface and Vulkan framebuffer were 1280×720; the client printed `[gfx]
-Using Native Vulkan Backend`. That smoke exited zero in 45.750 s and logged frame 1
-at 5.026 s after startup. It overlapped the candidate profile and enabled
-`NY_DEBUG`, so it verifies the full path only: neither its total nor first-frame
-time is a startup-performance comparison.
+The cache-disabled candidate completed native AOT compile, link, launch, and two
+Pong frames under a private Weston Vulkan `kiosk-shell` compositor: 1280×720
+Wayland surface and framebuffer, `[gfx] Using Native Vulkan Backend`, exit zero
+in 45.750 s with frame 1 at 5.026 s after startup. It overlapped the profile and
+enabled `NY_DEBUG`, so it verifies the full path only; neither time is a
+startup-performance comparison.
 
 ### HM function-environment buffer reuse
 
-`hm_infer_function_scheme` now reuses one scratch environment vector across the
-sequential scheme-inference passes in `hm_run` and `hm_run_reachable`. Each use gets
-a fresh environment generation and copies the global entries before binding function
-parameters, so cached lookups cannot reuse facts from the previous function.
-Refinement, inference, and module-use selections passed 112/112. A cache-disabled
-Pong `--native-only -O2 --run=none` compile produced the same object SHA-256 as the
-previous compiler. The single control took 36.589 s; two candidate runs took 36.219
-s and 35.910 s (median 36.065 s). Those runs do not establish a repeatable speedup
-and exclude linking, launch, and first frame; the 5 s end-to-end target remains
-unmet.
+`hm_infer_function_scheme` reuses one scratch environment vector across the
+sequential passes in `hm_run` and `hm_run_reachable`, with a fresh generation
+and copied global entries per use so cached lookups cannot inherit the prior
+function's facts. Refinement, inference, and module-use selections passed
+112/112; a cache-disabled Pong `--native-only -O2 --run=none` compile emitted
+the same object SHA-256 as the previous compiler. The single control took
+36.589 s versus 36.219 s and 35.910 s for two candidates (median 36.065 s):
+no repeatable speedup. Scope: compile only; no link, launch, or first frame;
+the 5 s end-to-end target remains unmet.
 
 ### Pong imported-module lookup profile
 
-A cache-disabled native-only Pong AOT run was sampled on 2026-11-11 with `perf
-record -F 499 -e cpu-clock:u --call-graph dwarf,16384`. It captured 38,076 samples
-with no losses (about 76.3 billion cpu-clock events). Named costs included
-`mach_encode_function` at 11.77% cumulative, `mach_home_dse_analyze` at 6.33%,
-`nyr_find_imported_value` at 6.83% (`nyr_find_imported_module_member_rec` at 6.45%),
-and HM inference at 3.7%. `nyr_mach_regalloc_segment_at` accounted for 2.01%. The
-executable was emitted, but launching Pong terminated with signal 11; the compositor
-reported `message length 27503 exceeds 4096`, so this run did not verify a first
-window.
+A cache-disabled native-only Pong AOT run sampled on 2026-11-11 with `perf
+record -F 499 -e cpu-clock:u --call-graph dwarf,16384` captured 38,076 samples,
+no losses (about 76.3 billion cpu-clock events): `mach_encode_function` 11.77%
+cumulative, `nyr_find_imported_value` 6.83% (`nyr_find_imported_module_member_rec`
+6.45%), `mach_home_dse_analyze` 6.33%, HM inference 3.7%, and
+`nyr_mach_regalloc_segment_at` 2.01%. The executable was emitted but launch died
+with signal 11 after the compositor reported `message length 27503 exceeds
+4096`; no first window was verified.
 
-The module-member cache was increased from 16,384 to 65,536 four-way entries.
-Matched `NYTRIX_TRACE_LOOKUPS=1` runs with `CCACHE_DISABLE=1` and AOT, native, and
-standard caches disabled recorded 12,534,021 module-member queries and 991,142 tree
-scans at 16,384 entries, versus 11,769,712 queries and 917,513 scans at 65,536
-entries (7.4% fewer scans). Both saved Pong executables had SHA-256
-`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`. The single
-traced wall times were 37.42 s and 37.84 s respectively; another untraced candidate
-run took 37.63 s. The counter reduction confirms less recursive lookup work, but
-these timings do not establish a total compile-time speedup. Both AOT launches ended
-with the same Wayland protocol error. The larger lazily allocated tables trade
-additional compiler memory for fewer measured lookup scans; the 5 s
-compile/link/first-window target remains unmet.
+Raising the module-member cache from 16,384 to 65,536 four-way entries cut
+matched `NYTRIX_TRACE_LOOKUPS=1` counts (`CCACHE_DISABLE=1`, AOT/native/standard
+caches off) from 12,534,021 queries and 991,142 tree scans to 11,769,712
+queries and 917,513 scans (7.4% fewer scans). Both saved Pong executables had
+SHA-256 `53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`.
+Single traced wall times were 37.42 s and 37.84 s; an untraced candidate took
+37.63 s. Counters confirm less recursive lookup work, but these timings do not
+establish a total compile-time speedup. Both AOT launches hit the same Wayland
+protocol error. Larger lazily allocated tables trade compiler memory for fewer
+scans; the 5 s compile/link/first-window target remains unmet.
 
 ### x86-64 home-DSE probe fast path
 
-`mach_home_dse_analyze` can remove only 8-byte virtual-register homes. The probe now
-avoids allocating its reference/dead maps and scanning encoded bytes when a function
-has no 8-byte vreg homes or the probe emits no vreg-home stores. Otherwise the
-existing reference scan and elimination test are unchanged. A no-dead-home probe is
-still reused as the final encoding.
+`mach_home_dse_analyze` removes only 8-byte vreg homes; the probe now skips
+reference/dead-map allocation and encoded-byte scanning when there are no such
+homes or no vreg-home stores, keeping the existing scan and elimination test
+otherwise and still reusing a no-dead-home probe as final encoding. The
+cache-disabled native fixture selection passed 68/68. Two cold-cache 64-thread
+Pong AOT runs on headless Weston/Vulkan took 37.263 s and 38.365 s wall
+(median 37.814 s), with first frames at 1.283 s and 1.134 s after startup;
+compiler/native/AOT/stdlib-source/stdlib-bytecode caches were disabled. Both
+matched the pre-change ELF SHA-256
+`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`; a
+debug-enabled launch of that ELF printed `[gfx] Using Native Vulkan Backend`.
+Weston output was 1280×720, but its desktop shell set the app surface to
+1280×688.
 
-The cache-disabled native fixture selection passed 68/68 after this change. Two
-cold-cache 64-thread Pong AOT runs on headless Weston with a Vulkan renderer took
-37.263 s and 38.365 s wall (median 37.814 s); first submitted frames arrived 1.283 s
-and 1.134 s after app startup. Compiler, native, AOT, standard-library, and
-standard-bytecode caches were disabled. Both emitted the same ELF SHA-256 as the
-pre-change Pong build:
-`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`. A debug-enabled
-run of that identical ELF printed `[gfx] Using Native Vulkan Backend`. Weston output
-was 1280×720, but its desktop shell configured the app surface at 1280×688.
-
-A cache-disabled 199 Hz DWARF profile of the same 64-thread, `--run=none` route
-captured 12,000 samples with no losses. `perf buildid-list` matched the sampled
-`ny-full` Build ID `a79e6dbcd64bd354755bea5a1e59ccc500331255`.
-`mach_home_dse_analyze` was below the 1% report cutoff. Remaining named costs
-included imported-module recursion at 2.31%, CFG construction at 2.14%,
-register-segment lookup at 1.99%, NYIR scalar verification at 1.73%, loop-edge
-coalescing at 1.72%, type-map initialization at 1.72%, and implementation-operator
-scanning at 1.45%. Two unresolved `libomp.so` instruction-address buckets accounted
-for 13.13% and 9.79%; the profile does not identify their symbols, so this is not
-yet evidence of a specific OpenMP wait or scheduling defect.
+A cache-disabled 199 Hz DWARF profile of the same 64-thread `--run=none` route
+had 12,000 samples, zero losses, and `ny-full` Build ID
+`a79e6dbcd64bd354755bea5a1e59ccc500331255` (`perf buildid-list`).
+`mach_home_dse_analyze` was below the 1% cutoff; remaining named costs were
+imported-module recursion 2.31%, CFG construction 2.14%, register-segment
+lookup 1.99%, NYIR scalar verification 1.73%, loop-edge coalescing 1.72%,
+type-map initialization 1.72%, and implementation-operator scanning 1.45%.
+Two unresolved `libomp.so` address buckets held 13.13% and 9.79%; the profile
+does not name their symbols, so no specific OpenMP wait/scheduling defect is
+established.
 
 The same output was rebuilt cache-disabled through Weston `kiosk-shell` with an
-exact 1280×720 app surface. Each run requested one frame; timings are one
-observation per thread setting, not repeatable medians.
+exact 1280×720 app surface, one frame per run (one observation per thread
+setting, not repeatable medians):
 
 | Compiler / std-library threads | AOT-to-frame wall | Frame 1 |
 | ---: | ---: | ---: |
@@ -857,299 +783,230 @@ observation per thread setting, not repeatable medians.
 | 32 / 32 | 37.189 s | 1.185 s |
 | 64 / 64 | 37.223 s | 1.269 s |
 
-Every run emitted the same ELF SHA-256 as the earlier Pong build:
-`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`. A debug launch
-of that identical ELF reported a 1280×720 Wayland surface and `[gfx] Using Native
-Vulkan Backend`. The single 32/32 and 64/64 observations are indistinguishable as a
-tuning result; neither approaches the 5 s target.
-
-A preceding 64/64 cold run before the no-store gate took 43.107 s and produced the
-same first-frame behavior; it is only one control against two candidates, so the
-difference does not establish a repeatable total-time speedup. The measured
-end-to-end time remains far above 5 s, and compile-hotspot work stays open.
+Every run emitted SHA-256
+`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`; a debug
+launch confirmed the 1280×720 surface and `[gfx] Using Native Vulkan Backend`.
+Single 32/32 and 64/64 observations are indistinguishable as tuning and neither
+nears 5 s. A preceding single 64/64 cold run before the no-store gate took
+43.107 s with the same first-frame behavior; one control against two candidates
+does not establish a repeatable speedup. End-to-end time stays far above 5 s;
+compile-hotspot work remains open.
 
 ### Native Pong compiler call graph
 
-A cache-disabled native-only Pong compile was sampled on 2026-11-10 with `perf
-record -F 199 -e cpu-clock:u --call-graph dwarf,16384`. The baseline record
-contained 3,698 samples, no lost samples, and about 18.58 billion cpu-clock events.
-`find_refine_in_stmts` accounted for 5.76% of samples: each unseen refinement name
-recursively scanned the program and nested module statements. The old name memo
-helped repeated names but did not avoid a full scan for each distinct refinement.
+`ny_lookup_refine` now indexes refinement statements in `prog` and
+`extra_progs` with an arena-backed open-addressed table in first-match order
+(main program, nested modules in traversal order, generated programs),
+rebuilding when the main program pointer or generated-program count changes;
+definitions stay lazy. Cache-disabled native-only Pong profiles (`perf record
+-F 199 -e cpu-clock:u --call-graph dwarf,16384`, 2026-11-10) went from 3,698
+samples, zero losses, about 18.58 billion events with `find_refine_in_stmts` at
+5.76% to 3,378 samples, zero losses, about 16.97 billion events with the scan
+below the 0.8% cutoff — single runs, not a controlled timing comparison.
+`hm_run` still held 55.89% cumulative children and
+`hm_infer_function_scheme` 49.73%; flat samples were HM environment lookup
+6.01%, expression inference 5.54%, module statement lookup 5.39%, and
+`collect_module_exports` 3.29% cumulative. Call-tree shares overlap and are not
+additive.
 
-`ny_lookup_refine` now builds an arena-backed open-addressed index of refinement
-statements in `prog` and `extra_progs`, preserving the original first-match order
-(main program, nested modules in traversal order, then generated programs). It
-rebuilds if the main program pointer or generated-program count changes; definition
-objects are still materialized lazily. The candidate record contained 3,378 samples,
-no lost samples, and about 16.97 billion cpu-clock events. The scan fell below the
-report's 0.8% cutoff. These are single-run profiles, not a controlled timing
-comparison.
+A four-way per-HM-state environment cache was reverted: with other caches off
+its 199 Hz profile put 23.84% in `hm_env_lookup_index_ctx`, versus 5.79% flat
+`hm_env_entry_ctx` in the final cache-free profile (prior 6.01%); one cached
+trial took 16.614 s against 18.072 s cache-free, not a controlled win.
+`ny_module_declares_exported_member` now walks declarations directly for the
+first matching leaf instead of materializing and freeing an export list with
+linear duplicate checks; `ny_str_list_has` and `collect_module_exports` fell
+below the 0.8% cutoff, module lookup was 5.62%, HM lookup 6.16%, and the
+cache-disabled module-use suite passed 45/45. One compile took 16.329 s
+(15.30 s user, 0.90 s system) against a different single 18.072 s run — not a
+controlled speedup, and it excludes link, launch, and first frame.
 
-The candidate call graph still puts `hm_run` at 55.89% cumulative children;
-`hm_infer_function_scheme` accounts for 49.73%, with recursive statement inference
-dominant. Flat samples include HM environment lookup (6.01%), module statement
-lookup (5.39%), expression inference (5.54%), and `collect_module_exports` with
-linear unique-name checks (3.29% cumulative). Imported-module alias resolution and
-string/hash work remain visible below those paths. These overlapping call-tree
-percentages are not additive.
-
-An attempted four-way per-HM-state environment lookup cache validated cached entries
-against the mutable environment vector and scanned newer entries to preserve
-shadowing. It was rejected: with other compiler caches disabled, its 199 Hz profile
-attributed 23.84% of samples to `hm_env_lookup_index_ctx`. The final cache-free
-profile had 5.79% flat samples in `hm_env_entry_ctx`, consistent with the prior
-6.01% HM environment-lookup attribution; the temporary cache and helper were
-removed. A single uninstrumented cached-trial compile took 16.614 s, but one run is
-not a controlled improvement against the 18.072 s cache-free result.
-
-`ny_module_declares_exported_member` previously materialized an owned export list,
-performed linear duplicate checks, scanned for one member, and freed the list on
-each query. It now walks the export declarations or module definitions directly and
-returns on the first matching leaf name. The 199 Hz candidate profile no longer
-reports `ny_str_list_has` or `collect_module_exports` at its 0.8% cutoff; module
-lookup remains at 5.62% and HM environment lookup at 6.16%. The cache-disabled
-module-use suite passed 45/45. A single cache-disabled native Pong compile took
-16.329 s (15.30 s user, 0.90 s system); the earlier 18.072 s measurement is a
-different single run, so this is not a controlled speedup claim. It still excludes
-linking, launch, and first frame.
-
-The same recursive module-alias resolver also formatted bounded path copies and
-joins through `snprintf`. `ny_module_path_write` now checks lengths and capacity,
-then copies the path components directly. The subsequent 199 Hz profile captured
-2,610 samples with no losses and about 13.12 billion cpu-clock events; `snprintf`
-was not reported above the 0.8% cutoff, while module statement lookup remained at
-6.25%. Two cache-disabled native-only Pong compiles took 13.866 s and 13.890 s
-(median 13.878 s). These are repeat candidate runs, not a controlled A/B against the
-18.072 s historical baseline; they do not include link, launch, or first frame.
-
-The earlier uninstrumented cache-disabled baseline `build/release/ny-full
---native-only -O2 --run=none etc/labs/pong.ny` run completed in 18.072 s
-(17.05 s user, 0.89 s system). It is compile-only: no link, app launch, or first
-frame. This does not meet the 3 s cold compile/link/first-window requirement. The
-profile runs used 64 standard-loader and compiler workers with minimum parallel work
-512; configured worker counts do not establish that the hot inference path
-parallelizes. Correctness check: `NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test
---bin build/release/ny-full --cold --jobs 8 --pattern refinement` passed all 90
-selected runtime and error fixtures.
+`ny_module_path_write` replaced `snprintf` bounded copies/joins with direct
+component copies after length/capacity checks; a 199 Hz profile had 2,610
+samples, zero losses, about 13.12 billion events, no `snprintf` above the 0.8%
+cutoff, and module statement lookup at 6.25%. Two cache-disabled native-only
+Pong compiles took 13.866 s and 13.890 s (median 13.878 s), repeat candidates
+rather than an A/B against the historical 18.072 s. The uninstrumented baseline
+`build/release/ny-full --native-only -O2 --run=none etc/labs/pong.ny` took
+18.072 s (17.05 s user, 0.89 s system): compile-only, no link/launch/first
+frame, and short of the 3 s cold compile/link/first-window requirement.
+Profiles used 64 loader/compiler workers with minimum parallel work 512; worker
+counts do not prove the hot inference path parallelizes.
+`NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test --bin build/release/ny-full
+--cold --jobs 8 --pattern refinement` passed all 90 selected runtime and error
+fixtures.
 
 ### Append-aware HM environment lookup cache
 
-HM environment lookup uses a direct-mapped cache keyed by the environment address,
-unique generation, name hash, and syntax context. Each entry records the environment
-length and either the most recent matching binding index or a negative result
-(`index == len`). When later bindings are appended, a cache hit scans only that
-suffix before reusing either result; cloned environments receive distinct
-generations. Existing-binding updates change the entry's type but not lookup order.
+The HM environment cache is direct-mapped on environment address, unique
+generation, name hash, and syntax context; each entry records environment
+length plus the latest matching binding index or `index == len` for a negative
+result, and a hit scans only appended bindings before reusing either result.
+Clones get distinct generations; updating an existing binding changes its type
+but not lookup order. A 199 Hz profile had 14,445 samples, zero losses, and
+`hm_env_entry_ctx` at 3.67% (below the earlier 6.16% non-matched figure, not an
+A/B); its compile took 43.165 s, with 40.328 s uninstrumented and 41.573 s with
+standard source/bytecode caches off — far above the earlier 13.866/13.890 s
+runs with no established cause, so no total speedup is claimed. All are
+`--run=none` compile-only measurements excluding link, launch, and first frame.
 
-A 199 Hz call-graph profile captured 14,445 samples with no losses; the
-`hm_env_entry_ctx` helper accounted for 3.67%. That is below the 6.16% seen in an
-earlier, non-matched profile, not a controlled A/B. The profiled compile took 43.165
-s wall time; an uninstrumented run took 40.328 s, and a run with standard
-source/bytecode caches disabled took 41.573 s. Those current timings are much higher
-than the earlier 13.866/13.890 s runs; the cause is not established, so no total
-compile-time speedup is claimed. All are `--run=none` compile-only measurements and
-exclude link, launch, and first frame.
+Existing positive-cache controls took 12.947 s at one thread and 12.940 s at
+four; thread count did not materially change this workload. A pointer-identity
+cache-hit variant took 13.732 s / 13.528 s with a 2,468-sample profile
+(`hm_env_entry_ctx` 21.27%, `ny_module_lookup_stmt_by_name` 7.46%) and was
+reverted; a 128-to-1,024-entry cache took 13.236 s / 12.950 s with a 2,443-sample
+profile (21.74% / 7.74%) and was reverted too. Restoring 128 entries gave a
+2,425-sample profile (`hm_env_entry_ctx` 23.13%, module lookup 6.85%).
+Append-suffix validation passed refinement/`modules/use`/`shadowing` 90/90,
+45/45, 6/6 with compile-only Pong runs of 12.842 s / 12.632 s and a 2,384-sample
+profile (HM lookup 22.19%, module lookup 7.51%): too few runs to prove a gain
+over the control, though consistent with a small one. The 3 s
+compile/link/first-window target stayed unmet; module and HM lookup remained
+open.
 
-Two cache-disabled control compiles with the existing positive cache took 12.947 s
-at one thread and 12.940 s at four threads; thread count did not materially change
-this compile-only workload. A pointer-keyed cache-hit experiment guarded by
-binding-name pointer identity (falling back to content lookup otherwise) took 13.732
-s at one thread and 13.528 s at four threads. Its 199 Hz profile captured 2,468
-samples with no losses; `hm_env_entry_ctx` was 21.27% and
-`ny_module_lookup_stmt_by_name` 7.46%. These percentages are from a smaller capture
-than the earlier 14,445-sample profile and are not directly comparable. The
-pointer-cache experiment was reverted; it showed no improvement. Growing the
-direct-mapped cache from 128 to 1,024 entries also failed to improve the same
-compile: 13.236 s at one thread and 12.950 s at four threads, with a 2,443-sample
-profile still showing `hm_env_entry_ctx` at 21.74% and module lookup at 7.74%. This
-capacity experiment was reverted. A fresh profile of the restored 128-entry cache
-captured 2,425 samples with no losses; `hm_env_entry_ctx` was 23.13% and module
-statement lookup was 6.85%. With append-suffix validation, the refinement,
-`modules/use`, and `shadowing` selections passed 90/90, 45/45, and 6/6.
-Cache-disabled Pong compile-only runs took 12.842 s at one thread and 12.632 s at
-four threads; the 2,384-sample profile had no losses and sampled HM lookup at 22.19%
-and module statement lookup at 7.51%. This one-run-per-setting comparison is too
-small to establish a speedup; it is consistent with a small improvement over the
-12.947/12.940 s control runs. The compile/link/first-window 3 s target remains
-unmet. Module lookup and HM inference remain open hotspots.
+Negative lookups were then cached with environment length as the not-found
+sentinel, still checking appended bindings so a later-introduced name resolves.
+The same selections passed 90/90, 45/45, 6/6; four compile-only repeats took
+10.923–11.202 s at one thread (median 11.078 s) and 10.682–10.952 s at four
+(median 10.700 s) versus single-run 12.842/12.632 s controls. A 2,019-sample
+profile put `hm_env_entry_ctx` at 8.37% (down from 22.19% in the smaller earlier
+capture) and module lookup at 8.07%; unmatched profiles, but repeated timings at
+both thread counts support keeping the negative cache. The 3 s target remains
+unmet.
 
-A follow-up caches negative lookups with the environment length as the not-found
-sentinel. Appended bindings are still checked before reusing a negative result, so a
-name introduced later in the same environment resolves normally. Refinement,
-`modules/use`, and `shadowing` passed 90/90, 45/45, and 6/6. Four cache-disabled
-compile-only repeats took 10.923–11.202 s at one thread (median 11.078 s) and
-10.682–10.952 s at four threads (median 10.700 s), versus the preceding single-run
-12.842/12.632 s controls. A fresh 2,019-sample profile had no losses and sampled
-`hm_env_entry_ctx` at 8.37%, down from 22.19% in the earlier smaller capture; module
-lookup was 8.07%. These are not matched A/B profiles, but repeated timings at both
-thread counts support keeping the negative cache. The compile/link/first-window 3 s
-target remains unmet.
-
-#### HM cache-slot mixer experiment (reverted)
-
-Replacing the cache slot's 64-bit mixing sequence with a cheaper 32-bit
-fold-and-shift mixer preserved the full environment, generation, name-hash,
-syntax-context, and length checks. Refinement, `modules/use`, and `shadowing` passed
-90/90, 45/45, and 6/6. Four cache-disabled compile-only Pong runs took 11.034/11.054
-s at one thread and 10.962/11.156 s at four threads. Against the immediately
-preceding mixer controls (10.875/10.902 s and 10.927/10.858 s), both candidate
-medians were slower by about 1.4–1.5%. The 2,017-sample candidate profile had no
-lost samples. Reverted the mixer; the 64-bit slot calculation remains. These
-compile-only measurements exclude linking, launch, and first frame.
+A 32-bit fold-and-shift mixer replacing the 64-bit slot mixing (all key checks
+kept) passed 90/90, 45/45, 6/6 but ran at 11.034/11.054 s and 10.962/11.156 s
+against mixer controls 10.875/10.902 s and 10.927/10.858 s — medians about
+1.4–1.5% slower on a 2,017-sample zero-loss profile. Reverted; the 64-bit slot
+calculation remains. Compile-only; no link, launch, or first frame.
 
 ### HM constraint-trace fast path
 
-`hm_unify` only needs formatted constraint type strings for `NY_DBG_TYPE_DETAIL`
-output and its suppression summary. It now checks that flag once and does not
-allocate or format either string on the normal trace-disabled path. When detail
-tracing is enabled, the existing formatter and suppression rules are retained. The
-compiler reads a debug bitmask here; it does not parse environment variables per
-constraint.
+`hm_unify` checks `NY_DBG_TYPE_DETAIL` once and skips formatting or allocating
+constraint-type strings on the disabled path, retaining the existing formatter
+and suppression rules when enabled; it reads a debug bitmask rather than parsing
+environment variables per constraint. After the change,
+`NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test --cold --pattern native` passed
+68/68, and `build/release/ny-full -vvvv --stop-after=hm etc/labs/pong.ny` exited
+0 emitting `HM_CONSTRAINT` and `HM_SUBST`. A cache-disabled four-thread Pong
+`--run=none` compile took 40.153 s with the same ELF hash as the 1280×720 AOT
+artifact; one timing is not a controlled speedup.
 
-After the change, `NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test --cold --pattern
-native` passed 68/68. `build/release/ny-full -vvvv --stop-after=hm
-etc/labs/pong.ny` exited 0 and emitted both `HM_CONSTRAINT` and `HM_SUBST`
-records. A cache-disabled four-thread Pong `--run=none` compile took 40.153 s and
-emitted the same ELF hash as the 1280×720 AOT artifact; this single timing is not a
-controlled speedup.
-
-A 99 Hz DWARF profile of the trace-disabled 64-thread compile captured about 6,000
-samples with no losses. The `ny-full` Build ID matched the profiled binary. HM
-symbols and `mach_home_dse_analyze` were below the 1% report cutoff. The top two
-`libomp.so` instruction-address buckets were 12.90% and 10.27%; their symbols remain
-unresolved, so they do not identify a specific runtime wait or scheduling cause.
-Named compiler costs still included CFG building (2.15%), imported-member recursion
-(2.08%), register-segment lookup (2.02%), type-map initialization (1.90%), NYIR
-scalar verification (1.69%), and loop edge coalescing (1.64%). This profile
-identifies remaining work but does not establish a total compile-time speedup; the 5
-s end-to-end target remains open.
+A 99 Hz DWARF profile of the trace-disabled 64-thread compile had about 6,000
+samples, zero losses, and a `ny-full` Build ID matching the profiled binary.
+HM symbols and `mach_home_dse_analyze` stayed below the 1% cutoff; the top two
+`libomp.so` address buckets were 12.90% and 10.27% with unresolved symbols, so
+they identify no specific wait or scheduling cause. Named costs: CFG building
+2.15%, imported-member recursion 2.08%, register-segment lookup 2.02%,
+type-map initialization 1.90%, NYIR scalar verification 1.69%, and loop edge
+coalescing 1.64%. No total compile-time speedup is established; the 5 s
+end-to-end target remains open.
 
 ### Imported-member visited-set trial (reverted)
 
-The recursive re-export search temporarily replaced its query-wide linear
-visited-module scan with a 512-slot open-addressed pointer set, retaining the same
-256-module bound and traversal order. The cache-disabled `modules/use` selection
-passed 45/45 and the emitted Pong ELF hash was unchanged. The baseline 99 Hz profile
-(Build ID `3970bd342bd1a58745445db06b44cc9e262795bc`) sampled
-`nyr_find_imported_module_member_rec` at 2.08%; the candidate profile (Build ID
-`3a354ff38709ecec8be62d06971c7a826705cc07`) sampled it at 2.14%. Both captured about
-6,000 samples with no losses. These separate captures do not show a reduction;
-initializing the 4 KiB pointer table per uncached query also adds work for shallow
-walks. The change was reverted rather than retained without a measured win.
+The recursive re-export search temporarily swapped its query-wide linear
+visited-module scan for a 512-slot open-addressed pointer set, keeping the
+256-module bound and traversal order. Cache-disabled `modules/use` passed 45/45
+and the Pong ELF hash was unchanged. The baseline 99 Hz profile (Build ID
+`3970bd342bd1a58745445db06b44cc9e262795bc`) sampled
+`nyr_find_imported_module_member_rec` at 2.08%; the candidate (Build ID
+`3a354ff38709ecec8be62d06971c7a826705cc07`) at 2.14%, both about 6,000 samples
+with no losses. These separate captures show no reduction, and initializing the
+4 KiB table per uncached query adds work for shallow walks. Reverted rather than
+retained without a measured win.
 
 ### Module statement cache probe experiment (reverted)
 
-The module-statement lookup cache inserts into the first empty slot in its
-eight-slot probe sequence and never deletes individual entries; graph changes free
-the whole cache. A trial made lookup stop at the first empty slot instead of
-checking the remaining probes. The focused `modules/use` selection passed 45/45.
-Cache-disabled Pong compile-only runs took 12.898 s at one thread and 12.554 s at
-four threads, versus 12.842 s and 12.632 s in the preceding append-aware-cache run.
-The new 2,387-sample profile had no losses, but module lookup rose from 7.51% to
-7.96%; the timings and profile do not establish a gain. Reverted rather than keep an
-unmeasured optimization.
-
-Retesting the same early-exit change after the HM negative cache passed
-`modules/use` 45/45 but took 11.107 s at one thread and 11.568 s at four threads,
-versus the negative-cache medians 11.078 s and 10.700 s. The 2,051-sample profile
-had no losses and put module lookup at 8.97%, up from 8.07% in the negative-cache
-profile. This did not produce a repeatable gain; the change was reverted again.
-
-A direct-mapped variant was also tested, replacing the eight-probe lookup and
-insertion with a single hashed slot; collisions still fell through to the canonical
-module-statement index. `modules/use` passed 45/45. Against two baseline repeats at
-each thread count (10.859/10.997 s at one thread and 10.800/11.055 s at four),
-direct-map repeats took 10.829/10.867 s and 10.890/10.858 s. These small,
-overlapping differences do not establish a speedup. Its 2,029-sample profile had no
-losses but sampled module lookup at 9.76%, compared with 9.25% in the preceding
-profile. Reverted the one-slot cache; the probe count remains eight.
+The module-statement cache inserts into the first empty slot of an eight-slot
+probe sequence and never deletes entries; graph changes free it wholesale.
+Making lookup stop at that first empty slot passed `modules/use` 45/45 but took
+12.898 s at one thread and 12.554 s at four versus 12.842/12.632 s, and a
+2,387-sample zero-loss profile raised module lookup from 7.51% to 7.96%;
+reverted. Retested after the HM negative cache, it passed 45/45 at 11.107 s /
+11.568 s against medians 11.078/10.700 s, with a 2,051-sample profile at 8.97%
+versus 8.07%; reverted again. A direct-mapped single-slot variant with
+collisions falling through to the canonical module-statement index also passed
+45/45: 10.829/10.867 s and 10.890/10.858 s against two baseline repeats per
+thread (10.859/10.997 s and 10.800/11.055 s), with a 2,029-sample profile at
+9.76% versus 9.25%. Small, overlapping differences; the one-slot cache was
+reverted and the probe count stays eight.
 
 ### Module statement last-result cache trial (reverted)
 
-A one-entry fast path reused the most recently hit or inserted module-statement
-cache entry by comparing its cache-owned key before hashing and probing the table.
-`modules/use` passed 45/45 and shadowing passed 6/6. Cache-disabled four-thread Pong
-compile-only wall times were 14.54/12.07 s, against 11.44/11.27 s immediately before
-the trial. The candidate was slower and was reverted; no module-lookup speedup is
+A one-entry fast path reused the last hit or inserted module-statement cache
+entry by comparing its cache-owned key before hashing and probing. `modules/use`
+passed 45/45 and shadowing 6/6, but cache-disabled four-thread Pong compile-only
+runs took 14.54/12.07 s against 11.44/11.27 s immediately before the trial.
+The candidate was slower and was reverted; no module-lookup speedup is
 established.
 
 ### Cached import-alias lookup fast-path experiment (reverted)
 
-`ny_resolve_used_module_export_alias` was changed to return an existing non-self
-user import alias before rescanning used modules; the indexed lookup still marks the
-alias as used. The refinement, `modules/use`, and shadowing selections passed 90/90,
-45/45, and 6/6. Cache-disabled Pong compile-only runs took 10.984/11.043 s at one
-thread and 11.083/10.965 s at four threads. Compared with the preceding
-negative-cache medians (11.078 s and 10.700 s), these results show no repeatable
-gain; the four-thread median was about 3% slower. The 2,153-sample candidate profile
-had no lost samples. Reverted the fast path rather than keep an unproven
-alias-precedence shortcut.
+`ny_resolve_used_module_export_alias` briefly returned an existing non-self
+user import alias before rescanning used modules, with the indexed lookup still
+marking it used. Refinement, `modules/use`, and shadowing passed 90/90, 45/45,
+6/6; cache-disabled Pong compile-only runs took 10.984/11.043 s at one thread
+and 11.083/10.965 s at four. Against negative-cache medians 11.078 s and
+10.700 s there was no repeatable gain and the four-thread median was about 3%
+slower, on a 2,153-sample zero-loss profile. Reverted rather than keep an
+unproven alias-precedence shortcut.
 
 ### HM binding-name pointer shortcut experiment (reverted)
 
 `hm_env_entry_matches` briefly accepted pointer-identical binding names before
-computing or comparing content hashes. Refinement, `modules/use`, and shadowing
-passed 90/90, 45/45, and 6/6. Cache-disabled compile-only Pong runs took
-11.188/10.970 s at one thread and 11.109/11.082 s at four threads. Against the
-restored-source controls (11.524/10.995 s and 11.040/10.943 s), the differences were
-inconsistent across thread counts. The candidate's 2,087-sample profile had no
-losses and sampled HM lookup at 8.82%, versus 8.30% in the 2,011-sample control
-profile. Reverted the shortcut; the captures do not demonstrate reduced lookup cost
-or compile time.
+hashing content. Refinement, `modules/use`, and shadowing passed 90/90, 45/45,
+6/6; cache-disabled compile-only Pong runs took 11.188/10.970 s at one thread
+and 11.109/11.082 s at four against restored-source controls 11.524/10.995 s
+and 11.040/10.943 s. Differences were inconsistent across thread counts, and
+the candidate's 2,087-sample profile sampled HM lookup at 8.82% versus 8.30%
+in the 2,011-sample control (both zero-loss). Reverted; no reduced lookup cost
+or compile time was demonstrated.
 
 ### HM cache pointer-key experiment (reverted)
 
-A trial used the parser-interned query-name pointer to select and validate the HM
-cache slot, deferring name hashing until a cache miss. This avoided repeated hashing
-and cached-name comparisons on same-AST hits while retaining the cached hash for
-appended-binding checks. Refinement, `modules/use`, and shadowing passed 90/45/6.
-Cache-disabled four-thread Pong compile-only wall times were 11.44/11.27 s before
-and 11.59/11.37 s with the trial. The candidate was slower, so the pointer-key path
-was reverted; no compile-time gain is claimed.
+A trial used the parser-interned query-name pointer to select and validate the
+HM cache slot, deferring hashing to a miss so same-AST hits avoided repeated
+hashing and cached-name comparisons while the cached hash still served
+appended-binding checks. Refinement, `modules/use`, and shadowing passed
+90/45/6. Cache-disabled four-thread Pong compile-only runs went from 11.44/11.27 s
+before to 11.59/11.37 s with the trial; the candidate was slower and the
+pointer-key path was reverted, with no compile-time gain claimed.
 
 ### HM environment clone bulk copy
 
-`hm_env_clone` now reserves exactly the source length once and copies the entries
-with one `memcpy`, replacing per-entry `vec_push` growth and copying. The cold
-refinement selection passed 90/90; `modules/use` passed 45/45 and shadowing passed
-6/6. Cache-disabled four-thread Pong compile-only wall times were 11.44/11.27 s
-before and 11.51/11.27 s after. This removes repeated vector growth/copy work but
-the timings do not establish a total compile-time speedup. A separate 2,427-sample
-cycle profile had no losses and still showed HM lookup as the largest flat hotspot
-at 9.55%; profiles are not matched A/B.
+`hm_env_clone` now reserves the source length once and copies entries in one
+`memcpy` instead of per-entry `vec_push` growth. Cold refinement passed 90/90,
+`modules/use` 45/45, shadowing 6/6; cache-disabled four-thread Pong compile-only
+runs went from 11.44/11.27 s to 11.51/11.27 s. This removes repeated growth and
+copying but does not establish a total compile-time speedup. A separate
+2,427-sample cycle profile had no losses and still showed HM lookup as the
+largest flat hotspot at 9.55%; profiles are not matched A/B.
 
 ### HM fast-hash replacement trial (reverted)
 
-To target the HM lookup hotspot, `hm_name_hash` was temporarily changed from 32-bit
-FNV-1a to the existing `ny_hash64_fast_cstr`, truncated to 32 bits. Refinement,
-`modules/use`, and shadowing passed 90/45/6. Two cache-disabled four-thread Pong
-compile-only controls took 10.933/10.955 s; the trial took 10.906/11.039 s. The
-ranges overlap and show no repeatable improvement, so the replacement was reverted.
+`hm_name_hash` was temporarily switched from 32-bit FNV-1a to
+`ny_hash64_fast_cstr` truncated to 32 bits. Refinement, `modules/use`, and
+shadowing passed 90/45/6; two cache-disabled four-thread Pong compile-only
+controls took 10.933/10.955 s against 10.906/11.039 s for the trial. The ranges
+overlap with no repeatable improvement, so the replacement was reverted.
 
 ### Reachability qualified-call duplicate lookup
 
-In `ny_native_scan_qualified_call`, a failed initial `nyr_find_user_function` lookup
-was repeated when the qualified name was not an import alias. The branch now returns
-directly when the first lookup found nothing, and adds the first result otherwise.
-The normal `NY_E_MEMCALL` scan also resolved the same qualified target twice; it now
-reuses the first resolution result. The change builds; focused `modules/use` passed
-45/45, and the `native` selection passed 68/68. Two cache-disabled four-thread Pong
-`--run=none` compiles took 12.12 s and 11.19 s wall time. These timings are not a
-matched A/B and do not establish a speedup. The change removes redundant lookups but
-does not close the compile-hotspot or 3 s compile/link/first-window acceptance
-criteria.
+`ny_native_scan_qualified_call` no longer repeats a failed
+`nyr_find_user_function` when the qualified name is not an import alias: the
+branch returns on a miss and adds the first result otherwise. The `NY_E_MEMCALL`
+scan also reuses the first resolution instead of resolving the same target
+twice. The change builds; focused `modules/use` passed 45/45 and `native`
+68/68. Two cache-disabled four-thread Pong `--run=none` compiles took 12.12 s
+and 11.19 s, not a matched A/B and not a speedup claim; redundant lookups are
+gone, but compile-hotspot and 3 s compile/link/first-window criteria remain
+open.
 
-#### Follow-up cache-disabled Pong profile
-
-A fresh 199 Hz DWARF call-graph capture after the reachability changes recorded
-2,545 samples with no losses. Flat samples were led by HM environment lookup
-(10.20%), `ny_hash64_fast` (5.71%), module statement lookup (4.67%),
-`ny_module_public_target` (4.44%), and attached-method lookup (3.03%).
-`ny_native_scan_qualified_call` was not a top-level symbol at the report's 1%
-cutoff, so this capture does not demonstrate a measurable gain from the
-duplicate-lookup fix. The imported-module and HM hot spots remain; the compile-time
-acceptance criteria are still open.
+A follow-up 199 Hz DWARF call-graph capture had 2,545 samples, zero losses, led
+by HM environment lookup 10.20%, `ny_hash64_fast` 5.71%, module statement lookup
+4.67%, `ny_module_public_target` 4.44%, and attached-method lookup 3.03%.
+`ny_native_scan_qualified_call` stayed below the 1% cutoff, so no measurable
+gain is demonstrated; imported-module and HM hot spots remain.
 
 ### Name-hash hotspot review
 
@@ -1157,105 +1014,81 @@ The 2,019-sample negative-cache profile attributed 5.10% cumulative to
 `ny_hash_name` and 4.26% self to `ny_hash64_fast`; these overlapping call-tree
 figures are not additive. Samples came through several consumers, including
 import-alias resolution and attached-method lookup, rather than one isolated
-name-hash workload. `ny_hash64_fast` is the shared implementation behind `ny_hash64`
-and has callers outside name lookup. No hash algorithm or global hash contract
-change was justified by this profile, so no code change was kept. Name hashing
-remains a measured cost to revisit if a consumer-specific hotspot becomes clear.
+name-hash workload, and `ny_hash64_fast` backs `ny_hash64` with callers outside
+name lookup. No hash algorithm or global hash contract change was justified,
+so no code change was kept. Name hashing remains a measured cost to revisit if
+a consumer-specific hotspot becomes clear.
 
 ### Attached-method fallback scan experiment (reverted)
 
-The attached-method fallback scans `cg->fun_sigs` and derives an owner string for
-signatures before checking whether each signature is an attached method. A trial
-moved the cheap attached-method, owner/name, and current-signature checks ahead of
-owner derivation. The attached-method selections passed 7/7 and `modules/use` passed
-45/45. Two cache-disabled compile-only runs took 11.267/10.844 s at one thread and
-11.446/10.695 s at four threads; these overlap the preceding negative-cache medians
-of 11.078/10.700 s and do not show a stable gain. The 2,075-sample candidate profile
-had no losses and sampled attached-method lookup at 4.05% self, but it is not a
-matched profile. Reverted the filter reordering rather than claim an unsupported
-speedup.
+The attached-method fallback derives an owner string for each `cg->fun_sigs`
+signature before checking whether it is an attached method; a trial moved the
+cheap attached-method, owner/name, and current-signature checks ahead of that
+derivation. Attached-method selections passed 7/7 and `modules/use` 45/45.
+Compile-only runs took 11.267/10.844 s at one thread and 11.446/10.695 s at
+four, overlapping the negative-cache medians 11.078/10.700 s; a 2,075-sample
+zero-loss profile put attached-method lookup at 4.05% self but was not matched.
+The filter reordering was reverted rather than claim an unsupported speedup.
 
 ### CFG builder allocation experiment (reverted)
 
-A `nyr_cfg_build_impl` trial replaced zeroed allocations with uninitialized storage
-for arrays believed to be fully written. It required zeroing all predecessor-offset
-entries before accumulating incoming edges; doing that inside the accumulation loop
-erased earlier counts and stalled dominator intersection. After fixing the ordering,
-`cfg_simplify`, `dce_phi_label`, `loop_unroll`, `loop_interchange`, `gvn_pre`, and
-`range_query` passed.
+A `nyr_cfg_build_impl` trial used uninitialized storage for arrays believed
+fully written; predecessor-offset entries had to be zeroed before accumulating
+incoming edges, since doing it inside the loop erased counts and stalled
+dominator intersection. After fixing ordering, `cfg_simplify`, `dce_phi_label`,
+`loop_unroll`, `loop_interchange`, `gvn_pre`, and `range_query` passed. The
+corrected trial's 199 Hz profile had 14,908 samples, zero losses, and
+`nyr_cfg_build_impl` at 2.12%; its compile took 43.771 s, with 41.338 s
+uninstrumented (1m18.022s user, 5.006s system) versus a separate 41.573 s
+baseline. No speedup was established and the allocation changes were reverted.
 
-The corrected trial's 199 Hz profile captured 14,908 samples with no losses;
-`nyr_cfg_build_impl` accounted for 2.12%. The profiled compile took 43.771 s; the
-uninstrumented cache-disabled `--run=none` compile took 41.338 s (1m18.022s user,
-5.006s system), versus a separate 41.573 s baseline. The difference is not enough to
-establish a speedup, so the allocation changes were reverted.
-`regalloc_loop_phi_carry` fails with both the trial and restored baseline; the
-mismatch is not attributed to the CFG allocation experiment.
-
-The whole `--ir-opt-test` run also stops at the AArch64 disassembly fixture's
-expected-line mismatch: the actual listing appends encoded bytes before the newline.
-Focused CFG-related groups pass independently. Pong measurements remain compile-only
-and do not meet the 3 s compile/link/first-window target.
+`regalloc_loop_phi_carry` fails with both trial and restored baseline, and the
+whole `--ir-opt-test` run also stops at an AArch64 disassembly expected-line
+mismatch (encoded bytes appended before the newline); focused CFG groups pass
+independently. Pong measurements are compile-only and short of the 3 s target.
 
 ### Register-segment lookup observation
 
-The Pong profile sampled `nyr_mach_regalloc_segment_at` at 1.69%. Its search is
-already restricted to each vreg's sorted segment range and runs in $O(\log k)$,
-where $k$ is that vreg's segment count. A last-start upper-bound shortcut was not
-adopted: machine blocks are appended at `inst_len`, so empty blocks can share
-instruction positions and generate same-start live segments; the shortcut could
-select a different segment at those boundaries. The LSP found 65 references, mostly
-encoder lookups.
-
-Focused `regalloc_cfg_edge_carry` and `regalloc_dead_input_coalesce` tests pass. At
-the time of this lookup investigation, `regalloc_loop_phi_carry` failed with the
-same reported colors when the CFG allocation trial was reverted
-(`header/preheader/latch = color 2`, source = color 0); the failure was not
-attributed to the lookup investigation. No segment-search change was made.
+`nyr_mach_regalloc_segment_at` drew 1.69% in the Pong profile; its search is
+already limited to a vreg's sorted segment range at O(log k) for k segments.
+A last-start upper-bound shortcut was rejected: machine blocks are appended at
+`inst_len`, so empty blocks can share instruction positions and produce
+same-start live segments, letting the shortcut pick a different segment at
+those boundaries. LSP found 65 references, mostly encoder lookups. Focused
+`regalloc_cfg_edge_carry` and `regalloc_dead_input_coalesce` pass; with the CFG
+allocation trial reverted, `regalloc_loop_phi_carry` still failed with
+`header/preheader/latch = color 2`, source = color 0, a failure not attributed
+to this lookup work. No segment-search change was made.
 
 ### Loop-phi preheader source color fix
 
-The failing GPR fixture exposed a missed safe-coalescing case: loop-edge coalescing
-intentionally left preheader source segments untouched to preserve values across
-calls, even when the source died at the phi copy. That left the preheader incoming
-value in a different physical register from the backedge carry. The coalescer now
-recolors a preheader source only when it dies at the copy, after checking both
-source segments for register constraints, clobbers, and conflicts. Non-dying sources
-retain their original register; call-clobber checks remain active.
+Loop-edge coalescing previously left preheader source segments untouched to
+preserve values across calls even when the source died at the phi copy, leaving
+the preheader value in a different physical register from the backedge carry.
+The coalescer now recolors such a source only when it dies at the copy, after
+checking both source segments for register constraints, clobbers, and
+conflicts; non-dying sources keep their register and call-clobber checks stay.
+`regalloc_loop_phi_carry`, `regalloc_cfg_edge_carry`,
+`regalloc_dead_input_coalesce`, and `regalloc_fpr_loop_phi_carry` pass, and the
+loop-carry fixture confirms a deliberately mismatched latch color is rejected.
+The CFG allocation experiment stays reverted; this correctness fix shows no
+compile-time speedup.
 
-The focused `regalloc_loop_phi_carry`, `regalloc_cfg_edge_carry`,
-`regalloc_dead_input_coalesce`, and `regalloc_fpr_loop_phi_carry` tests pass. The
-loop-carry fixture also verifies that a deliberately mismatched latch color is
-rejected by the allocator verifier. The CFG allocation experiment remains reverted;
-this correctness fix does not establish a compile-time speedup.
+A release-build audit collected 2026-11-15 ran one
+`ny-test --bin build/release/ny-full --bench <fixture> --bench-show-asm --bench-run 1 --bench-warmup 0`
+per `etc/tests/bench/**/*.nshape` source: 96 fixtures (95 ok, 1 fail),
+92,005,384 emitted machine-code bytes across 90 fixtures, median 24,876 bytes,
+and 6 text-emitter fallbacks excluded from the total and median. `code bytes` is
+the internal x86-64 machine-code size, so it ranks emitted code, not the
+printer; NYR/C timings are single samples and the C column may use a different
+repetition count (`knight` 16.5x here versus 1.61x in the harness), so they are
+not timing evidence — the benchmark run is. The six `text` rows — `sssp`
+2,486,370, `deltablue` 2,485,605, `richards` 2,598,852, `mont64` 3,775,697,
+`qrsyndrome` 2,636,227, `leela` 3,228,001 assembly-text bytes — pass their
+native-route checksums; the fallback is a property of this diagnostic, not
+execution.
 
-#### Native assembly and code-size audit (2026-11-15)
-
-Collected 2026-11-15 on the release build, one `--bench-show-asm` run per fixture.
-These numbers rank emitted code size; they are not timing evidence:
-
-```
-ny-test --bin build/release/ny-full --bench <fixture> --bench-show-asm \
-  --bench-run 1 --bench-warmup 0
-```
-
-for all 96 `etc/tests/bench/**/*.nshape` sources. `code bytes` is the internal
-x86-64 machine code size the runner reports, so it measures emitted code rather than
-the assembly printer. Six fixtures fall back to the text emitter in this diagnostic
-mode: their rows say `text`, they carry assembly bytes in the note below the table,
-and they are excluded from the byte total and median.
-
-Timings below come from a single sample per fixture. The C column is the runner's C
-route for that fixture and can use a different repetition count from the fixture's
-own timing loop (`knight` reports 16.5x here while the harness row for it is 1.61x).
-Use these numbers only to rank code size; the benchmark run below is the timing
-evidence.
-
-fixtures audited: 96 (95 ok, 1 fail)
-emitted machine code: 92,005,384 bytes across 90 fixtures; median 24,876 bytes
-records without an internal machine-code size: 6 (text-emitter fallback)
-
-#### Largest fixtures
+The eight largest fixtures by emitted bytes were:
 
 | fixture | path | code bytes |
 |---|---|---|
@@ -1268,7 +1101,7 @@ records without an internal machine-code size: 6 (text-emitter fallback)
 | bigint-oracle | `etc/tests/bench/numeric/bigint-oracle.nshape` | 4,295,923 |
 | json-parser | `etc/tests/bench/string/json-parser.nshape` | 3,950,079 |
 
-#### All audited fixtures
+The full per-fixture audit (status, NYR, C, bytes) was:
 
 | fixture | path | status | NYR | C | code bytes |
 |---|---|---|---|---|---|
@@ -1369,86 +1202,67 @@ records without an internal machine-code size: 6 (text-emitter fallback)
 | word-frequency-~ | `etc/tests/bench/string/word-frequency-scan.nshape` | ok | 3.03ms | 2.49ms | 27381 |
 | xz | `etc/tests/bench/string/xz.nshape` | ok | 2.17ms | 1.61ms | 20075 |
 
-The six `text` rows emitted through the text assembly emitter in this diagnostic
-mode, so no comparable machine-code size exists for them: `sssp` 2,486,370,
-`deltablue` 2,485,605, `richards` 2,598,852, `mont64` 3,775,697, `qrsyndrome`
-2,636,227, and `leela` 3,228,001 assembly-text bytes. They pass their checksums on
-the native route; the fallback is a property of this assembly diagnostic, not of
-execution.
-
-#### Findings
-
-The size cost is MACH-to-x64 expansion, not one missed opcode idiom. `ny_fn_moves`
-  (`knight`) is 188 MACH instructions and 498 x64 instructions, 199 of them `(%rbp)`
-  home traffic: each MACH operand is materialised through a stack home unless a
-  value stays resident across the block.
-Zero tests already use `test %reg,%reg`, and immediates already take the zero /
-  32-bit / sign-extended forms, so `cmp $0` and `mov $0` peepholes have no remaining
-  targets (0 occurrences of `cmp $0` in `knight`).
-37 adjacent `mov A,B; mov B,A` reversed pairs remain in `knight`. They come out of
-  the inline ALU/copy paths, so removing them needs a MACH-level copy-forwarding
-  pass (see `spec/stats.md`, 2026-11-15).
-The 32-bit path already emits compact forms: no `pushl`/`popl` pairs, no `cmpl $0`,
-  no self moves in `knight`'s i386 assembly; its 119 `pushl` are call arguments
-  under the stack ABI.
+The size cost is MACH-to-x64 expansion, not one missed idiom: `ny_fn_moves`
+(`knight`) is 188 MACH instructions and 498 x64 ones, 199 of them `(%rbp)`
+home traffic, with each operand materialized through a stack home unless it
+stays resident across a block. Zero tests already use `test %reg,%reg` and
+immediates already use zero/32-bit/sign-extended forms, so `cmp $0` and `mov
+$0` peepholes have no targets (0 `cmp $0` in `knight`). 37 adjacent reversed
+`mov A,B; mov B,A` pairs remain from inline ALU/copy paths and need a
+MACH-level copy-forwarding pass (`spec/stats.md`, 2026-11-15). The 32-bit path
+already emits compact forms: no `pushl`/`popl` pairs, no `cmpl $0`, no self
+moves in `knight`'s i386 assembly; its 119 `pushl` are stack-ABI call
+arguments.
 
 ### Binary latch-guard duplication
 
-Machine lowering now duplicates a tiny pure register-only guard at a single-block
+Machine lowering duplicates a tiny pure register-only guard at a single-block
 latch, after PHI-edge lowering and before register allocation. The entry guard
-remains, preserving zero-trip behavior; memory and trapping guards are not cloned.
-This removes one taken branch per inner iteration.
+remains, preserving zero-trip behavior; memory and trapping guards are not
+cloned. This removes one taken branch per inner iteration.
 
-Matched screening used the unchanged fixtures, O3 peak profile, LLVM/host-C/NYC
-comparisons, seven measured runs and two warm-ups in each configuration:
+Matched screening used unchanged fixtures, O3 peak profile, LLVM/host-C/NYC
+comparisons, seven measured runs and two warm-ups per configuration:
 
 | Configuration | NYR | LLVM | Host C | NYC | NYR/LLVM |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Guard duplication disabled | 2.001 ms | 318 µs | 1.04 ms | 8.27 ms | 6.29x |
 | Guard duplication enabled | 1.797 ms | 319 µs | 1.04 ms | 8.27 ms | 5.64x |
 
-All four checksums match `3360874588549334`. This is approximately a 10% runtime
-reduction, **not a passing performance gate** (the limit remains 5.00x). Reports:
+All four checksums match `3360874588549334`. This is about a 10% runtime
+reduction, **not a passing performance gate** (limit remains 5.00x). Reports:
 `build/bench-reports/bench-20261103-210935-1855512.json` and
 `build/bench-reports/bench-20261103-211407-1869585.json`. The full candidate run
-also retained matching checksums and still failed only the binary performance gate.
-The executable regression checks negative, zero, one and many trips, live-out PHIs,
-and rejection of a memory guard. The focused native PHI/edge fixtures pass all five
-variants. Of 98 optimizer groups, 96 pass; `licm_address_component` and
-`portable_wasm` also fail with guard duplication disabled and are not counted as
+also retained matching checksums and failed only the binary performance gate.
+The executable regression checks negative, zero, one and many trips, live-out
+PHIs, and rejection of a memory guard. Focused native PHI/edge fixtures pass all
+five variants. Of 98 optimizer groups, 96 pass; `licm_address_component` and
+`portable_wasm` also fail with duplication disabled and are not counted as
 passing.
 
 ### NYC binary runtime: static helpers and repeated sign extension
 
-The focused comparison compiled the unchanged `binary` fixture's C source with two
-NYC snapshots using `-O3 -S` and the same host assembler/link driver. Each
-executable received one discarded warm-up and seven measured executions, alternating
-control/candidate order. The fixture's own `elapsed_ns` region excludes compilation,
-linking, process startup, and checksum printing.
-
-| Change set | Control NYC runtime | Candidate NYC runtime | Median reduction |
-| --- | ---: | ---: | ---: |
-| Static-helper inlining and redundant sign-extension folding | 12.652 ms | 10.811 ms | 14.5% |
-
-Every execution preserved checksum `3360874588549334`. Generated assembly eliminated
-the per-inner-iteration `signed_from_bits` call. The shared peephole pass also
-removes repeated sign extension to an equal or wider width, without removing
-narrower truncations. The focused optimizer regression checks 36 width combinations
-against signed boundary inputs before and after rewriting. The C regression executes
+Compiling the unchanged `binary` fixture's C source with two NYC snapshots using
+`-O3 -S` and the same host assembler/link driver, with one discarded warm-up and
+seven alternating measured executions, reduced the median from 12.652 ms to
+10.811 ms (14.5%). The fixture's `elapsed_ns` excludes compilation, linking,
+process startup, and checksum printing. Every execution preserved checksum
+`3360874588549334`. Generated assembly eliminated the per-inner-iteration
+`signed_from_bits` call. The shared peephole also removes repeated sign
+extension to an equal or wider width, without removing narrower truncations.
+The focused optimizer regression checks 36 width combinations against signed
+boundary inputs before and after rewriting. The C regression executes
 recursive/address-taken helpers and GNU `noinline` frame boundaries.
 
-This is a local NYC improvement, not a passing NYR/NYC-versus-reference matrix. The
-separate four-route binary smoke still measured NYR/LLVM above its gate at that
-time.
-
-#### Rejected NYR binary candidates
-
-Seven-sample, one-warm-up snapshot screening retained checksum `3360874588549334`
-but did not justify either candidate. A less conservative R8 live-range proof around
-power-of-two division measured 1.990/1.961 ms control/candidate, with overlapping
-samples and identical register-allocation output; it was reverted. Removing the
-extra comparison around a masked select predicate measured 1.972/2.313 ms and was
-also reverted. No NYR binary speedup is claimed from these experiments.
+Scope: local NYC improvement, not a passing NYR/NYC-versus-reference matrix;
+the separate four-route binary smoke still measured NYR/LLVM above its gate at
+that time. Rejected NYR candidates: a seven-sample, one-warm-up snapshot
+screening retained the checksum but justified neither. A less conservative R8
+live-range proof around power-of-two division measured 1.990/1.961 ms
+control/candidate, with overlapping samples and identical register-allocation
+output; it was reverted. Removing the extra comparison around a masked select
+predicate measured 1.972/2.313 ms and was also reverted. No NYR binary speedup
+is claimed from these experiments.
 
 ### `dict-set` repeated low-contention stability
 
@@ -1465,145 +1279,140 @@ every run.
 | 3 | 47.366 ms (44.826–51.217) | 46.075 ms (44.009–48.360) | 55.052 ms | 208.848 ms | 1.028x |
 
 Every run stayed below the unchanged 1.50x per-fixture NYR/LLVM ceiling, so the
-prior `dict-set` stability item is closed. This closes only that fixture's budget
-item; it does not establish per-fixture competitiveness or close the full
+prior `dict-set` stability item is closed. This closes only that fixture's
+budget item; it does not establish per-fixture competitiveness or close the full
 data-structures class. Raw reports are `/tmp/ny-dict-set-quiet-{1,2,3}.json`.
 
 ### Raw-allocation ABI and gcbench runtime
 
-A direct native `__calloc_raw(17)` call reached the legacy tagged-integer allocator
-with the raw value `17`, producing an 8-byte allocation. Runtime alias selection now
-preserves the raw-byte entry chosen during argument lowering. The `calloc-raw`
-fixture checks exact registered extents before access, zero initialization, release,
-a dynamic `any` size, and an inlined constant `any` size. Its four native/LLVM
-variants pass.
+A direct native `__calloc_raw(17)` call reached the legacy tagged-integer
+allocator with raw value `17`, producing an 8-byte allocation. Runtime alias
+selection now preserves the raw-byte entry chosen during argument lowering. The
+`calloc-raw` fixture checks exact registered extents before access, zero
+initialization, release, a dynamic `any` size, and an inlined constant `any`
+size; its four native/LLVM variants pass.
 
 Retained allocation-observer evidence records 440400 requests of 96 bytes in
 `gcbench`; a separate typed/dynamic probe records two 96-byte requests and one
-97-byte request. The saved profile attributes 21.15% of instructions to raw-pointer
-registration and unregistration. Those earlier artifacts are under
-the local perf workspace.
-
-A subsequent focused `gcbench` correctness smoke used one measured execution and no
-warm-up, with matching checksums on all four routes:
+97-byte request. The saved profile attributes 21.15% of instructions to
+raw-pointer registration and unregistration. Those earlier artifacts are under
+the local perf workspace. A focused `gcbench` correctness smoke used one
+measured execution and no warm-up, with matching checksums on all four routes:
 
 | NYR | LLVM | Host C | NYC | NYC/C |
 | ---: | ---: | ---: | ---: | ---: |
 | 37.5 ms | 28.2 ms | 24.8 ms | 26.0 ms | 1.05× |
 
-The report is `build/bench-reports/gcbench-raw-abi-runtime.md`. This single sample
-establishes execution and result agreement, not a stable improvement or a passing
-performance gate. Allocation overhead remains open.
+Report: `build/bench-reports/gcbench-raw-abi-runtime.md`. This single sample
+establishes execution and result agreement, not a stable improvement or a
+passing performance gate. Allocation overhead remains open.
 
 ### Linpack native baseline
 
-The focused diagnostic used one measured execution without warm-up; all four routes
-retained checksum `1`.
+A focused diagnostic used one measured execution without warm-up; all four
+routes retained checksum `1`.
 
 | NYR | LLVM | Host C | NYC |
 | ---: | ---: | ---: | ---: |
 | 1.31 ms | 239 µs | 160 µs | 3.31 ms |
 
-The report is `build/bench-reports/linpack-focused-native.md`. The native `rt_main`
-register diagnostic has 325 virtual registers, 986 segments, and zero addressable
-frame-slot bytes. A conservative SysV private-spill-home proof now permits
-loop-register allocation despite scalar indirect stores when there are no frame
-slots, parameters, physical-register operands, or opaque memory effects. One
-candidate smoke reported checksum `1` and `elapsed_ns=814184`; this is not a matched
-control/candidate comparison, and the focused x64 regression test and comparable
-LLVM/C timings remain unverified. The report's aggregate counters include imported
-core code and must not be treated as per-kernel runtime attribution.
+Report: `build/bench-reports/linpack-focused-native.md`. The native `rt_main`
+register diagnostic has 325 virtual registers, 986 segments, and zero
+addressable frame-slot bytes. A conservative SysV private-spill-home proof now
+permits loop-register allocation despite scalar indirect stores when there are
+no frame slots, parameters, physical-register operands, or opaque memory
+effects. One candidate smoke reported checksum `1` and `elapsed_ns=814184`; it
+is not a matched control/candidate comparison, and the focused x64 regression
+test and comparable LLVM/C timings remain unverified. The report's aggregate
+counters include imported core code and must not be treated as per-kernel
+runtime attribution.
 
 ### Runtime-call effect lookup
 
-The 2026-10-29 profile showed `nyr_effective_effects` among the sampled compiler
-hotspots. `nyr_call_effect_summary` now rejects names outside the `rt_` namespace
-and filters by family before full name comparisons. The runtime table also
+The 2026-10-29 profile showed `nyr_effective_effects` among sampled compiler
+hotspots. `nyr_call_effect_summary` now rejects names outside the `rt_`
+namespace and filters by family before full name comparisons. The runtime table
 classifies `rt_tbuf_new_raw` and `rt_tbuf_new_typed_raw` as allocating, trapping
-calls instead of unknown FFI calls. Unknown symbols retain the conservative
+calls instead of unknown FFI calls; unknown symbols retain the conservative
 FFI/unknown-side-effect summary. The `cse` optimizer regression covers both
 allocator contracts, known effectful calls, and an unknown non-runtime symbol.
 
-For `fannkuch`, the native-tier report's known effect/alias blockers changed from
-3/21 to 0/18; its GPR spill/reload counts remained 971/1,367. The focused x86-64
-`O3`, peak-profile benchmark used three measured runs and one warm-up for both
-snapshots, with matching checksums on all three routes. Expression tree measured
-115.426 ms compile / 59.436 ms NYR runtime before and 115.872 ms / 58.877 ms after.
+For `fannkuch`, known effect/alias blockers changed from 3/21 to 0/18; GPR
+spill/reload counts remained 971/1,367. The focused x86-64 `O3`, peak-profile
+benchmark used three measured runs and one warm-up for both snapshots, with
+matching checksums on all three routes. Expression tree measured 115.426 ms
+compile / 59.436 ms NYR runtime before and 115.872 ms / 58.877 ms after.
 Fannkuch measured 77.646 ms compile / 414.333 ms runtime before and 77.099 ms /
-420.062 ms after. These samples do not establish a compile or runtime speedup; the
-Fannkuch runtime gap remains about 2.25x against LLVM. Correcting effect summaries
-removed false unknown-call classification, but did not resolve the high register
-pressure or slow Fannkuch execution.
+420.062 ms after. These samples establish no compile or runtime speedup; the
+Fannkuch runtime gap remains about 2.25x against LLVM. Correcting effect
+summaries removed false unknown-call classification, but did not resolve high
+register pressure or slow Fannkuch execution.
 
 ### Fixed-size Fannkuch workload
 
 The benchmark invokes Fannkuch only with `n=10`. The fixture now represents that
-fixed input as a local constant rather than a parameter; this preserves the measured
-workload while exposing its loop bound to native optimization. On the same x86-64
-`O3`, peak-profile, warm-cache setup (three measured runs, one warm-up), NYR runtime
-fell from 412 ms to 341.051 ms (339.598–344.173 ms). The checksum remained
-`15830566` on NYR, LLVM, and C. Candidate compile time was 76.667 ms; LLVM and C
-measured 206.411 ms and 208.212 ms. This is a benchmark-fixture specialization, not
-evidence that dynamic `n` calls became faster; NYR remains 1.65x slower than LLVM
-for this fixture.
+fixed input as a local constant rather than a parameter, preserving the measured
+workload while exposing its loop bound to native optimization. On the same
+x86-64 `O3`, peak-profile, warm-cache setup (three measured runs, one warm-up),
+NYR runtime fell from 412 ms to 341.051 ms (339.598–344.173 ms). The checksum
+remained `15830566` on NYR, LLVM, and C. Candidate compile time was 76.667 ms;
+LLVM and C measured 206.411 ms and 208.212 ms. This is a benchmark-fixture
+specialization, not evidence that dynamic `n` calls became faster; NYR remains
+1.65x slower than LLVM for this fixture.
 
 ### BCE matrix timer-floor correction
 
-The original `bce-matrix` timed one 100×100 traversal. C measured below 1 µs and
-LLVM about 1 µs, so the reported NYR/C and LLVM/C ratios were unavailable and
-NYR/LLVM was dominated by the timer floor. The fixture now performs 2,048
-traversals, incrementing element zero once per pass to keep the result
-data-dependent and prevent the optimizing comparison routes from folding the entire
-timed loop away. All three sources perform the same work and produce checksum
-`103823513600`.
+The original `bce-matrix` timed one 100×100 traversal. C measured below 1 µs
+and LLVM about 1 µs, so NYR/C and LLVM/C ratios were unavailable and NYR/LLVM
+was dominated by the timer floor. The fixture now performs 2,048 traversals,
+incrementing element zero once per pass to keep the result data-dependent and
+prevent optimizing routes from folding the timed loop away. All three sources
+perform the same work and produce checksum `103823513600`.
 
-On x86-64 `O3`, peak profile, warm cache (three measured runs and one warm-up), NYR
-measured 33.719 ms (33.622–33.802 ms), LLVM 1.701 ms (1.698–1.710 ms), and C 1.680
-ms (1.635–1.971 ms). All routes now exceed the 1 ms comparison cutoff, so the runner
-reports NYR/C 20.07x, LLVM/C 1.01x, and NYR/LLVM 19.82x instead of timer-floor
-dashes. This corrects denominator comparability; the resulting NYR slowdown is
-visible rather than hidden.
+On x86-64 `O3`, peak profile, warm cache (three measured runs and one warm-up),
+NYR measured 33.719 ms (33.622–33.802 ms), LLVM 1.701 ms (1.698–1.710 ms), and
+C 1.680 ms (1.635–1.971 ms). All routes now exceed the 1 ms cutoff, so the
+runner reports NYR/C 20.07x, LLVM/C 1.01x, and NYR/LLVM 19.82x instead of
+timer-floor dashes. This corrects denominator comparability; the resulting NYR
+slowdown is visible rather than hidden.
 
 ### Standard-library core bitcode generation
 
-On 2026-10-26, emitting `core.bc` at `-O0` reduced cold compiler time on the LLVM
-release build. Consumers optimize the linked module, so the standalone core-bitcode
+On 2026-10-26, emitting `core.bc` at `-O0` reduced cold compiler time on the
+LLVM release build. Consumers optimize the linked module, so the standalone core-bitcode
 build no longer runs the same LLVM optimization pipeline first. The CMake
 core-bitcode builder applies `-O0`; its compiler/source fingerprint still
-invalidates the cached artifact when inputs change.
-
-The measured snapshot used Nytrix `0.10.0+git.f05fdb2f6816`, x86-64 Linux (EPYC
-7642), `core.ny` SHA-256
-`11322462a9e5883c4267f36db5691c1d024c88749b7dc0b23fa3d2e76d3f4a46`, and compiler
-SHA-256 `6ac9aae9234d1becb0a757069597ddcd53c9bdd4e287db3977f3bf05f0667d6f`. With
-standard-source and bitcode auto-caches disabled and 16 standard-library workers,
-three cold runs measured per variant. One run per variant included `-time` for phase
-attribution; the other two used plain wall timing. This was a small, non-interleaved
-comparison:
+invalidates the cached artifact when inputs change. The measured snapshot used
+Nytrix `0.10.0+git.f05fdb2f6816`, x86-64 Linux (EPYC 7642), `core.ny` SHA-256
+`11322462a9e5883c4267f36db5691c1d024c88749b7dc0b23fa3d2e76d3f4a46`, and
+compiler SHA-256 `6ac9aae9234d1becb0a757069597ddcd53c9bdd4e287db3977f3bf05f0667d6f`.
+With standard-source and bitcode auto-caches disabled and 16 standard-library
+workers, three cold runs were measured per variant; one run per variant included
+`-time`. This was a small, non-interleaved comparison:
 
 | Variant | Cold times | Median | Bitcode |
 | --- | --- | ---: | ---: |
 | Release default optimization | 170.333, 171.055, 169.476 s | 170.333 s | 17,429,672 bytes |
 | `-O0` core emission | 134.776, 132.089, 136.531 s | 134.776 s | 30,968,768 bytes |
 
-The median cold reduction was 20.9%. The larger unoptimized bitcode is an explicit
-trade-off; a generated-flow consumer fixture passed with both the default and `-O0`
-artifacts (one run each, not a consumer-speed comparison). The phase profile
-attributed 130.706 s to codegen and 34.938 s to optimization at the default level;
-`-O0` took 127.610 s in codegen and skipped that separate optimization stage.
+The median cold reduction was 20.9%. The larger unoptimized bitcode is an
+explicit trade-off; a generated-flow consumer fixture passed with both default
+and `-O0` artifacts (one run each, not a consumer-speed comparison). The phase
+profile attributed 130.706 s to codegen and 34.938 s to optimization at the
+default level; `-O0` took 127.610 s in codegen and skipped that separate
+optimization stage.
 
-To recheck the optimization after the working tree changed, the then-current
-compiler and `core.ny` were copied to tmpfs and held fixed for a matched one-run
-comparison. The compiler SHA-256 was
-`dff81f6e64cf988f5c82ff5192c39810e9daed1bc7fbe207e2f99d7327edaced`; the `core.ny`
-SHA-256 was `a5eab3ab5e1b16e630bdee42e5e90fe5a511194b9ca6e0d67d0bacf9702b2593`.
-Default emission took 173.048 s (17,430,724 bytes); `-O0` took 132.076 s (30,969,940
-bytes). Their SHA-256 checksums were
+After the working tree changed, the then-current compiler and `core.ny` were
+copied to tmpfs and held fixed for a matched one-run comparison. Compiler
+SHA-256 `dff81f6e64cf988f5c82ff5192c39810e9daed1bc7fbe207e2f99d7327edaced`;
+`core.ny` SHA-256 `a5eab3ab5e1b16e630bdee42e5e90fe5a511194b9ca6e0d67d0bacf9702b2593`.
+Default emission took 173.048 s (17,430,724 bytes); `-O0` took 132.076 s
+(30,969,940 bytes). Their SHA-256 checksums were
 `15f619b778e25b66efcba622c40741316f610c1cf13012df3e589222e151855d` and
-`3e26ef35b3aba63aed9b249ae5cbb354ae9258e4b601484dc6e56c666686f6db`, respectively.
-This is one paired sample, not a new median. Both bitcode variants passed the
-generated-flow fixture and a native `str.repeat` consumer smoke using the same
-frozen compiler and source.
+`3e26ef35b3aba63aed9b249ae5cbb354ae9258e4b601484dc6e56c666686f6db`,
+respectively. This is one paired sample, not a new median. Both bitcode variants
+passed the generated-flow fixture and a native `str.repeat` consumer smoke using
+the frozen compiler and source.
 
 Reproduce cold samples without deleting or overwriting the shared build cache:
 
@@ -1617,33 +1426,30 @@ time env NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 \
   --emit-module=lib -e ' '
 ```
 
-For the pre-change comparison, omit `-O0`; use a new output filename for each cold
-sample. For the builder's warm-cache path, build the target once, then time the
-unchanged target again:
+For the pre-change comparison, omit `-O0`; use a new output filename for each
+cold sample. For the builder's warm-cache path, build once, then time again:
 
 ```bash
 cmake --build build/release --target core_bc
 time cmake --build build/release --target core_bc
 ```
 
-On the measured snapshot, the CMake builder's cold run took 143.918 s and its first
-warm hit took 0.064 s. An earlier warm-hit observation was 0.061 s. Later
-source/compiler changes changed the core/compiler fingerprints; the builder
-correctly regenerated instead of treating those changed inputs as a warm hit. These
-timings describe the hashes above, not the subsequently edited working tree.
-
-The cache identity checker passed for the generated artifact. The
-`generated-length-bound-flow.nshape` consumer passed against both default and `-O0`
-bitcode, and passed again against the rebuilt candidate. The separate
-`semantic-effect-artifact.nshape` check failed on both the default and candidate
-routes because `core.os.file_read` returned an empty string for its existing
-consumer template; direct execution without `--core-bc` reproduced that failure, so
-it did not distinguish the bitcode variants.
+On the measured snapshot, the CMake builder's cold run took 143.918 s and its
+first warm hit 0.064 s; an earlier warm-hit observation was 0.061 s. Later
+source/compiler changes changed the fingerprints; the builder correctly
+regenerated instead of treating changed inputs as a warm hit. These timings
+describe the hashes above, not the subsequently edited tree. The cache identity
+checker passed for the generated artifact. `generated-length-bound-flow.nshape`
+passed against both default and `-O0` bitcode, and again against the rebuilt
+candidate. The separate `semantic-effect-artifact.nshape` check failed on both
+default and candidate routes because `core.os.file_read` returned an empty
+string for its existing consumer template; direct execution without `--core-bc`
+reproduced that failure, so it did not distinguish the bitcode variants.
 
 ### Selected workload results
 
-These rows preserve useful checksum-matched checkpoints. They were not one
-simultaneous campaign and must not be combined into a new aggregate.
+These rows are checksum-matched checkpoints, not one simultaneous campaign; they
+must not be combined into a new aggregate.
 
 | Workload and checkpoint | NYR | LLVM | C | Interpretation |
 | --- | ---: | ---: | ---: | --- |
@@ -1651,10 +1457,10 @@ simultaneous campaign and must not be combined into a new aggregate.
 | Word frequency, direct span counting, 3+1 | 5.08 ms | 5.13 ms | 8.81 ms | Checksum and semantic edge cases passed; earlier split-and-dictionary implementations are superseded. |
 | DGEMM before conversion-aware FPR homes, 5+2 | 1.10 ms | 324 µs | 314 µs | Two candidate NYR medians were 650 and 734 µs; C varied too much for a stable ratio. |
 | SOR after the address-chain correctness guard, 3+1 | 3.44 ms | 751 µs | 1.45 ms | Correct checksum restored; C dispersion was 54%. |
-| Fannkuch, 5+2 | 357.7 ms | 215.2 ms | 211.1 ms | NYR used 64-bit array elements; C used 32-bit elements. Not a layout-matched comparison. |
-| Thread ring, 5+2 | 23.1 ms | 22.7 ms | 6.12 ms | Similar native/LLVM behavior; the shared-runtime and synchronization gap against C was not attributed. |
+| Fannkuch, 5+2 | 357.7 ms | 215.2 ms | 211.1 ms | NYR used 64-bit array elements; C used 32-bit. Not layout-matched. |
+| Thread ring, 5+2 | 23.1 ms | 22.7 ms | 6.12 ms | Similar native/LLVM; the shared-runtime and synchronization gap against C was not attributed. |
 | BigInt after timer/reference correction, 5+2 | 34.0 ms | 34.8 ms | 3.61 ms | Both references used 256-bit floating arithmetic; C still included explicit GMP cleanup. |
-| BigInt after caching x86 arithmetic-feature detection, 3+1 | 35.3 ms | 38.4 ms | 3.68 ms | Checksum matched. NYR was 9.3% below the supplied 38.9 ms checkpoint; separate 3+1 runs, not an interleaved A/B. The broader benchmark gate passed. |
+| BigInt after caching x86 arithmetic-feature detection, 3+1 | 35.3 ms | 38.4 ms | 3.68 ms | Checksum matched; NYR was 9.3% below the supplied 38.9 ms checkpoint; separate 3+1 runs, not an interleaved A/B. The broader benchmark gate passed. |
 | BCE matrix, one focused 5+2 checkpoint | 442 µs | 414 µs | 125 µs | Bounds check removed, but native nested traversal remained scalar. Later unstable rows were discarded. |
 | Splay, restored safe baseline, 5+2 | 5.41 ms | 3.66 ms | 4.30 ms | Native/C target remained unmet at this checkpoint. |
 | Splay, resident-register scaled LEA, 5+2 | 5.15 ms | 3.66 ms | 4.44 ms | Small local improvement; native remained slower than C. |
@@ -1669,23 +1475,21 @@ simultaneous campaign and must not be combined into a new aggregate.
 | Known-vocabulary word scan, exclusive dispatch, 7+3 | 5.46 ms | 2.74 ms | 5.44 ms | Checksums matched; Ny now uses exclusive `match` dispatch to match C's first-byte `switch`. NYR/C was 1.00×, within the 2.00× class limit with little margin. This is a changed-source checkpoint, not an A/B against the earlier row. |
 
 The 2026-10-23 SOR check after bounded loop-GPR allocation used nine samples and
-three warm-ups. NYR, LLVM, and C matched checksum `1725461952`; medians were 3.52
-ms, 762 µs, and 1.48 ms. NYR/LLVM was 4.62×, under the fixture's 5.00× limit. This
-is a focused workload result, not a full benchmark-gate pass.
-
-The 2026-10-23 cold `call-chain` run used three samples and one warm-up; all routes
-matched checksum `375998521`. Native compile time was 3,162.92 ms against the 3,000
-ms cap, a non-fatal miss of 162.92 ms (5.43%). The measured NYR/C runtime ratio was
-2.04× against the 30× cap, leaving 27.96× of ratio headroom. Accepted at this
-checkpoint as a compile-time budget miss, not as closure of the compile-time limit.
+three warm-ups. NYR, LLVM, and C matched checksum `1725461952`; medians were 3.52 ms,
+762 µs, and 1.48 ms. NYR/LLVM was 4.62×, under the fixture's 5.00× limit. This
+is a focused workload result, not a full benchmark-gate pass. The 2026-10-23 cold
+`call-chain` run used three samples and one warm-up; all routes matched checksum
+`375998521`. Native compile time was 3,162.92 ms against the 3,000 ms cap, a
+non-fatal miss of 162.92 ms (5.43%). NYR/C was 2.04× against the 30× cap,
+leaving 27.96× headroom. Accepted as a compile-time budget miss, not closure of
+the compile-time limit.
 
 The 2026-10-23 pre-fix cold, single-sample vectorizer check matched every route's
-checksum: `dgemm` returned `1` with 32 loop attempts, 32 rejects, and no vectorized
-loops; `pbkdf2` returned `2991` with 55 attempts, 54 rejects, and one vectorized
-loop. This is a historical baseline, superseded for dgemm by the post-fix checkpoint
-below.
-
-On 2026-10-23, the cold focused command completed with matching NYR, LLVM, and C
+checksum:
+`dgemm` returned `1` with 32 loop attempts, 32 rejects, and no vectorized loops;
+`pbkdf2` returned `2991` with 55 attempts, 54 rejects, and one vectorized loop.
+This is a historical baseline, superseded for dgemm by the post-fix checkpoint.
+On 2026-10-23, a cold focused command completed with matching NYR, LLVM, and C
 checksums (`1`):
 
 ```bash
@@ -1695,204 +1499,183 @@ NYTRIX_TEST_COLD=1 ./make bench etc/tests/bench/numeric/dgemm.nshape \
 
 The report recorded 31 loop attempts, 30 rejects, and one vectorized loop. The
 full-size two-row/64-column repro also returned `failed= 0`; the permanent
-`loop_vector_metadata` regression checks the nested dynamic-buffer vector load/store
-result and all 128 updated elements. The report was
-`build/bench-reports/bench-20261023-014616-2817852.json`. This is correctness and
-vectorizer-counter evidence only: one sample does not establish a performance
-change.
-
-The loop vectorizer keeps scalar epilogues rather than masked tails. SLP is a
-separate pass: benchmark loop counters do not count SLP groups. The focused
-`slp_debug` check verifies that vector loads and stores retain source locations; it
-does not establish an SLP group count or runtime speedup.
-
-FFT's signed-division correctness recheck measured 99 µs NYR; Linpack measured 1.72
-ms NYR. Both passed focused checksums. Earlier Linpack was 2.79 ms NYR/653 µs
-LLVM/149 µs C with no bounds checks or dynamic operations reported in its main
-function; that did not by itself locate the bottleneck.
+`loop_vector_metadata` regression checks the nested dynamic-buffer vector
+load/store result and all 128 updated elements. Report:
+`build/bench-reports/bench-20261023-014616-2817852.json`. One sample supplies
+correctness and vectorizer-counter evidence only, not a performance change. The
+loop vectorizer keeps scalar epilogues rather than masked tails. SLP is a
+separate pass; benchmark loop counters do not count SLP groups. The focused
+`slp_debug` check verifies that vector loads and stores retain source locations;
+it establishes no SLP group count or runtime speedup. FFT's signed-division
+correctness recheck measured 99 µs NYR; Linpack measured 1.72 ms NYR; both
+passed focused checksums. Earlier Linpack was 2.79 ms NYR/653 µs LLVM/149 µs C
+with no bounds checks or dynamic operations reported in its main function; that
+did not by itself locate the bottleneck.
 
 ### Compilation and startup
 
-#### Import-heavy compilation
-
-The October 3 investigation measured cold native emission of `vterm-key-state-open`,
-with both standard-library caches disabled. Its roughly 43.9 s starting point fell
-through successive, separately measured changes:
+Cold native emission of `vterm-key-state-open` with both standard-library caches
+disabled started around 43.9 s and fell through successive, separately measured
+changes:
 
 | Change | Recorded result | Correctness or interpretation |
 | --- | --- | --- |
 | Register-allocation prefilter | Intermediate cold median about 39 s | Reduced unnecessary allocator work; not the final acceptance result. |
-| Conservative alias-name prefilter | 35.940 s median; matched disabled control 38.622 s | Full alias scans fell from 21,857 to 1,106. Positive candidates retained source/module precedence. |
+| Conservative alias-name prefilter | 35.940 s median; disabled control 38.622 s | Full alias scans fell 21,857→1,106; positive candidates retained source/module precedence. |
 | Source-order layout index | 29.173 s median | Thirteen focused checks passed; three 8,540,352-byte outputs had identical hashes. |
 | Enum-member cache | 28.385 s median | 15,844 queries, 11,823 hits, 4,021 tree scans; enum traversal fell below the profile's 0.5% display threshold. |
-| Scoped function-name cache | 25.120 s enabled mean, 28.222 s disabled | Same executable, three runs per arm, identical output objects; exact-string keys avoided interner-order changes. |
+| Scoped function-name cache | 25.120 s enabled mean, 28.222 s disabled | Same executable, three runs per arm, identical objects; exact-string keys avoided interner-order changes. |
 | Block-local coalescer segment lookup | 24.344 s median | Three cold emits, identical object hashes, correct end-to-end output; met the then-current 25 s target. |
 
-The alias index conservatively covered explicit aliases, imported items, plain-use
-leaves, and module leaves. A miss could reject alias resolution; a hit still used
-the original resolver. Layout indexing preserved source order and dotted suffix
-aliases. Enum caching included misses because tags and declarations were fixed for
-the expanded program's lifetime. Function lookup kept a bounded 8,192-entry cache;
-longer names and allocation failures retained the original resolution path.
-
-Larger function caches, a last-query cache, a combined key-length/hash loop, and
-enumerating only coalescer header predecessors did not show repeatable benefits and
-were removed. One early alias-index output differed in size; later layout-index runs
-were deterministic. A mismatched-executable profile was discarded rather than used
-to explain instruction offsets.
-
-The final coalescer change kept uniqueness and first-match checks while searching
-the current block's segments instead of the complete segment list. Its sampled self
-share fell from 11.97% to 6.44%. Five allocator/CFG fixtures and all 62 benchmark
+The alias index conservatively covered explicit aliases, imported items,
+plain-use leaves, and module leaves. A miss could reject alias resolution; a hit
+still used the original resolver. Layout indexing preserved source order and
+dotted suffix aliases. Enum caching included misses because tags and
+declarations were fixed for the expanded program's lifetime. Function lookup
+kept a bounded 8,192-entry cache; longer names and allocation failures retained
+the original path. Larger function caches, a last-query cache, a combined
+key-length/hash loop, and enumerating only coalescer header predecessors showed
+no repeatable benefit and were removed. One early alias-index output differed in
+size; later layout-index runs were deterministic. A mismatched-executable
+profile was discarded rather than used to explain instruction offsets. The final
+coalescer change kept uniqueness and first-match checks while searching the
+current block's segments instead of the complete segment list. Its sampled self
+share fell 11.97%→6.44%. Five allocator/CFG fixtures and all 62 benchmark
 checksums passed; the one-sample benchmark was correctness evidence, not a
 performance campaign. Generated-program runtime was outside this compile-time
 target.
 
-#### Pong AOT compilation and startup
-
-Pong's font setup accepts an optional glyph subset; omitted glyphs are prepared on
-demand, while the default still primes ASCII. `font-subset.nshape` checks prepared
-and missing glyph metrics on native O0/O3, AOT O2, and LLVM MCJIT. The app prepares
-its score/label characters before drawing. Its 26 net rectangles are cached as
-packed records and rebuilt only on framebuffer resize. The AOT executable completed
-three 20-frame headless-Weston runs. `NYTRIX_PONG_FRAME_TIMES=1` measures
-submission/show completion, not physical display scanout.
-
-The original mapping oracle's eight-entry thread-local dedup cache could forget an
-address still in the append-only exact-range table, exhausting the 256 entries with
-duplicates. Registration now scans that table under its writer lock before
-appending. `nytrix-map-oracle-dedup` cycles 32 allocated ranges 32 times; the old
-runtime fills the table at 256, and the regression passes with the fix. Distinct
-ranges still saturate capacity. A 4096-entry trial delayed saturation to about frame
-nine, then frame intervals returned to roughly 210 ms; the same 60-frame run stopped
-in `libvulkan_radeon.so` with SIGSEGV, whose cause was not established. The capacity
+Pong's font setup accepts an optional glyph subset; omitted glyphs are prepared
+on demand, while the default still primes ASCII. `font-subset.nshape` checks
+prepared and missing glyph metrics on native O0/O3, AOT O2, and LLVM MCJIT. The
+app prepares score/label characters before drawing; its 26 net rectangles are
+cached as packed records and rebuilt only on resize. The AOT executable
+completed three 20-frame headless-Weston runs. `NYTRIX_PONG_FRAME_TIMES=1`
+measures submission/show completion, not physical scanout. The original mapping
+oracle's eight-entry thread-local dedup cache could forget an address still in
+the append-only exact-range table, exhausting 256 entries with duplicates.
+Registration now scans that table under its writer lock before appending.
+`nytrix-map-oracle-dedup` cycles 32 allocated ranges 32 times; the old runtime
+fills the table at 256, and the regression passes with the fix. Distinct ranges
+still saturate capacity. A 4096-entry trial delayed saturation to about frame
+nine, then intervals returned to roughly 210 ms; the same 60-frame run stopped
+in `libvulkan_radeon.so` with SIGSEGV, cause not established. The capacity
 increase was reverted. Append-only positive range knowledge needs lifetime-safe
 invalidation before capacity can grow without weakening pointer safety.
 
-Historical three-run medians at 1280×720 on private headless Weston were:
+Historical three-run medians at 1280×720 on private headless Weston were
+1714.20 ms for the original app/runtime, 1612.48 ms with font subsets, 1505.97
+ms with subsets plus cached net geometry, and 1417.93 ms with fresh runtime
+range deduplication. These successive runs overlapped other host work and
+runtime builds, so they do not establish a controlled speedup. Subsequent frames
+stayed around 210–220 ms. The mapping-oracle bound-overflow experiment and its
+current check are recorded with the runtime changes; startup still needs a
+stable headless comparison.
 
-| Variant | Median to first submitted/shown frame |
-| --- | ---: |
-| Original app and runtime | 1714.20 ms |
-| Font subsets | 1612.48 ms |
-| Subsets plus cached net geometry | 1505.97 ms |
-| Fresh runtime with range deduplication | 1417.93 ms |
+The 2026-11-10 cache-disabled Pong `-O2` AOT compile took 62.185 s on the
+synchronized toolchain: type validation 10.243 s, codegen 11.783 s, object
+emission 42.560 s, runtime object 0.006 s, link 0.319 s. A sampled run recorded
+6,246 CPU-cycle samples with no losses. The largest named self costs were CFG
+building 2.60%, imported-member lookup 2.44%, loop-edge coalescing 2.37%,
+refinement lookup 2.20%, type-map initialization 1.78%, and register-allocation
+segment lookup 1.59%; no one hot path accounts for the 30-second gap. The
+profile-time run before rebuilding launcher and compiler as a matched pair is
+not comparable and is excluded. A later synchronized compile after the
+mapping-oracle change took 70.350 s, including 14.092 s rebuilding the runtime
+object; type validation 10.227 s, codegen 11.723 s, object emission 34.969 s,
+link 0.237 s. Different cache/build state prevents treating this as a direct
+regression against 62.185 s; both remain above the 30 s target. No compiler
+hot-spot optimization was established.
 
-These successive runs overlapped other host work and runtime builds, so they do not
-establish a controlled speedup. Subsequent frames remained around 210–220 ms. The
-mapping-oracle bound-overflow experiment and its current check are recorded with the
-runtime changes; startup still needs a stable headless comparison.
+New cache-disabled `-O2` runs on the updated tree took 58.139 s with default
+threads, 56.042 s with `--threads 4` (10.349 s type validation, 11.938 s
+codegen, 36.259 s object emission), and 63.450 s with `--threads 8`; the
+eight-thread run parallelized only five of 4,956 regions. Disabling x86 home DSE
+took 52.267 s (10.303 s validation, 11.828 s codegen, 32.488 s emission), but
+generated code differs and Pong runtime was not validated. None meets 30 s; no
+retained compile-time speedup was established. The current cold-cache,
+eight-thread `--run=aot` profile under headless Weston at 1280×720 with
+cache-disabled settings and `NYTRIX_PONG_MAX_FRAMES=1` took 75.334 s total:
+type validation 10.019 s, codegen 11.547 s, object emission 31.732 s, and
+`nyr_build_ir` 30.046 s; the first submitted frame arrived 1.200 s after app
+startup. Reachability timers split 6.978 s into 0.066 s for top-level roots,
+effectively zero for function roots, and 6.912 s scanning the transitive
+call-graph across 2,725 functions. Function lowering took 6.864 s and `rt_main`
+lowering 12.248 s; machine lowering 0.520 s, bundle encoding 4.430 s, ELF
+writing under 0.2 s. `_range_contains` still uses the legacy fallback after a
+register-allocation failure. A root-seeding filter experiment did not change the
+2,725-function reachable set and was reverted. Earlier default-cache verification
+printed `[gfx] Using Native Vulkan Backend`; its one-frame run took 52.498 s.
+These runs confirm the 3-second target is not close; profiling established no
+retained speedup.
 
-The 2026-11-10 cache-disabled Pong `-O2` AOT compile measured 62.185 s on the
-synchronized toolchain: type validation 10.243 s, codegen 11.783 s, object emission
-42.560 s, runtime object 0.006 s, link 0.319 s. A sampled run recorded 6,246
-CPU-cycle samples with no lost samples. The largest named self costs were CFG
-building 2.60%, imported-member lookup 2.44%, loop-edge coalescing 2.37%, refinement
-lookup 2.20%, type-map initialization 1.78%, and register-allocation segment lookup
-1.59%; no one hot path accounts for the 30-second gap. The profile-time run before
-rebuilding the launcher and compiler as a matched pair is not comparable and is
-excluded.
+A follow-up instrumented NYIR build with an already-cached runtime object
+completed the same one-frame Weston/Vulkan AOT path in 53.401 s. Its 29.815 s
+NYIR build split into 6.893 s reachable-function collection, 6.857 s function
+lowering, 6.019 s post-inline optimization, 4.221 s call-effect inference, and
+0.295 s `rt_main` lowering. The post-inline stage runs the full optimizer over
+up to 512 functions after cleanup, small inlining, and general inlining; the
+call-effect stage includes fixed-point propagation and patching calls in
+function bodies. Machine lowering was 0.519 s, bundle encoding 4.414 s, ELF
+writing under 0.2 s, object emission 31.482 s. A temporary attempt to skip full
+optimization when general inlining made no changes reported 355 reoptimized and
+157 unchanged functions, but an unpaired noisy run was slower (37.146 s
+`nyr_build_ir`, 39.577 s emission). It was reverted: earlier small-inline/cleanup
+mutations were not tracked, and no output equivalence or speed improvement was
+established. The new opt-in stage timers are retained.
 
-A later synchronized compile after the mapping-oracle change completed in 70.350 s,
-including 14.092 s rebuilding the runtime object. Its type validation took 10.227 s,
-codegen 11.723 s, object emission 34.969 s, and linking 0.237 s. The different
-cache/build state prevents treating this as a direct regression against the 62.185 s
-run; both remain above the 30 s target. No compiler hot-spot optimization was
-established by these measurements.
-
-New cache-disabled `-O2` runs on the updated tree took 58.139 s with default thread
-settings, 56.042 s with `--threads 4` (10.349 s type validation, 11.938 s codegen,
-36.259 s object emission), and 63.450 s with `--threads 8`; the eight-thread run
-parallelized only five of 4,956 regions. Disabling x86 home DSE took 52.267 s
-(10.303 s type validation, 11.828 s codegen, 32.488 s object emission), but
-generated code differs and its Pong runtime was not validated. None meets the 30 s
-target; these experiments establish no retained compile-time speedup.
-
-The current cold-cache, eight-thread `--run=aot` profile ran under headless Weston
-at 1280×720 with cache-disabled compiler/runtime settings and
-`NYTRIX_PONG_MAX_FRAMES=1`. Total time was 75.334 s: type validation 10.019 s,
-codegen 11.547 s, object emission 31.732 s, and `nyr_build_ir` 30.046 s; the first
-submitted frame arrived 1.200 s after app startup. Reachability timers split its
-6.978 s into 0.066 s for top-level roots, effectively zero for function roots, and
-6.912 s for transitive call-graph scanning across 2,725 functions. Function lowering
-took 6.864 s and `rt_main` lowering 12.248 s. Machine lowering took 0.520 s, bundle
-encoding 4.430 s, and ELF writing under 0.2 s. The `_range_contains` function still
-uses the legacy fallback after a register-allocation failure. A root-seeding filter
-experiment did not change the 2,725-function reachable set and was reverted. Earlier
-default-cache verification explicitly printed `[gfx] Using Native Vulkan Backend`;
-its one-frame run took 52.498 s total. These runs confirm the three-second
-compile/link/first-frame target is not currently close to passing; profiling did not
-establish a retained compiler speedup.
-
-A follow-up instrumented NYIR build used an already-cached runtime object and
-completed the same one-frame Weston/Vulkan AOT path in 53.401 s. Its 29.815 s NYIR
-build split into 6.893 s reachable-function collection, 6.857 s function lowering,
-6.019 s post-inline optimization, 4.221 s call-effect inference, and 0.295 s
-`rt_main` lowering. The post-inline stage runs the full optimizer over up to 512
-functions after cleanup, small inlining, and general inlining. The call-effect stage
-includes fixed-point propagation and patching calls in the function bodies. Machine
-lowering was 0.519 s, bundle encoding 4.414 s, and ELF writing under 0.2 s; object
-emission was 31.482 s. A temporary attempt to skip that full optimization when
-general inlining made no changes reported 355 reoptimized and 157 unchanged
-functions, but an unpaired noisy run was slower (37.146 s `nyr_build_ir`, 39.577 s
-object emission). It was reverted: the earlier small-inline/cleanup mutations were
-not tracked, and no output equivalence or speed improvement was established. The new
-opt-in stage timers are retained to isolate these costs on future matched runs.
-
-A separate cache-disabled `--run=none` type-pipeline profile, with the finer
-HM-phase timers enabled, measured 18.862 s total: context construction 1.229 s, HM
-8.078 s, type validation 10.070 s, and codegen 11.584 s. Within HM, scheme
-collection took 0.081 s, the top-level sweep 0.405 s, inference across 8,430 schemes
-7.299 s, and semantic completion 0.293 s; only four functions were inferred during
-the first-pass top-level sweep. These counts identify whole-scheme inference—not the
-initial sweep—as the measured HM cost. Pipeline timers are nested/overlapping and
-must not be summed to reconstruct wall time. A separate 99 Hz software-clock profile
-captured 1,824 samples with no loss. It sampled repeated refinement lookup at 5.37%,
-HM environment matching at 5.59%, and module lookup/cache paths at about 8.6%
-combined. HM expression inference was distributed across several symbols. The sample
+A separate cache-disabled `--run=none` type-pipeline profile with finer HM-phase
+timers measured 18.862 s total: context construction 1.229 s, HM 8.078 s, type
+validation 10.070 s, codegen 11.584 s. Within HM, scheme collection took 0.081
+s, the top-level sweep 0.405 s, inference across 8,430 schemes 7.299 s, and
+semantic completion 0.293 s; only four functions were inferred during the
+first-pass sweep. These counts identify whole-scheme inference, not the initial
+sweep, as the measured HM cost. Pipeline timers are nested/overlapping and must
+not be summed to reconstruct wall time. A separate 99 Hz software-clock profile
+captured 1,824 samples with no loss: repeated refinement lookup 5.37%, HM
+environment matching 5.59%, and module lookup/cache paths about 8.6% combined;
+HM expression inference was distributed across several symbols. The sample
 identifies investigation targets, not independently attributable savings; no
-optimization to these paths was justified by that profile alone. A follow-up changed
+optimization was justified by that profile alone. A follow-up changed
 `ny_lookup_refine` to consult the existing name-to-definition/miss memo before
-scanning registered definitions, while invalidating the memo when the extra program,
+scanning registered definitions, invalidating the memo when extra program,
 parsed-refinement, or registry-refinement counts change. The build and
 generated-refinement fixture pass. One cache-disabled `--run=none` Pong profile
-after this change measured 18.948 s total (type validation 10.113 s, codegen 11.586
-s); its instrumented repeat measured 18.728 s total, with 8.042 s HM time on the
-validation pass and 6.7 s on the post-codegen HM pass. These are single unpaired
-observations against an earlier 18.862 s profile; they do not establish a
-compile-time speedup. The full language type suite completed with 343 passed, 0
-failed across 273 runtime and 70 error fixtures, including the generated-refinement
-and mutable-flow differentials.
+after this change measured 18.948 s total (validation 10.113 s, codegen 11.586
+s); its instrumented repeat measured 18.728 s, with 8.042 s HM on the validation
+pass and 6.7 s on the post-codegen HM pass. These are single unpaired
+observations against the earlier 18.862 s profile; they establish no speedup.
+The full language type suite completed 343 passed, 0 failed across 273 runtime
+and 70 error fixtures, including generated-refinement and mutable-flow
+differentials.
 
-A separate NYIR cleanup removed five redundant `rt_main` small-inliner scans: the
-helper walks every current instruction, only clones straight-line bodies without
-calls, and does not expose new calls for a later sweep. It also removed a duplicate
-three-pass sweep. The cache-disabled one-frame AOT run completed under the existing
-headless Weston/Vulkan compositor in 75.232 s: type validation 10.236 s, codegen
-11.713 s, object emission 31.501 s, runtime object generation 22.926 s, and link
-0.272 s. Frame 1 was reported at 1.267 s after app startup. The client output did
-not include `[gfx] Using Native Vulkan Backend`; backend selection is therefore
-unconfirmed for this run. This single-sample result does not establish a
-compile-time improvement, and the 3-second acceptance remains unmet.
-
-The `./make bench call-chain` smoke completed with exit 0. It reported NYR 699µs,
-LLVM 541µs, and C 245µs, but also reported an internal-versus-decoder
-instruction-count divergence (180,701 versus 186,499) at an equivalent `lea` whose
-operand ordering differed textually. Do not treat that output as proof of
-instruction-count parity or as a speedup measurement for the inliner edit.
+A separate NYIR cleanup removed five redundant `rt_main` small-inliner scans
+(the helper walks every current instruction, clones only straight-line bodies
+without calls, and exposes no new calls for a later sweep) and a duplicate
+three-pass sweep. The cache-disabled one-frame AOT run under the existing
+headless Weston/Vulkan compositor took 75.232 s: validation 10.236 s, codegen
+11.713 s, object emission 31.501 s, runtime object generation 22.926 s, link
+0.272 s; frame 1 was reported 1.267 s after startup. The client output did not
+include `[gfx] Using Native Vulkan Backend`, so backend selection is unconfirmed.
+This single sample establishes no improvement; the 3-second acceptance remains
+unmet. The `./make bench call-chain` smoke exited 0 and reported NYR 699 µs,
+LLVM 541 µs, C 245 µs, but also an internal-versus-decoder instruction-count
+divergence (180,701 versus 186,499) at an equivalent `lea` whose operand order
+differed textually. It is not proof of instruction-count parity or a speedup for
+the inliner edit.
 
 For output verification, a cache-disabled native `-O2` Pong AOT run with
 `NY_DEBUG=1` completed two frames and exited 0 after 52.8 s process uptime. It
-selected `[gfx] Using Native Vulkan Backend` on the AMD Radeon RX 9060 XT; the
-frame-2 capture logged nine draw calls and saved `/tmp/nytrix-pong-verify.png`. The
-image showed the court, center net, paddles, score labels, and controls.
-Auto-dump/debug overhead means this is an output check, not a clean timing sample;
-it still confirms the current compile-plus- launch is far above 3 s.
+selected `[gfx] Using Native Vulkan Backend` on an AMD Radeon RX 9060 XT; the
+frame-2 capture logged nine draw calls and saved `/tmp/nytrix-pong-verify.png`,
+showing the court, center net, paddles, score labels, and controls. Auto-dump/
+debug overhead makes this an output check, not a clean timing sample; it still
+confirms compile plus launch is far above 3 s.
 
-Matched cold-cache AOT screening runs used `--native-only -O2 --run=aot`,
+Matched cold-cache AOT screening used `--native-only -O2 --run=aot`,
 `CCACHE_DISABLE=1`, `NYTRIX_AOT_CACHE=0`, `NYTRIX_NATIVE_CACHE=0`,
-`NYTRIX_STD_CACHE=0`, `NYTRIX_STD_BC_CACHE_AUTO=0`, runtime `-O3`, and one Pong
-frame. All four selected native Vulkan and completed:
+`NYTRIX_STD_CACHE=0`, `NYTRIX_STD_BC_CACHE_AUTO=0`, runtime `-O3`, and one frame.
+All four selected native Vulkan and completed:
 
 | Compiler threads | `NYTRIX_STD_THREADS` | Wall | User CPU |
 | ---: | ---: | ---: | ---: |
@@ -1901,238 +1684,213 @@ frame. All four selected native Vulkan and completed:
 | 96 | default (8) | 52.240 s | 87.735 s |
 | 64 | 64 | 48.996 s | 76.959 s |
 
-These are single-run screening results, not a repeated speedup estimate. 64 compiler
-threads with 64 standard-loader threads were fastest by 7.9% versus 8/8, while
-consuming 21% more user CPU; 96/8 threads were slower than 8/8 despite consuming 38%
-more user CPU. Raising only standard-loader parallelism from its 8-thread default
+These are single-run screening results, not a repeated speedup estimate. 64/64
+was fastest by 7.9% versus 8/8 while using 21% more user CPU; 96/8 was slower
+than 8/8 despite 38% more user CPU. Raising only standard-loader parallelism
 saved 0.885 s at 64 compiler threads. The object profile's `clock()` values are
-process CPU time, while its `ny_ticks` subphases are elapsed time: build-IR CPU time
-was 30.347 s at 8 threads and 26.298/27.179 s at 64/96; parallel machine-lowering
-elapsed time was 0.518/0.277/0.328 s, and bundle-encoding elapsed time was
-4.505/1.054/1.071 s. The 3 s acceptance remains unmet. A final cold `64/64` run with
-`NYTRIX_PONG_FRAME_TIMES=1` took 50.927 s wall / 79.027 s user and reported frame 1
-at 1.131 s after app startup. It again selected native Vulkan; this confirms the
-first-frame timing path but does not pass the 3 s compile/link/first-frame limit.
+process CPU time, while `ny_ticks` subphases are elapsed time: build-IR CPU was
+30.347 s at 8 threads and 26.298/27.179 s at 64/96; parallel machine-lowering
+elapsed 0.518/0.277/0.328 s and bundle-encoding elapsed 4.505/1.054/1.071 s.
+The 3 s acceptance remains unmet. A final cold 64/64 run with
+`NYTRIX_PONG_FRAME_TIMES=1` took 50.927 s wall / 79.027 s user and reported frame
+1 at 1.131 s after startup; it again selected native Vulkan, confirming the
+first-frame timing path but not passing the 3 s limit.
 
-The latest cache-disabled, four-thread `--native-only -O2 --run=aot` run completed
-in 53.684 s wall (78.506 s user, 7.964 s system) on 2026-11-10. It selected native
-Vulkan and reported frame 1 at 1.460 s after startup. NYIR construction took 37.616
-s for 2,725 reachable functions; its measured sub-stages were 7.590 s reachability,
-7.304 s function lowering, 6.430 s post-inline optimization, and 4.584 s call-effect
-inference. Machine-object emission took 10.418 s, including 5.685 s bundle encoding;
-ELF writing itself was under 0.13 s across the reported writer stages. These phase
-measurements overlap with pipeline timings and are not additive. This one run
-establishes no speedup, and cold compile/link/first-frame remains far above 5 s.
+The latest cache-disabled four-thread `--native-only -O2 --run=aot` run took
+53.684 s wall (78.506 s user, 7.964 s system). It selected native Vulkan and
+reported frame 1 at 1.460 s after startup. NYIR construction took 37.616 s for
+2,725 reachable functions: 7.590 s reachability, 7.304 s function lowering,
+6.430 s post-inline optimization, 4.584 s call-effect inference. Machine-object
+emission took 10.418 s including 5.685 s bundle encoding; ELF writing was under
+0.13 s across writer stages. Phase measurements overlap and are not additive.
+This one run establishes no speedup; cold compile/link/first-frame remains far
+above 5 s.
 
-A cache-disabled `-vvvvvv --callgraph=3 --run=none` trace completed in 66.277 s and
-peaked at 1,060 MiB RSS. It loaded 146 modules (4,389,365 standard-library source
-bytes); import scanning took 0.00018 s, core loading 0.066 s, and parsing 0.348 s.
-Type validation took 9.403 s (HM inference 7.831 s); reachable-function collection
-took 7.566 s for 2,725 functions; function lowering took 8.493 s, post-inline
-optimization 23.840 s, and call-effect inference 4.345 s. The deep pass tracing
+A cache-disabled `-vvvvvv --callgraph=3 --run=none` trace took 66.277 s and
+peaked at 1,060 MiB RSS. It loaded 146 modules (4,389,365 standard-library
+source bytes); import scanning 0.00018 s, core loading 0.066 s, parsing 0.348
+s. Type validation took 9.403 s (HM inference 7.831 s), reachable-function
+collection 7.566 s for 2,725 functions, function lowering 8.493 s, post-inline
+optimization 23.840 s, call-effect inference 4.345 s. Deep pass tracing
 materially increased optimization time, so these are diagnostic figures, not
-performance baselines. The bounded graph reported 305 displayed nodes and 4,873
-edges at depth 3, with remaining edges omitted from text output. Before the trace,
-the default callgraph path used a 256-entry function buffer and failed on Pong; it
-now allocates the native 16,384-function capacity, and this run completed.
+baselines. The bounded graph reported 305 displayed nodes and 4,873 edges at
+depth 3, with remaining edges omitted. Before the trace, the default callgraph
+path used a 256-entry function buffer and failed on Pong; it now allocates the
+native 16,384-function capacity, and this run completed.
 
-The profile also exposed malformed x86-64 object layout: parallel register-
-allocation fallbacks were appended after the data tables, placing function symbols
-outside `.text` and allowing code/data overlap. The parallel builder now appends the
-tables after all fallback bodies, and the ELF writer rejects unsectioned function
-symbols outside `.text`. On the corrected output, `_vk_check_descriptor_pool` and
-`rt_load32_idx` both lie within `.text`, and the saved AOT executable selected
-Vulkan and completed a one-frame run. One earlier first-launch attempt still exited
-with signal 11 during surface startup; a GDB run, direct relaunch, and the later
-cold AOT run succeeded. That intermittent runtime crash is not root-caused by these
-measurements.
+The profile also exposed malformed x86-64 object layout: parallel
+register-allocation fallbacks appended after data tables placed function symbols
+outside `.text`, allowing code/data overlap. The parallel builder now appends
+tables after all fallback bodies, and the ELF writer rejects unsectioned
+function symbols outside `.text`. On corrected output, `_vk_check_descriptor_pool`
+and `rt_load32_idx` lie within `.text`, and the saved AOT executable selected
+Vulkan and completed a one-frame run. One earlier first-launch exited with signal
+11 during surface startup; a GDB run, direct relaunch, and later cold AOT run
+succeeded. That intermittent crash is not root-caused by these measurements.
 
-The runtime archive builder's 25 C translation units now have independent parallel
-compile tasks with distinct source/object paths; the archive is assembled in the
-original fixed unit order after they finish. A first apparent 2.295 s runtime-object
-result was only a runtime-cache restore, not a parallel compile. A controlled
-uncached comparison then used `NYTRIX_RUNTIME_OPT=3`, `NYTRIX_RUNTIME_NATIVE=0`,
-`CCACHE_DISABLE=1`, and the same harmless host warning flags (order reversed to
-create distinct runtime-cache keys):
+The runtime archive builder's 25 C translation units now have independent
+parallel compile tasks with distinct source/object paths; the archive is
+assembled in original fixed unit order. A first apparent 2.295 s runtime-object
+result was only a cache restore. A controlled uncached comparison used
+`NYTRIX_RUNTIME_OPT=3`, `NYTRIX_RUNTIME_NATIVE=0`, `CCACHE_DISABLE=1`, and the
+same harmless host warning flags with reversed order to create distinct
+runtime-cache keys:
 
 | Runtime archive compile | Threads | Runtime object | Total AOT | Object emission |
 | --- | ---: | ---: | ---: | ---: |
 | Parallel | 8 | 7.473 s | 60.135 s | 32.207 s |
 | Serial | 1 | 24.465 s | 81.501 s | 35.535 s |
 
-Both launches reported one frame. The runtime-object stage improved 3.28× in this
-paired profile; total AOT time is not a clean scaling comparison because the
+Both launches reported one frame. The runtime-object stage improved 3.28× in
+this paired profile; total AOT is not a clean scaling comparison because
 compiler and object stages also used different thread counts and varied. The
-parallel run reported 8 OpenMP regions across 2.86 million tasks; the single-thread
-control reported no OpenMP regions. This verifies the runtime archive scaling path,
-not the 3-second target. A separate cache-enabled `NY_DEBUG=1` AOT launch printed
-`[gfx] Using Native Vulkan Backend` and reported frame 1 at 1.459 s after app
-startup. This confirms the intended renderer path but is not a cold-cache timing
-result.
+parallel run reported 8 OpenMP regions across 2.86 million tasks; the serial
+control reported none. This verifies runtime archive scaling, not the 3 s
+target. A separate cache-enabled `NY_DEBUG=1` AOT launch printed `[gfx] Using
+Native Vulkan Backend` and frame 1 at 1.459 s; it confirms the renderer path but
+is not a cold-cache timing result.
 
-The final cache-disabled `-O2` build after the AOT font-registration fix took 55.971
-s: type validation 10.599 s, codegen 12.111 s, object emission 35.917 s, runtime
-object 0.0046 s, and link 0.242 s. A fresh current-source run took 56.241 s: type
-validation 10.516 s, codegen 12.122 s, object emission 36.379 s, runtime object
-0.0067 s, and link 0.249 s. The font change was a source representation correction,
-not a compiler-speed optimization; the small run-to-run difference does not
-establish a regression. Object emission remains the largest stage and the 30 s
-target remains unmet.
-
-Fresh `NYTRIX_AOT_CACHE=0` scheduler trials measured 56.622 s with four threads and
-`NYTRIX_PARALLEL_MIN_WORK=512`, 55.653 s with eight threads and the same threshold,
-and 57.144 s with eight threads and a 128-item threshold. The parallel report
-counted 65 OpenMP regions for the four-thread case and only five for the
-eight-thread cases, out of 4,967 regions overall. These are single-run screening
-results, not a matched speedup; thread/grain tuning does not close the 30 s gap.
+The final cache-disabled `-O2` build after the AOT font-registration fix took
+55.971 s: validation 10.599 s, codegen 12.111 s, object emission 35.917 s,
+runtime object 0.0046 s, link 0.242 s. A fresh current-source run took 56.241 s:
+validation 10.516 s, codegen 12.122 s, emission 36.379 s, runtime object 0.0067
+s, link 0.249 s. The font change was a source representation correction, not a
+compiler-speed optimization; the small difference does not establish a
+regression. Object emission remains the largest stage and the 30 s target
+remains unmet. Fresh `NYTRIX_AOT_CACHE=0` scheduler trials measured 56.622 s at
+four threads with `NYTRIX_PARALLEL_MIN_WORK=512`, 55.653 s at eight threads with
+the same threshold, and 57.144 s at eight threads with a 128-item threshold.
+The parallel report counted 65 OpenMP regions for four threads and five for
+eight, out of 4,967 regions overall. These are single-run screening results, not
+a matched speedup; thread/grain tuning does not close the 30 s gap.
 
 A fresh cache-disabled `-O2 --threads=4 --native-only --run=none` object-emission
-profile took 55.128 s: type validation 10.359 s, codegen 11.864 s, and object
-emission 35.477 s. `perf record -e cpu-clock:u` captured 6,155 samples with no
-losses; the recorded `ny-full` BuildID matches the executable. The largest named
-self costs were CFG construction 2.73%, imported-module re-export lookup 2.26%,
-register-segment lookup 1.97%, refinement lookup 1.92%, module lookup 1.66%,
-loop-edge coalescing 1.54%, HM inference 1.51%, and type-map initialization 1.41%.
-Two unresolved `libomp` addresses account for 10.20%; without a known-code control,
-their attribution remains unverified. Object emission is still the dominant measured
-stage, and no identified compiler function accounts for the 30-second gap. A
-member-cache key experiment using intern IDs measured 55.946 s without sampling and
-was reverted: the runs are not a matched comparison and establish no speedup.
+profile took 55.128 s: validation 10.359 s, codegen 11.864 s, emission 35.477 s.
+`perf record -e cpu-clock:u` captured 6,155 samples with no losses; the recorded
+`ny-full` BuildID matches the executable. Largest named self costs: CFG
+construction 2.73%, imported-module re-export lookup 2.26%, register-segment
+lookup 1.97%, refinement lookup 1.92%, module lookup 1.66%, loop-edge coalescing
+1.54%, HM inference 1.51%, type-map initialization 1.41%. Two unresolved
+`libomp` addresses account for 10.20%; without a known-code control their
+attribution is unverified. Object emission remains dominant, and no identified
+function accounts for the 30-second gap. A member-cache key experiment using
+intern IDs measured 55.946 s without sampling and was reverted: the runs are not
+a matched comparison and establish no speedup.
 
-A CFG label-map audit found that `cfg_label_map_init` always chooses a power-of-two
-capacity. Hash reduction and linear-probe wraparound now use `cap - 1` masks instead
-of remainder. The seven `cfg`-matched fixtures passed. Two cache-disabled AOT
+A CFG label-map audit found `cfg_label_map_init` always chose a power-of-two
+capacity; hash reduction and linear-probe wraparound now use `cap - 1` masks
+instead of remainder. Seven `cfg`-matched fixtures passed. Two cache-disabled AOT
 screenings took 50.718 s and 41.795 s wall versus the earlier 53.684 s run; the
-spread is too large to establish a repeatable gain. The latest run selected native
-Vulkan and showed the window through the X11 fallback because the isolated Weston
-socket was no longer running; it did not record a first-frame time. A recursive
-exact-function subtree-cache trial passed `modules/use` 45/45 but one AOT screening
-took 57.284 s, so that unproven memoization was discarded.
+spread is too large to establish a repeatable gain. The latest run selected
+native Vulkan and showed the window through the X11 fallback because the
+isolated Weston socket was no longer running; it recorded no first-frame time. A
+recursive exact-function subtree-cache trial passed `modules/use` 45/45 but one
+AOT screening took 57.284 s, so the unproven memoization was discarded.
 
-The x86-64 mixed-bundle parallel-encoding candidate passed focused ELF64 debug-line,
-multifunc, and call-object fixtures. Three cache-disabled Pong `-O2 --threads=4
---native-only --run=none` measurements with that candidate took 57.054 s, 57.460 s
-(`NYTRIX_PARALLEL_MIN_WORK=1`), and 56.530 s (`NYTRIX_PARALLEL_MIN_WORK=1`, parallel
-report enabled); the last reported 4,958 parallel regions and 2,856,770 tasks across
-the full compile, not specifically the object emitter. These runs do not establish a
-compile-time improvement; object emission remained about 37.5 s and the 30 s target
-remains unmet.
-
-Parallelizing NYIR-to-machine lowering in the same x86-64 bundle path also passed
-the focused ELF64 fixtures. A cache-disabled run at four threads took 56.316 s
-(10.207 s type validation, 11.723 s codegen, 37.185 s object emission); the parallel
-report counted 67 OpenMP regions. At 32 threads it took 57.611 s with 38.624 s
-object emission and only two OpenMP regions. Neither run met the target or showed a
-speedup over the current 55.128 s reference.
+The x86-64 mixed-bundle parallel-encoding candidate passed focused ELF64
+debug-line, multifunc, and call-object fixtures. Three cache-disabled Pong `-O2
+--threads=4 --native-only --run=none` measurements took 57.054 s, 57.460 s
+(`NYTRIX_PARALLEL_MIN_WORK=1`), and 56.530 s (`NYTRIX_PARALLEL_MIN_WORK=1` with
+the parallel report enabled); the last reported 4,958 parallel regions and
+2,856,770 tasks across the full compile, not specifically the object emitter.
+These establish no improvement; object emission stayed about 37.5 s and the 30 s
+target remained unmet. Parallelizing NYIR-to-machine lowering in the same bundle
+path also passed the focused ELF64 fixtures. Four threads took 56.316 s
+(10.207 s validation, 11.723 s codegen, 37.185 s emission) with 67 OpenMP
+regions; 32 threads took 57.611 s with 38.624 s emission and two regions.
+Neither met the target nor beat the current 55.128 s reference.
 
 Changing bundle encoding to retain successful functions and use the legacy
-machine/NIR fallback only for failed functions passed the focused ELF64 debug-line,
-multifunc, and call-object fixtures (5/5). A fresh cache-disabled Pong `-O2
---threads=4 --native-only --run=none` compile took 51.948 s: type validation 10.140
-s, codegen 11.655 s, and object emission 32.809 s. A second cache-disabled run at
-eight threads took 51.165 s: 10.193 s type validation, 11.707 s codegen, and 31.882
-s object emission. Instrumented bundle encoding handled 2,725 functions in 5.193 s
-at four threads and 4.117 s at eight; only `ny_fn_core.reflect._range_contains`
-required the fallback. The eight-thread output passed `readelf --lint` and `ld -r`.
-These are single-run measurements, not matched evidence of a speedup; both remain
-above the historical 30 s compile-only target and the user's 3 s
-compile/link/first-window target.
+machine/NIR fallback only for failures passed the focused ELF64 debug-line,
+multifunc, and call-object fixtures (5/5). A cache-disabled Pong `-O2 --threads=4
+--native-only --run=none` compile took 51.948 s: validation 10.140 s, codegen
+11.655 s, emission 32.809 s. A second at eight threads took 51.165 s: 10.193 s,
+11.707 s, 31.882 s. Instrumented bundle encoding handled 2,725 functions in
+5.193 s at four threads and 4.117 s at eight; only
+`ny_fn_core.reflect._range_contains` required the fallback. The eight-thread
+output passed `readelf --lint` and `ld -r`. These are single runs, not matched
+speedup evidence; both remain above the historical 30 s compile-only target and
+the 3 s compile/link/first-window target. Repeating the eight-thread compile with
+default parallel grain (not forcing `NYTRIX_PARALLEL_MIN_WORK=1`) took 50.530 s:
+validation 10.162 s, codegen 11.621 s, emission 31.529 s, bundle encoding 4.148
+s; output again passed `readelf --lint` and `ld -r`. That is only 0.635 s faster
+than the forced-grain run; neither measures launch or first frame.
 
-Repeating the eight-thread compile with the default parallel grain (rather than
-forcing `NYTRIX_PARALLEL_MIN_WORK=1`) took 50.530 s: type validation 10.162 s,
-codegen 11.621 s, and object emission 31.529 s. Bundle encoding took 4.148 s. The
-output again passed `readelf --lint` and `ld -r`. This single run is only 0.635 s
-faster than the preceding forced-grain run; neither run measures launch or first
-frame.
-
-Further instrumentation on a fresh cache-disabled eight-thread run measured 51.599 s
-total: type validation 10.413 s, codegen 11.947 s, and object emission 32.079 s.
-`nyr_build_ir` consumed 30.656 s, split into 7.091 s reachable-function collection,
-6.942 s function lowering, and 12.376 s `rt_main` lowering. The 2,725-function
-machine bundle then encoded in 4.417 s; ELF section serialization, including 154,901
-relocations, took under 0.2 s. This rules out ELF serialization as the object-time
-bottleneck. The run emitted an object only; a compile/link/launch/first-frame
-measurement is still needed against the new 3 s target.
+Further instrumentation on a fresh cache-disabled eight-thread run measured
+51.599 s total: validation 10.413 s, codegen 11.947 s, emission 32.079 s.
+`nyr_build_ir` consumed 30.656 s: 7.091 s reachable-function collection, 6.942 s
+function lowering, 12.376 s `rt_main` lowering. The 2,725-function machine
+bundle encoded in 4.417 s; ELF section serialization, including 154,901
+relocations, took under 0.2 s, ruling out ELF serialization as the object-time
+bottleneck. The run emitted an object only; compile/link/launch/first-frame
+against the 3 s target is still needed.
 
 A cache-disabled `--run=aot` run under the dedicated headless Weston Vulkan
-compositor compiled and launched Pong, then completed 60 frames in 66.377 s total.
-Its first frame was reported at 1.360 s after app startup; runtime object generation
-took 13.480 s and link took 0.294 s. Weston loaded its Vulkan renderer, but the
-client did not print `[gfx] Using Native Vulkan Backend`, so the selected client
-renderer is unconfirmed. This run misses the 3 s compile/link/first-window target by
-a wide margin and is not yet valid backend acceptance.
+compositor compiled and launched Pong, then completed 60 frames in 66.377 s;
+first frame was 1.360 s after startup, runtime object generation 13.480 s, link
+0.294 s. Weston loaded its Vulkan renderer, but the client did not print `[gfx]
+Using Native Vulkan Backend`, so client renderer selection is unconfirmed. This
+misses the 3 s target widely and is not valid backend acceptance. A subsequent
+`--run=aot` with default caches and `NY_DEBUG=1` completed one headless-Weston
+frame in 52.498 s; it reported a cached runtime object (0.004 s), object emission
+31.674 s, frame 1 at 1.412 s, and printed `[gfx] Using Native Vulkan Backend`.
+Default caches did not bring source compile near 3 s.
 
-A subsequent `--run=aot` invocation with default caches and `NY_DEBUG=1` completed
-one headless-Weston frame in 52.498 s total. It reported a cached runtime object
-(0.004 s), but object emission still took 31.674 s; frame 1 arrived 1.412 s after
-app startup. The client printed `[gfx] Using Native Vulkan Backend`. Default caches
-therefore did not bring this source compile near the 3 s end-to-end target.
+One 20-frame headless run showed 1.629 s to the first submitted/shown frame and
+roughly 200–210 ms between later frames; with no paired baseline it establishes
+neither improvement nor regression. A separate `strace` run counted 928,250
+`mincore` calls (8.796 s reported in that syscall) but slowed the app enough to
+invalidate frame timings. A non-traced CPU profile sampled `_font_builtin_create`
+under `_resolve_text_font`, identifying a path for investigation, not a proven
+cause. The bound-overflow change preserved conservative distant-address
+rejection but did not establish lower startup cost.
 
-One subsequent 20-frame headless run showed 1.629 s to the first submitted/ shown
-frame and roughly 200–210 ms between later frames. It had no paired baseline, so it
-establishes neither a startup improvement nor a regression. A separate `strace` run
-counted 928,250 `mincore` calls (8.796 s reported in that syscall) but slowed the
-app enough to invalidate its frame timings. A non-traced CPU profile sampled
-`_font_builtin_create` under `_resolve_text_font`; this identifies a path for
-further investigation, not a proven cause of the syscall count. The bound-overflow
-change preserved conservative distant-address rejection but did not establish lower
-startup cost.
+Using the same 1280×720 headless Weston Vulkan renderer with explicit native
+Vulkan backend, the pre-cache AOT executable took 1.189 s to its first shown
+frame and 14.249 s for 60 frames, with later intervals around 204–210 ms. The
+intermediate build with only the exact-pointer SSO-probe cache took 1.155 s and
+7.745 s; it had a 0.51 s interval spike at frame 49 and failed to load the Pong
+font. After fixing the AOT UI module's inferred global type, the corrected build
+took 1.194 s to first shown frame and 2.141 s for 60 frames, with later intervals
+roughly 16–18 ms, no spike, and no font-load warning. The app reported `[gfx]
+Using Native Vulkan Backend`. A 60-frame `perf stat` run also completed with
+2.190 s wall and 1.074 s task-clock, without the earlier `ZeroDivisionError`.
 
-##### Same-session Vulkan comparison after runtime fixes
+Five-frame `strace -c -e mincore` runs counted 837,099 calls before runtime
+fixes, 389,911 after the SSO-probe cache alone, and 77,524 after cache plus font
+fix. Traced timings are invalid; these counts show reduced calls in this setup,
+not elimination of `mincore` or proof that distinct-range exhaustion is
+impossible. The conservative range-capacity limit was not increased. The
+Pixman-rendered Weston variant rejected the Vulkan surface query and fell back
+to the mock renderer; it was discarded. Weston `--renderer=vulkan` and the app
+log `[gfx] Using Native Vulkan Backend` were required for valid runs. The font
+failure was in `core/os/ui/render/mod.ny`: module-level `_next_font_id` was
+inferred as dynamic and AOT lowering mishandled its increment/return path;
+declaring it `mut int` preserves the integer representation. The AOT `-O2`
+variant of `font-subset.nshape` now passes alongside native O0/O3 and LLVM
+MCJIT; the corrected app completed 60 frames with no font-load warning. The
+earlier `ZeroDivisionError` did not recur; its connection to the font bug is
+unproven.
 
-Using the same 1280×720 headless Weston Vulkan renderer and explicit native Vulkan
-backend, the pre-cache AOT executable took 1.189 s to its first shown frame and
-14.249 s for 60 frames, with later intervals around 204–210 ms. The intermediate
-build with only the exact-pointer SSO-probe cache took 1.155 s and 7.745 s; it still
-had a 0.51 s interval spike at frame 49 and failed to load the Pong font. After
-fixing the AOT UI module's inferred global type, the corrected build took 1.194 s to
-its first shown frame and 2.141 s for 60 frames; later intervals were roughly 16–18
-ms, without a spike or font-load warning. The app reported `[gfx] Using Native
-Vulkan Backend`. A 60-frame `perf stat` run also completed (2.190 s wall time, 1.074
-s task-clock), without the previously observed `ZeroDivisionError`.
+A later workload on revision `2f25b3ac` plus local changes took 128.71 s cold
+and emitted a 25,226,512-byte object. Register-segment lookup, not the earlier
+loop-edge coalescer, dominated its relevant call chain. A single-segment fast
+path retained the existing inclusive bounds check. Its sampled share fell 22.35%
+to 19.43%; profiles took 132.533 and 127.039 s with zero lost samples but some
+unresolved frames. Inline decisions and output objects were byte-identical. This
+supports a local lookup improvement, not closure of a new editor compile-time
+target or a change to inlining policy.
 
-Five-frame `strace -c -e mincore` runs counted 837,099 calls before runtime fixes,
-389,911 after the SSO-probe cache alone, and 77,524 after both the cache and font
-fix. Traced timings are invalid; these counts show reduced calls in this setup, not
-elimination of `mincore` or proof that distinct-range exhaustion is impossible. The
-conservative range-capacity limit was not increased.
-
-The Pixman-rendered Weston variant rejected the Vulkan surface query and the
-application fell back to its mock renderer; it was discarded. Weston with
-`--renderer=vulkan` and the application log `[gfx] Using Native Vulkan Backend` were
-required for valid runs. The font failure was in `core/os/ui/render/mod.ny`: the
-module-level `_next_font_id` was inferred as a dynamic value, and AOT lowering
-mishandled its increment/return path. Declaring it `mut int` preserves the integer
-representation. The AOT `-O2` variant of `font-subset.nshape` now passes alongside
-native O0/O3 and LLVM MCJIT; the corrected Pong app completed 60 frames with no
-font-load warning. The earlier `ZeroDivisionError` did not recur after the fix; its
-connection to the font bug is unproven.
-
-#### Larger editor workload
-
-A later workload on revision `2f25b3ac` plus local changes took 128.71 s cold and
-emitted a 25,226,512-byte object. Register-segment lookup, not the earlier loop-edge
-coalescer, dominated its relevant call chain. A single-segment fast path retained
-the existing inclusive bounds check. Its sampled share fell from 22.35% to 19.43%;
-profiles took 132.533 and 127.039 s, with zero lost samples but some unresolved
-frames. Inline decisions and output objects were byte-identical. This supports a
-local lookup improvement, not closure of a new editor compile-time target or a
-change to inlining policy.
-
-#### Validated editor compile
-
-The 2026-10-22 comparison used revision `f05fdb2f` plus a recorded local snapshot,
-clang 23.1.1, the existing Release configuration, and frozen compiler
-objects/dependencies. Saved executables kept concurrent workspace rebuilds out of
-the comparison. The candidate changed the range-query/peephole helpers and included
-a regression entry. The hashed source set contained the editor and library tree: 524
-files, 11,096,879 bytes. Generated core/std sources were also hashed. Both fresh
-compiler processes used the default profile, explicit `-O3`, native x86-64 ELF
-emission, and disabled standard-library/automatic bitcode caches. Source files were
-read for hashing before measurement.
-
-The expected result was a successful complete native object with identical bytes and
-inline decisions. Both compiler processes exited zero:
+The 2026-10-22 editor comparison used revision `f05fdb2f` plus a recorded local
+snapshot, clang 23.1.1, the existing Release configuration, and frozen compiler
+objects/dependencies. Saved executables kept concurrent workspace rebuilds out
+of the comparison. The candidate changed the range-query/peephole helpers and
+included a regression entry. The hashed source set contained the editor and
+library tree: 524 files, 11,096,879 bytes. Generated core/std sources were also
+hashed. Both fresh compiler processes used the default profile, explicit `-O3`,
+native x86-64 ELF emission, and disabled standard-library/automatic bitcode
+caches; source files were read for hashing before measurement. Both processes
+exited zero:
 
 | Check | Baseline | Candidate |
 | --- | ---: | ---: |
@@ -2146,9 +1904,9 @@ inline decisions. Both compiler processes exited zero:
 
 The profile interval was 2.94 times shorter. These are first-to-last sample
 intervals from one attribution pair on Linux x86-64 (EPYC 7642); other local
-compiles overlapped portions of the recordings. The inline streams matched byte for
-byte, including repeat multiplicities and the 447-duplicate compaction summary.
-Identities:
+compiles overlapped portions of the recordings. The inline streams matched byte
+for byte, including repeat multiplicities and the 447-duplicate compaction
+summary.
 
 ```text
 baseline compiler BuildID: 5ecf7136bdc0c2d7742f95a9dce8ae3ea4358640
@@ -2161,9 +1919,9 @@ both objects SHA-256: a6215bffe8bb8857627cea1a2e1c74e6d549b65abeb3ed06ad91f4183c
 both inline logs SHA-256: 005eb94e6b0b8e81befcf511fd35969e38d0e4149420ad7693dc870ac25dc6b2
 ```
 
-The per-file hashes, compiler/object identities, build commands, logs, captures, ELF
-headers, validation scripts/results, and accepted comparison are retained under
-`build/editor-compile-investigation/current/`, outside source control.
+Per-file hashes, compiler/object identities, build commands, logs, captures, ELF
+headers, validation scripts/results, and the accepted comparison are retained
+under `build/editor-compile-investigation/current/`, outside source control.
 `source-graph-inputs.json` and `generated-inputs.json` contain the input hashes;
 `comparison.json` records the accepted pair. Exact compile routes:
 
@@ -2184,17 +1942,15 @@ NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 NY_TRACE_INLINE=1 \
 ```
 
 Validation checked every sampled IP against its executable MMAP, matching ELF
-BuildID, executable load segment, symbol start, and decoded instruction boundary.
-Matching libc debug symbols resolved private functions; a `strlen@plt` sample was
-checked through its GOT relocation and IFUNC resolver. The same software clock
+BuildID, load segment, symbol start, and decoded instruction boundary. Matching
+libc debug symbols resolved private functions; a `strlen@plt` sample was checked
+through its GOT relocation and IFUNC resolver. The same software clock
 configuration put all 49 known-code control samples inside `known_hot`. A bounded
 frame-pointer control validated 245 addresses across 49 samples; the three-second
-compiler caller capture validated all 1,457 addresses across 301 samples, with zero
-loss. It connected the sustained CFG cost to serial peephole range queries. Captures
-with a replaced executable, unrelated compiler edits, or interrupted emission were
-excluded.
-
-The unchanged CFG helpers' self-sample counts fell as follows:
+compiler caller capture validated all 1,457 addresses across 301 samples, with
+zero loss. It connected sustained CFG cost to serial peephole range queries.
+Captures with a replaced executable, unrelated compiler edits, or interrupted
+emission were excluded. The unchanged CFG helpers' self-sample counts:
 
 | Symbol | Baseline | Candidate |
 | --- | ---: | ---: |
@@ -2202,361 +1958,316 @@ The unchanged CFG helpers' self-sample counts fell as follows:
 | `nyr_block_last_non_nop` | 34,859 | 1,142 |
 | `cfg_label_map_find` | 26,265 | 1,114 |
 
-The query scope now reuses topology and definition positions while reading
-predicates from the current instructions. Instruction insertion, value-count
+The query scope reuses topology and definition positions while reading
+predicates from current instructions. Instruction insertion, value-count
 changes, and storage moves invalidate automatically; branch/definition-position
-edits require explicit disposal. The serial peephole loop preserves those positions
-between inserting rewrites. Singleton intervals skip edge refinement, and parity
-candidates reject unrelated definitions before scanning uses.
-
-The new `range_query` driver compared cached and fresh results for singleton and
-contradictory bounds, integer extremes, live predicate edits, instruction insertion,
-storage movement, new value IDs, and explicit invalidation after branch retargeting.
-Its expanded mutation checks linked the exact candidate optimizer objects. All 80
-checked optimizer drivers retained their previous results: 77 passed; `gvn_pre`,
-`magic_div`, and `polyhedral_nest` failed on both the reference and candidate. An
-earlier aggregate SMT check reached its 40 s timeout on both the reference and
-initial candidate, and supplies no passing execution result. The normal `ny-full`
-build and focused range, boolean, VRP, and bounds-check drivers also passed in the
-shared checkout.
-
-#### Runtime gate investigation (2026-11-13)
+edits require explicit disposal. The serial peephole loop preserves those
+positions between inserting rewrites. Singleton intervals skip edge refinement,
+and parity candidates reject unrelated definitions before scanning uses. The new
+`range_query` driver compared cached and fresh results for singleton and
+contradictory bounds, integer extremes, live predicate edits, instruction
+insertion, storage movement, new value IDs, and explicit invalidation after
+branch retargeting. Its expanded mutation checks linked the exact candidate
+optimizer objects. All 80 checked optimizer drivers retained their previous
+results: 77 passed; `gvn_pre`, `magic_div`, and `polyhedral_nest` failed on both
+reference and candidate. An earlier aggregate SMT check reached its 40 s timeout
+on both reference and initial candidate, supplying no passing execution result.
+The normal `ny-full` build and focused range, boolean, VRP, and bounds-check
+drivers also passed in the shared checkout.
 
 `./make bench --jobs 4 --bench-run 5 --bench-warmup 2` completed all 77 fixtures
-with matching checksums and no execution failures. Its JSON classified 62 rows as
-`ok`, 14 as unstable, and `gcbench` as a fixture-budget regression. Sixty fixtures
-had at least one comparable NYR/C, LLVM/C, or NYC/C ratio above 1.2x. The EPYC 7642
-host was shared with compiler and kernel builds (load roughly 39–50, 66 GB available
-in `/tmp`). This is investigation evidence, not an idle host gate pass. The report
-precedes the scalar and wrapper changes below.
+with matching checksums and no execution failures. Its JSON classified 62 rows
+as `ok`, 14 as unstable, and `gcbench` as a fixture-budget regression. Sixty
+fixtures had at least one comparable NYR/C, LLVM/C, or NYC/C ratio above 1.2x.
+The EPYC 7642 host was shared with compiler and kernel builds (load roughly
+39–50, 66 GB available in `/tmp`). This is investigation evidence, not an idle
+host gate pass; the report precedes the scalar and wrapper changes below.
 
-The `iter` post-inline failure exposed two separate vectorizer assumptions:
-unrolling copied only instructions before the induction update, potentially omitting
-a later reduction update; vector accumulation emitted the final reduction at a named
-successor after an unlabeled exit had already observed it. Unrolling now requires
-the reduction update within its cloned prefix. The accumulator result is emitted at
-the actual exit block, preserving vectorization and dominance of exit observations.
-The vector metadata driver checks both orders and exit observations with vector
-accumulation enabled and disabled. Native and LLVM return checksum `400020000`.
-
-The C `iter` reference now uses preallocated, zero-initialized buffers, matching the
-Ny fixture's allocation scope instead of timing dynamic append growth. This changes
-the reference baseline. A focused 5+2 run reported NYR 34 µs and LLVM 27 µs; a later
-cold run under contention reported noisy 72/52 µs results. Neither focused result
-replaces the full gate. `time-profile` also remains noise-sensitive; its status has
-not been hidden or its samples discarded.
+The `iter` post-inline failure exposed two vectorizer assumptions: unrolling
+copied only instructions before the induction update, potentially omitting a
+later reduction update; vector accumulation emitted the final reduction at a
+named successor after an unlabeled exit had already observed it. Unrolling now
+requires the reduction update within its cloned prefix. The accumulator result
+is emitted at the actual exit block, preserving vectorization and dominance of
+exit observations. The vector metadata driver checks both orders and exit
+observations with vector accumulation enabled and disabled. Native and LLVM
+return checksum `400020000`. The C `iter` reference now uses preallocated,
+zero-initialized buffers, matching the Ny fixture's allocation scope instead of
+timing dynamic append growth; this changes the reference baseline. A focused 5+2
+run reported NYR 34 µs and LLVM 27 µs; a later cold run under contention reported
+noisy 72/52 µs. Neither replaces the full gate. `time-profile` remains
+noise-sensitive; its status was not hidden or its samples discarded.
 
 The `iter` reduction also exposed a loop-phi carry gap in register allocation.
 `coalesce_loop_edges` rejected any phi edge whose edge block had more than one
 predecessor, even when the copy source was defined in that edge block. The
 accumulator phi (header block 13, `v279`) therefore spilled and reloaded every
-iteration. The carry now accepts a source defined on the edge and uses that edge's
-live segment; only a source that must arrive across the branch still requires a
-unique predecessor and a terminator-ending segment. After the fix, the hot latch is
-`vpaddq ymm10, ymm10, ymm9` with the accumulator resident in `ymm10`; the only
-remaining stack traffic is the loop-exit store/reload at `[rbp-2352]`. Focused 5+2
-warm runs pinned to an idle CPU reported checksum `400020000`, NYR 357–369 µs, LLVM
+iteration. The carry now accepts a source defined on the edge and uses that
+edge's live segment; only a source arriving across the branch needs a unique
+predecessor and a terminator-ending segment. The hot latch is `vpaddq ymm10,
+ymm10, ymm9` with the accumulator resident in `ymm10`; the only remaining stack
+traffic is the loop-exit store/reload at `[rbp-2352]`. Focused 5+2 warm runs
+pinned to an idle CPU reported checksum `400020000`, NYR 357–369 µs, LLVM
 356–364 µs, C 267–275 µs, NYC 304–307 µs (NYR/C 1.30–1.38x, NYR/LLVM 1.00–1.02x).
 
-That harness ratio is not a code comparison. The same fixture built as a standalone
+That harness ratio is not a code comparison. The same fixture as a standalone
 AOT executable measured 288–307 µs against C at 266–276 µs (1.08–1.12x). Both
 kernels fault the same pages inside the timed region (about 80 in map, 78 in
 reverse, none in sum), but `ny -run` starts with about 6,300 user page faults
 against C's 260. Pre-touching 24.6 MB in the standalone AOT process raised it to
-about 342 µs and C to about 351 µs, reproducing the harness range. The extra cost is
-first-touch allocation amplified by the compiler's resident set, not generated loop
-code. The result is also cache-state sensitive: forcing a fresh stencil or JIT
-compile (`NYTRIX_STENCIL_CACHE=0` or `NYTRIX_JIT_CACHE=0`) pre-faults the heap
-during compilation and the same timed region reports about 34 µs, while the default
-warm-cache harness reports about 350 µs. Keep the cache state fixed when comparing
-and do not read the cold-compile figure as a code result.
+about 342 µs and C to about 351 µs, reproducing the harness range. The extra
+cost is first-touch allocation amplified by the compiler's resident set, not
+generated loop code. The result is cache-state sensitive: forcing a fresh
+stencil or JIT compile (`NYTRIX_STENCIL_CACHE=0` or `NYTRIX_JIT_CACHE=0`)
+pre-faults the heap during compilation and the timed region reports about 34
+µs, while the default warm-cache harness reports about 350 µs. Keep cache state
+fixed when comparing; do not read the cold-compile figure as a code result. One
+real code gap remains: the reverse loop is scalar because the affine vectorizer
+rejects negative strides (`access.stride < 0` in `loop_vectorize.c`), while C
+emits a 4-lane `vpermq` reverse load. It accounts for roughly 10 µs of the
+standalone gap and is left as a vectorizer item.
 
-One real code gap remains in this fixture: the reverse loop is scalar because the
-affine vectorizer rejects negative strides (`access.stride < 0` in
-`loop_vectorize.c`), while C emits a 4-lane `vpermq` reverse load. It accounts for
-roughly 10 µs of the standalone gap and is left as a vectorizer item.
-
-The new `phi_elim_deep_vec8` regression also showed that vector phi elimination
+The new `phi_elim_deep_vec8` regression showed that vector phi elimination
 materialized `vec8.load.i64`/`vec8.store.i64` without the `MAY_TRAP` effect bit
-required by the verifier, and that its hand-built loop used a backedge label that
-was not a CFG predecessor. Both are fixed and the driver passes.
-
-Scalar assembly review found that `3 * n` retained a constant left operand and
-missed the x86 immediate/LEA selection used by `n * 3`. Machine lowering now
-normalizes integer commutative operands without changing floating operations. Native
+required by the verifier, and that its hand-built loop used a backedge label
+that was not a CFG predecessor. Both are fixed and the driver passes. Scalar
+assembly review found `3 * n` retained a constant left operand and missed the
+x86 immediate/LEA selection used by `n * 3`. Machine lowering now normalizes
+integer commutative operands without changing floating operations. Native
 execution tests cover both operand orders, factors 3/5/9, large and negative
 constants, live inputs, and wrapping limits. The boolean peephole also removes
-positive-polarity comparisons of an exact `x & 1` result. Its regression checks
-negative inputs, integer extremes, both mask operand orders, and comparisons against
--1/0/1/2. Native `collatz` assembly uses LEA and omits the previous materialized
-equality comparison; its checksum remains `178`.
+positive-polarity comparisons of an exact `x & 1` result; its regression checks
+negative inputs, integer extremes, both mask operand orders, and comparisons
+against -1/0/1/2. Native `collatz` assembly uses LEA and omits the previous
+materialized equality comparison; its checksum remains `178`.
 
 ### Binary: scalar recurrence and register homes
 
-The canonical workload's checksum was `3360874588549334`. Its linked native caller
-inlined `branch_mix` but retained a scalar dependent recurrence, while LLVM
-vectorized independent seeds. An outlined helper's frame size was not the cost of
-that inlined timed loop.
+The canonical workload's checksum was `3360874588549334`. Its linked native
+caller inlined `branch_mix` but retained a scalar dependent recurrence, while
+LLVM vectorized independent seeds. An outlined helper's frame size was not the
+cost of that inlined timed loop. Representative counters were about 37.05
+million native instructions versus 3.67 million LLVM instructions, with similar
+branch/cache misses. An earlier cross-block eligibility relaxation raised
+instructions from 78.99 to 91.31 million despite overlapping wall-time ranges;
+it was rejected. Verified software-clock sampling and matching machine images
+connected hot home traffic to loop-carried values; invalid raw-IP profiles did
+not.
 
-Representative counters were about 37.05 million native instructions versus 3.67
-million LLVM instructions, with similar branch/cache misses. An earlier cross-block
-eligibility relaxation increased instructions from 78.99 to 91.31 million despite
-overlapping wall-time ranges; it was rejected. Verified software-clock sampling and
-matching machine images connected hot home traffic to loop-carried values; invalid
-raw-IP profiles did not.
+Retained changes: signed divide-by-two lowering used a logical shift for its 0/1
+bias, not an arithmetic 0/−1 bias; a negative-seed workload exposed native
+`3450853999197106` versus correct LLVM/C `3456948289413084`. Unique-edge carry
+required matching physical colors, an explicit carried segment, safe
+predecessor/successor structure, and no intervening clobber; a nominal color
+alone did not establish residency. SELECT-arm coalescing reused a dying arm's
+color but preserved a still-live arm; the target stopped spilling but aggregate
+runtime did not improve. Common-addend factoring preserved raw-i64 wrapping,
+SELECT guards, ownership metadata, and effect restrictions; it fired in the
+measured recurrence but did not by itself meet the 5× cap. Side-effect-free
+`SUB_I64` became eligible for if-conversion, with empty branch bridges resolved
+only via exclusive-edge checks. Physical fallthrough deletion required no other
+incoming branch: one matched 5+2 run improved 2.450→2.148 ms with static
+spills/reloads dropping 9,059/26,933→7,854/23,140, but C dispersion exceeded
+120%, so no stable NYR/C ratio followed. Constant-division scheduling admitted
+immediate divisors other than `0` and `−1`, preserving trap order and scratch
+clobbers: one 3+1 result was 1.897 ms native/388.1 µs LLVM, below the 5× cap,
+and a completed 71-fixture serial run recorded 1.91 ms/385 µs and passed its
+then-current gates. Other checksum-valid snapshots still exceeded that cap:
+2.32 ms/387 µs in a supplied 72-fixture result and 2.313 ms/384.8 µs in a
+focused 3+1 result. These are distinct checkpoints, not proof the earlier gate
+holds today.
 
-Recorded retained changes included:
-
-Signed divide-by-two lowering used a logical shift for its 0/1 bias, not an
-  arithmetic 0/−1 bias. A negative-seed workload exposed native result
-  `3450853999197106` versus the correct LLVM/C `3456948289413084`.
-Unique-edge carry required matching physical colors, an explicit carried segment,
-  safe predecessor/successor structure, and no intervening clobber. A nominal
-  register color alone did not establish residency.
-SELECT-arm coalescing reused a dying arm's color but preserved a still-live arm. The
-  target result stopped spilling; aggregate runtime did not improve.
-Common-addend factoring preserved raw-i64 wrapping, SELECT guards, ownership
-  metadata, and effect restrictions. It fired in the measured recurrence but did not
-  by itself meet the 5× native/LLVM cap.
-Side-effect-free `SUB_I64` became eligible for if-conversion. Empty branch bridges
-  were resolved only with exclusive-edge checks.
-Physical fallthrough deletion required the next block to have no other incoming
-  branch. One matched 5+2 comparison improved 2.450 to 2.148 ms, with static
-  spills/reloads falling from 9,059/26,933 to 7,854/23,140; C dispersion exceeded
-  120%, so it established no stable NYR/C ratio.
-Constant-division scheduling admitted immediate divisors other than `0` and `−1`,
-  preserving trap order and scratch-register clobbers. One 3+1 result was 1.897 ms
-  native/388.1 µs LLVM, below the 5× cap; a completed 71-fixture serial run recorded
-  1.91 ms/385 µs and passed its then-current gates.
-
-Other checksum-valid snapshots still exceeded that cap: one supplied 72-fixture
-result was 2.32 ms/387 µs, and a focused 3+1 result was 2.313 ms/384.8 µs. These are
-distinct compiler/workload checkpoints, not proof that the earlier gate result holds
-today.
-
-#### Rejected Binary experiments
-
-| Experiment | Reason not retained |
+| Rejected experiment | Reason not retained |
 | --- | --- |
-| Broad caller-saved register pool | Call-clobber and later Euler9 failures; profitable-looking local allocation did not prove safe residency. |
-| Weighted R8 homes across recognized power-of-two division | Instructions fell from 37.04 to 36.08 million, but candidate/control NYR medians were 2.400/2.383 ms. |
+| Broad caller-saved register pool | Call-clobber and later Euler9 failures; local allocation did not prove safe residency. |
+| Weighted R8 homes across recognized power-of-two division | Instructions fell 37.04→36.08 million, but candidate/control NYR medians were 2.400/2.383 ms. |
 | Loop-carried GPR opt-in | Lower elapsed time was not supported by lower cycles or instructions. |
 | Invariant-only loop-home filter | No useful change to the canonical result. |
-| Larger full-unroll budget through 18 trips | No demonstrated gain; did not make the nested seed loop vectorizable. |
-| CFG clone cap 256→512→1024 | The 512 trial remained above the cap; 1024 regressed to 3.968 ms and 11.04× native/LLVM. |
+| Larger full-unroll budget through 18 trips | No gain; did not make the nested seed loop vectorizable. |
+| CFG clone cap 256→512→1024 | 512 remained above the cap; 1024 regressed to 3.968 ms and 11.04× native/LLVM. |
 | More permissive CFG clones, including division/fallthrough shapes | Some synthetic legality tests passed, but canonical runs were unchanged or regressed to 4.26 ms. |
 | Paired recurrence unrolling | One direct result was 2.741 ms versus 2.304 ms; not a controlled gain. |
 | Reduced if-conversion budget | Branchful code was substantially slower; one sample rose to 5.34 ms. |
-| Deferring signed division to machine lowering | Extra allocator pressure; no canonical performance improvement. |
-| Literal-depth specialization or selected-multiplier source rewrites | Prevented useful inlining or regressed the unchanged workload comparison. |
-| Earlier common-add factoring probe | Approximately 2.39 versus 2.40 ms, without a repeatable gain; distinct from the later guarded retained rewrite. |
+| Deferring signed division to machine lowering | Extra allocator pressure; no canonical improvement. |
+| Literal-depth specialization or selected-multiplier source rewrites | Prevented useful inlining or regressed the unchanged workload. |
+| Earlier common-add factoring probe | About 2.39 versus 2.40 ms without a repeatable gain; distinct from the later guarded rewrite. |
 | Narrower division clobber mask | Regressed to 2.29 ms and 6.19× native/LLVM. |
-| Branch-bridge inversion | Could bypass required register-home saves; passing one checksum was insufficient. |
+| Branch-bridge inversion | Could bypass required home saves; one checksum was insufficient. |
 | Rematerialization preference, wider copy forwarding, loop-update coalescing | No sufficient canonical gain. |
 
 The remaining SIMD opportunity concerned independent seeds, not weakening the
-dependent-recurrence legality guard. Existing unroll-and-jam required a known even
-trip count, step-one induction, and a pure two-block body; larger budgets did not
-satisfy those structural requirements.
+dependent-recurrence legality guard. Existing unroll-and-jam required a known
+even trip count, step-one induction, and a pure two-block body; larger budgets
+did not satisfy those structural requirements.
 
 ### Splay and native register allocation
 
-#### Entry-address rematerialization reachability
-
-The reported C failure needs an entry-block LEA and another definition to coalesce
-to the same machine vreg. Domination alone does not make a vreg-numbered address
-fact immutable, so the x86-64 object encoder retains its unique-definition guard.
-
-That PHI-coalescing route is unreachable for current Nytrix functions:
-`mach_coalesce_copies` starts at pass 1 for non-C functions and skips synthetic PHI
-edge copies (`source_pc == UINT32_MAX`). Ordinary Nytrix coalescing also requires
-both operands to pass `mach_cc_raw_vregs`; C does not have these restrictions. This
-does not rule out other encoder bugs; revisit if synthetic edge-copy coalescing
-becomes available.
-
-`etc/tests/code/targets/x86_64/addr-local-loop-phi-x86-64.nshape` covers a pointer
-changed across a loop, including zero and one iterations; its O3 native oracle is 42
-and `@noinline` preserves the function boundary. It passes with and without only the
-unique-definition guard in an isolated compiler build, so it is coverage, not a
-reproducer of the C failure. Five cold fixtures passed: this case,
+The reported C failure needs an entry-block LEA and another definition to
+coalesce to the same machine vreg. Domination alone does not make a vreg-numbered
+address fact immutable, so the x86-64 object encoder retains its unique-
+definition guard. That PHI-coalescing route is unreachable for current Nytrix
+functions: `mach_coalesce_copies` starts at pass 1 for non-C functions and skips
+synthetic PHI edge copies (`source_pc == UINT32_MAX`). Ordinary coalescing also
+requires both operands to pass `mach_cc_raw_vregs`; C does not. Other encoder
+bugs are not ruled out; revisit if synthetic edge-copy coalescing becomes
+available. `etc/tests/code/targets/x86_64/addr-local-loop-phi-x86-64.nshape`
+covers a pointer changed across a loop, including zero and one iterations; its
+O3 native oracle is 42 and `@noinline` preserves the boundary. It passes with
+and without only the unique-definition guard in an isolated build, so it is
+coverage, not a reproducer. Five cold fixtures passed: that case,
 `addr-local-x86-64`, `addr-local-multi-x86-64`, `addr-borrow-local-x86-64`, and
 ELF64 `addr-deref`. No compiler behavior changed.
 
 The supplied early Splay row was 16.9 ms native/4.01 ms LLVM/4.53 ms C; a 5+2
-confirmation was 16.733/3.978/4.414 ms. Later safe-source checkpoints were around
-5.4 ms native, still behind C. These changes were incremental, not one matched
-end-to-end A/B.
-
-Useful retained mechanisms:
-
-Call-safe loop homes were checked per candidate, rather than rejecting an entire
-  function because some loop contained a call. Vector overlap was likewise checked
-  against each scalar candidate's live range.
-PHI copies were placed in a predecessor with a single successor instead of always
-  using an out-of-line trampoline.
-Sticky-home self stores were omitted only when the same home was already valid.
-  Direct frame-to-allocated-register loads avoided an extra RAX move.
-Scaled LEA reused resident base/index registers and loaded only missing operands. An
-  initial premature encoder return truncated a function; commit failure propagation
-  and switch-local exit corrected it.
-Small constant multiplies used direct-register LEA where legal. Negative
-  signed-32-bit immediates used the seven-byte encoding instead of ten-byte
-  `movabs`; this was a code-size result, not a demonstrated runtime gain.
-Callee-saved address homes and a restricted call-free R8 home reduced some traffic
-  without reopening broad caller-save eligibility.
+confirmation was 16.733/3.978/4.414 ms. Later safe-source checkpoints were
+around 5.4 ms native, still behind C. These were incremental changes, not one
+matched end-to-end A/B. Retained mechanisms: call-safe loop homes were checked
+per candidate rather than rejecting a function because some loop contained a
+call; vector overlap was checked against each scalar candidate's live range.
+PHI copies were placed in a predecessor with a single successor instead of an
+out-of-line trampoline. Sticky-home self stores were omitted only when the home
+was already valid; direct frame-to-allocated-register loads avoided an extra RAX
+move. Scaled LEA reused resident base/index registers and loaded only missing
+operands; an initial premature encoder return truncated a function, and commit
+failure propagation plus switch-local exit corrected it. Small constant
+multiplies used direct-register LEA where legal. Negative signed-32-bit
+immediates used the seven-byte encoding instead of ten-byte `movabs` (code size,
+not a runtime gain). Callee-saved address homes and a restricted call-free R8
+home reduced some traffic without reopening broad caller-save eligibility.
 Cross-block compare-flag reuse required identical operands, a flag-preserving
-  trampoline, unique false-edge entry, fused branches, and ended compare-result
-  lifetimes. Linked code confirmed the second compare disappeared; timing
-  differences remained within variation.
-Direct incoming-argument setup required a unique entry-block frame load, no write to
-  its slot, only fixed frame stores between eligible loads, and no incoming-register
-  clobber. Only callee-saved scalar GPR destinations were eligible; aggregate and
-  more-than-six-parameter signatures stayed excluded.
+trampoline, unique false-edge entry, fused branches, and ended compare-result
+lifetimes; linked code confirmed the second compare disappeared, but timing
+stayed within variation. Direct incoming-argument setup required a unique
+entry-block frame load, no write to its slot, only fixed frame stores between
+eligible loads, and no incoming-register clobber; only callee-saved scalar GPR
+destinations were eligible, with aggregate and more-than-six-parameter
+signatures excluded.
 
 The timed caller still reloaded five call arguments in one inspected object; the
 callee had 89 vregs, 221 segments, 40 frame slots, and a 544-byte frame. Another
-large `main` frame contained roughly 24 KB of source buffers; frame size must not be
+large `main` frame held roughly 24 KB of source buffers; frame size must not be
 equated with spills. C kept the traversal inline in its timed loop, but forced
-native inlining alone did not provide a repeatable gain.
+native inlining alone gave no repeatable gain. Default loop homes remained
+useful: a matched 5+2 control measured 5.46 ms native versus 6.88 ms with them
+disabled. A separate process counter comparison recorded 52.05 million native
+versus 13.91 million LLVM instructions, including startup and reporting.
 
-Default loop homes remained useful: a matched 5+2 control measured 5.46 ms native
-versus 6.88 ms with them disabled. A separate process counter comparison recorded
-52.05 million native versus 13.91 million LLVM instructions; those counters included
-startup and reporting.
-
-#### Rejected allocator and Splay experiments
-
-| Experiment | Finding |
+| Rejected allocator/Splay experiment | Finding |
 | --- | --- |
-| Unrestricted same-block home reuse | Focused tests missed a Binary crash. The constrained version excluded frame-loaded values and required disjoint single-segment GPR intervals. |
-| Globally relaxed cross-block colored reads | SOR returned `412269742` instead of `1725461952`, independently of the indexed-store bug. Canonical-home seeding remained necessary. |
-| Larger loop-home block ceiling | The relevant timed function was already below the existing ceiling. |
-| New carry rule for SOR row bases | Homes grew from 1,240 to 1,288 bytes and timing did not improve. |
-| Lower vector-unroll factors | No stable SOR benefit; another factor-two trial increased instructions and missed n-body's budget. |
-| Immutable parameter-home aliasing | No repeatable runtime gain, despite excluding mutated/address-taken parameters. |
-| Unproved incoming-register loads or skipped parameter-home stores | Could read a register after entry had clobbered it; removed despite passing selected checksums. |
-| Pre-allocation compare elision | Seven fewer segments, but frame grew from 544 to 576 bytes and runtime stayed about 5.35 ms. |
-| Broad pressure-aware inlining or forced `splay`/join inlining | Controls did not establish a repeatable gain; source hints were reverted. Cost approval alone did not prove an inline splice occurred. |
-| `i32` loop annotations, cached child loads, equal-immediate copies | No stable gain or no confirmed hot-path code change. |
-| Global-buffer source parity | Failed with extreme memory growth before useful timing; failure stage was not isolated. |
-| Setup/timed-loop extraction | One refactor broke checksums and rose to 699 ms; explicit-buffer variants restored checksums but overlapped baseline timing. |
-| Direct immediate-to-home stores | Focused boundaries passed, but the timed hot path did not exercise the new encoding. |
-| More caller-save/address-home candidates | Extra eligibility did not establish a safe, repeatable improvement. |
+| Unrestricted same-block home reuse | Focused tests missed a Binary crash; the constrained version excluded frame-loaded values and required disjoint single-segment GPR intervals. |
+| Globally relaxed cross-block colored reads | SOR returned `412269742` instead of `1725461952`, independently of the indexed-store bug; canonical-home seeding remained necessary. |
+| Larger loop-home block ceiling | The timed function was already below the existing ceiling. |
+| New carry rule for SOR row bases | Homes grew 1,240→1,288 bytes with no timing improvement. |
+| Lower vector-unroll factors | No stable SOR benefit; a factor-two trial increased instructions and missed n-body's budget. |
+| Immutable parameter-home aliasing | No repeatable gain despite excluding mutated/address-taken parameters. |
+| Unproved incoming-register loads or skipped parameter-home stores | Could read a register after entry clobbered it; removed despite passing checksums. |
+| Pre-allocation compare elision | Seven fewer segments, frame 544→576 bytes, runtime still about 5.35 ms. |
+| Broad pressure-aware inlining or forced `splay`/join inlining | Controls showed no repeatable gain; source hints reverted, and cost approval did not prove an inline splice. |
+| `i32` loop annotations, cached child loads, equal-immediate copies | No stable gain or confirmed hot-path change. |
+| Global-buffer source parity | Failed with extreme memory growth before useful timing; failure stage not isolated. |
+| Setup/timed-loop extraction | One refactor broke checksums and rose to 699 ms; explicit buffers restored checksums but overlapped baseline timing. |
+| Direct immediate-to-home stores | Focused boundaries passed, but the hot path did not exercise the encoding. |
+| More caller-save/address-home candidates | No safe, repeatable improvement. |
 
 The earlier compare-residency regression exercised both outcomes of an emitted
 integer comparison. A path-only temporary-file descriptor leak also affected
-benchmark reporting; closing those descriptors and serializing timed workers were
-harness fixes, not Splay optimizations.
+benchmark reporting; closing those descriptors and serializing timed workers
+were harness fixes, not Splay optimizations.
 
 ### Vectorization, floating point, and addressing
 
-#### SOR
-
-Affine row-base splitting moved `(row + column + displacement) << scale` toward an
-invariant row pointer plus scaled column. Indexed-address folding then recognized
-memory uses correctly: `STORE.dst` was an address use, not a vreg definition. Linked
-objects confirmed direct SIB loads/stores, while readable text assembly still showed
-extra temporaries. Five row-base home reloads and the outer grid-swap recurrence
-remained distinct costs.
-
-Later four-wide f64 loops used AVX2 arithmetic but still spilled scalar address and
-induction values. Permitting callee-saved scalar homes across vector instructions
-changed two NYR medians from a 3.41 ms baseline to 3.17 and 3.14 ms; C was unstable.
-Hoisting horizontal neighbor offsets in the benchmark source changed a 3.269 ms row
-to 2.871 and 2.889 ms, but this was a source change with noisy follow-up results,
-not a stable compiler ratio improvement. Reducing the vector-unroll cap from eight
-to four or two did not help.
-
-LICM later hoisted address-producing additions before vector rewriting and corrupted
-the checksum (`5515142` versus `1725461952`). Keeping an add in its loop when its
-use chain feeds a scalar/vector address restored correctness. The fixture gained an
-explicit known-checksum assertion.
-
-#### Vector and loop legality
+Affine row-base splitting moved `(row + column + displacement) << scale` toward
+an invariant row pointer plus scaled column. Indexed-address folding recognized
+`STORE.dst` as an address use, not a vreg definition. Linked objects showed
+direct SIB loads/stores, while text assembly still showed extra temporaries;
+five row-base home reloads and the outer grid-swap recurrence remained distinct
+costs. Later four-wide f64 loops used AVX2 arithmetic but spilled scalar address
+and induction values. Callee-saved scalar homes across vector instructions
+changed two NYR medians from a 3.41 ms baseline to 3.17 and 3.14 ms; C was
+unstable. Hoisting horizontal neighbor offsets in the benchmark source changed
+a 3.269 ms row to 2.871 and 2.889 ms, but this was a source change with noisy
+follow-up, not a stable compiler ratio. Reducing the vector-unroll cap from 8 to
+4 or 2 did not help. LICM later hoisted address-producing additions before
+vector rewriting and corrupted the checksum (`5515142` versus `1725461952`);
+keeping an add in its loop when its use chain feeds a scalar/vector address
+restored correctness, and the fixture gained an explicit known-checksum
+assertion.
 
 Four-lane f64 used a 32-byte machine representation: x86-64 emitted VEX
-  instructions; AArch64 used paired NEON operations. Strict reductions retained
-  ordered rounding. Machine width, storage homes, and induction stride had to agree;
-  a four-lane operation advancing by two was a real correctness bug.
-PBKDF2's late-vectorization corruption (`2991`→`3978`) came from reduction PHI
-  handling. The dedicated correction and containment checks were distinct from
-  earlier speculative rotate/BCE explanations.
-Guard-derived ranges required explicit predecessor/update proofs. Coverage included
-  strict/inclusive bounds, step-two traversal, matching multi-latch updates,
-  overflow, bypass edges, unknown-effect calls, and overlapping stores. Unsupported
-  or conflicting shapes retained scalar execution.
-Restricted unswitching remapped SSA/exit PHIs and labeled cloned fallthrough exits,
-  preserving unselected traps. Multiple distinct exits remained rejected.
-  Interchange admitted only independently proven private, injective, in-bounds
-  stores and invariant stack reads; overlap/overflow cases remained rejected. These
-  were legality improvements without measured runtime claims.
-DGEMM's FPR-home dataflow modeled scalar-conversion clobbers per block, rather than
-  rejecting all homes because a conversion occurred elsewhere.
-A later PBKDF2 failure reported missing `vec4.reduce_add.i64` emission. An attempted
-  scalar emitter/four-word-home change still crashed and was reverted. The
-  contemporaneous BCE-matrix crash was not thereby fixed.
-
-#### Address and ABI correctness
+instructions, AArch64 paired NEON operations. Strict reductions retained ordered
+rounding. Machine width, storage homes, and induction stride had to agree; a
+four-lane operation advancing by two was a real correctness bug. PBKDF2's
+late-vectorization corruption (`2991`→`3978`) came from reduction PHI handling;
+the dedicated correction and containment checks were distinct from earlier
+speculative rotate/BCE explanations. Guard-derived ranges required explicit
+predecessor/update proofs, with coverage of strict/inclusive bounds, step-two
+traversal, matching multi-latch updates, overflow, bypass edges, unknown-effect
+calls, and overlapping stores; unsupported or conflicting shapes retained scalar
+execution. Restricted unswitching remapped SSA/exit PHIs and labeled cloned
+fallthrough exits, preserving unselected traps; multiple distinct exits remained
+rejected. Interchange admitted only independently proven private, injective,
+in-bounds stores and invariant stack reads; overlap/overflow cases remained
+rejected. These were legality improvements without runtime claims. DGEMM's
+FPR-home dataflow modeled scalar-conversion clobbers per block rather than
+rejecting all homes because a conversion occurred elsewhere. A later PBKDF2
+failure reported missing `vec4.reduce_add.i64` emission; an attempted scalar
+emitter/four-word-home change still crashed and was reverted, and the
+contemporaneous BCE-matrix crash was not fixed.
 
 | Failure | Recorded correction or limit |
 | --- | --- |
-| Forwarded RAX result followed by a same-home no-op copy | Do not treat the no-op as a consumer that makes the canonical home unnecessary. |
+| Forwarded RAX result followed by a same-home no-op copy | Do not treat the no-op as a consumer making the canonical home unnecessary. |
 | f64 loads ignored a pending RAX address | Use the same validated scalar-address load path as integer loads. |
 | Indexed integer store staged its value in R10, then address formation clobbered R10 | Preserve the value while resolving the full destination address. |
-| Vector store ignored a pending SIB address | Resolve the complete memory address for ordinary and fast-path V256 stores. |
-| Adjacent single-use ADD/load | Capture the address operands and omit the home only when later uses/live-out do not require it. |
-| Runtime ABI tables failed binary search | Place `rt_set_len_raw` in lexical order in both declaration and argument-contract tables. |
+| Vector store ignored a pending SIB address | Resolve the complete address for ordinary and fast-path V256 stores. |
+| Adjacent single-use ADD/load | Capture address operands and omit the home only when later uses/live-out do not require it. |
+| Runtime ABI tables failed binary search | Place `rt_set_len_raw` in lexical order in declaration and argument-contract tables. |
 | AVR prologue overwrote incoming argument bytes in `r16:r17` | Use caller-clobbered `r26:r27` for stack-pointer temporaries before spilling arguments. |
 | Broad immediate arithmetic lowering | Silent Binary/Splay/SSE miscompiles outweighed focused successes; reverted. |
-| Profile-driven block layout with synthetic steps but zero positive block heat | Leave the function unchanged; synthetic profitability was not real layout evidence. |
+| Profile-driven block layout with synthetic steps but zero positive block heat | Leave the function unchanged; synthetic profitability was not layout evidence. |
 
 ### Memory facts, bounds checks, and scalar optimization
 
 GVN reused dominating reads of the same local slot only without an intervening
-  write. Proven non-local reads could survive unrelated local stores; address-taken
-  locals still required alias safety. Effect-only calls such as clock reads were not
-  automatically writes to existing memory. JSON parser byte loads fell from four to
-  two in the relevant optimized shape; manually caching the byte in source did not
-  establish a separate runtime win.
-Append-length reuse needed canonical declaration identity and the same-local
-  assignment lineage. Handling only one lowered call spelling missed the fast path.
-  BCE reused a single CFG/dominator map across its proof families.
-Append and typed-buffer setter results supplied logical may-alias lineage, not
-  permission to assume every handle identical. Store reachability and freshness
-  still mattered. Returned-borrow provenance followed one unique trusted argument
-  only when effects excluded invalidating writes.
-A successful runtime assertion supplied its true-edge lower bound only if
-  dominance/control flow proved execution. Function-local allocation roots enabled
-  proofs that observable module-global cells could not support. Adding `list<int>`
-  to an empty list alone did not improve the benchmark.
-Moving asserted buffers into helpers changed the source baseline. Historical
-  matrix/sort results after that change cannot be presented as a compiler-only A/B.
-  A remaining nested non-affine address rejection was separate from the removed
-  bounds check.
-Counted zero-fill rewriting required a nonnegative, bounded, non-overflowing byte
-  range and preserved observable writes. It did not justify weakening alias or trap
-  checks.
-The `escape-loop` kernel eliminated allocation, checks, and the loop while
-  preserving checksum `499999500000`; both backends measured below 1 µs. A guarded
-  affine reduction also resolved the earlier `inline` loop gap.
-Recursive constant evaluation restored `gcbench` to approximately 369 µs native/374
-  µs LLVM/33 µs C. That did not establish safety for broader recursion, side
-  effects, malformed flow, or exhausted evaluation budgets.
+write. Proven non-local reads could survive unrelated local stores; address-taken
+locals still required alias safety. Effect-only calls such as clock reads were
+not automatically writes to existing memory. JSON parser byte loads fell from
+four to two in the relevant optimized shape; manually caching the byte in source
+did not establish a separate runtime win. Append-length reuse needed canonical
+declaration identity and the same-local assignment lineage; handling only one
+lowered call spelling missed the fast path. BCE reused a single CFG/dominator map
+across its proof families. Append and typed-buffer setter results supplied
+logical may-alias lineage, not permission to assume every handle identical;
+store reachability and freshness still mattered. Returned-borrow provenance
+followed one unique trusted argument only when effects excluded invalidating
+writes. A successful runtime assertion supplied its true-edge lower bound only
+if dominance/control flow proved execution. Function-local allocation roots
+enabled proofs that observable module-global cells could not support. Adding
+`list<int>` to an empty list alone did not improve the benchmark.
+
+Moving asserted buffers into helpers changed the source baseline, so historical
+matrix/sort results after that change cannot be presented as a compiler-only
+A/B. A remaining nested non-affine address rejection was separate from the
+removed bounds check. Counted zero-fill rewriting required a nonnegative,
+bounded, non-overflowing byte range and preserved observable writes; it did not
+justify weakening alias or trap checks. The `escape-loop` kernel eliminated
+allocation, checks, and the loop while preserving checksum `499999500000`; both
+backends measured below 1 µs. A guarded affine reduction also resolved the
+earlier `inline` loop gap. Recursive constant evaluation restored `gcbench` to
+about 369 µs native/374 µs LLVM/33 µs C, without establishing safety for broader
+recursion, side effects, malformed flow, or exhausted evaluation budgets.
 Havlak's promoted integer reads were raw i64, but equality had reached a dynamic
-  tagging boundary. The focused correction addressed that mismatch; passing a
-  reduced case alone had not established the full fixture fixed.
+tagging boundary; the focused correction addressed that mismatch, while passing
+a reduced case alone had not established the full fixture fixed.
 
 ### Runtime arithmetic and allocation
 
-#### BigInt and BigFloat
-
-Similar NYR/LLVM times pointed to shared runtime arithmetic and immutable allocation
-APIs, rather than only native code generation. One old fixture version counted
-166,814 allocations and 11,207 runtime calls; a later checksum-matched run counted
-158,116 allocations and no reallocations. Those counts belong to different
-checkpoints.
-
-A marked execution interval identified these sampled self shares:
+Similar NYR/LLVM times pointed to shared runtime arithmetic and immutable
+allocation APIs, not only native code generation. One old BigInt fixture version
+counted 166,814 allocations and 11,207 runtime calls; a later checksum-matched
+run counted 158,116 allocations and no reallocations. Those counts belong to
+different checkpoints. A marked execution interval produced these sampled self
+shares:
 
 | Component | Share |
 | --- | ---: |
@@ -2565,65 +2276,54 @@ A marked execution interval identified these sampled self shares:
 | Knuth division | 7.07% |
 | `__udivti3` | 3.34% |
 
-Only 509 of 2,927 samples fell inside that interval; zero samples were lost. Earlier
-whole-command sampling mostly measured compilation and was unsuitable for choosing
-an arithmetic change. A separate single scaled probe put BigInt square root at 52.5
-ms, BigFloat add/subtract at 46.7/36.8 ms, BigInt power at 32.6 ms, and BigInt
-add/subtract at 31.0/32.3 ms. These were diagnostic operation timings, not stable
-baselines.
+Only 509 of 2,927 samples fell inside that interval; zero samples were lost.
+Earlier whole-command sampling mostly measured compilation and was unsuitable
+for choosing an arithmetic change. A separate single scaled probe put BigInt
+square root at 52.5 ms, BigFloat add/subtract at 46.7/36.8 ms, BigInt power at
+32.6 ms, and BigInt add/subtract at 31.0/32.3 ms; these were diagnostic timings,
+not stable baselines.
 
-Recorded retained changes:
+Retained changes: exact-u64 BigFloat construction wrote directly into the final
+object when precision sufficed; two A/B pairs showed about 2.7% fewer
+instructions, but cycles and wall times were inconsistent, so no wall-speedup
+claim followed. BigFloat square root reduced Newton steps from `4 +
+floor(log2(precision))` to `1 + ceil(log2(precision))`, keeping a guard step:
+12→9 steps at 256 bits. Ordinary-precision division used stack scratch, larger
+inputs retained heap scratch, and exact division by two folded into the result
+exponent. Four candidate medians were 33.45–34.50 ms native versus a 37.82 ms
+preceding baseline; spread and C variability limited the comparison. Focused
+boundary/differential/padding checks passed after fusion; the earlier 2,027-test
+cold pass preceded that final fusion. Redundant two-limb multiplication probing
+was removed and division reused its validated divisor-limb view; five
+alternating pairs had medians 756.56→727.67 ms, all checksum `1968365`, with an
+overlapping benchmark making the 3.8% difference provisional. Nine focused cold
+rows passed, not a full cold suite. Rejected experiments included direct
+short-division result writes, power-of-two quotient shifts/remainder masks,
+replacing division with a source shift, and removing a wrapper zero check. One
+alternating shift/mask comparison was slower despite 56 retained arithmetic
+boundary cases. A multiply/divide fusion pattern could not match: NYIR called
+module wrappers with expanded three-word `any` arguments, not inner runtime
+helpers. The unused helper and pass were removed. No trial established an
+arithmetic gain.
 
-Exact-u64 BigFloat construction wrote directly into the final object when precision
-  sufficed. Two A/B pairs showed about 2.7% fewer instructions, but cycles and wall
-  times were inconsistent; no wall-speedup claim followed.
-BigFloat square root reduced Newton steps from `4 + floor(log2(precision))` to
-  `1 + ceil(log2(precision))`, keeping a guard step: 12→9 steps at 256 bits.
-  Ordinary-precision division used stack scratch, larger inputs retained heap
-  scratch, and exact division by two folded into the result exponent. Four candidate
-  medians were 33.45–34.50 ms native versus a 37.82 ms preceding baseline; spread
-  and C variability limited the comparison. Focused boundary/differential/padding
-  checks passed after fusion; the earlier 2,027-test cold pass preceded that final
-  fusion.
-Redundant two-limb multiplication probing was removed, and division reused its
-  validated divisor-limb view. Five alternating pairs had medians 756.56→727.67 ms,
-  all checksum `1968365`; an overlapping benchmark made the 3.8% difference
-  provisional. Nine focused cold rows passed, not a full cold suite.
-
-Rejected arithmetic experiments included direct short-division result writes,
-power-of-two quotient shifts/remainder masks, replacing division with a source
-shift, and removing a wrapper zero check. One alternating shift/mask comparison was
-slower despite 56 retained arithmetic boundary cases. A multiply/divide fusion
-pattern could not match: NYIR called module wrappers with expanded three-word `any`
-arguments, not the inner runtime helpers. The unused helper and pass were removed.
-None of these trials established an arithmetic gain.
-
-#### Typed-buffer and allocation lookup
-
-| Retained change | Matched result | Limit |
+| Retained typed-buffer/allocation change | Matched result | Limit |
 | --- | --- | --- |
-| Compact typed-buffer header read after an epoch-valid provenance-cache hit | Seven interleaved heapsort runs: native process median 98.330→15.220 ms; LLVM 85.664→4.032 ms | All other handles retained the resolver and sanitizer/header checks. This was process wall time, not startup subtraction. |
+| Compact typed-buffer header read after an epoch-valid provenance-cache hit | Seven interleaved heapsort runs: native process median 98.330→15.220 ms; LLVM 85.664→4.032 ms | Other handles retained resolver and sanitizer/header checks; process wall time, not startup subtraction. |
 | Most-recent thread-local allocation-dedup range before eight-entry search | Eleven interleaved BigInt runs: 130.534→126.995 ms; retired instructions 440.425→430.703 million | About 2.2% fewer instructions; did not close the GMP gap. |
 
 Widening the length shortcut to generic `rt_len` regressed Splay and was removed.
-Rematerialization/forward-edge residency experiments were also removed; canonical
-homes remained required unless every edge and clobber was proved. LLVM spill-weight
-source was studied under its license, but no code was copied into these independent
-runtime changes.
-
-#### Dictionaries and strings
-
-Native dictionary handles already registered with the runtime avoided repeated
+Rematerialization/forward-edge residency experiments were also removed;
+canonical homes remained required unless every edge and clobber was proved. LLVM
+spill-weight source was studied under its license, but no code was copied. Native
+dictionary handles already registered with the runtime avoided repeated
 validation. Resize thresholds were cached until capacity changed; empty first
 integer-key probes bypassed grouped collision search. Collisions, overwrite, and
-growth retained the existing behavior.
-
-Word counting moved from split-list construction to token spans, avoiding
-repeated-key allocation. Counts used the dynamic integer representation: raw `1`
-otherwise collided with tagged zero, losing singleton words. Semantic coverage
-included whitespace, repetition, growth, long keys, empty input, and non-string
-input. An earlier two-pass tokenizer removed an intermediate token list without
-demonstrating a material gain on its own.
+growth retained existing behavior. Word counting moved from split-list
+construction to token spans, avoiding repeated-key allocation. Counts used the
+dynamic integer representation: raw `1` collided with tagged zero, losing
+singleton words. Semantic coverage included whitespace, repetition, growth, long
+keys, empty input, and non-string input. An earlier two-pass tokenizer removed
+an intermediate token list without demonstrating a material gain on its own.
 
 ### Correctness and verification history
 
@@ -2635,59 +2335,53 @@ revision.
 | Early cold native parity | 1,122/1,131 passed; later 1,185/1,191, then 1,189/1,191. |
 | Subsequent focused fixes | 1,192/1,192 passed, including 61 benchmark correctness fixtures; not a performance result. |
 | Untyped closure ABI | A function's own result representation had to prevail over a later call site's raw inference. |
-| Sound-source reachability | False global-name resolutions inflated the graph from the intended workload; targeted resolution reduced reachable functions 973→262→148 and avoided the former 8 GiB failure. |
-| Sound emission and execution | Emission completed at 220 MiB; the cold matrix covered NYIR VM, MCJIT, ORC, native, and native+VM. Physical 440 Hz playback and a 144,044-byte/72,000-frame WAV were separately checked. |
+| Sound-source reachability | False global-name resolutions inflated the graph; targeted resolution reduced reachable functions 973→262→148 and avoided the former 8 GiB failure. |
+| Sound emission and execution | Emission completed at 220 MiB; the cold matrix covered NYIR VM, MCJIT, ORC, native, and native+VM. Physical 440 Hz playback and a 144,044-byte/72,000-frame WAV were checked. |
 | Sound numeric specialization | Concrete f64 `poly_blep` avoided a dynamic representation error; a separate old integer-output discrepancy was not a new sound-memory failure. |
-| Diagnostic re-lowering | JSON-parser pass dumping crashed although normal execution passed; re-lowering lifetime/output handling was corrected. Diagnostic output volume remained a separate issue. |
+| Diagnostic re-lowering | JSON-parser pass dumping crashed although normal execution passed; re-lowering lifetime/output handling was corrected; output volume remained a separate issue. |
 | Four-lane f64 and runtime contracts | Focused drivers passed; the full optimizer sweep reached `tv_smt_semantics` and timed out, so no complete sweep pass was established. |
 | Later vector campaign | Binary ratios passed, but BCE-matrix and PBKDF2 crashed before samples; the campaign failed overall. |
-| Isolated reported benchmark mismatches | Several nqueens, float comparison, Fannkuch, FFT, knucleotide, and Euler9 failures did not reproduce in focused checks; unstable rows stayed unaccepted. A passing rerun was not a newly identified fix. |
-| Platform audio and list/cache regressions | Selected cold rows passed; no new audio cause or full-suite fix was inferred. |
+| Isolated reported benchmark mismatches | Several nqueens, float comparison, Fannkuch, FFT, knucleotide, and Euler9 failures did not reproduce in focused checks; unstable rows stayed unaccepted; a passing rerun was not a new fix. |
+| Platform audio and list/cache regressions | Selected cold rows passed; no new audio cause or full-suite fix inferred. |
 
-ORC perf-map support used object-symbol sizes and loaded addresses. Missing sizes,
-unresolved mappings, or invalid raw sample IPs could not be repaired by accepting a
-profiler's symbol label. A code dump established what was emitted, not which
-instruction consumed time.
+ORC perf-map support used object-symbol sizes and loaded addresses. Missing
+sizes, unresolved mappings, or invalid raw sample IPs could not be repaired by
+accepting a profiler's symbol label. A code dump established what was emitted,
+not which instruction consumed time.
 
 ### Benchmark validity and coverage
 
-#### Harness and reference corrections
-
 Timed fixtures/routes became serial and stopped inheriting ordinary test
-  concurrency. A 66-worker run on a 96-thread host overlapped another suite and
-  exhausted memory; its timings were not accepted. Explicit comparison worker
-  settings did not make overlapping timing valid.
-Native timing used the compiler's nanosecond phase marker. C wrapper timing covered
-  its whole measured body; timer-floor fallback was reported, not silently compared
-  as equivalent kernel time. Progress updates did not become samples.
-Matrix validation changed from a weak positive accumulator check to the exact
-  checksum `1105103687680`; BCE matrix used `49995000`. A plausible nonzero result
-  was insufficient for transformation acceptance.
-BigInt references precomputed the same square-root operand. The C floating workload
-  changed from `double` to 256-bit GMP, and Ny timing expanded to include setup and
-  final power/checksum work. Earlier ratios were superseded; explicit C teardown
-  remained a difference.
-Fannkuch's attempted 32-bit parity changed direct raw accesses into generic helper
-  calls, regressing native to 9.81 s/72.3 billion instructions. It was reverted. A
-  separate vector-disjoint home comparison measured 282 ms versus 400 ms
-  forced-stack, with 24% fewer instructions.
-Thread-ring aggregate misses did not establish false sharing. `perf c2c` sampling
-  was denied by host permissions; that was missing evidence, not zero HITM and not
-  justification for speculative mutex padding.
-Completed campaign results and incomplete attempts stayed distinct. The historical
-  71-fixture pass did not validate a later interrupted 72-fixture attempt or close
-  subsequently reported per-fixture failures.
-Build integration preserved explicit `NYTRIX_CORE_PATH` and the supported legacy
-  CMake input instead of overwriting configured core-bundle paths.
-
-#### Workload coverage
+concurrency. A 66-worker run on a 96-thread host overlapped another suite and
+exhausted memory; its timings were not accepted. Explicit worker settings did
+not make overlapping timing valid. Native timing used the compiler's nanosecond
+phase marker. C wrapper timing covered the whole measured body; timer-floor
+fallback was reported, not silently compared as equivalent kernel time. Progress
+updates did not become samples. Matrix validation changed from a weak positive
+accumulator check to exact checksum `1105103687680`; BCE matrix used `49995000`.
+A plausible nonzero result was insufficient for transformation acceptance.
+BigInt references precomputed the same square-root operand. The C floating
+workload changed from `double` to 256-bit GMP, and Ny timing expanded to include
+setup and final power/checksum work; earlier ratios were superseded, with
+explicit C teardown still a difference. Fannkuch's attempted 32-bit parity
+changed direct raw accesses into generic helper calls, regressing native to 9.81
+s/72.3 billion instructions; it was reverted. A separate vector-disjoint home
+comparison measured 282 ms versus 400 ms forced-stack, with 24% fewer
+instructions. Thread-ring aggregate misses did not establish false sharing;
+`perf c2c` sampling was denied by host permissions, which is missing evidence,
+not zero HITM or justification for speculative mutex padding. Completed campaign
+results and incomplete attempts stayed distinct: the historical 71-fixture pass
+did not validate a later interrupted 72-fixture attempt or close subsequently
+reported per-fixture failures. Build integration preserved explicit
+`NYTRIX_CORE_PATH` and the supported legacy CMake input instead of overwriting
+configured core-bundle paths.
 
 The [Goose benchmark
 design](https://github.com/aardappel/goose/blob/master/bench/design.md) and
 [results](https://raw.githubusercontent.com/aardappel/goose/refs/heads/master/bench/results.md)
-informed coverage questions, not borrowed performance claims or copied source. Its
-useful distinction was flat controls versus allocation, layout, mutation, and
-teardown at several working-set sizes.
+informed coverage questions, not borrowed performance claims or copied source.
+The useful distinction was flat controls versus allocation, layout, mutation,
+and teardown at several working-set sizes.
 
 | Public fixture | Question covered |
 | --- | --- |
@@ -2699,327 +2393,179 @@ teardown at several working-set sizes.
 | [Known-vocabulary scan](../../../etc/tests/bench/string/word-frequency-scan.nshape) | Allocation/token scanning and a small counting kernel without hashing. |
 
 The repeat fixture's earlier full byte-scan form measured 441/391/12.8 ms and
-checksum `1122000000`; that was a memory-scan finding, not a string-copy comparison.
-Early general word counting measured 1.75 s/1.84 s/3.78 ms before the later
-direct-counting result, so its old hundreds-fold gap should not be presented as a
-current hotspot.
-
-Distinct remaining coverage questions included mixed variable-payload records, an
-allocation-heavy S-expression arena, bounded LRU mutation, incremental adjacency
-construction, and cache-sized image blur. Flat scans, list growth, binary trees,
-numeric kernels, particles, and the fixtures above already covered several related
-shapes. Varying vocabulary cardinality/token length, separating
-build/query/teardown, and comparing aliased/non-aliased kernels would answer
-additional questions; a list of benchmark names alone would not.
+checksum `1122000000`; that was a memory-scan finding, not a string-copy
+comparison. Early general word counting measured 1.75 s/1.84 s/3.78 ms before
+the later direct-counting result, so its old hundreds-fold gap is not a current
+hotspot. Distinct remaining coverage questions include mixed variable-payload
+records, an allocation-heavy S-expression arena, bounded LRU mutation,
+incremental adjacency construction, and cache-sized image blur. Flat scans, list
+growth, binary trees, numeric kernels, particles, and the fixtures above already
+cover related shapes. Varying vocabulary cardinality/token length, separating
+build/query/teardown, and comparing aliased/non-aliased kernels would answer more
+questions; a list of benchmark names alone would not.
 
 ### Rejected constant-division scheduling trial
 
-A scheduler latency estimate that treated positive power-of-two signed divisors as
-short operations was built and screened against the single `binary` fixture. The
-11-sample partial run reported 2.00 ms NYR, 322 us LLVM, and 6.20x NYR/LLVM; the
-fixture completed successfully. This was not a matched before/after comparison, used
-GCC for the host-C route, and did not pass the unchanged 5.00x gate. The source
-change was reverted; retain the result as a rejected, inconclusive experiment. Raw
-report: `/tmp/ny-binary-divlatency.json`.
+A scheduler latency estimate treating positive power-of-two signed divisors as
+short operations was screened against the single `binary` fixture. The
+11-sample partial run reported 2.00 ms NYR, 322 µs LLVM, and 6.20x NYR/LLVM; the
+fixture completed successfully. This was not a matched before/after comparison,
+used GCC for the host-C route, and did not pass the unchanged 5.00x gate. The
+source change was reverted; retain it as a rejected, inconclusive experiment.
+Raw report: `/tmp/ny-binary-divlatency.json`.
 
-### Binary runtime diagnosis (2026-11-03)
-
-#### Timed-object inspection
+### Binary runtime diagnosis
 
 The exact native-tier AOT object was emitted from cached benchmark source and
-inspected with `objdump`; the relevant function is `ny_fn_branch_mix`. The current
-loop carries `i`, `acc`, and `x` in callee-saved registers. The signed divide-by-two
-result (`v36`, machine segment `[19,27]`) has no allocated color because of register
-pressure and is stored/reloaded at `-0x150(%rbp)` each iteration. Several
-short-lived branch values also spill; updated `x` is already written directly into
-`%r15`, so the earlier two-spill description is stale. `--emit=asm` is a generic
-listing and is not the timed object.
+inspected with `objdump`; the relevant function is `ny_fn_branch_mix`. The loop
+carries `i`, `acc`, and `x` in callee-saved registers. The signed divide-by-two
+result (`v36`, machine segment `[19,27]`) has no allocated color because of
+register pressure and is stored/reloaded at `-0x150(%rbp)` each iteration.
+Several short-lived branch values also spill; updated `x` is written directly
+into `%r15`, so the earlier two-spill description is stale. `--emit=asm` is a
+generic listing, not the timed object. A SELECT-arm elision prototype was
+rejected after the relinked object showed no instruction change. The
+`select-flag-preservation` runtime fixture passed all four variants during that
+experiment, but no performance gain was established. A pinned 11-sample matched
+run used native x86-64, opt tier, `-O3`, one warm-up, and CPU 12. NYR
+median/min/max were 1.756597/1.728875/1.828070 ms; LLVM 0.327349 ms, host C
+0.568908 ms, NYC 8.365809 ms. All four checksums were `3360874588549334`.
+NYR/LLVM was 5.37x, above the 5.00x ceiling. A prior 11-sample run on another
+CPU reported 1.750 ms NYR, 0.325 ms LLVM, and 0.558 ms C as supporting data, not
+a strict same-core comparison. The next optimization should reduce or split the
+short-lived divide result's live range under fixed-register clobbers and local
+pressure. Do not change fixture work, checksums, comparisons, or gate limits.
 
-A SELECT-arm elision prototype was rejected after the relinked object showed no
-instruction change. The `select-flag-preservation` runtime fixture passed all four
-variants during that experiment, but no performance gain was established. A pinned
-11-sample matched run used native x86-64, opt tier, `-O3`, one warm-up, and CPU 12.
-NYR median/min/max were 1.756597/1.728875/1.828070 ms; LLVM was 0.327349 ms and host
-C 0.568908 ms. NYC was 8.365809 ms. All four checksums were `3360874588549334`.
-NYR/LLVM is 5.37x, still above the unchanged 5.00x fixture ceiling. A prior
-11-sample run on another CPU reported 1.750 ms NYR, 0.325 ms LLVM, and 0.558 ms C;
-retain it as supporting data, not a strict same-core comparison. The next general
-optimization should reduce or split the short-lived divide result's live range under
-fixed-register clobbers and local pressure. Do not change fixture work, checksums,
-compiler comparisons, or gate limits to close the item.
+### BCE vector carry experiment
 
-### BCE vector carry experiment (2026-11-03)
-
-#### JIT carry-flush result
-
-Inspection of the relocated JIT image showed that the x86 `BR` and `BR_IF` encoder
-cases flushed every seeded vector to its stack home, bypassing the allocator's
-`carried && !spill` proof. The encoder now preserves only those proven vector
-carries across internal branches; exit segments still flush, and call boundaries
-still flush all vectors because vector registers are caller-saved. The exact
-`ny_fn_matrix_sum` JIT loop no longer stores its accumulator on the loop backedge. A
-pre-loop seed load/store remains, as do chunk-load staging operations.
+The relocated JIT image showed that x86 `BR` and `BR_IF` encoder cases flushed
+every seeded vector to its stack home, bypassing the allocator's `carried &&
+!spill` proof. The encoder now preserves only proven vector carries across
+internal branches; exit segments still flush, and call boundaries still flush
+all vectors because vector registers are caller-saved. The exact
+`ny_fn_matrix_sum` JIT loop no longer stores its accumulator on the loop
+backedge; a pre-loop seed load/store and chunk-load staging remain.
 
 A same-source A/B used the `bce-matrix` fixture, NYR `-O3 --native-only
---native-backend=x86_64 --native-tier=opt`, nine process-isolated runs per version,
-and matching checksum `14439925760000`. The baseline median was 15.720 ms
-(15.675–15.744 ms); preserving proven carries measured 12.566 ms (12.552–12.625 ms),
-a 20.1% reduction in this fixture. This confirms the branch-flush cause and a local
-runtime gain; it does not close the LLVM/C or full-matrix acceptance gaps. Focused
-`native_vec4_f64`, `vec8_reduce_loop`, `loop_vector_metadata`,
+--native-backend=x86_64 --native-tier=opt`, nine process-isolated runs per
+version, and matching checksum `14439925760000`. Baseline median was 15.720 ms
+(15.675–15.744 ms); preserving proven carries measured 12.566 ms
+(12.552–12.625 ms), a 20.1% reduction. This confirms the branch-flush cause and
+a local runtime gain; it does not close LLVM/C or full-matrix acceptance gaps.
+Focused `native_vec4_f64`, `vec8_reduce_loop`, `loop_vector_metadata`,
 `regalloc_cfg_edge_carry`, and `regalloc_loop_phi_carry` regressions pass. The
 initial run exposed that `loop_phi_carry_enabled` opted scalar GPR carries in but
-omitted scalar FPR carries despite the shared `NYTRIX_GPR_LOOP_CARRY` switch. The
-gate now covers both scalar classes; `regalloc_fpr_loop_phi_carry`,
+omitted scalar FPR carries despite the shared `NYTRIX_GPR_LOOP_CARRY` switch.
+The gate now covers both scalar classes; `regalloc_fpr_loop_phi_carry`,
 `regalloc_loop_phi_carry`, `regalloc_cfg_edge_carry`, and
 `regalloc_unchanged_dag_carry` pass. The existing `float-loop-register-calls`
-runtime fixture also passes both `-O0` and `-O3` native x86-64 variants with
+runtime fixture also passes `-O0` and `-O3` native x86-64 variants with
 `NYTRIX_GPR_LOOP_CARRY=1` and all result/JIT/AOT caches disabled, covering calls,
 joins, and conversion scratch use.
 
-A follow-up four-route AOT run used x86-64, `-O3`, peak profile, warm cache, CPU 28,
-11 measured samples and one warm-up. All routes returned checksum `14439925760000`:
+A follow-up four-route AOT run used x86-64, `-O3`, peak profile, warm cache, CPU
+28, 11 measured samples and one warm-up. All routes returned checksum
+`14439925760000`:
 
 | NYR | LLVM | Host C | NYC | NYR/LLVM |
 | ---: | ---: | ---: | ---: | ---: |
 | 12.714 ms (12.672–12.803) | 6.334 ms (6.317–6.423) | 1.608 ms (1.594–1.663) | 91.739 ms (91.701–92.090) | 2.01x |
 
-This passes the unchanged per-fixture NYR/LLVM ceiling of 5.00x. It is one fixture
-result; the 72-fixture rerun is still required before closing the cross-fixture
-item. Raw report: `/tmp/ny-bce-carry-check.json`.
+This passes the unchanged 5.00x per-fixture ceiling. It is one fixture result;
+the 72-fixture rerun is still required before closing the cross-fixture item.
+Raw report: `/tmp/ny-bce-carry-check.json`.
 
-### Rejected loop-PHI latch reuse trial (2026-11-03)
+### Rejected loop-PHI latch reuse trial
 
-Relaxing the x86 loop-PHI edge check to allow the incoming value to reuse the old
-PHI register after its final latch read reduced the benchmark's static spill/reload
-counters, but made `binary` much slower. With `NYTRIX_GPR_LOOP_CARRY=1`, `./make
-bench binary --bench-run 11 --bench-warmup 2 --bench-opt O3 --bench-compile-profile
-peak --bench-compare-llvm` measured 7.76 ms NYR (min 7.73 ms), 317 us LLVM, and 1.04
+Relaxing the x86 loop-PHI edge check to let the incoming value reuse the old PHI
+register after its final latch read reduced static spill/reload counters but made
+`binary` much slower. With `NYTRIX_GPR_LOOP_CARRY=1`, `./make bench binary
+--bench-run 11 --bench-warmup 2 --bench-opt O3 --bench-compile-profile peak
+--bench-compare-llvm` measured 7.76 ms NYR (min 7.73 ms), 317 µs LLVM, and 1.04
 ms host C; checksum `3360874588549334` remained correct. The matched pre-change
 carry-flag run was 1.75 ms NYR. The allocator change was reverted; fewer static
 spills did not translate into faster execution. Raw report:
 `build/bench-reports/bench-20261103-132333-356243.json`.
 
-### Binary hardware-counter profile (2026-11-03)
+### Binary hardware-counter profile
 
-A seven-run matched benchmark with two warmups measured 1.75 ms NYR, 317 us LLVM,
-and 1.04 ms host C for checksum `3360874588549334`. The validated AOT counter run
-recorded 26.56M NYR instructions versus 3.66M LLVM instructions; branch misses were
-nearly equal (4,518 vs 4,515), as were cache misses (11,723 vs 12,602). This points
-to excess NYR instruction work rather than branch prediction or cache misses.
-NYR/LLVM remained 5.53x, above the 5.00x per-fixture limit. Raw report:
-`build/bench-reports/bench-20261103-132518-358879.json`.
+A seven-run matched benchmark with two warmups measured 1.75 ms NYR, 317 µs
+LLVM, and 1.04 ms host C for checksum `3360874588549334`. The validated AOT
+counter run recorded 26.56M NYR instructions versus 3.66M LLVM instructions;
+branch misses were nearly equal (4,518 vs 4,515), as were cache misses (11,723
+vs 12,602). This points to excess NYR instruction work, not branch prediction or
+cache misses. NYR/LLVM remained 5.53x, above the 5.00x per-fixture limit. Raw
+report: `build/bench-reports/bench-20261103-132518-358879.json`.
 
 A later pinned 11-sample run on CPU 12, after rebuilding the compiler, measured
-1.773 ms NYR, 316 us LLVM, 1.054 ms host C, and 8.353 ms NYC; all routes returned
+1.773 ms NYR, 316 µs LLVM, 1.054 ms host C, and 8.353 ms NYC; all routes returned
 the same checksum. NYR/LLVM was 5.60x. Its checksum-validated AOT counters were
-26.57M NYR instructions vs 3.66M LLVM, 4,809 vs 4,611 branch misses, and 12,490 vs
-12,656 cache misses. The accompanying native object disassembly still shows the
-signed divide-by-two result stored to and loaded from `-0x150(%rbp)` in
-`ny_fn_branch_mix`. The power-of-two latency scheduling candidate and a just-in-time
-single-use deferral candidate were not retained: neither produced a verified matched
-runtime improvement. The startup `FLOOR` row is the intentional empty timer control
-and is excluded from the workload ratios; the startup-class gate remains a separate
-unresolved issue. Raw report:
+26.57M NYR instructions vs 3.66M LLVM, 4,809 vs 4,611 branch misses, and 12,490
+vs 12,656 cache misses. The accompanying disassembly still shows the signed
+divide-by-two result stored to and loaded from `-0x150(%rbp)` in
+`ny_fn_branch_mix`. The power-of-two latency scheduling candidate and a
+just-in-time single-use deferral candidate were not retained: neither produced a
+verified matched runtime improvement. The startup `FLOOR` row is the intentional
+empty timer control, excluded from workload ratios; the startup-class gate
+remains a separate unresolved issue. Raw report:
 `build/bench-reports/bench-20261103-134322-399654.json`.
 
 The subsequent 72-fixture full matrix used three samples and 21 parallel fixture
-workers. All checksums matched, but this run is only a broad regression screen, not
-low-contention acceptance. The `binary` row measured 1.762 ms NYR, 318 us LLVM, and
-1.047 ms C (5.54x NYR/LLVM); it remains over the unchanged 5.00x limit. The empty
-`startup` timer control remains `FLOOR`; separately, the five-workload startup
-cohort measured NYR/C 1.224x and LLVM/C 1.130x against unchanged limits of 0.42x and
+workers. All checksums matched, but it is only a broad regression screen, not
+low-contention acceptance. The `binary` row measured 1.762 ms NYR, 318 µs LLVM,
+and 1.047 ms C (5.54x NYR/LLVM), still over the 5.00x limit. The empty `startup`
+timer control remains `FLOOR`; separately, the five-workload startup cohort
+measured NYR/C 1.224x and LLVM/C 1.130x against unchanged limits of 0.42x and
 0.30x. Raw report: `build/bench-reports/bench-20261103-135250-429124.json`.
 
-The next full 20-worker run reported `bce-matrix` checksum `-14354741043200` and a
-423.587 ms NYR time. Re-running the fixture alone with `./make bench bce-matrix
+The next full 20-worker run reported `bce-matrix` checksum `-14354741043200`
+and a 423.587 ms NYR time. Re-running alone with `./make bench bce-matrix
 --no-build --bench-run 3 --bench-warmup 1` returned the expected checksum at 14.1
 ms; a second full 20-worker run also returned the expected checksum at 14.276 ms.
 The anomaly is not reproduced, so keep it open as an intermittent correctness
-failure. The second full run still failed the binary, datastructures, startup, and
-string gates; `append-scaling` measured 7.829 ms NYR vs 3.072 ms LLVM (2.55x, above
-its 1.50x fixture limit). Report:
+failure. The second full run still failed binary, datastructures, startup, and
+string gates; `append-scaling` measured 7.829 ms NYR vs 3.072 ms LLVM (2.55x,
+above its 1.50x fixture limit). Reports:
 `build/bench-reports/bench-20261103-140002-447190.json` (mismatch) and
 `build/bench-reports/bench-20261103-140431-460598.json` (clean repeat).
 
-After the benchmark driver's Clang rebuild crashed on `parse.c`, the already built
-`ny-full` binary was used for 11 single-process `binary` launches pinned to CPU 12.
-Every run returned checksum `3360874588549334`; the median timed kernel was 1.749 ms
-(1.730–1.757 ms). This is a NYR-only follow-up, so it does not replace the matched
-NYR/LLVM/C report above. The failed rebuild's Clang reproducer is
+After the benchmark driver's Clang rebuild crashed on `parse.c`, the already
+built `ny-full` binary was used for 11 single-process `binary` launches pinned
+to CPU 12. Every run returned checksum `3360874588549334`; the median timed
+kernel was 1.749 ms (1.730–1.757 ms). This is a NYR-only follow-up, so it does
+not replace the matched NYR/LLVM/C report. The Clang reproducer is
 `/tmp/parse-b761af.sh`.
 
-The rejected register-clobber candidate modeled immediate power-of-two division as
-clobbering only RDX, and stopped flushing RCX in the x86 encoder. Its pinned
-11-sample run preserved checksum `3360874588549334` but regressed to 1.945 ms NYR
-versus 328 us LLVM (5.92x). The timed linked object still stored the signed divide
-result to `-0x160(%rbp)` in `ny_fn_branch_mix`; other loop values also shifted into
-stack homes. The candidate and its regression test were removed. Raw report:
-`build/bench-reports/bench-20261103-135047-424579.json`; object dump:
+The rejected register-clobber candidate modeled immediate power-of-two division
+as clobbering only RDX and stopped flushing RCX in the x86 encoder. Its pinned
+11-sample run preserved checksum `3360874588549334` but regressed to 1.945 ms
+NYR versus 328 µs LLVM (5.92x). The timed linked object still stored the signed
+divide result at `-0x160(%rbp)` in `ny_fn_branch_mix`; other loop values also
+shifted into stack homes. The candidate and its regression test were removed.
+Raw report: `build/bench-reports/bench-20261103-135047-424579.json`; object dump:
 `/tmp/ny-bench-native-426219-232140242-8.dump`.
 
-### Narrow loop-home spill reduction (2026-11-03)
+### Narrow loop-home spill reduction
 
-The `binary` benchmark's pinned 11-sample baseline measured 1.759 ms NYR
-(1.737–1.807 ms), 327 us LLVM, and 554 us host C. Inspection of the timed linked
-object showed `ny_fn_branch_mix` storing and reloading the result of a single-use
-constant divide inside its loop. The x86 loop-home allocator now admits that
-one-definition, one-use value alongside CFG-proven loop-carried values. The existing
-`x64_readonly_loop_gpr` execution test covers a loop with a single-use
-constant-division result.
+Reduced one loop-home spill: the x86 allocator now admits a one-definition, one-use constant-divide result alongside CFG-proven loop-carried values. In the timed object, `ny_fn_branch_mix` shrank 11 bytes and its `%rbp` references fell 10→8 as the quotient store/reload disappeared.
 
-The pinned candidate run measured 1.739 ms NYR (1.733–1.756 ms), 320 us LLVM, and
-554 us host C; the checksum remained `3360874588549334`. NYR elapsed time fell about
-1.1%, while NYR/LLVM moved from 5.38x to 5.43x because LLVM's sample was also
-faster; the row remains above the unchanged 5.00x gate. In the timed object,
-`ny_fn_branch_mix` shrank by 11 bytes and its `%rbp` references fell from 10 to 8 as
-the quotient store/reload disappeared. Aggregate NYR instructions were unchanged at
-about 26.56M; cycles fell from 6.50M to 6.39M. Whole-program code size changed from
-1,141,504 to 1,139,008 bytes, while compile time moved from 76.80 to 77.28 ms. These
-small runtime changes are evidence for one spill reduction, not a resolution of the
-`binary` gap. A focused 11-sample `dgemm` run measured 192 us and checksum `1`; no
-matched before/after run was made for that fixture. Reports and object dumps are in
-`/tmp/ny-backend-*.json` and `/tmp/ny-bench-native-*.dump`.
+Pinned 11-sample `binary`: baseline 1.759 ms NYR (1.737–1.807 ms), 327 us LLVM, 554 us host C; candidate 1.739 ms (1.733–1.756 ms), 320 us LLVM, 554 us host C, checksum `3360874588549334`. NYR fell ~1.1%; NYR/LLVM went 5.38x→5.43x because LLVM also sped up, staying above the unchanged 5.00x gate. Aggregate NYR instructions stayed ~26.56M; cycles 6.50M→6.39M; whole-program code 1,141,504→1,139,008 bytes; compile time 76.80→77.28 ms. `x64_readonly_loop_gpr` covers the single-use divide. A focused 11-sample `dgemm` measured 192 us, checksum `1`, with no matched before/after. Scope: one spill reduction, not a resolution of the `binary` gap. Reports in `/tmp/ny-backend-*.json` and `/tmp/ny-bench-native-*.dump`.
 
-### AVX1 V256 integer operations and allocation checks (2026-11-03)
+### AVX1 V256 integer operations and allocation checks
 
-The x86 encoder now lowers V256_I64 add/sub on AVX1 by extracting each 128-bit half,
-applying SSE2 `paddq`/`psubq`, and inserting the two results back into a YMM
-register. The fallback keeps values in canonical homes for the function, because its
-XMM0-XMM3 temporaries must not clobber live allocated values. An executable AVX-only
-probe checks both operations and reductions. That probe also found and fixed a NYIR
-lowering typo where `VEC8_SUB_I64` became machine ADD. Vector FMA encoding now
-rejects targets missing AVX or FMA.
+AVX1 V256_I64 add/sub now extract each 128-bit half, apply SSE2 `paddq`/`psubq`, and insert into YMM; the fallback keeps canonical homes because XMM0–XMM3 temporaries must not clobber live values. An executable AVX-only probe also found and fixed a NYIR typo where `VEC8_SUB_I64` became machine ADD; vector FMA encoding now rejects targets missing AVX or FMA. Focused `bce-matrix` (3 samples): checksum `14439925760000` on all routes, NYR 13.343 ms, LLVM 3.240 ms, host C 1.591 ms, 8,280 NYR code bytes, 6.96 ms compile, 124 spills, 274 reloads, 4.12x NYR/LLVM — a material gap; this focused run does not establish a full-suite gain. AVX-only V256_I64 bitwise ops use AVX1 bitwise encodings; AVX2-only integer ops stay rejected with AVX2 masked; the add/sub fallback executes directly.
 
-The focused `bce-matrix` run returned the expected checksum `14439925760000` in all
-implementations. Across three samples, NYR measured 13.343 ms, LLVM 3.240 ms, and
-host C 1.591 ms. The report measured 8,280 NYR code bytes, 6.96 ms compiler time,
-124 spills, and 274 reloads. NYR/LLVM was 4.12x; this remains a material runtime
-gap, and this focused run does not establish a full-suite improvement.
+An 11-sample `binary` allocator comparison did not justify global scalar loop-carried GPR residency: default 1.721 ms/1,125,272 bytes/76.67 ms vs `NYTRIX_GPR_LOOP_CARRY=1` 1.734 ms/1,125,032 bytes/77.19 ms, both checksum `3360874588549334`; keep that path opt-in. A four-lane `V256_I64` regression carries lanes `{1, 2, 3, 4}` through five backedges and returns `60` by default: the first run showed the allocator set `spill` on a carried PHI with an exit successor, so the encoder reloaded a stale home and returned garbage. The encoder now seeds any verifier-proven carried segment, including one stored at block exit; vector carry is on by default (`NYTRIX_VECTOR_LOOP_CARRY=0` isolates it), GPR/FPR carry stays opt-in. The first hot-pressure spill-splitter was removed: matched seven-sample runs pinned to CPU 13, one warm-up, loop-home overlay off, preserved checksums — `binary` 2.769/2.749 ms, 1,125,920 bytes, 79.25/78.01 ms, spills/reloads 9,480/32,617 vs 9,480/32,618 (identical assembly); `linpack` 1.373/1.363 ms, 1,147,728 bytes, 79.71/79.57 ms, 10,176/34,283 vs 10,176/34,284. Ranges overlapped; no speedup claimed. The segmented allocator verifier now checks that every register operand use has non-overlapping segment coverage, with a truncation negative test.
 
-The 11-sample `binary` allocator comparison did not justify enabling scalar
-loop-carried GPR residency globally: the default measured 1.721 ms, 1,125,272 code
-bytes, and 76.67 ms compile time; `NYTRIX_GPR_LOOP_CARRY=1` measured 1.734 ms,
-1,125,032 bytes, and 77.19 ms. Both runs preserved checksum `3360874588549334`. Keep
-that path opt-in. The verifier-checked segment allocator and unchanged-value DAG
-carry remain covered by focused tests; the whole-function allocation and full-suite
-quality acceptance remain open.
+The verifier also enforces live-in/live-out coverage and matching registers on carried predecessor edges with tied, covered edge-copy destinations; negative tests mutate registers and truncate boundaries. A scalar-carry x86 loop test passes for −1, 0, 2, 3, 4, emitting 152 bytes vs 177 with forced stack homes. In a matched serial three-sample A/B, 67 fixtures timed successfully; median change +0.11%, and >10% apparent regressions did not reproduce in an 11-sample `dict-set` repeat (47.515 vs 46.813 ms, 13.2%/14.7% dispersion, 1,153,528→1,153,432 bytes, 80.86/80.89 ms). The runner rebuilt a shared core artifact, invalidating the gate verdict: rows are diagnostic, scalar carry stays opt-in. Final focused `binary` A/B (`-O3`, warm cache, one warm-up, 11 samples): 5.210 ms (5.182–5.311) vs 5.093 ms (5.072–5.114) with `NYTRIX_GPR_LOOP_CARRY=1`, −2.2%; compile 65.00/64.89 ms, +8 bytes, static spill/reload 3,407/29,376, `ny_fn_branch_mix` frame −128 bytes, checksum `3360874588549334` (reports `184827`/`184902`). Focused checks pass: `vec8_reduce_loop`, `regalloc_loop_phi_carry`, `machine_home_reuse`, `x64_readonly_loop_gpr`, `x64_disasm_vex`, `x64_encoder_oracle`, division/clobber, read-only loop and backend acceptance. The 73-fixture run kept `bce-matrix`/`dgemm`/`pbkdf2` checksums (`14439925760000`/`1`/`2991`) but still failed `fannkuch`, `n-body`, `spectral`, `binary` (6.09x) and startup gates. Scope: vector-lane preservation and local `binary` gains; whole-function allocation and full-suite acceptance remain open.
 
-Focused checks passed: `vec8_reduce_loop`, `regalloc_loop_phi_carry`,
-`machine_home_reuse`, `x64_readonly_loop_gpr`, `x64_disasm_vex`, and
-`x64_encoder_oracle`. AVX-only V256_I64 bitwise operations use AVX1 bitwise
-encodings; AVX2-only integer operations remain rejected when AVX2 is masked. The
-AVX1 add/sub fallback is directly executed.
+### PBKDF2 optimized correctness failure
 
-#### Loop-carried vector lane preservation
+Kept the origin unresolved: a rebuild made the mismatch disappear. In `etc/tests/bench/numeric/pbkdf2.nshape`, NYR O0/O1 returned checksum `2991` while repeated O2/O3 runs returned varying wrong values; LLVM and host C returned `2991`. Disabling `loop_vectorize`, individual loop passes, or range-based compare folding did not repair it, but `--nyr-disable-pass=peephole` at O2 restored `2991`, pointing at that pass or a later-lowering interaction. The per-pass oracle stops at `iv_elim` because its VM lacks `vec4.add.i64`. After a full `ny-full` rebuild, five consecutive O2 native runs returned `2991`, and a 3-sample, 1-warm-up O3 run passed (NYR 1.65 ms, LLVM 937 us, host C 1.10 ms). No semantic source fix was found; the earlier executable may have been stale. Reproduce before assigning fault. Original report `/tmp/ny-pbkdf2-followup.json`.
 
-An executable machine-IR regression builds a four-lane `V256_I64` accumulator,
-starts with lanes `{1, 2, 3, 4}`, carries it through five loop backedges, then
-reduces it on the exit edge. It verifies the allocator marks the vector PHI as
-carried and checks the generated x86 function returns `60` with the default
-configuration and no carry environment override. This detects loss of any upper
-lane.
+### Performance TODO batch
 
-The first run exposed the bug: the allocator correctly marked the header value
-carried, but also set its `spill` bit because the loop had an exit successor. The
-encoder interpreted that bit as “not resident at block entry,” reloaded a stale
-canonical home, and returned a garbage result. The bit means the value's home must
-be published for the exit; the common preg remains valid on both preheader and
-backedge arrivals. The encoder now seeds any verifier-proven carried segment,
-including one that must be stored at block exit. Vector loop carry is enabled by
-default; `NYTRIX_VECTOR_LOOP_CARRY=0` remains available to isolate regressions.
-GPR/FPR loop carry remains separately opt-in.
-
-The focused vector, segmented-allocation, GPR/FPR carry, VEX-disassembly, and
-encoder-oracle checks pass. The subsequent 73-fixture run preserves checksums for
-`bce-matrix` (`14439925760000`), `dgemm` (`1`), and `pbkdf2` (`2991`). It still
-reports independent failures in `fannkuch`, `n-body`, and `spectral`, and the
-benchmark gates still fail on `binary` (6.09x NYR/LLVM) and the startup cohort. This
-validates vector-lane preservation on the focused generated-code case; it does not
-establish full backend acceptance. See the archived run above for complete
-per-fixture measurements.
-
-The first hot-pressure spill-splitting candidate was removed after matched
-seven-sample tests showed no useful change. Both runs were pinned to CPU 13, used
-one warm-up, disabled the loop-home overlay in both configurations, and preserved
-fixture checksums. For `binary`, control/candidate runtime was 2.769/2.749 ms, code
-size was 1,125,920 bytes in both, compile time was 79.25/78.01 ms, and spill/reload
-counts were 9,480/32,617 versus 9,480/32,618. For `linpack`, runtime was 1.373/1.363
-ms, code size was 1,147,728 bytes in both, compile time was 79.71/79.57 ms, and
-spill/reload counts were 10,176/34,283 versus 10,176/34,284. Runtime ranges
-overlapped; the generated assembly text was identical for `binary`. No speedup is
-claimed, and the opt-in splitter was removed instead of leaving an unaccepted
-allocator path in the encoder.
-
-The segmented allocator verifier now also checks that every register operand use is
-covered by a non-overlapping segment. A focused negative test truncates a live range
-before an actual use and confirms the verifier rejects it. This strengthens
-allocation validation; it does not resolve the independent `fannkuch`, `n-body`, or
-`spectral` benchmark failures recorded above.
-
-#### CFG carry preservation proof and scalar carry A/B (2026-11-03)
-
-The verifier now requires segments to cover live-in and live-out block boundaries.
-For every carried live-in segment, it checks each live predecessor ends in the same
-allocated register; a carried edge-copy destination must be defined by a covered,
-tied copy. Negative allocator tests mutate the incoming register, truncate
-live-in/live-out boundaries, and verify rejection. The generated x86 loop test
-executes with scalar GPR carry enabled for inputs `-1, 0, 2, 3, 4`, preserving each
-expected result; its emitted function is 152 bytes versus 177 bytes with forced
-stack homes. The AVX-only fallback, V256 lane-carry, FMA feature-gate,
-encoder-oracle, and VEX-disassembly checks also pass.
-
-Scalar GPR carry remains opt-in. In a matched serial three-sample full-matrix A/B,
-67 fixtures had successful NYR timings in both configurations. The median
-per-fixture change was effectively flat (+0.11%); several apparent regressions above
-10% did not reproduce in an 11-sample `dict-set` repeat. Its medians were 47.515 ms
-with carry off and 46.813 ms with carry on, while sample dispersion was 13.2% and
-14.7%; code size changed from 1,153,528 to 1,153,432 bytes and compile time was
-80.86/80.89 ms. The full run also reproduced existing `fannkuch`, `n-body`, and
-`spectral` failures. Its overall gate verdict was invalidated when the runner
-rebuilt a shared core artifact, so these rows are diagnostic measurements, not an
-acceptance result. Keep scalar carry opt-in until repeated measurements show a
-broad, stable gain without material regressions. Vector carry remains enabled and is
-covered by the five-backedge, four-lane executable regression above.
-
-#### Binary allocator acceptance (2026-11-03)
-
-For the focused `binary` workload, the final opt-in GPR-carry A/B used the same
-source, `-O3`, peak compile profile, warm cache, one warm-up, and 11 timed samples.
-Both runs returned checksum `3360874588549334`. With carry off, NYR measured 5.210
-ms (5.182–5.311 ms); with `NYTRIX_GPR_LOOP_CARRY=1`, it measured 5.093 ms
-(5.072–5.114 ms), a 2.2% median reduction. Compile time was effectively flat
-(65.00/64.89 ms), and code size changed by +8 bytes. The aggregate static
-spill/reload counters remained 3,407/29,376, so this is not a claim that all
-reported spills were removed. The `ny_fn_branch_mix` frame shrank by 128 bytes in
-the inspected x64 object, and the result is kept opt-in: default allocation behavior
-is unchanged. Focused division/clobber, read-only loop, machine-home reuse, and
-backend-acceptance tests pass. This is the practical acceptance for this item: a
-repeatable local runtime and frame-size improvement with correct results, not a new
-global spill-count threshold. Reports: `184827` carry off and `184902` carry on.
-
-### PBKDF2 optimized correctness failure (2026-11-03)
-
-The focused benchmark reproduces a NYR checksum mismatch in
-`etc/tests/bench/numeric/pbkdf2.nshape`. NYR O0/O1 returns `2991`; repeated O2/O3
-runs return varying incorrect checksums. LLVM and host C both return `2991`.
-Disabling `loop_vectorize` does not repair the result, while
-`--nyr-disable-pass=peephole` at O2 restores `2991`, narrowing the failure to that
-pass or its interaction with later lowering. Disabling individual loop passes and
-range-based compare folding did not repair it. The per-pass oracle cannot continue
-past `iv_elim` because its VM does not support the resulting `vec4.add.i64`
-operation. After a full rebuild of `ny-full`, five consecutive O2 native runs
-returned `2991`; the focused O3 benchmark (3 samples, 1 warm-up) also passed with
-checksum `2991` (NYR 1.65 ms, LLVM 937 us, host C 1.10 ms). No semantic source fix
-was identified, so the earlier failing executable may have been stale. Keep the
-origin unresolved and reproduce it before assigning the fault to a pass. Original
-focused report: `/tmp/ny-pbkdf2-followup.json`.
-
-### Performance TODO batch (2026-11-04)
-
-Host EPYC 7642, x86-64 native, `-O3`, executables built from each fixture's NY
-source and run pinned to one CPU. Medians of 9–15 runs; checksums match the baseline
-compiler, LLVM, and the fixture's expected value.
+Improved five fixtures on EPYC 7642 (x86-64 native, `-O3`, pinned to one CPU, medians of 9–15 runs; checksums matched baseline, LLVM and expected values):
 
 | Fixture | Before | After | LLVM | Change |
 | --- | ---: | ---: | ---: | --- |
@@ -3030,401 +2576,33 @@ compiler, LLVM, and the fixture's expected value.
 | `linpack` | 772 µs | 745 µs | 240 µs | no dead temporary homes |
 | `binary`, `dgemm`, `json-parser` | — | unchanged | — | neutral within noise |
 
-**`dce`:** the recovered `loop_global_promote` and `select_chain_fold` passes were
-  not wired into the pipeline after a `git checkout -- .` wiped tracked-file edits;
-  they now run after the mid-pipeline cleanup and again after store forwarding. Two
-  further fixes were needed. Rule R4 merges the `add(add(b, C1), C2)` chains that R3
-  builds, and use counts now ignore folded selects so the merge applies within one
-  round. Separately, DCE's fallback `nyr_label_referenced()` ignored PHI predecessor
-  labels. When `max_label` exceeded `4 * len + 1024`, which the collapsed 500-step
-  function did, DCE merged a fall-through block away and broke the PHI. The 400-step
-  variant stayed under the bound, which is why the bug showed only at 500. The
-  `dce_phi_label` regression fails without the fix.
-**FPR residency:** convert/sqrt clobber only the loop colors their encoding writes,
-  conversions and sqrt may define loop homes, spill-home privacy rejects only LEA'd
-  frame slots and stack/aggregate parameters, displaced segments move to free colors
-  above the loop colors, and scalar register copies use `movaps`. A segment moved to
-  a free color keeps the allocator's reload/spill flags. Forcing them stored every
-  block-local temporary to a dead home once per iteration (four stores in linpack's
-  row update).
-**Variable-shift recolor miscompile:** loop-carry recoloring again checks
-  fixed-register clobbers over the whole interval (`x64_loop_recolor` runs with loop
-  GPRs on and off), and the post-allocation verifier rejects a colored range live
-  across a fixed clobber (`regalloc_verifier_coverage`).
-**Vector homes:** a single-definition vector whose home is current in its defining
-  block is no longer re-stored at every loop latch. That removes dgemm's
-  invariant-broadcast stores but not its runtime; see the TODO.
-**Boundary coalescing:** the arithmetic/SELECT boundary-tie hook had already been
-  reduced to a stub returning false; it is removed. `binary` and `json-parser` are
-  unchanged.
+`dce`: recovered `loop_global_promote` and `select_chain_fold` were unwired after `git checkout -- .` wiped tracked edits; they now run after mid-pipeline cleanup and store forwarding. Rule R4 merges the `add(add(b, C1), C2)` chains R3 builds, and use counts ignore folded selects so the merge lands in one round. DCE's `nyr_label_referenced()` ignored PHI predecessor labels: when `max_label` exceeded `4 * len + 1024`, as the collapsed 500-step function did, DCE merged a fall-through away and broke the PHI (the 400-step variant stayed under the bound); `dce_phi_label` fails without the fix. FPR residency lets convert/sqrt clobber only the loop colors their encoding writes and define loop homes, restricts spill-home privacy to LEA'd frame slots and stack/aggregate parameters, moves displaced segments to free colors above the loop colors keeping reload/spill flags, and uses `movaps` for scalar copies; forcing them stored every block-local temporary to a dead home once per iteration (four stores in linpack's row update). Loop-carry recoloring again checks fixed-register clobbers over the whole interval (`x64_loop_recolor` with loop GPRs on and off), and `regalloc_verifier_coverage` rejects a colored range live across a fixed clobber. A single-definition vector whose home is current in its defining block is no longer re-stored at each latch, removing dgemm's invariant-broadcast stores but not its runtime. The arithmetic/SELECT boundary-tie stub returning false was removed; `binary` and `json-parser` are unchanged. All 103 optimizer groups pass and all 73 bench fixtures match baseline checksums. Scope: not a full-gate run.
 
-All 103 optimizer test groups pass, and all 73 bench fixtures match baseline
-checksums. This is not a full-gate run.
+### Gate follow-up
 
-### Gate follow-up (2026-11-04, late)
+Restoring two lost lowering options fixed `recursive-fibonacci`: a serial `./make bench` (3 runs + 1 warm-up) had failed the algorithms, datastructures, startup and overall gates on three fixtures. Statement lowering had lost the AVX2 optimizer option and the post-optimization recursive-call rewrite (`nyr_tail_call`, which turns `f(n-1) + f(n-2)` into an accumulator loop); both are restored in `lower/stmt.h`, taking the kernel from 3.7 ms to 0.32 us. AVX2 also feeds vector passes (`bce-matrix` 11.0 ms vs 12.7 ms). `dict-set` read 1.95x (budget 1.50x) from concurrent builds; alone with 7 runs it measures 30.9 ms vs 25.8 ms LLVM (1.20x). `binary` read 5.33x (gate 5.00x): keeping MUL by 5/9 as one LEA and the new `loop_sub_iv` pass (`inv - i` to a decrementing IV) cut the inner loop 19→18 instructions and NYR 1.60→1.45 ms, but LLVM measured 266 us in that run (5.47x); the remaining gap is LLVM's outer vectorization. All 103 optimizer groups pass and all 73 bench fixtures match baseline checksums.
 
-A serial `./make bench` (3 runs + 1 warm-up) failed the algorithms, datastructures,
-startup, and overall gates on three fixtures:
+### Outer vectorization residency
 
-`recursive-fibonacci` 2.60x NYR/LLVM (budget 2.00x): statement lowering had lost the
-  AVX2 optimizer option and the post-optimization recursive-call rewrite
-  (`nyr_tail_call`, which turns `f(n-1) + f(n-2)` into an accumulator loop). Both
-  are restored in `lower/stmt.h`; the kernel went from 3.7 ms to 0.32 us. The AVX2
-  option also feeds the vector passes (`bce-matrix` 11.0 ms vs 12.7 ms before).
-`dict-set` 1.95x (budget 1.50x) came from concurrent builds; alone with 7 runs it
-  measures 30.9 ms vs 25.8 ms LLVM (1.20x).
-`binary` 5.33x (gate 5.00x). Keeping MUL by 5/9 as one LEA and the new `loop_sub_iv`
-  pass (`inv - i` becomes a decrementing IV) took the inner loop from 19 to 18
-  instructions and NYR from 1.60 to 1.45 ms, but LLVM measured 266 us in that run
-  (5.47x). The remaining gap is LLVM's outer vectorization.
+Enabled outer vectorization by default (`NYTRIX_OUTER_VECTORIZE=0` disables it) and cut `binary` from 1.45 ms to 903 us. A targeted serial `ny-test --bench --bench-run 7 --bench-warmup 2 --bench-compare-llvm` on a host at load ~14 (advisory, not gate evidence) measured `binary` 1.45 ms/266 us/5.45x default, 903 us/266 us/3.40x with `NYTRIX_OUTER_VECTORIZE=1`, `dgemm` 154 us/26 us/5.97x and `linpack` 739 us/240 us/3.07x; the earlier opt-in widened `binary` loop took 2.1 ms. Latch recurrences `x' = f(x)` share the PHI register when every old-value read precedes the new definition (allocator proposes, `verify_vector_latch_recurrence` checks; the latch may read the PHI as `src0` of one add/sub/and/or/xor). The coalescer tries the PHI's header color first, picks cheapest evictions (a segment unused in its block is nearly free), coalesces each PHI once per header, and judges nesting on the natural loop body; evicted register-only temporaries get a second free color, loop-invariant vectors stay resident when every body segment shares the preheader color, and functions with no scalar floats (SysV, AVX2) gain xmm4–xmm7 for 10 vector colors instead of 6. The encoder adds three-operand VEX binops, register-form `vbroadcastsd` and direct SET1 writes into assigned registers.
 
-All 103 optimizer groups pass and all 73 bench fixtures match baseline checksums
-with these changes.
+Correctness fixes: the home-path four-lane COPY used a 16-byte `movdqu` leaving lanes 2–3 stale (the "wrong `binary` checksum" blamed on latch relaxation); `mach_ymm_broadcastsd_mem` dropped VEX.R for ymm8+; `mach_lower_phi_edges` counted only leading contiguous PHIs, losing edge copies after a DCE-made NOP; LICM hoisted into a preheader laid out after its loop, breaking verifier def-before-use once the outer vectorizer appended a vector loop. The full 2139-fixture `lang`+`code` suite showed no regressions (16 failures also fail on baseline or pass alone). Default-on needed four more fixes on the in-process native route (`--native-only`, native JIT, native result oracle), whose scalar machine emitter hands vector functions to the NYIR emitter: `nyr_phi_elim` now uses a 32-byte entry `alloca` with `vec8.store/load.i64` instead of 8-byte locals; the NYIR emitter gained lane-wise `sarq` for `vec8.sar.i64` with four-slot homes; home-path f64 SET1 no longer broadcasts from a stack home when the scalar lives only in a float register (`2.0 * B` read 0 in `loop-tail-passes`). With the vectorizer forced on, the full suite matched the baseline failure list exactly (2124/2139); the serial bench at 2026-11-05 06:25 put `binary` at 919 us vs 266 us LLVM (3.45x) and passed every per-class gate with all checksums matching. Later `nyr_licm_post_vectorize` (right after the late vectorizer) allowed hoisting invariant address arithmetic, taking `linpack` 760→320 us; CSE merged identical class-refining pointer copies; home-path f64 broadcasts load with `movsd` then use register-form `vbroadcastsd` (Zen 2 cannot forward a store into a broadcast load). A linpack row-update vectorizer with dependence guard and scalar remainder was correct but 2x slower and removed — the next `k` step reads scalar 8-byte loads back from misaligned 32-byte stores. The full suite had no new failures; the 13:21 serial bench (`CC=clang`) passed 72/72 fixtures and every per-class gate: `binary` 3.31x, `linpack` 1.33x (329 vs 248 us), `dgemm` 5.26x (137 vs 26 us; ungated, host C under 1 ms).
 
-### Outer vectorization residency (2026-11-05)
+VEX scalar code removed a dirty-upper-YMM stall (C microbenchmark 81 ns per legacy SSE transition vs 6.4 ns with VEX): on AVX targets scalar and 128-bit SSE helpers emit VEX forms (`NYTRIX_NO_VEX_SSE=1` restores legacy) and `vzeroupper` runs before calls, returns, and at scalar-float block entry where no 256-bit value is live; `sor` fell 2.67 ms→0.70 ms and `dgemm` 137→37 us, the previously unexplained stall. Fixed-trip integer reductions keep a four-lane accumulator again (`NYTRIX_NO_VECTOR_ACCUMULATOR=1` disables): `bce-matrix` 11.0→3.4 ms. Loop-carry exit homing no longer publishes to a dead successor; packed i64 `sar` by 1 uses `(a >>> 1) | (a & SIGN)` for 2 cycles instead of 3. `binary` stays ~3.2x LLVM: the LLVM reference is itself outer-vectorized, so `NYTRIX_OUTER_VECTORIZE=0` is not a meaningful gate, and the remaining gap is instruction count (9.6M vs 3.2M at IPC 2.67 vs 2.04), mostly signed `x / 2` and xor/and/xor select. The 18:36 bench (`CC=clang`, 3+1, load 4–12) passed every timed fixture and gate: overall 1.29x, max 3.17x on `binary`, `dgemm` 1.52x (39 vs 26 us), `sor` 1.21x, `linpack` 1.49x, `bce-matrix` 0.53x. A later build passed 224/225 vector/ABI/optimizer fixtures privately (`f64-scalar-abi` fails on release too, from a concurrent `--run` argv change): `vec8.shr.i64` (`NYR_MACH_VSHR`, `vpsrlq`) replaces four instructions of signed-division bias for `(x >> 63) & 1`, `binary` 880→831 us; floats confined to xmm0–xmm3 free xmm4–xmm7 for vectors (`NYTRIX_NO_SHARED_XMM4_7=1`), keeping dgemm's fourth broadcast in a register (~35 us); `NYTRIX_OUTER_VEC_INTERLEAVE=2` is correct but slower (1.40 ms) as the second register set spills, and is off by default.
 
-Targeted serial run, `ny-test --bench --bench-run 7 --bench-warmup 2
---bench-compare-llvm`, on a host that other sessions were also loading (load average
-about 14), so these numbers are advisory, not gate evidence:
+### NYC copy intrinsic register residency
 
-| Fixture | Route | NYR | LLVM | NYR/LLVM | status |
-| --- | --- | ---: | ---: | ---: | --- |
-| `binary` | default | 1.45 ms | 266 µs | 5.45x | measured |
-| `binary` | `NYTRIX_OUTER_VECTORIZE=1` | 903 µs | 266 µs | 3.40x | measured |
-| `dgemm` | default | 154 µs | 26 µs | 5.97x | measured |
-| `linpack` | default | 739 µs | 240 µs | 3.07x | measured |
+x86-64 loop allocation now lets known copy intrinsics act as clobbers callee-saved registers survive, while copies stay indirect-store hazards when stack-home privacy is unproven (indexed and fallback proofs agree). In a frozen before/after comparison on the string benchmark's C source with `memcpy` replaced by `__builtin_memcpy`, checksum `300003294` held in all 11 runs; best kernel 643127→273198 ns, median 714369→324634 ns, with fewer loop-counter reloads. That is intrinsic-path only: the declared `memcpy` stays a call and measured essentially unchanged; `small-copy-loop-residency.c` passes NYC O3 and Clang O3, including escaped-local-address writes. Small constant copies also lower through compatible external `memcpy` declarations including the standard prototype; visible definitions, assembler aliases, incompatible signatures and `-fno-builtin` keep calls. The seven-run report `build/bench-reports/bench-20261111-083623-3891112.json` is `ok` with matching checksums: 184 us NYR, 202 us LLVM, 190 us C, 280 us NYC (1.47x NYC/C; prior full report 3.04x); object inspection shows no `memcpy` relocation by default and one with `-fno-builtin`. Both regressions pass and are registered with the C frontend fixture runner. `llvm_rc=139` on `knight`/`currying` came from a stale pinned `build/release/core.bc`: `./make bench` pinned but never refreshed it, and `ny_jit_cache_path` hashed only its path, so a cached module referencing removed core globals faulted at `_ny_top_entry`. The bench now builds `core_bc` before pinning, the cache key folds size and timestamp, and `NY_JIT_CACHE_VERSION` is 33: `knight` measures 2.56 ms NYR (1.75x C, 2.00x LLVM), 1.28–1.31 ms LLVM (0.88x C), 2.40 ms NYC, checksum `340233` on every route, 0.4% spread over 3 runs. `currying`'s 2.36 ms LLVM row still fails the 4.0x gate: closure loops cost ~588 ns per indirect call vs ~2 ns for a direct loop in a 20000-iteration microbenchmark; a memoized flag lookup moved it 688x→668x NYR/C, and the rest is unattributed (`strace -c` shows no per-call syscall, the trampoline is three instructions, `perf` denied).
 
-Before this batch, the opt-in widened `binary` loop took 2.1 ms. Changes:
+Constant-condition select folding took `knight`'s `ny_fn_moves` from 565 to 498 instructions with no conditional moves, spills/reloads 485/903→382/800. Fully unrolled ternary predicates (`i >> 1`, `i & 1`, `pair == 0 || pair == 3`) had survived as constant materialization plus `test`/`cmovne` from a stack home; `nyr_select_chain_fold` now applies R0 first, releasing dead arms in the same round, and `nyr_peephole` folds later-proven constants plus `select(b, b)`. `--bench-run 5 --bench-warmup 2` on `knight`: NYR 2.33–2.38 ms (1.59–1.62x C, 1.84–1.85x LLVM), LLVM 1.29 ms, C 1.47 ms, NYC 2.41 ms, checksum `340233` on every route, 1.9–2.3% noise (was 1.75x C/2.56 ms). Objects from `--native-only -o` and the JIT are byte-identical (`NY_DUMP_JIT` matches the object's `moves` prologue), so this measures codegen; disabling `loop_unroll`, `unroll_jam` or `if_convert` gives 2.43–2.50 ms and disabling `loop_unroll_ssa` 3.86 ms. The residual 199 `(%rbp)` operations come from block-boundary temporaries and the multi-def `total` PHI after unrolling; 8 compares miss flags fusion (`reason=condition-live-out`, 50 fuse). Twelve focused fixtures pass. Relaxing `coalesce_unchanged_dag_values` to allow calls with `preserve_gpr_calls` (the encoder's `mach_call_gpr_home_mask` homes only colors 5–11) accepted 478 values on `knight` (112 ineligible, 54 no free color) but left 199 home ops, 503 instructions and a 2.35 ms row, so it was reverted; the repeated homes are `nx`, `ny`, `depth - 1` and PHI `total`, which no unchanged-value proof covers. Extending `coalesce_loop_edges` to non-loop headers behind `NYTRIX_GPR_JOIN_CARRY` committed seven five-copy joins (`h=12 v=26 C=7`, `h=21 v=36 C=0`, plus the second allocation pass) but produced byte-identical `.text` and a 2.4 ms row: the encoder rebuilds GPR segments with `nyr_mach_regalloc_build_x64_class` and seeds only via `mach_segment_at(vreg, block_first_inst)`, while `mach_keep_homes_for_store_live_values` clears `carried` on every copy/store value. Two more encoder variants (eliding 37 `mov A,B; mov B,A` pairs and a per-home last-store cache) were byte-identical and reverted: those pairs come from `mach_load_src_preg`/`emitted2`, not `mach_mov_preg_preg`/`mach_mov_reg_rax`. `src/code/backend/lower/ regalloc.c` and `src/code/backend/mach/arch/x86/object64.c` are restored; this needs an encoder-side carried/allocation contract or a MACH copy-forwarding pass.
 
-Vector latch recurrences (`x' = f(x)` computed in the latch) share the PHI register
-  when every read of the old value precedes the new definition. The allocator
-  proposes this pairing and the verifier checks it again
-  (`verify_vector_latch_recurrence`). The latch definition may read the PHI as
-  `src0` of a single add/sub/and/or/xor.
-The loop-carry coalescer tries the PHI's own header color first, picks the color
-  with the cheapest evictions (a segment with no access in its block is nearly
-  free), and coalesces each PHI once per header. Nesting is judged on the natural
-  loop body, not on every block that reaches the header.
-Coalescing can evict block-local temporaries. Those that were register-only now get
-  a second chance at any color that is still free.
-Loop-invariant vectors stay resident across the loop when every body segment shares
-  one color with the preheader.
-Functions with no scalar floats (SysV, AVX2) also allocate xmm4..xmm7 to vectors,
-  giving 10 vector colors instead of 6.
-Encoder: three-operand VEX binops, register-form `vbroadcastsd`, and SET1 results
-  written straight into their assigned register.
+The winning change was same-color copy elision in `object64.c`: the scalar COPY path required `sp != dp`, so equal-color copies staged through `%rax` via `mach_load_op_rax`/`mach_commit_vreg`; the guard now accepts equal colors and skips the move with unchanged seeding, clobber and home-store bookkeeping (`NYTRIX_NO_SAME_COLOR_COPY=1` restores staging). `knight` `moves` fell 498→418 instructions and `.text` 5,240→5,016 bytes (−4.3%), removing all 37 reversed pairs with checksum `340233` on object and JIT routes. Timing was neutral: 11 interleaved `--native-only -O3 -time -run` samples per side gave medians 2.364/2.378 ms and minima 2.345/2.307 ms, inside 1.9–2.3% noise; the win is code size. `collatz`, `nqueens`, `sieve`, `mandelbrot`, `knucleotide`, `calls` and `bigint-oracle` still report `ok`; `.text` drops 8 bytes on `collatz` and 32 on `sieve` and is unchanged on `nqueens`, so this is targeted. A full `--bench-correctness` sweep over 77 `etc/tests/bench/**/*.nshape` passes 76/77; `startup/currying.nshape` fails identically without the change and is the sole `FAIL` in the assembly audit.
 
-Correctness fixes found along the way:
+### Collatz mask-test fusion
 
-The home-path COPY of a four-lane vector used a 16-byte `movdqu`, which left lanes
-  2–3 stale. This caused the "wrong `binary` checksum" that had been blamed on the
-  latch relaxation.
-`mach_ymm_broadcastsd_mem` dropped VEX.R for ymm8+.
-`mach_lower_phi_edges` counted only leading contiguous PHIs, so a PHI after a
-  DCE-made NOP lost its edge copies.
-LICM hoisted into a preheader laid out after its loop, which broke the verifier's
-  def-before-use order once the outer vectorizer appended its vector loop.
+Kept the collatz `test`/`cmovne` fusion: `src/code/backend/mach/arch/x86/machine.c` recognizes a SELECT whose condition is directly `AND(x, 1)` and emits `testq $1, %rax` + `cmovne`, eliding the `and` and its stack home while keeping the source live for coloring (`mov n,%rax; and $1,%rax; mov n,%r9; ...; test %rax,%rax; cmovne` became `sar $1,%r9; lea (%r9,%r9,2),%r9; add $1,%r9; test $1,%rax; cmovne`). Checksum `178` matches C/LLVM/NYC; the Ny kernel is ~12 us vs C ~8.5 us (~1.4x; the reported 2.9x was a `ny--time` JIT-run overhead artifact), and whole-program Ny went ~15 ms→~12 ms, still dominated by runtime and page faults. A parallel object-encoder prototype in `src/code/backend/mach/arch/x86/object.c` produced checksum `9` instead of `178` and was reverted. A cold GCC rerun also fixed the reference wrapper: macro-renaming C `main` had removed its implicit zero return, so the wrapper now inserts one while preserving early failure returns and skipping comments/quoted braces in its body scan; its regression covers fallthrough, explicit failure, nested blocks, quoted braces and argc/argv. A six-cache-disabled editor compile took 99.24 s wall and 2,772,484 KiB peak RSS (10.36 s type validation, 12.37 s codegen, 85.69 s emit; phases may nest, so no sum). A 10-second sample put 19.28% in `nyr_find_module_in_root_cached`, which now rejects statement kinds that cannot contain modules before hashing; four alias/reexport/module fixtures passed cold. No isolated speedup or 15 s acceptance is claimed.
 
-The full `lang` + `code` suite (2139 fixtures) showed no regressions. The 16
-failures it reported fail on the baseline compiler too, or pass when run alone.
-
-Outer vectorization is now on by default (`NYTRIX_OUTER_VECTORIZE=0` turns it off).
-Enabling it took four more fixes on the in-process native route (`--native-only`,
-native JIT, native result oracle), whose scalar machine emitter hands vector
-functions to the NYIR emitter:
-
-`nyr_phi_elim` lowered four-lane PHIs through 8-byte locals. They now go through a
-  32-byte entry `alloca` with `vec8.store/load.i64`.
-The NYIR emitter had no `vec8.sar.i64`. It is now lane-wise `sarq`, with four-slot
-  homes.
-The home-path four-lane f64 SET1 broadcast from the source's stack home even when
-  the scalar existed only in its float register, which made `2.0 * B` read 0 in
-  `loop-tail-passes`.
-
-The full suite with the vectorizer forced on matched the baseline failure list
-exactly (2124/2139). The full serial bench that followed (2026-11-05 06:25, recorded
-above) put `binary` at 919 µs vs 266 µs LLVM (3.45x) and passed every per-class
-gate. Every checksum that ran matched.
-
-Later the same day:
-
-`nyr_licm_post_vectorize` runs right after the late loop vectorizer. It allows
-  hoisting invariant address arithmetic, which the pre-vectorization LICM keeps in
-  place on purpose. That alone took `linpack` from 760 µs to 320 µs.
-CSE now merges identical class-refining pointer copies.
-Home-path f64 broadcasts load the lane with `movsd`, which forwards, then use
-  register-form `vbroadcastsd`. Zen 2 cannot forward a store into a broadcast load.
-A dedicated row-update vectorizer for `linpack` (runtime dependence guard, scalar
-  remainder) was correct but 2x slower and was removed. The next `k` step reads the
-  vector-written row back with scalar 8-byte loads, which cannot be forwarded from
-  the misaligned 32-byte stores.
-
-The full suite showed no new failures. The serial full bench at 13:21 (`CC=clang`,
-recorded above) passed 72/72 fixtures and every per-class gate: `binary` 3.31x,
-`linpack` 1.33x (329 µs vs 248 µs), and `dgemm` 5.26x (137 µs vs 26 µs; ungated,
-host C under 1 ms).
-
-#### AVX/SSE transitions, vector accumulators and exit homing (2026-11-05 evening)
-
-Legacy SSE executed while the upper YMM halves are dirty stalls on this host (C
-  microbenchmark: 81 ns per transition against 6.4 ns with VEX scalar code). The
-  encoder mixed the two. On AVX targets the scalar and 128-bit SSE helpers now emit
-  VEX forms (`NYTRIX_NO_VEX_SSE=1` restores legacy encoding), and `vzeroupper` runs
-  before calls, before returns, and at entry to scalar-float blocks where no 256-bit
-  value is live. `sor` fell from 2.67 ms to 0.70 ms and `dgemm` from 137 µs to 37
-  µs; this was the `dgemm` stall that had no explanation without IBS.
-Fixed-trip integer reductions keep a four-lane vector accumulator again
-  (`NYTRIX_NO_VECTOR_ACCUMULATOR=1` disables it): `bce-matrix` 11.0 ms → 3.4 ms.
-Loop-carry exit homing ignored liveness. A carried vector segment was published to
-  its home before every loop branch whenever some successor had no carried arrival,
-  including successors where the value is dead.
-Packed i64 `sar` by 1 is `(a >>> 1) | (a & SIGN)`, two cycles of latency instead of
-  three.
-
-`binary` stays at about 3.2x LLVM. Its LLVM reference is itself vectorized across
-the outer loop: `NYTRIX_OUTER_VECTORIZE=0` compares our scalar loop with LLVM vector
-code and is not a meaningful gate. The remaining gap is instruction count (9.6M
-against 3.2M at higher IPC, 2.67 against 2.04), mostly in the signed `x / 2`
-sequence and the xor/and/xor select.
-
-The full serial bench at 18:36 (`CC=clang`, 3+1, load average 4–12, recorded above)
-passed every timed fixture and every per-class gate. Overall NYR/LLVM was 1.29x and
-the maximum 3.17x on `binary`. Other results: `dgemm` 1.52x (39 µs vs 26 µs), `sor`
-1.21x, `linpack` 1.49x, `bce-matrix` 0.53x.
-
-Built and validated after that run (224 of the 225 vector, ABI and optimizer
-fixtures pass on a private build; `f64-scalar-abi` fails on the release build too,
-from the concurrent `--run` argv change):
-
-`vec8.shr.i64` (`NYR_MACH_VSHR`, `vpsrlq`). The outer vectorizer emits it for
-  `(x >> 63) & 1`, which replaces four instructions of the signed-division bias:
-  `binary` 880 µs → 831 µs.
-Functions whose float allocation and loop-pinned floats stay in xmm0..xmm3 give
-  xmm4..xmm7 to vectors (`NYTRIX_NO_SHARED_XMM4_7=1` disables it). The fourth
-  `dgemm` broadcast now stays in a register (about 35 µs).
-`NYTRIX_OUTER_VEC_INTERLEAVE=2` widens to two four-lane registers per value. It is
-  correct but slower (1.40 ms) because the second register set spills. Off by
-  default.
-
-### NYC copy intrinsic register residency (2026-11-11)
-
-The x86-64 loop allocator now treats known copy intrinsics as clobbers that
-callee-saved registers can survive. Copies remain indirect-store hazards when
-stack-home privacy is unproven. Both indexed and fallback proofs agree.
-
-A frozen before/after compiler comparison on the string benchmark's C source, with
-`memcpy` replaced by `__builtin_memcpy` to exercise this path, retained checksum
-`300003294` in all 11 runs. Best kernel times fell from 643127 ns to 273198 ns;
-medians fell from 714369 ns to 324634 ns. Object assembly shows fewer loop-counter
-reloads. This is an intrinsic-path measurement, not closure of the existing string
-benchmark: its declared `memcpy` remains a call and measured essentially unchanged.
-The `small-copy-loop-residency.c` regression passes NYC O3 and Clang O3, including
-writes through an escaped local address.
-
-#### Declared memcpy follow-up
-
-Small constant copies now also lower through compatible external `memcpy`
-declarations, including the standard header prototype. Visible definitions,
-assembler aliases, incompatible signatures, and `-fno-builtin` retain calls. The
-seven-run focused string report
-`build/bench-reports/bench-20261111-083623-3891112.json` reports `ok`, matching
-checksums, and 184 us NYR, 202 us LLVM, 190 us C, and 280 us NYC (1.47x NYC/C). The
-prior full report measured 3.04x NYC/C. Object inspection confirms no `memcpy`
-relocation in the optimized fixture and a retained relocation with `-fno-builtin`.
-The copy-residency and visible-definition regressions pass; both are registered with
-the C frontend fixture runner.
-
-#### Benchmark LLVM rows and the pinned core bitcode (2026-11-15)
-
-The `knight` and `currying` benchmark rows reported `llvm_rc=139` at `-O3` while the
-same materialized source ran fine by hand. The failure was not in MCJIT. `./make
-bench` pins `build/release/core.bc` when the build tree already carries one, but did
-not refresh it, and `ny_jit_cache_path` hashed only that artifact's path, so a
-cached module linked against an older `core.bc` survived the rebuild. Storing to
-core globals the stale bitcode no longer defined resolved to address 0 at
-`_ny_top_entry` and faulted.
-
-Three changes close it: the bench builds the `core_bc` target before pinning, the
-JIT cache key folds the pinned artifact's size and timestamp, and
-`NY_JIT_CACHE_VERSION` is 33. A fresh `build/release/core.bc` plus those keys makes
-the rows measurable again: `knight` runs 2.56ms NYR (1.75x C, 2.00x LLVM),
-1.28-1.31ms LLVM (0.88x C), and 2.40ms NYC, with checksum `340233` matching on all
-routes and 0.4% spread across three runs. `currying`'s LLVM row is 2.36ms; the row
-still fails the 4.0x NYR/LLVM gate because its closure loops cost about 588ns per
-indirect call, against about 2ns for the direct loop in a 20000-iteration
-micro-benchmark. Closure ABI flags latch once at creation, so the per-call re-mark
-is a no-op; answering it and the flag lookup from a memoized resolution instead of
-the callable lock moved the row from 688x to 668x NYR/C. The rest of the gap is
-unattributed: `strace -c` shows no per-call syscall and the generated trampoline is
-three instructions, but `perf` is denied on this host.
-
-#### Constant-condition select folding (2026-11-15)
-
-`knight` is fully unrolled, and every ternary in the expanded loop body has a
-predicate that depends only on the induction value of the copy (`i >> 1`, `i & 1`,
-`pair == 0 || pair == 3`). Those selects survived to machine code as a materialized
-constant, a `test`, and a `cmovne` from a stack home. Nothing folded a `SELECT_I64`
-whose condition was already a known constant.
-
-`nyr_select_chain_fold` now applies that fold (R0) before its existing rules,
-releasing the dead arm so its constants and selects disappear in the same round.
-`nyr_peephole` has the same rule for conditions proven constant later in the
-pipeline, plus the `select(b, b)` identity. On the `knight` fixture, `ny_fn_moves`
-went from 565 to 498 instructions with no conditional moves left, and spills/reloads
-fell from 485/903 to 382/800.
-
-`./make bench knight --bench-run 5 --bench-warmup 2` reports NYR 2.33-2.38ms
-(1.59-1.62x C, 1.84-1.85x LLVM), LLVM 1.29ms, C 1.47ms, NYC 2.41ms, checksum
-`340233` on every route, 1.9-2.3% noise; the row was 1.75x C (2.56ms) before the
-fold. The native artifact is byte-identical whether produced by `--native-only -o`
-or the JIT route (`NY_DUMP_JIT` image matches the object's `moves` prologue), so
-this row measures codegen and not the route. Disabling `loop_unroll`, `unroll_jam`,
-or `if_convert` does not improve it (2.43-2.50ms), and disabling `loop_unroll_ssa`
-is worse (3.86ms), so unrolling is not the residual cost.
-
-What remains is home traffic: 199 of the 498 instructions reference `(%rbp)` homes.
-Cross-block GPR residency is opt-in and loop-only, and after unrolling `moves` has
-no loop, so `x`, `y`, `nx`, `ny`, and `total` reload at every unrolled block
-boundary. Eight compares also fail the flags-fused branch
-(`reason=condition-live-out`; the other 50 fuse). Closing the rest needs
-whole-function residency proofs rather than another peephole. Twelve focused
-fixtures covering ternary, select, if-convert, deferred cleanup, function values,
-and the three modified bench sources pass on the rebuilt compiler.
-
-#### Acyclic GPR carry across calls (attempted, reverted 2026-11-15)
-
-`coalesce_unchanged_dag_values` proves that a single-definition value stays in one
-register through acyclic blocks, but it rejected any live region containing a call
-and passed `preserve_gpr_calls = false`, so a call split every color. The encoder
-already keeps callee-saved seeds across a call (`mach_call_gpr_home_mask` homes only
-colors 5-11), so the relaxation was to allow call blocks and let the candidate check
-use `preserve_gpr_calls`, which leaves only the ABI callee-saved colors eligible for
-a call-spanning carry.
-
-The proof then accepted 478 values on `knight` (112 ineligible, 54 with no free
-color), but the object did not change where it mattered: `ny_fn_moves` still had 199
-`(%rbp)` home operations and the row stayed at 2.35ms, with 503 instructions instead
-of 498. Disassembly shows why. `x` and `y` were already resident after their one
-prologue reload, and the repeated homes are block-boundary temporaries (`nx`, `ny`,
-`depth - 1`) plus the multi-def accumulator `total`. Those cannot use any
-unchanged-value proof: the join after each range check has predecessors that do not
-all supply the value, and `total` is a PHI at every join. The change was reverted.
-Closing the rest needs acyclic PHI/join coalescing - the `coalesce_loop_edges`
-all-edge proof generalized to non-loop headers - plus an executable regression like
-`regalloc_loop_phi_carry` before it can be enabled by default.
-
-#### Acyclic join carry in the encoder (attempted, reverted 2026-11-15)
-
-The proposed follow-up changed `coalesce_loop_edges` itself: non-loop headers with
-no layout backedge now run the same all-edge PHI proof behind
-`NYTRIX_GPR_JOIN_CARRY`, a call-spanning carry is limited to callee-saved colors
-0-4, and a header that returns the value keeps its home. On `knight` seven joins
-committed (`h=12 v=26 C=7`, `h=21 v=36 C=0`, ... plus the same set from the second
-allocation pass), each with five incoming copies and no call use of the PHI.
-
-The emitted code did not change: `.text` was byte-identical to the run with the flag
-off, `ny_fn_moves` stayed at 498 instructions and 199 `(%rbp)` operations, and the
-row stayed at 2.4 ms. Two probes explain why. The encoder does not consume the pass
-allocation; it rebuilds GPR segments with `nyr_mach_regalloc_build_x64_class` and
-seeds a carried value only through `mach_segment_at(vreg, block_first_inst)`.
-Instrumenting that seed loop printed no carried segment at any block entry even with
-`NYTRIX_GPR_LOOP_CARRY=1`, and `mach_keep_homes_for_store_live_values` clears
-`carried` for every value that appears in a copy or a store - which is exactly the
-join PHI set. The bit is therefore invisible where it would matter, for loop carries
-as well.
-
-Two cheaper encoder-side variants were measured and reverted for the same reason.
-Eliding a `mov A,B; mov B,A` reversal (37 such pairs in `ny_fn_moves`) and a
-per-home last-store cache both produced byte-identical objects: those pairs are
-emitted by the inline ALU and copy paths (`mach_load_src_preg`, the `emitted2`
-sequences), not through `mach_mov_preg_preg` / `mach_mov_reg_rax`, so hooking those
-helpers never fires.
-
-Conclusion: acyclic GPR residency needs the encoder to consume an explicit
-carried/allocation contract, or a MACH-level copy-forwarding pass that folds `copy
-a,b; copy b,a` and single-use copy chains before lowering. Another allocator-side
-proof cannot move the object. `src/code/backend/lower/ regalloc.c` and
-`src/code/backend/mach/arch/x86/object64.c` were restored to their pre-experiment
-state.
-
-#### Same-color copy elision in the x64 encoder (kept 2026-11-15)
-
-The three attempts above looked in the wrong place. The reversed pairs are not MACH
-instructions and not `mach_mov_*` calls: the scalar COPY path in `object64.c`
-required `sp != dp` before moving directly between physical registers, so a copy
-whose source and destination already shared a color fell through to
-`mach_load_op_rax(src)` + `mach_commit_vreg(dst)` and staged the value through
-`%rax` although it was already in the destination register. The guard now accepts
-equal colors and skips the move while keeping the same seeding, clobber and
-home-store bookkeeping. `NYTRIX_NO_SAME_COLOR_COPY=1` restores the staging path.
-
-`knight` `moves`: 498 -> 418 x64 instructions; `.text` 5,240 -> 5,016 bytes (-4.3%);
-  all 37 adjacent reversed pairs are gone; checksum `340233` on the object and JIT
-  routes.
-Time is neutral rather than a speedup. Eleven interleaved
-  `--native-only -O3 -time -run` samples per side gave old median 2.364 ms / min
-  2.345 ms and new median 2.378 ms / min 2.307 ms, inside this host's 1.9-2.3%
-  noise. The win is code size and instruction count.
-`collatz`, `nqueens`, `sieve`, `mandelbrot`, `knucleotide`, `calls` and
-  `bigint-oracle` still report `ok` through the benchmark runner after the change.
-  Other fixtures move less: `.text` loses 8 bytes on `collatz`, 32 on `sieve`, and
-  is unchanged on `nqueens`, so this is a targeted fix for coalesced definitions
-  rather than a corpus-wide shrink.
-A full `--bench-correctness` sweep over all 77 `etc/tests/bench/**/*.nshape` passes
-  76 of 77 with this change. The single failure is `startup/currying.nshape`, which
-  fails identically without the change (it is also the one `FAIL` row in the
-  assembly audit).
-
-Next:
-
-[Performance](../learn/performance.md) — measurement method and profile validation.
-[Changelog](../CHANGELOG.md) — verified release records.
-
-### Collatz mask-test fusion (2026-11-13)
-
-The collatz inner loop lowers `if (n & 1) == 1 { n = 3*n+1 } else { n >>= 1 }` to a
-SELECT whose condition is the mask `n & 1` itself (not a `==`/`!=` compare against
-it). The x86-64 NIR emitter in `src/code/backend/mach/arch/x86/machine.c` now
-recognizes a SELECT whose condition is directly `AND(x, 1)` and emits `testq $1,
-%rax` + `cmovne`, dropping the `and` instruction and the redundant register copies
-entirely. The AND's stack home is elided, and the source value stays live through
-the SELECT for register coloring.
-
-Before: `mov n,%rax; and $1,%rax; mov n,%r9; sar $1,%r9; ...; test %rax,%rax;
-cmovne`. After: `sar $1,%r9; lea (%r9,%r9,2),%r9; add $1,%r9; test $1,%rax; cmovne`.
-
-Checksum `178` matches C/LLVM/NYC. Focused timing shows the Ny kernel at ~12µs vs C
-~8.5µs (~1.4x; the reported 2.9x was a `ny--time` JIT-run overhead artifact, not a
-kernel gap). Whole-program Ny time improved from ~15ms to ~12ms, still dominated by
-runtime and page-fault cost rather than the kernel.
-
-A matching object-encoder pass was prototyped in
-`src/code/backend/mach/arch/x86/object.c` but produced a checksum mismatch (`9` vs
-`178`) and was reverted; the NIR emitter path is sufficient and correct.
-
-A cold GCC rerun exposed an independent reference-wrapper defect: macro-renaming C
-`main` removes its implicit successful return. The timer wrapper now inserts an
-explicit final zero return into that body, preserving explicit early failure
-returns. Its body scan skips comments and quoted braces. The wrapper regression
-executes fallthrough, explicit failure, nested-block, quoted-brace, and argc/argv
-cases through the selected host compiler.
-
-Before runtime work was prioritized, a current-tree editor object compile with six
-caches disabled took 99.24 s wall and 2,772,484 KiB peak RSS. Reported phases were
-10.36 s type validation, 12.37 s code generation, and 85.69 s object emission; phase
-timings may be nested and must not be summed. A 10-second CPU sample put 19.28% of
-samples in `nyr_find_module_in_root_cached`. That helper now rejects statement kinds
-that cannot contain modules before hashing/caching guaranteed misses. Four existing
-alias/reexport/module fixtures passed cold. No isolated compile-time speedup or
-15-second acceptance result is claimed.
-
-#### Compiler build-time fixes (2026-11-12)
-
-Machine: AMD EPYC 7642, 96 threads, 62 GB, shared with other agents. Cold means the
-native, AOT, JIT, stencil, and stdlib caches disabled with a private build of the
-current tree. These are single-session measurements taken at load 8–20, not gate
-evidence. Twelve of the thirteen root projects meet 15 s; no UI project does, so the
-all-project target stays open.
+On AMD EPYC 7642 (96 threads, 62 GB, shared, load 8–20; native/AOT/JIT/stencil/stdlib caches off, private build; single-session, not gate evidence), 12 of 13 root projects meet 15 s and no UI project does:
 
 | Project (`-o`, cold) | wall | dominant phase |
 | --- | --- | --- |
@@ -3443,478 +2621,94 @@ all-project target stays open.
 | editor | 73.2 s | emit 60.6 s |
 | xtool | 6.8 s | emit 5.1 s |
 
-Emit object is the dominant phase in every UI project. Per-project fixes in this
-batch removed the HM blockers in the UI library (Wayland clipboard wrappers, asset
-font/catalog defaults, engineering batch helpers, camera `scale`). The remaining
-inference fixes made heterogeneous list literals `list<any>` and bare
-`list`/`set`/`tuple`/`dict` annotations use `any` elements; the `gf` scalar
-overloads were rewritten from a comptime template into three explicit functions,
-which removed `editor`'s nested-dict error and `xtool`'s `expected gf, got int`
-error. A per-vreg first/last live-range pre-check in `nyr_mach_regalloc_segment_at`
-measured no gain (animation emit 25.4 s vs 24.6 s, input 75.5 s vs 73.2 s) and was
-reverted.
+Emit dominates every UI project. HM blockers (Wayland clipboard wrappers, asset font/catalog defaults, engineering batch helpers, camera `scale`) were fixed, heterogeneous list literals became `list<any>` and bare `list`/`set`/`tuple`/`dict` annotations use `any` elements, and `gf` overloads were rewritten from a comptime template into three explicit functions, clearing editor's nested-dict and xtool's `expected gf, got int` errors. A per-vreg live-range pre-check in `nyr_mach_regalloc_segment_at` showed no gain (animation emit 25.4 vs 24.6 s, input 75.5 vs 73.2 s) and was reverted. `nyr_inline_general` rebuilt CFG topology, loop depths and type maps after every splice, making a 63k-instruction driver with thousands of tiny calls quadratic; it now stops at 128 splices (`NYTRIX_INLINE_MAX_SPLICES`) and skips bodies over 100k instructions (`NYTRIX_INLINE_BODY_CAP`), unchanged below 128 calls. Editor fell 270.7 s (512-splice cap)→205.8 s and engine 122.9→93.4 s; indexing float/vector segments by start/end instruction took engine to 87.0 s, and replacing the coalescer's per-candidate `segment_in_block_vreg` scans with a one-time `(vreg, block) -> unique segment` hash table took editor to 73.2 s (emit 189.5→60.6 s). Engine and animation objects are byte-identical before/after the index changes (SHA-256 prefixes `f1a8e01a67f1f0a5` and `14a899e7b7b03d59`); engine re-runs 85.8–93.3 s (emit 72.2–79.2 s) at load ~20. Type-map init now allocates one region per observed class plus a shared zeroed region, dropping 14 full-size arrays when fewer than 7 classes are present; its earlier profile share was 1.85% self but there is no matched timing, so no speedup is claimed and build-time acceptance stays open. Mock-replay `--run=native` takes pong 36–41 s, input 109 s and engine 142 s (349 s before fixes); LLVM takes pong 56 s, input 102 s, and engine segfaults in SimplifyCFG after ~115 s on a malformed PHI (also on unmodified release, so separate). Engine's remaining 87.0 s is 72.9 s encode; a pre-index profile had `nyr_mach_regalloc_segment_at` 12.3%, `coalesce_loop_edges` 8.2%, `mach_float_begin_segments` 6.6% and `mach_float_end_segments` 2.4% self. Float/vector scans now use start/end indexes, `mach_flush_float_to_home_mode` still scans every vreg per block, and a persistent per-function object cache is the larger lever; the focused benchmark fixtures pass but a full runtime comparison at this cap is owed, and editor still spends 60.6 s in emit.
 
-The inliner was the other dominant cost. `nyr_inline_general` rebuilt the caller CFG
-topology, loop depths, and type map after every committed splice, so a
-63k-instruction driver with thousands of tiny calls became quadratic. It now stops
-after 128 splices per function (`NYTRIX_INLINE_MAX_SPLICES`) and skips bodies above
-100k instructions (`NYTRIX_INLINE_BODY_CAP`). Functions with fewer than 128
-inlinable calls are unchanged. This took `editor` from 270.7 s (at a 512-splice cap)
-to 205.8 s and `engine` from 122.9 s to 93.4 s. Indexing float and vector segments
-by the instruction where they start or end (the scalar allocator already did this)
-then took `engine` to 87.0 s. Finally, the loop-edge coalescer's per-candidate
-`segment_in_block_vreg` scan was replaced with a per-vreg index, and then with a
-one-time `(vreg, block) -> unique segment` hash table; a block can hold thousands of
-segments and a long-lived value can have thousands of its own, so both scans were
-quadratic. That took `editor` from 205.8 s to 73.2 s (emit 189.5 s to 60.6 s). The
-`engine` and `animation` objects are byte-identical before and after the index
-changes (SHA-256 prefixes `f1a8e01a67f1f0a5` and `14a899e7b7b03d59`); engine re-runs
-ranged 85.8–93.3 s (emit 72.2–79.2 s) at load ~20. The focused benchmark fixtures
-still pass, but a full runtime benchmark comparison at this cap is still owed.
+A CFG-boundary scan experiment was rejected: `nyr_cfg_build_impl` was 4.04% of 520 CPU-clock samples on a focused `sound.ny` compile, and removing its temporary boundary bitmap and one full scan left the object byte-identical (`7df680223713507fe982ffb1cec8cb25bbb8412b96990520812393dc5dc2f917`). The A/B used `build/ny-full-before-cfg` (BuildID `994641023b6455a692f0dd04ff5036a9e0809a2f`) and candidate `ny-full` (BuildID `3f061e09c999dd80dc81a1a54bd67ecd807bbaab`) with `NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 perf stat -r 5 -e task-clock,cycles,instructions -- build/release/ny-full --no-progress --native-only --opt-level=3 --run=none --output=build/perf-sound-time.o etc/labs/sound.ny`, run twice per compiler in baseline/candidate then candidate/baseline order under `nice -n 19`, with the NYC Linux build also running, `-j32` (not `-j16`), load 16–20 and no page-cache clear. First pair 7.990 s ±0.22% vs 8.168 s ±0.43%; reverse pair 8.067 s ±0.18% vs 8.104 s ±0.15%; means 8.028 vs 8.136 s. Candidate task-clock and instruction counts were also slightly higher, and its single profile sampled the routine at 2.91% of 516 samples without an end-to-end gain. It was reverted: baseline passed `cfg_simplify`, candidate passed `cfg_simplify` and all 166 x86-64 target tests, both emitted the identical object, and no compile-time acceptance item changed. Native JIT startup improved locally by reusing one exact-name definition lookup across data routing, symbol resolution and external call stubs, preserving alias/relocation rules; AArch64 reused its stub selection lookup too. An alternating warm-process comparison discarded two warm-up pairs and kept ten samples per arm: baseline median 207.69 ms (200.95–209.61), candidate 149.78 ms (145.07–155.94), 27.9% lower, all with checksum `1968365`. An overlapping editor compile makes this a startup observation, not an arithmetic-speedup claim; four module/cache/closure fixtures passed and AArch64 execution was unavailable on the x86-64 host.
 
-NYIR type-map initialization now allocates flag regions after type propagation: one
-region per class observed in the function, plus one zeroed region shared by absent
-classes. Typed functions no longer allocate and clear fourteen full-size value/local
-arrays when fewer than seven classes are present. The earlier profile attributed
-1.85% self time to type-map initialization; this allocation change has no matched
-before/after compile-time measurement, so no speedup is claimed and the build-time
-acceptance items remain open.
+### i386 object writer compact encoding
 
-Run route `--run=native` with the mock replay environment: pong 36–41 s, input 109
-s, engine 142 s (349 s before this batch's fixes). The default LLVM run route takes
-pong 56 s and input 102 s, and engine segfaults in LLVM SimplifyCFG after about 115
-s on a malformed PHI (the unmodified release compiler does the same, so it is
-separate from the native route).
+i386 `.text` fell 8,379→7,909 bytes on `knight` and 1,036→804 on recursive `fib(12)` (22%): `NY_I386_EBP_OP` in `src/code/backend/mach/arch/x86/object.c` now takes the ModRM register field and selects mod=01 disp8 for offsets in `[-128,127]`, falling back to mod=10 disp32 (offset 0 also uses disp8, since mod=00 with base=EBP encodes disp32-without-base). `ny_i386_obj_mov_imm32` (`c7 /0`, the `NYIR_CONST_I64` home store) uses `c7 45 disp8 imm32` for narrow offsets, and `ny_i386_obj_add_esp_imm` plus the prologue use `0x83 /0` and `0x83 /5` imm8 forms for adjustments up to 127 bytes; `NYTRIX_NO_I386_DISP8=1` forces the old all-disp32 memops. With `--native-backend x86 --native-only -O3 --nyr-verify -emit-only -o out.o` and `.text` read via `objcopy -O binary --only-section=.text`, the three builds measured 8,379/1,036 (baseline), 8,015/not measured (disp8 memops only) and 7,909/804 (disp8 plus imm8). The `knight` object file went 14,304→13,940 bytes; its 616-byte frame is beyond imm8 reach, so it gains only from disp8 memops, while the small fixture's signed-byte frame and post-call `add $imm8,%esp` cleanups give the 22%. Verification: `--pattern i386` 13/13 and `--pattern elf32` 45/45, the latter linking with clang and executing under qemu. The x86-64 writer and its same-color copy elision are untouched.
 
-Remaining engine native time (87.0 s): encode 72.9 s. In the profile taken before
-the segment index, `nyr_mach_regalloc_segment_at` was 12.3 % self,
-`coalesce_loop_edges` 8.2 %, `mach_float_begin_segments` 6.6 %, and
-`mach_float_end_segments` 2.4 %. The float and vector begin/end scans now use
-per-instruction start/end indexes, like the scalar scans;
-`mach_flush_float_to_home_mode` still scans every vreg once per block. A persistent
-per-function object cache is the larger lever for iteration time. `editor` still
-spends 60.6 s in emit on its giant function, so it remains far from the 15 s target
-even though it now compiles.
+### Multi-segment home sharing in the x64 home layout
 
-#### Rejected NYIR CFG-boundary scan experiment (2026-11-12)
+Reverted multi-segment home sharing: generalizing `mach_vreg_home_colorable` in `mach/arch/x86/object/regalloc.h` from single-block intervals to the union of all resident segments (min start/max end, still rejecting call-bearing blocks, reload/spill/carried segments, frame-loaded incoming args and float CMP results) left `knight` `.text` at 5,016 bytes with checksum `340233` and moved stack-relative ops 199→206 (all disp8). `--pattern regalloc` 11/11 and `--pattern codegen` 15/15 passed, but with no size or frame change the edit failed the keep-only-measured-wins rule and was reverted. Values resident across blocks are already colored into registers, so the only homes that could gain are spilled ones, which the filter rejects; the remaining frame is cold spill slots. Shrinking it needs interval-based slot coloring over spill segments, not home sharing.
 
-On the same AMD EPYC 7642 host, a focused `sound.ny` native compile sampled
-`nyr_cfg_build_impl` at 4.04% of 520 CPU-clock samples. The experiment removed its
-temporary boundary bitmap and one full scan, calculating block starts directly in
-two passes. It passed the CFG regression and x86-64 target suites; the emitted
-object stayed byte-identical
-(`7df680223713507fe982ffb1cec8cb25bbb8412b96990520812393dc5dc2f917`).
+### Spill-slot coloring in the x64 home layout
 
-The A/B used `build/ny-full-before-cfg` (BuildID
-`994641023b6455a692f0dd04ff5036a9e0809a2f`) and the candidate `ny-full` (BuildID
-`3f061e09c999dd80dc81a1a54bd67ecd807bbaab`) with:
+Spill-slot coloring cut `knight` `.text` 5,016→4,688 bytes (−6.5%) and its frame 616→488; the frame was spill-bound, not resident-bound. `mach_build_vreg_homes` had given each non-single-block-resident value its own slot — 616 bytes for 104 vregs on `knight`, with only 27 values sharing — so `mach_vreg_home_spill_interval` now colors spilled values by the union of their live segments (min start/max end), limited to GPR-class, 8-byte homes that actually touch home (spill, reload, spilled color); incoming-argument homes and floating-predicate GPR results stay unshared as in the resident path. Disjoint ranges share a slot and overlapping ones do not; a call cannot alias because a value live across it has segments on both sides, so its union covers the call. `NYTRIX_NO_SPILL_HOME_COLOR=1` restores one slot per value for A/B from one binary.
 
-```bash
-NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 \
-  perf stat -r 5 -e task-clock,cycles,instructions -- \
-  build/release/ny-full --no-progress --native-only --opt-level=3 \
-  --run=none --output=build/perf-sound-time.o etc/labs/sound.ny
-```
-
-The same command was run against each compiler twice, in baseline/candidate then
-candidate/baseline order. `nice -n 19` was applied to all runs. The host was shared
-with the NYC Linux build. The user later clarified that it was run with `-j32`, not
-`-j16` as initially recorded; the observed load averages were 16–20. The OS page
-cache was not cleared. These timings were taken under substantial contention; retain
-them only as a rejected exploratory run, not evidence of a real speedup or
-regression:
-
-| Order | Baseline elapsed | Candidate elapsed |
-| --- | ---: | ---: |
-| First pair | 7.990 s ± 0.22% | 8.168 s ± 0.43% |
-| Reverse pair | 8.067 s ± 0.18% | 8.104 s ± 0.15% |
-| Mean of pair means | 8.028 s | 8.136 s |
-
-Candidate task-clock and instruction counts were also slightly higher. Its single
-CPU-clock profile sampled `nyr_cfg_build_impl` at 2.91% of 516 samples, but that
-small sample-count shift did not correspond to an end-to-end gain. The candidate was
-reverted; no speedup is claimed. The baseline compiler passed `cfg_simplify`, the
-candidate passed `cfg_simplify` and all 166 x86-64 target tests, and both compilers
-emitted the identical object above. This experiment did not change the open
-compile-time acceptance items.
-
-#### Native JIT relocation lookup
-
-The loader repeatedly searched for the same definition while deciding data routing,
-symbol resolution, and external call stubs. Reusing one exact-name lookup preserved
-alias and relocation rules; AArch64 also reused its stub selection lookup.
-
-An alternating warm-process comparison discarded two warm-up pairs and kept ten
-samples per arm. Baseline median was 207.69 ms (200.95–209.61 ms); candidate median
-was 149.78 ms (145.07–155.94 ms), 27.9% lower. Every run returned checksum
-`1968365`. Another editor compile overlapped the comparison, so this is a local
-startup observation, not an arithmetic-speedup claim. Four focused
-module/cache/closure fixtures passed; AArch64 execution was not available on the
-x86-64 host.
-
-### i386 object writer compact encoding (kept 2026-11-15)
-
-The i386 ELF object writer was emitting the longest form of every stack-relative
-instruction: `NY_I386_EBP_OP` always produced mod=10 disp32 `(%ebp)` memops, and the
-frame reservation/adjustment always used the `0x81` imm32 group (seven bytes per
-access where three would do).
-
-Changes in `src/code/backend/mach/arch/x86/object.c`:
-
-`NY_I386_EBP_OP` now takes the ModRM register field and selects mod=01 disp8 for
-  offsets in `[-128,127]`, falling back to mod=10 disp32. Offset 0 still takes the
-  disp8 form because mod=00 with base=EBP encodes disp32-without-base.
-`ny_i386_obj_mov_imm32` (`c7 /0`, the home store used by `NYIR_CONST_I64`) uses
-  `c7 45 disp8 imm32` for narrow offsets.
-`ny_i386_obj_add_esp_imm` and the prologue use `0x83 /0` and `0x83 /5` imm8 forms
-  for stack adjustments up to 127 bytes.
-`NYTRIX_NO_I386_DISP8=1` forces the old all-disp32 memops so both encodings can be
-  measured from one binary.
-
-Measured with `--native-backend x86 --native-only -O3 --nyr-verify -emit-only -o
-out.o`, taking `.text` bytes through `objcopy -O binary --only-section=.text`:
-
-| build | `knight` `.text` | recursive `fib(12)` `.text` |
+| fixture | `.text` before→after | frame before→after |
 | --- | --- | --- |
-| all-disp32 baseline (`NYTRIX_NO_I386_DISP8=1`) | 8,379 | 1,036 |
-| disp8 memops only | 8,015 | not measured |
-| disp8 memops + imm8 frame forms | 7,909 | 804 |
+| `knight` | 5,016→4,688 (−6.5%) | 616→488 |
+| `compose-local` | 7,040→6,800 (−3.4%) | 632→488 |
+| `combs-test` | 3,152→3,152 | 88→72 |
+| `eq-test` | 3,928→3,912 | 136→136 |
+| `unicode-identifiers` | 2,632→2,624 | 1,552→1,552 |
 
-The `knight` object file shrank 14,304 -> 13,940 bytes. Its own 616-byte frame is
-out of imm8 reach, so its saving is the disp8 memops; the small recursive fixture's
-frame fits a signed byte and its post-call cleanups also collapse to `add
-$imm8,%esp`, giving the combined 22% reduction.
+`knight` gained 12 instructions (983→995) while losing 328 bytes: the smaller frame pulls accesses into disp8 and reused slots trade offsets for shorter encodings. Checksum `340233` is unchanged; `--pattern x86` 223/223, `regalloc` 11/11, `codegen` 15/15, `copy` 8/8. `--bench-correctness` reports 2,357/2,366; the 9 failures (`code/probes/tools/doc-rank`, `doc-meta`, `lang/memory/sanitizer-thread-race`, `code/intermediate/ny/bare/asm-artifacts`, `code/probes/cli/terminal`, `code/intermediate/ny/vm-disasm-artifact-diff`, `lang/comptime/comptime-contracts`, and both `lang/errors/parser/invalid-byte-stops`) fail identically with `NYTRIX_NO_SPILL_HOME_COLOR=1 NYTRIX_NO_SAME_COLOR_COPY=1`, so they predate both encoder changes; `startup/currying.nshape` is the earlier known failure. Widening `mach_vreg_home_colorable` to multi-segment resident values had produced nothing because it excluded every spilled value.
 
-Verification: `--pattern i386` 13/13 and `--pattern elf32` 45/45. The ELF32 fixtures
-link the emitted object with clang and execute it under qemu, so these encodings are
-checked by running rather than only by assembling. The x86-64 object writer and its
-same-color copy elision are untouched.
+### x64 frame ModRM narrowing covers the hand-rolled paths
 
-### Multi-segment home sharing in the x64 home layout (attempted, reverted 2026-11-15)
+Converting eleven hand-rolled `0x85 disp32` frame sites to the range-checked `mach_rbp_disp` produced no size change on the measured fixtures, so those sites are cold there; frame narrowing's 424-byte total was won earlier. The converted paths cover the aggregate-parameter home `lea`, SSE scalar memory op, v256 `ymm` load/store, packed ymm add/sub/and/or/xor, x87 `fld`/`fstp` for sin/cos, `imul` and ALU fallback with a memory operand, `cmov`/`cmp` with a memory source, and `cmpq $0, mem; jne`, which keeps its immediate in `83 /7 ib` form (`48 83 7d d8 00` instead of `48 83 bd <disp32> 00`). Struct-argument staging `lea` uses `mach_rsp_disp`, now taking a reg field to emit `48 8d 7c 24 <disp8>`. `NYTRIX_NO_FRAME_DISP8=1` forces disp32 in both helpers, so `knight` `.text` is 5,112 with it and 4,688 by default — a 424-byte cumulative difference (8.3%) that is byte-identical to the pre-change encoder on `knight` (4,688), `compose-local` (6,800), `combs-test` (3,152) and a small float kernel (688). `knight` still pays disp32 on 303 frame accesses because its spill-colored frame is 488 bytes, putting those homes below −128 where disp32 is the only legal form; that needs slot ordering by access count, not another encoder helper. Correctness: `--pattern x86` 223/223, `regalloc` 11/11, `copy` 8/8; `--pattern codegen` 14/15 with `code/derive/dispatch/codegen-match` failing deterministically and unchanged under `NYTRIX_NO_FRAME_DISP8=1`, `NYTRIX_NO_SPILL_HOME_COLOR=1`, `NYTRIX_NO_SAME_COLOR_COPY=1`, `NYTRIX_NO_SELECT_CHAIN_FOLD=1`, `NYTRIX_NO_FLOAT_GUARD_FOLD=1` and `NYTRIX_PEEPHOLE_SKIP_SERIAL_INTEGER=1`, individually and together. Its `.nshape` has no `main` (the harness wraps it), so it cannot be bisected standalone and needs its own investigation.
 
-`mach_vreg_home_colorable` in `mach/arch/x86/object/regalloc.h` only let
-single-block intervals share a vreg home. Generalizing it to the union of all of a
-value's resident segments (min start / max end, still rejecting call-bearing blocks,
-reload/spill/carried segments, frame-loaded incoming args and float CMP results) is
-a safe extension, since a home is only touched while its value is live, but it
-bought nothing measurable on the hot fixture: `knight` `.text` stayed at 5,016 bytes
-with checksum `340233`, while stack-relative ops went 199 -> 206 (all still disp8).
-`--pattern regalloc` 11/11 and `--pattern codegen` 15/15 passed, but with no size or
-frame change it fails the rule of keeping only measured wins, so the edit was
-reverted.
+### Hot-slot ordering for x64 frame homes
 
-The reason is structural: values that stay resident across blocks are already
-colored into registers, so the homes that could gain from sharing are spilled ones,
-which the eligibility filter rejects. The remaining frame bytes are cold spill
-slots, not shareable resident homes. Shrinking them needs spill-slot reuse
-(interval-based slot coloring over spill segments), not home sharing.
-
-### Spill-slot coloring in the x64 home layout (kept 2026-11-15)
-
-`mach_build_vreg_homes` gave every value that was not a single-block resident its
-own home slot. Those are the spilled values, and they dominate the frame: `knight`
-reserved 616 bytes of homes for 104 vregs while only 27 values shared a slot.
-
-`mach_vreg_home_spill_interval` now colors spilled values by the union of all their
-live segments (min start / max end), restricted to GPR-class values with an 8-byte
-home that actually touch their home (spill, reload, or spilled color).
-Incoming-argument homes and floating-predicate GPR results keep unshared slots,
-exactly as in the resident path. Disjoint live ranges reuse one slot; overlapping
-ones keep separate slots. A call cannot alias because any value live across it has
-segments on both sides, so its union range covers the call instruction and overlaps
-anything live there.
-
-`NYTRIX_NO_SPILL_HOME_COLOR=1` restores one slot per value so both layouts can be
-measured from one binary.
-
-| fixture | `.text` before -> after | frame bytes before -> after |
-| --- | --- | --- |
-| `knight` | 5,016 -> 4,688 (-6.5%) | 616 -> 488 |
-| `compose-local` | 7,040 -> 6,800 (-3.4%) | 632 -> 488 |
-| `combs-test` | 3,152 -> 3,152 | 88 -> 72 |
-| `eq-test` | 3,928 -> 3,912 | 136 -> 136 |
-| `unicode-identifiers` | 2,632 -> 2,624 | 1,552 -> 1,552 |
-
-`knight` gained 12 instructions (983 -> 995) while losing 328 bytes: the smaller
-frame pulls more accesses into disp8 reach, and reused slots trade distinct offsets
-for shorter encodings.
-
-Correctness: `knight` checksum `340233` is unchanged; `--pattern x86` 223/223,
-`--pattern regalloc` 11/11, `--pattern codegen` 15/15, `--pattern copy` 8/8. A full
-`--bench-correctness` sweep reports 2,357/2,366. The 9 failures are
-`code/probes/tools/doc-rank`, `doc-meta`, `lang/memory/sanitizer-thread-race`,
-`code/intermediate/ny/bare/asm-artifacts`, `code/probes/cli/terminal`,
-`code/intermediate/ny/vm-disasm-artifact-diff`, `lang/comptime/comptime-contracts`
-and both `lang/errors/parser/invalid-byte-stops` fixtures; each one fails
-identically under `NYTRIX_NO_SPILL_HOME_COLOR=1 NYTRIX_NO_SAME_COLOR_COPY=1`, so
-they predate both encoder changes. `startup/currying.nshape` remains the known
-failing row from the earlier sweep.
-
-The earlier attempt that only widened `mach_vreg_home_colorable` to multi-segment
-resident values produced nothing because it still excluded every spilled value. The
-frame was never resident-bound; it was spill-bound.
-
-### x64 frame ModRM narrowing covers the hand-rolled paths (kept 2026-11-15)
-
-Frame accesses no longer hand-roll their ModRM byte. Eleven `0x85 disp32` sites now
-call the range-checked `mach_rbp_disp`: the aggregate-parameter home `lea`, the SSE
-scalar op with a memory operand, the v256 `ymm` load/store, packed
-add/sub/and/or/xor on `ymm`, x87 `fld`/`fstp` for sin/cos, `imul` and the ALU
-fallback with a memory operand, `cmov` and `cmp` with a memory source, and `cmpq $0,
-mem; jne`. The last one also keeps its immediate in the `83 /7 ib` form, so a nearby
-home costs `48 83 7d d8 00` instead of `48 83 bd <disp32> 00`. The struct-argument
-staging `lea` uses `mach_rsp_disp`, which now takes a reg field and narrows `lea
-disp8(%rsp), %rdi` to `48 8d 7c 24 <disp8>`.
-
-`NYTRIX_NO_FRAME_DISP8=1` makes both helpers emit disp32, so the frame encoding is
-A/B-able from a single binary. On `knight`:
-
-| encoding | `.text` |
-| --- | --- |
-| disp32-only (`NYTRIX_NO_FRAME_DISP8=1`) | 5,112 |
-| default | 4,688 |
-
-The 424-byte difference is the cumulative value of frame narrowing (8.3% of
-`.text`), not this round's share: `.text` is byte-identical to the pre-change
-encoder on `knight` (4,688), `compose-local` (6,800), `combs-test` (3,152) and a
-small float kernel (688), so the converted sites are cold in those programs.
-
-What remains is not an encoding gap. `knight` still pays disp32 on 303 frame
-accesses, and the spill-colored frame is 488 bytes, so those accesses address homes
-below -128 bytes where disp32 is the only legal form. Converting any of them
-requires slot ordering, not another encoder helper: rank homes by access count and
-pack the hot ones into the low 128 bytes.
-
-Correctness: `--pattern x86` 223/223, `--pattern regalloc` 11/11, `--pattern copy`
-8/8. `--pattern codegen` is 14/15: `code/derive/dispatch/codegen-match` fails
-deterministically, and it still fails with `NYTRIX_NO_FRAME_DISP8=1`,
-`NYTRIX_NO_SPILL_HOME_COLOR=1`, `NYTRIX_NO_SAME_COLOR_COPY=1`,
-`NYTRIX_NO_SELECT_CHAIN_FOLD=1`, `NYTRIX_NO_FLOAT_GUARD_FOLD=1` and
-`NYTRIX_PEEPHOLE_SKIP_SERIAL_INTEGER=1`, individually and together, so this encoder
-round is not its cause. Its `.nshape` source has no `main` (the harness wraps it),
-so it cannot be run standalone to bisect further; the fixture needs its own
-investigation.
-
-### Hot-slot ordering for x64 frame homes (kept 2026-11-15)
-
-disp8 frame addressing only reaches the 128 bytes below `%rbp`, so which value owns
-which slot decides three bytes per access. The coloring pass allocates in live-range
-order, which says nothing about how often a slot is touched, so the homes that fit
-in disp8 reach were arbitrary.
-
-`mach_order_hot_homes` counts MACH operand references per vreg, but only for vregs
-that actually reach a home: a fully resident value appears in many operands and
-still has no home traffic, so counting it would let it push a hot spilled value out
-of reach. Vregs that share a slot are grouped into one slot weight, and the offsets
-of equal-width slots are permuted so the most-used homes sit closest to `%rbp`. Only
-offsets move — every slot keeps its byte range, its width, and the disjointness the
-coloring pass proved; width-16/32 vector homes keep their offsets; the frame stays
-the same size.
+Kept hot-slot ordering: `mach_order_hot_homes` counts MACH operand references only for vregs that actually reach a home, groups slot sharers into one slot weight, and permutes the offsets of equal-width slots so the busiest homes sit closest to `%rbp`; only offsets move, with byte ranges, widths, disjointness, frame size and width-16/32 vector offsets preserved. A first version weighted every operand reference regardless of home use and cost `unicode-identifiers` 8 bytes by letting resident values outrank spilled ones; restricting the count removed that and improved `knight` from −88 to −128.
 
 | fixture | allocation order | hot ordering |
 | --- | --- | --- |
-| `knight` | 4,688 | 4,560 (-128, -2.7%) |
-| `compose-local` | 6,800 | 6,712 (-88, -1.3%) |
+| `knight` | 4,688 | 4,560 (−128, −2.7%) |
+| `compose-local` | 6,800 | 6,712 (−88, −1.3%) |
 | `combs-test` | 3,152 | 3,152 |
 | `eq-test` | 3,912 | 3,912 |
 | `unicode-identifiers` | 2,624 | 2,624 |
 | `unicode-debug7` | 3,280 | 3,280 |
 
-The first attempt weighted every operand reference regardless of home use and cost
-`unicode-identifiers` 8 bytes: resident values outranked spilled ones and displaced
-hot homes. Restricting the weight to home-using vregs removed that and improved
-`knight` from -88 to -128.
+`knight` checksum `340233` is unchanged. `--pattern x86` 223/223, `regalloc` 11/11, `copy` 8/8, `codegen` 14/15 (`codegen-match`, pre-existing and identical with every encoder hatch disabled). The full `--bench-correctness` sweep reports 2,286/2,366 both with hot ordering and with `NYTRIX_NO_HOT_HOMES=1`; the 80 failures are concentrated in 10-25 s UI/font/audio fixtures produced while other agents held the machine at load 12-26, so they are timeouts rather than encoding differences, versus 2,357/2,366 on a quiet machine. disp8 reaches only the low 128 bytes below `%rbp`, which also hold callee-save and source frame slots, so only a handful of 8-byte homes fit; frame-slot ordering by access frequency is the next lever, not more encoder work.
 
-`knight`'s checksum is unchanged (`340233`). Correctness: `--pattern x86` 223/223,
-`regalloc` 11/11, `copy` 8/8, `codegen` 14/15 (`codegen-match`, which fails
-identically with every encoder hatch disabled and predates this work). The full
-`--bench-correctness` sweep reports 2,286/2,366 both with hot ordering and with
-`NYTRIX_NO_HOT_HOMES=1`. The 80 failures are concentrated in 10-25 s UI/font/audio
-fixtures and were produced while other agents held the machine at load 12-26, so
-they are timeouts rather than encoding differences; the earlier quiet-machine sweep
-was 2,357/2,366.
+### Short backward branches
 
-The remaining ceiling is the low 128 bytes themselves: they also hold the
-callee-save slots and the source frame slots, so only a handful of 8-byte homes land
-in disp8 reach. Ordering frame slots by access frequency is the next lever, not more
-encoder work.
-
-### Short backward branches (kept 2026-11-15)
-
-Every branch was emitted as rel32 (`e9` or `0f 8x` plus four displacement bytes) and
-patched after the trampoline fold, even for loop latches whose target was already
-laid out. A backward edge knows its displacement when it is emitted because
-`block_off[target]` is recorded at that block's start, so `mach_emit_branch_to` now
-emits `eb`/`7x` with a single displacement byte when the distance fits a signed
-byte.
-
-Short branches still record a patch, flagged in `patch_short`, so the trampoline
-fold's byte compaction moves their patch site with the rest of the code. That fold
-only ever drops bytes, and dropping bytes between a backward target and its latch
-can only shrink the displacement, so a rel8 edge cannot fall out of range
-afterwards. Forward edges keep the rel32 placeholder. `NYTRIX_NO_SHORT_BRANCHES=1`
-restores rel32 everywhere for A/B runs.
+Kept: `mach_emit_branch_to` emits `eb`/`7x` with one displacement byte for backward edges whose distance fits a signed byte, using `block_off[target]` recorded at the target's start; previously every branch used rel32 (`e9`/`0f 8x` plus four displacement bytes) patched after the trampoline fold, even for already-laid-out loop latches. Short branches still record a patch flagged `patch_short` so the fold's byte compaction moves their patch site; the fold only drops bytes, which can only shrink a backward displacement, so a rel8 edge cannot fall out of range. Forward edges keep the rel32 placeholder and `NYTRIX_NO_SHORT_BRANCHES=1` restores rel32 everywhere for A/B.
 
 | fixture | rel32 only | short backward |
 | --- | --- | --- |
-| `knight` | 4,592 | 4,584 (-8) |
-| `compose-local` | 6,712 | 6,680 (-32) |
-| `combs-test`, `eq-test`, `unicode-identifiers`, `unicode-debug7` | - | unchanged |
+| `knight` | 4,592 | 4,584 (−8) |
+| `compose-local` | 6,712 | 6,680 (−32) |
+| `combs-test`, `eq-test`, `unicode-identifiers`, `unicode-debug7` | — | unchanged |
 
-Only one of `knight`'s 67 branches fits: its loop bodies are larger than the
-128-byte rel8 reach. `compose-local` converts ten. Reaching the rest needs a real
-fixpoint relaxation that also re-derives block alignment, which is a separate change
-rather than another local widening.
+Only one of `knight`'s 67 branches fits because its loop bodies exceed the 128-byte rel8 reach; `compose-local` converts ten. Reaching the rest needs fixpoint relaxation that also re-derives block alignment. `knight` checksum `340233`; `--pattern x86` 223/223, `regalloc` 11/11, `copy` 8/8. `--bench-correctness` is 2,290/2,370, with exactly the same 80 heavy UI/font/audio timeout failures as `NYTRIX_NO_HOT_HOMES=1` in the same binary. Two baselines moved 8-16 bytes between builds from concurrent edits outside this work, so every number above is an A/B inside one binary.
 
-`knight`'s checksum is unchanged (`340233`). `--pattern x86` 223/223, `regalloc`
-11/11, `copy` 8/8. The full `--bench-correctness` sweep reports 2,290/2,370, and the
-failing fixtures are exactly those that fail with `NYTRIX_NO_HOT_HOMES=1` in the
-same binary (80, all heavy UI/font/audio fixtures timing out under the load other
-agents put on the machine). The two fixtures' baselines moved by 8-16 bytes between
-builds because of concurrent edits outside this work, so every number above is an
-A/B inside one binary.
+### Symbol addresses materialized in the destination color
 
-### Symbol addresses materialized in the destination color (kept 2026-11-15)
-
-Auditing `knight`'s 4,584-byte `.text` by instruction class showed the largest
-single redundancy was not arithmetic: 169 of its 175 LEAs were `leaq
-sym(%rip),%rax`, roughly one per address-of-global use, and 87 of those were
-immediately followed by `mov %rax,%rdi`/`%rsi`/`%r12`. The pair costs ten bytes
-where `leaq sym(%rip),%rdi` costs seven.
-
-The move is not a machine COPY. `mach_vreg_def_preg` already gave the LEA a
-destination color, and `mach_commit_vreg` stages the RAX result into that color with
-exactly that three-byte move. The indexed-LEA paths in the same case write their
-result straight into the assigned register, so the symbol path now does the same:
-emit `lea` with the color in ModRM and commit through `mach_commit_preg` like its
-neighbours, falling back to the RAX form when the destination has no usable color
-(unassigned, `%rsp`, `%rbp`).
+Symbol LEAs now write directly into their assigned destination color, cutting `knight` `.text` 4,584→4,320 bytes (−264, −5.8%). Of its 175 LEAs, 169 were `leaq sym(%rip),%rax` and 87 of those were followed by a 3-byte move to `%rdi`/`%rsi`/`%r12`, costing ten bytes where `leaq sym(%rip),%rdi` costs seven. `mach_vreg_def_preg` already assigned a color and `mach_commit_vreg` staged the RAX result through that move, so the symbol path now emits the `lea` with the color in ModRM and commits via `mach_commit_preg`, falling back to RAX when the destination is unassigned, `%rsp` or `%rbp`.
 
 | fixture | RAX staging | in-color | delta |
 | --- | --- | --- | --- |
-| `knight` | 4,584 | 4,320 | -264 (-5.8%) |
-| `compose-local` | 6,680 | 6,424 | -256 (-3.8%) |
-| `unicode-identifiers` | 2,640 | 2,384 | -256 (-9.7%) |
-| `combs-test` | 3,160 | 2,888 | -272 (-8.6%) |
-| `eq-test` | 3,928 | 3,656 | -272 (-6.9%) |
-| `unicode-debug7` | 3,296 | 3,032 | -264 (-8.0%) |
+| `knight` | 4,584 | 4,320 | −264 (−5.8%) |
+| `compose-local` | 6,680 | 6,424 | −256 (−3.8%) |
+| `unicode-identifiers` | 2,640 | 2,384 | −256 (−9.7%) |
+| `combs-test` | 3,160 | 2,888 | −272 (−8.6%) |
+| `eq-test` | 3,928 | 3,656 | −272 (−6.9%) |
+| `unicode-debug7` | 3,296 | 3,032 | −264 (−8.0%) |
 
-`NYTRIX_NO_LEA_COLOR=1` restores RAX staging and reproduces the old sizes exactly,
-so each row is an A/B inside one binary. The saving is not simply three bytes per
-folded site: surviving copies include two-byte 32-bit moves, and removing the
-staging move also shifts later block layout. In the disassembly the `lea ...; mov
-%r..` pairs fall from 87 to 22 in `knight` and from 93 to 35 in `compose-local`.
+`NYTRIX_NO_LEA_COLOR=1` restores RAX staging and reproduces the old sizes exactly, making each row a one-binary A/B; the saving is not a flat three bytes per site because surviving copies include 2-byte 32-bit moves and removing staging shifts later layout. LEA+move pairs fell 87→22 on `knight` and 93→35 on `compose-local`. Four levers were rejected first: NOP runs are 7 bytes or shorter (`knight` 24 bytes total, `compose-local` 126), so a max-skip policy saves nothing; only 1 of `knight`'s 67 branches fits rel8 even with both directions known, worth about 5 bytes; all 169 symbol targets are distinct, so no address CSE; and `knight` has no frame slots while `compose-local` has none in reach. `knight` checksum `340233`; `--pattern x86` 223/223, `regalloc` 11/11, `copy` 8/8, `codegen` 14/15 (`codegen-match`, pre-existing and identical with every encoder hatch disabled). `--bench-correctness` is 2,290/2,370 with the baseline binary's same 80 failing fixtures, none new or fixed, under the same host load. The 22 (`knight`) and 35 (`compose-local`) surviving pairs have RAX as the LEA's own color and are genuine single-use MACH COPYs, needing a separate residency proof to fold.
 
-Four other levers were measured and rejected before this one, so they are not worth
-re-trying blindly:
+### E-graph saturator: hash-consing, batched rebuild, guarded arithmetic
 
-Loop-alignment padding: every NOP run is 7 bytes or shorter (`knight` 24 bytes
-  total, `compose-local` 126), so a GCC-style max-skip policy saves nothing.
-Branch relaxation: only 1 of `knight`'s 67 branches fits rel8 even with both
-  directions known, so a layout fixpoint would buy about 5 bytes.
-Address CSE: all 169 symbol targets are distinct, one per use; there is no duplicate
-  materialization to remove.
-Frame-slot ordering: `knight` has no frame slots and `compose-local` none in reach,
-  all offsets are vreg homes, and hot ordering already fills the disp8 window with
-  the busiest of them.
-
-`knight`'s checksum is unchanged (`340233`). `--pattern x86` 223/223, `regalloc`
-11/11, `copy` 8/8, `codegen` 14/15 (`codegen-match`, pre-existing and identical with
-every encoder hatch disabled). The full `--bench-correctness` sweep reports
-2,290/2,370 with exactly the baseline binary's 80 failing fixtures, none new and
-none fixed, under the same host load other agents were generating.
-
-What remains is the 22 (`knight`) and 35 (`compose-local`) surviving LEA+move pairs:
-there the LEA's own color is RAX and the move is a genuine MACH COPY of a single-use
-address. Folding those requires proving the single use and skipping a copy
-instruction — a separate change with its own residency proof, not another widening
-of this one.
-
-### E-graph saturator: hash-consing, batched rebuild, guarded arithmetic (kept 2026-11-15)
-
-`passes/scalar/egraph.c` already saturated pure i64 straight-line blocks, but the
-implementation was the slow shape: interning a node scanned every node, and
-congruence closure compared every pair of nodes on every iteration. Both are
-quadratic in the block, so a large pure block was the most expensive thing the
-mid-pipeline could do, and the rule set could only express unconditionally sound
-equalities.
-
-Three changes, all inside that pass:
-
-**Hash-consed interning.** Nodes live in an open-addressing table keyed by
-  `(op, imm, child classes)`, rebuilt whenever unions move canonical children.
-  `eg_intern` is now a probe instead of a scan.
-**Batched congruence closure.** `eg_rebuild` re-canonicalizes every root's child
-  pointers and merges roots that became identical, once per saturation iteration,
-  replacing the pairwise compare. Union-find now merges by rank, so the repeated
-  canonicalization does not walk long parent chains. A merge late in a round can
-  leave a table entry stale; that can only *delay* a merge to the next round, never
-  invent one, because entries are only ever compared for full structural equality.
-**Analysis-guarded rewriting.** `eg_nonneg_roots` computes class non-negativity as a
-  fixpoint: a class is non-negative when one of its members provably is (the e-graph
-  only equates values that really are equal), with `and` inheriting non-negativity
-  from either operand and COPY forwarding it. That fact justifies rewrites that are
-  *not* equalities in general: NYIR division truncates toward zero while SAR rounds
-  toward -infinity, so `x / 2^k == x >> k` and `x % 2^k == x & (2^k-1)` hold exactly
-  when `x >= 0`. Because the divisor is a nonzero constant, neither form traps where
-  the other did. Bitwise idempotence (`x&x`, `x|x`) was added as unconditional
-  rules.
-
-DIV/MOD are not e-nodes at all — they may fault, so `eg_inst_pure_scalar` rejects
-them — and the first version of the guarded rule therefore never fired. The
-regression driver caught it (`non-negative div was not refined to a shift`); the
-rewrite is now planned per instruction against the dividend's e-class fact, and
-emission is keyed by destination value so a planned DIV/MOD replacement reaches the
-rewritten instruction stream.
+Kept the e-graph rewrite in `passes/scalar/egraph.c`: it buys compile time and two new correct rules, not code size on current fixtures. Interning scanned every node and congruence closure compared every pair each iteration, both quadratic, and the rule set only expressed unconditionally sound equalities. It now uses an open-addressing table keyed by `(op, imm, child classes)`, rebuilt when unions move canonical children, so `eg_intern` probes instead of scanning; `eg_rebuild` re-canonicalizes every root's child pointers and merges identical roots once per iteration, with union-find merging by rank, replacing the pairwise compare. A stale table entry after a late merge can only delay a merge, never invent one, since entries are matched on full structural equality. `eg_nonneg_roots` computes non-negativity as a fixpoint (one provably non-negative member, `and` inheriting from either operand, COPY forwarding), justifying `x / 2^k == x >> k` and `x % 2^k == x & (2^k-1)` only for `x >= 0` plus unconditional bitwise idempotence `x&x` and `x|x`. DIV/MOD are not e-nodes (`eg_inst_pure_scalar` rejects them as faulting), so the first guarded rule never fired until the regression ("non-negative div was not refined to a shift") forced per-instruction planning against the dividend's e-class and destination-keyed emission.
 
 | check | result |
 | --- | --- |
 | `ny --backend-test=passes/scalar/egraph` | pass (incl. new guarded-div and idempotence cases) |
 | randomized expression equivalence | 256 seeds, depth 24, unchanged |
-| `knight`, `compose-local`, `unicode-identifiers`, `combs-test`, `eq-test` `.text` | byte-identical with the pass on, guarded rules off, and pass off |
+| `.text` for `knight`, `compose-local`, `unicode-identifiers`, `combs-test`, `eq-test` | byte-identical with the pass on, guarded rules off, and the pass off |
 | compile time, 120-op straight-line function | 543/549/550 ms vs 548/544/554 ms with the guarded rules off |
 
-The zero byte delta is a scheduling fact, not an analysis failure: the pipeline runs
-this saturator only for functions without loops, and on those the earlier
-`const_fold`/`cse`/`peephole`/`strength_reduce` passes already canonicalize the
-arithmetic — a straight-line `band(x,255) / 8` fixture reaches the backend with no
-`idiv` at all. So this change buys compile time on pure blocks and correctness of
-the new rules, not code size on the current fixtures.
+The zero byte delta is scheduling: the saturator runs only on loop-free functions, where `const_fold`/`cse`/`peephole`/`strength_reduce` already canonicalize arithmetic and a straight-line `band(x,255) / 8` reaches the backend with no `idiv`. Limits: no directional `<=` relation with per-argument variance, non-negativity is the only class fact (no known-bits, ranges, alignment or provenance), extraction uses a static per-op cost plus loop-depth/trip-hint scaling instead of measured register pressure, and the new rules are hand-argued rather than discharged by an SMT bitvector proof.
 
-Limitations, stated plainly: there is no directional `<=` relation with per-argument
-variance, so a refinement that is legal without an explicit fact still cannot be
-used; non-negativity is the only class fact (no known-bits, ranges, alignment, or
-provenance); extraction still uses a static per-op cost plus loop-depth/trip-hint
-scaling rather than measured register pressure; and the new rules are argumented by
-hand rather than discharged by an SMT bitvector proof. Each of those is a separate,
-independently testable step.
+### Explainable x64 missed-optimization audit
 
-### Explainable x64 missed-optimization audit (kept 2026-11-15)
-
-The x64 encoder now reports what it did and what it left on the table, in the terms
-it actually controls. `NYTRIX_AUDIT=1` prints one stable line per encoded function:
-
-```
-[audit] fn=main lea_copy=0 self_move=0 spill_pair=0 fallthrough_elided=9 \
-        lea_color=87 lea_staged=0
-```
-
-`lea_color` / `lea_staged` — symbol addresses materialized directly in the
-  destination's assigned color versus staged through `%rax` and then moved. This is
-  an encoder *decision* counter, incremented on the path taken, so a size delta is
-  attributed to the transformation instead of inferred from assembly.
-`lea_copy` — symbol LEAs whose result has exactly one use, the adjacent COPY, which
-  could be folded into that copy's register (`mach_build_vreg_use_counts` builds the
-  per-vreg reference counts this needs).
-`self_move` — COPY whose source and destination already share a physical color.
-`spill_pair` — adjacent store/load through the same frame slot.
-`fallthrough_elided` — unconditional edges to the following block that emit no
-  `jmp`. Nonzero here is the optimization working, not a miss: it is counted so a
-  regression to an emitted branch would show up as a different number.
-
-**End-to-end demonstration.** `NYTRIX_NO_LEA_COLOR=1` restores the old RAX staging
-path, which makes the detector's own counters reproduce the defect it was written to
-find:
+`NYTRIX_AUDIT=1` prints one stable per-function line with encoder-decision counters, e.g. `[audit] fn=main lea_copy=0 self_move=0 spill_pair=0 fallthrough_elided=9 lea_color=87 lea_staged=0`. `lea_color`/`lea_staged` are decisions: symbol addresses materialized in the destination's assigned color versus staged through `%rax` then moved. `lea_copy` counts single-use symbol LEAs whose adjacent COPY could fold into its register (per-vreg counts from `mach_build_vreg_use_counts`); `self_move` counts COPYs whose source and destination share a color; `spill_pair` counts adjacent store/load through one frame slot; `fallthrough_elided` counts unconditional edges to the following block that emit no `jmp`, where nonzero means the optimization works.
 
 | fixture | encoding | `lea_color` | `lea_staged` | `.text` |
 | --- | --- | --- | --- | --- |
@@ -3923,100 +2717,22 @@ find:
 | `compose-local` | in-color (kept) | 93 | 3 | 6,424 |
 | `compose-local` | `NYTRIX_NO_LEA_COLOR=1` | 0 | 96 | 6,680 |
 
-The 87 staged materializations in `knight` cost 264 bytes (3.03 bytes each: the
-three-byte `mov` that disappears, plus layout movement); `compose-local` spends 256
-bytes on 93 convertible sites and keeps 3 in the RAX form because the destination
-has no usable color (unassigned, `%rsp`, `%rbp`). `knight`'s checksum is `340233` in
-both encodings, so the correction is verified by behaviour, not by the counters
-agreeing with themselves.
+The 87 staged `knight` materializations cost 264 bytes (3.03 bytes each: the three-byte `mov` plus layout); `compose-local` spends 256 bytes on 93 convertible sites and keeps 3 in RAX where the destination is unassigned, `%rsp` or `%rbp`. `knight` checksum `340233` in both encodings, so the correction is verified by behavior, not by the counters agreeing with themselves. `self_move=0` and `spill_pair=0` are the expected end state of the same-color copy fold and frame-slot work, and `lea_copy=0` means the single-use pattern does not occur — the surviving LEA+move pairs are commit staging, not machine copies. A fold with a `NYTRIX_NO_LEA_COPY_FOLD` hatch measured `lea_copy=0` on both fixtures: zero candidates, zero bytes, so it was reverted and the counter retained. The hook first sat inside `if (!encoded)`, but home-DSE analysis encodes most functions itself, so every counter read zero; it now runs after either encode path. The audit is off by default, reads the environment once per function and makes one pass over machine form the encoder already visited, with no cache, extra IR or second code path. Limits: no Linux `perf`/hardware-counter correlation, no automatic ranking or auto-apply loop, no MIR-to-source-line attribution (`inst_offsets` and debug lines exist), and counters go to stderr as a stable machine-readable line rather than the JSON report. The host was loaded throughout, so attribution is code size plus reference checksums under controlled A/B hatches and no timing claim is made.
 
-`self_move=0` and `spill_pair=0` on both fixtures are the expected end state of the
-same-color copy fold and the frame-slot work recorded above. `lea_copy=0` means the
-single-use-address-plus-COPY pattern does not occur: the remaining LEA+move pairs
-are commit staging, not machine copies.
+### Register-allocation shape audit
 
-**A rejected experiment, recorded.** A fold that would have emitted such a
-single-use symbol LEA directly into the following COPY's register was implemented
-with a `NYTRIX_NO_LEA_COPY_FOLD` hatch and measured at `lea_copy=0` on both
-fixtures: zero candidates, zero bytes. By the keep-only-measured-wins rule it was
-reverted; the audit counter that would justify it is retained, so the evidence for
-re-adding it later is one `NYTRIX_AUDIT=1` run away.
-
-**A wiring bug the work exposed.** The audit was first called inside `if
-(!encoded)`, but the home-DSE analysis encodes most functions itself, so the call
-never ran and every counter read zero. It is now called after either encode path.
-That is worth remembering for any future instrumentation in this encoder: there are
-two encode entry points, not one.
-
-Cost: the audit is off unless `NYTRIX_AUDIT` is set, the environment is read once
-per function, and the walk is a single pass over the machine form the encoder has
-already visited. No persistent cache, no extra IR, no second code path.
-
-Limitations: there is no Linux `perf`/hardware-counter correlation, no automatic
-ranking or auto-apply loop, and no MIR-to-source-line attribution in the report (the
-encoder already carries `inst_offsets` and debug lines, so that is the natural next
-step). Counters go to stderr as a stable machine-readable line rather than into the
-JSON report. Performance attribution in this session is code size plus reference
-checksums under controlled A/B hatches; the host was loaded throughout, so no timing
-claim is made.
-
-### Register-allocation shape audit (2026-11-15)
-
-`NYTRIX_AUDIT=1` now runs inside `mach_encode_function`, after the GPR, FPR and
-vector allocators have been summarized and before they are freed, and appends the
-allocator's own totals to each `[audit]` line: `ra_segments`, `ra_spilled`,
-`ra_reload`, and `ra_colors` (distinct physical colors actually used). Earlier
-attempts hooked the outer encode callers, where the allocators have already been
-freed; those rows printed zero for every field. A zero row now means an empty
-allocator, not a stale hook.
+Measurement plumbing only: `NYTRIX_AUDIT=1` now runs inside `mach_encode_function`, after the GPR, FPR and vector allocators are summarized and before they are freed, appending `ra_segments`, `ra_spilled`, `ra_reload` and `ra_colors` (distinct physical colors used) to each `[audit]` line. Earlier hooks on outer encode callers printed zero because the allocators were already freed; a zero row now means an empty allocator.
 
 | fixture | `.text` | segments | spilled | reload | colors |
-| --- | --- | --- | --- | --- | --- |
+| --- | --- | ---: | ---: | ---: | ---: |
 | `knight` | 4,320 | 2,202 | 1,608 | 1,600 | 42 |
 | `compose-local` | 6,424 | 2,656 | 1,686 | 1,690 | 96 |
 | `unicode-identifiers` | 2,384 | 366 | 2 | 2 | 16 |
 
-Per function in `knight`: `ny_fn_moves` has 870 segments, 769 spilled and 12 colors;
-`main` has 231 segments, 35 spilled and 9 colors. The large spilled share in the
-dispatcher is the same mechanism the spill-slot coloring and frame-disp8 narrowing
-exploit, so a high `ra_spilled` value is not by itself a defect — it is the pressure
-the encoder then folds.
-
-`knight` checksum `340233` and all three `.text` sizes are byte-identical to the
-pre-audit build, so this section records measurement plumbing only, not a code
-generation change. Each function prints twice per build (two deterministic encode
-passes); the duplicate lines carry identical counters, so sum per function name
-rather than per line.
-
-Checks for this change: build clean, `--pattern x86` 223/223, `regalloc` 11/11,
-`copy` 8/8.
-
-#### Probe encodes no longer count twice
-
-The duplicated audit line per function was not a second compilation pass. Home
-dead-store analysis (`mach_home_dse_analyze`) runs a throwaway *probe* encode inside
-`mach_encode_function`, then the real encode applies the dead-home table. The probe
-printed its own audit line and, worse, added its segments to the process-wide `mach
-regalloc segments/colored/spilled/reloads` counters, so every report about
-allocation counted each function twice. The encoder now has `suppress_stats`, set
-for probe encodes and cleared when a probe is reused (`NYTRIX_NO_HOME_DSE` already
-disabled the probe). After the fix, `knight` prints two audit lines for its two
-functions and `compose-local` five for five.
-
-The probe encode itself remains deliberate: without it there are no dead-home
-findings. `knight` with `NYTRIX_NO_HOME_DSE=1` grows from 4,320 to 5,600 bytes, so
-the probe still pays for itself.
-
-#### Spill composition: stored-and-reloaded versus dying
-
-`[audit]` also splits `ra_spilled` into `ra_spill_live` (the segment is stored and
-later reloaded) and `ra_spill_dying` (the value dies in the segment, so no load is
-needed). A home-based count was rejected: `vreg_home_offs` is only populated on the
-home-DSE path, so counting "spills without a home" reported every spill as
-home-less.
+Within `knight`, `ny_fn_moves` has 870 segments, 769 spilled and 12 colors, while `main` has 231 segments, 35 spilled and 9 colors; dispatcher pressure is what spill-slot coloring and frame-disp8 narrowing exploit, so a high `ra_spilled` is not itself a defect. Checksum `340233` and all three `.text` sizes are byte-identical to the pre-audit build; each function prints twice (two deterministic encode passes) with identical counters, so sum by function name rather than per line. Clean build, `--pattern x86` 223/223, `regalloc` 11/11, `copy` 8/8. The duplicate line was a throwaway probe encode from `mach_home_dse_analyze`, which also added its segments to the process-wide `mach regalloc segments/colored/spilled/reloads` counters; `suppress_stats` now covers probe encodes and clears when a probe is reused (`NYTRIX_NO_HOME_DSE` already disables it), after which `knight` prints two lines for two functions and `compose-local` five for five. The probe is deliberate: without it there are no dead-home findings, and `NYTRIX_NO_HOME_DSE=1` grows `knight` 4,320→5,600 bytes. `ra_spilled` now splits into `ra_spill_live` (stored and later reloaded) and `ra_spill_dying` (value dies in the segment, no load needed); a home-based count was rejected because `vreg_home_offs` is populated only on the home-DSE path, so it reported every spill as home-less.
 
 | fixture | `.text` | functions | segments | spilled | reload | colors | live | dying |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `knight` | 4,320 | 2 | 1,101 | 804 | 800 | 21 | 748 | 56 |
 | `compose-local` | 6,424 | 5 | 1,328 | 843 | 845 | 48 | 804 | 39 |
 | `unicode-identifiers` | 2,384 | 1 | 183 | 1 | 1 | 8 | 1 | 0 |
@@ -4024,228 +2740,38 @@ home-less.
 | `eq-test` | 3,656 | 4 | 324 | 2 | 2 | 34 | 2 | 0 |
 | `unicode-debug7` | 3,032 | 1 | 251 | 0 | 0 | 9 | 0 | 0 |
 
-So roughly 93% of spilled segments in the large fixtures are real store-and-reload
-work, not live-through bookkeeping: `knight` is 748 live to 56 dying. The high spill
-share is genuine pressure in the dispatchers, which is why the encoder-side folds
-(spill-slot coloring, frame disp8 narrowing, same-color copy folding) produced the
-size wins rather than allocation itself.
+About 93% of spilled segments in the large fixtures are real store-and-reload work (`knight` 748 live to 56 dying), confirming dispatcher pressure; that is why the encoder-side folds, not allocation itself, produced the size wins. A call-crossing-weighted spill cost (`uses x (1 + crossings)`, saturating, with `NYTRIX_NO_RA_CALL_COST=1` for A/B) was measured on `knight`, `compose-local`, `unicode-identifiers`, `combs-test`, `eq-test` and `unicode-debug7` and was byte-identical in every `.text` under both settings, so it was reverted: `use_count` already counts the reloads a spill causes, `git diff --stat` on `regalloc.c` is empty, and the crossing weight's binary search left the eviction hot path. Final checks: clean build, `--pattern x86` 223/223, `regalloc` 11/11, `copy` 8/8, `--pattern codegen` 14/15 (the pre-existing `code/derive/dispatch/codegen-match` failure, unchanged), `knight` checksum `340233`, all six `.text` sizes unchanged.
 
-#### Rejected: call-crossing-weighted spill cost
+### SCEV: exact trip counts for `!=` loops
 
-Spill cost was extended with the number of call and fixed-clobber sites inside
-candidate segments (`uses x (1 + crossings)`, saturating), with
-`NYTRIX_NO_RA_CALL_COST=1` as the A/B hatch. Measured on `knight`, `compose-local`,
-`unicode-identifiers`, `combs-test`, `eq-test` and `unicode-debug7`: byte-identical
-`.text` in every fixture, both settings. The existing `use_count` term is already
-the number of reloads a spill would cause, so the crossing weight never displaced a
-victim. Reverted: `regalloc.c` is back to byte-identical with its previous state
-(`git diff --stat` empty), and the crossing weight's binary search came off the
-eviction hot path.
+Kept, as a capability extension with no size change: `compute_trip` now counts a `NYIR_CMP_NE` loop only when the recurrence lands exactly on the limit — `limit - start` a whole multiple of `|step|`, the step travelling toward the limit, and the exit value `start + n*step` equal to the limit and representable in i64. Divisibility, direction and landing checks are each necessary because a loop that misses the limit runs until the i64 recurrence wraps and must stay unknown; downward loops use the same rule with a negative step, keeping count-down loops first-class. Previously `nyr_scev_analyze` handled `<`, `<=`, `>` and `>=` with constant start, limit and step, so `for (i = 0; i != n; ++i)` and `while (i != n)` got no trip count, no `scev_lite` range fact and kept bounds-check guards. `passes/loops/scev_ne_trip_count` checks three exact cases (unit step, divisible `+2`, downward `-2`) against the derived count, reference-interpreter exit value and exported range `[min(start, limit), max(start, limit)]`, plus four unknown cases (non-divisible in both directions, step travelling away from the limit, entry value already satisfying the exit test) where no range fact may be exported. `.text` is unchanged at 4,320 (`knight`), 6,424 (`compose-local`), 2,384 (`unicode-identifiers`) and 2,888 (`combs-test`), with checksum `340233`; `scev_tbuf_length_range` still passes and `--pattern x86` remains 223/223. Still missing: symbolic exit counts (the article's `symbolic max exit count`; `nyr_range_t` holds constants only, so `i != n` for parameter `n` yields none), known-multiple tracking, nowrap/poison distinctions (NYIR has no poison), and a SCEV expander; "SCEV at scope" remains only the exhaustion-value singleton for single-exit loops.
 
-Final checks after the revert: build clean, `--pattern x86` 223/223, `regalloc`
-11/11, `copy` 8/8, `--pattern codegen` 14/15 (the pre-existing
-`code/derive/dispatch/codegen-match` failure, unchanged), `knight` checksum
-`340233`, all six `.text` sizes unchanged.
+### SCEV: range-derived bounds for symbolic loops
 
-### SCEV: exact trip counts for `!=` loops (2026-11-15)
+Kept: for a loop-invariant limit with proven ranges on both start and limit, `compute_range_bounds` exports a constant IV interval and an iteration ceiling without inventing a symbolic bound type (`nyr_range_t` is a constant interval serialized by the binary IR format). It emits `body_min`/`body_max` for values passing the exit test, `iv_min`/`iv_max` for every observation including the final failing test (the exit block observes it, so the phi's range fact must cover it), and `trip_bound` for ceiling-only consumers; `compute_trip` stays the exact-count path, so no exact-count consumer receives an inexact one. Soundness requires start and limit definitions outside the natural loop dominating the header (a per-iteration limit has no static bound), predicate matching step direction (`<`/`<=` ascending, `>`/`>=` descending), and `body_max + step` or `body_min + step` representable in i64, all in checked 128-bit arithmetic; `NYTRIX_NO_SCEV_RANGE_BOUNDS=1` disables it. The first attempt computed bounds on the pass-0 analysis record that SCEV discards (only pass 1 appends the loop record), so negative assertions exposed the empty result before the call moved to pass 1. `passes/loops/scev_range_bounds` checks three loops (ascending `<`, ascending `<=` with step 2, descending `>`) for body and whole-value intervals, the trip ceiling, the in-body `nyr_scev_affine_at` query used by bounds-check elimination and the phi range fact, and checks that an unbounded limit and an `INT64_MAX`-reaching `<=` export nothing. `.text` is unchanged at 4,320/6,424/2,384/2,888/3,656/3,032, checksum `340233`, five verification suites green (`invariants`, `rules`, `differential`, `passes`, `mach_invariants`), `--pattern x86` 223/223. `passes/loops/irce` has no driver on disk, so runner status 2 means unknown test, not failure. Still missing: exact symbolic exit counts (an expression such as `n - a`), known-multiple tracking and SCEV expansion.
 
-Nikita Popov's "LLVM: Scalar evolution" describes the addrec + exit-count model: an
-induction variable is `{start,+,step}` over a loop, the backedge-taken count is what
-an exit condition bounds, and the trip count is that count plus one. Nytrix's
-`nyr_scev_analyze` already derived counts for `<`, `<=`, `>` and `>=` with constant
-start, limit and step, but rejected `!=` outright. C loops written `for (i = 0; i !=
-n; ++i)` or `while (i != n)` therefore got no trip count, `nyr_scev_lite` exported
-no range fact for their induction variable, and bounds-check elimination had to keep
-runtime guards it could otherwise drop.
+### SCEV: loop-guard bounds-check elimination
 
-`compute_trip` now counts a `NYIR_CMP_NE` loop only when the recurrence lands
-exactly on the limit: `limit - start` must be a whole multiple of `|step|`, the step
-must travel toward the limit, and the resulting exit value (`start + n*step`) must
-equal the limit and stay representable in i64. A loop that misses the limit
-continues until the i64 recurrence wraps, so it must stay unknown; the divisibility
-test, the direction test, and the landing check are each necessary. Downward loops
-use the same rule with a negative step, which keeps the article's point that
-count-down loops should not be second-class.
+Kept: `scev_guard_proves_offset` proves a bounds check redundant from the loop's own exit test, without a range fact on the bound. For `for (i = start; i < n; ++i) check(buf, i * S, n * S)`, the check only runs while `i < n`, so `S*i + d < S*n` holds for `S > 0` and `d <= 0` (and `d <= -1` under `<=`, where the body may run at `i == n`). The proof needs an offset `S*iv + d`, the length to be the loop's own comparison value scaled by the same `S`, a check dominated by body entry, an ascending loop, and `S*start + d >= 0` so the removed check could not have trapped on a negative offset; scaling is recognized in both `x * c` and `x << s` form. `scev_affine_build` now emits a term for a known loop IV even without its constant interval, but those term-only forms still fail `scev_affine_bound`, so range consumers keep their results. An initially wrong test expectation was the feature working: `i <= n` with `i - 1` at `i = 0` can be `-1`, so eliminating the check would hide a trap; the suite keeps that as must-not-eliminate with `start = 4` as the eliminable counterpart. `passes/loops/scev_guard_bounds` drives `nyr_bounds_check_elim` and asserts 4 eliminations (`<` element, `i-1` offset, `<=` with `i-1`, byte-scaled) and 6 kept checks (`<=` at `i`, `i+1`, a different length value, negative lowest value at zero start, negative start, descending loop); `bounds_check_elim`, `loop_memset`, `loop_interchange`, `loop_unroll`, `iv_period2`, `licm_guarded_division` and the other SCEV drivers stay green. `.text` is unchanged at 4,320/6,424/2,384/2,888/3,656/3,032 with checksum `340233`, five verification suites green and `--pattern x86` 223/223 in 24.7 s. It does not convert the guard into a reusable predicate outside the loop, and the relations come from dominating branches rather than assumptions, SMT or a symbolic expression layer.
 
-`passes/loops/scev_ne_trip_count` covers three exact cases (unit step, divisible
-`+2`, downward `-2`) and four that must remain unknown (non-divisible in both
-directions, a step travelling away from the limit, and an entry value that already
-satisfies the exit test). For each exact case it checks the derived count, the exit
-value returned by the reference interpreter, and the exported induction-variable
-range `[min(start, limit), max(start, limit)]`; for each unknown case it checks that
-`scev_lite` exports **no** range fact, so a dropped guard cannot follow from a
-guessed count.
+### SCBE review and chained guard proofs
 
-Measured effect on the existing fixtures: `.text` is unchanged at 4,320 (`knight`),
-6,424 (`compose-local`), 2,384 (`unicode-identifiers`) and 2,888 (`combs-test`),
-with `knight` checksum `340233`, so this is a capability extension on loop shapes
-those fixtures do not contain rather than a size win. The existing
-`passes/loops/scev_tbuf_length_range` case still passes, and `--pattern x86` remains
-223/223.
-
-Article items that remain unimplemented, and why: symbolic exit counts (the
-article's `symbolic max exit count`) cannot be represented because `nyr_range_t`
-holds constants only, so `i != n` for a parameter `n` still yields no count; there
-is no known-multiple tracking, no nowrap/poison distinction (NYIR has no poison
-values), and no SCEV expander, so "SCEV at scope" is only used as the
-exhaustion-value singleton that already existed for single-exit loops. The
-constant-range half of the symbolic limit case is addressed in the next section.
-
-### SCEV: range-derived bounds for symbolic loops (2026-11-15)
-
-Popov's article treats an induction variable as `{start,+,step}` and its exit count
-as a first-class expression. Nytrix has no symbolic bound type: `nyr_range_t` is a
-constant interval that the binary IR format serializes, so `i < n` with a parameter
-`n` produced no count and no range fact. This change gets the useful half without
-inventing a type. When the limit is loop invariant (defined outside the loop,
-dominating the header) and the start and limit both have proven ranges, a constant
-interval for the induction variable and an upper bound on iterations follow from
-those ranges.
-
-`compute_range_bounds` exports three facts on `nyr_scev_loop_t`: `body_min` /
-`body_max` for values that pass the exit test, `iv_min` / `iv_max` for every
-observation including the final failing test (the exit block observes that value, so
-the phi's range fact must cover it), and `trip_bound` for consumers that only need a
-ceiling. `compute_trip` remains the exact-count path, so no consumer that requires
-an exact count receives an inexact one.
-
-Soundness conditions, each enforced: the start and limit definitions must lie
-outside the natural loop and dominate the header (a per-iteration limit has no
-static bound); the predicate must match the step direction (`<` / `<=` ascending,
-`>` / `>=` descending), because the opposite combination never exits on the tested
-edge; and `body_max + step` (or `body_min + step`) must stay representable in i64,
-because wrapping would let the loop revisit values outside any claimed interval. All
-arithmetic is 128-bit and checked. `NYTRIX_NO_SCEV_RANGE_BOUNDS=1` disables the
-derivation.
-
-A bug was found in the first attempt: bounds were computed on the pass-0 analysis
-record, which SCEV discards, because only pass 1 appends the loop record. The call
-moved to pass 1, which is why the first run reported no bounds at all. The negative
-assertions in the suite are what made that visible; a test that only checked
-accepted loops would have passed while computing into a dead record.
-
-`passes/loops/scev_range_bounds` asserts the body and whole-value intervals, the
-trip ceiling, the in-body `nyr_scev_affine_at` query (the path bounds-check
-elimination uses) and the phi range fact for three loops (ascending `<`, ascending
-`<=` with step 2, descending `>`), and asserts that an unbounded limit and an
-`INT64_MAX`-reaching `<=` limit export nothing at all.
-
-Measured: `.text` unchanged at 4,320 (`knight`), 6,424 (`compose-local`), 2,384
-(`unicode-identifiers`), 2,888 (`combs-test`), 3,656 (`eq-test`) and 3,032
-(`unicode-debug7`); `knight` checksum `340233`; five verification suites green
-(`invariants`, `rules`, `differential`, `passes`, `mach_invariants`); `--pattern
-x86` 223/223. `passes/loops/irce` has no driver on disk, so the runner's status 2
-for that name means "unknown test", not a failure; IRCE coverage comes from the loop
-drivers that exist.
-
-Still missing: exact symbolic exit counts (an expression such as `n - a`, not an
-interval), known-multiple tracking, and SCEV expansion.
-
-### SCEV: loop-guard bounds-check elimination (2026-11-15)
-
-The article's "loop guard" idea: an exit test can prove a check without any range
-fact about the bound. `for (i = start; i < n; ++i) check(buf, i * S, n * S)` only
-reaches the check while `i < n`, so `S*i + d < S*n` for `d <= 0` (and for `d <= -1`
-under `<=`, where the body may run at `i == n`). Nytrix's check-safety query
-required a constant interval for the offset and a constant minimum length, so a
-buffer whose length is the loop's own runtime limit produced no proof even though
-the guard makes the check redundant.
-
-`scev_guard_proves_offset` adds the symbolic proof. It needs the offset to be `S*iv
-+ d` with `S > 0` and `d <= 0`, the length to be the loop's own comparison value
-scaled by the same `S`, the check to be dominated by the body entry, an ascending
-loop, and `S*start + d >= 0` so the removed check could not have trapped on a
-negative offset. Scaling is recognized in both `x * c` and `x << s` form, so
-byte-scaled checks against a byte-scaled length work. To see unbounded induction
-variables as affine terms, `scev_affine_build` now emits a term for a known loop IV
-even when its constant interval is unavailable; those term-only forms still fail in
-`scev_affine_bound`, so every existing range consumer keeps its previous result.
-
-A test expectation was wrong on the first run, and the failure is the feature
-working: `i <= n` with `i - 1` at `i = 0` can be `-1`, so eliminating the check
-would hide a trap. The suite now keeps that case as a must-not-eliminate expectation
-(with `start = 4` as the eliminable counterpart), which is exactly the
-non-negativity condition the proof needs.
-
-`passes/loops/scev_guard_bounds` drives the real consumer (`nyr_bounds_check_elim`)
-and asserts 4 eliminations (`<` element, `i-1` offset, `<=` with `i-1`, byte-scaled)
-and 6 kept checks (`<=` at `i`, `i+1`, a different length value, negative lowest
-value at zero start, negative start, descending loop).
-`passes/loops/bounds_check_elim`, `loop_memset`, `loop_interchange`, `loop_unroll`,
-`iv_period2`, `licm_guarded_division` and the other SCEV drivers stay green.
-Measured: fixture `.text` unchanged at 4,320 / 6,424 / 2,384 / 2,888 / 3,656 /
-3,032, `knight` checksum `340233`, five verification suites green, `--pattern x86`
-223/223 in 24.7 s.
-
-What this does not do: it does not convert the guard into a reusable predicate
-outside the loop, and the relations come from dominating branches rather than
-assumptions, SMT, or a symbolic expression layer. Chained guards are covered in the
-next section.
-
-### SCBE review and chained guard proofs (2026-11-15)
-
-Reviewed `https://github.com/maxnut/scbe` before porting anything. SCBE is 32,218
-lines of C++ with an x86-64 back end (ELF, COFF, text assembly) and AArch64 assembly
-emission; its README calls it a learning project that is unfinished and not
-production quality. Each subsystem was compared with the Nytrix equivalent:
+Reviewed `https://github.com/maxnut/scbe` before porting anything: 32,218 lines of C++ with x86-64 (ELF, COFF, text assembly) and AArch64 assembly emission, described in its README as an unfinished learning project, not production quality. Verdict: no subsystem worth porting; feature parity or Nytrix ahead on every comparison, and SCBE's own TODOs name work Nytrix already does. The one idea taken was predicated guard reasoning, also in the LLVM SCEV article, which filled a real gap.
 
 | SCBE | Nytrix |
 | --- | --- |
-| `codegen/spiller.cpp`: replaces one operand per instruction with a reserved register | `passes/regalloc/regalloc.c` spills live segments with homes, rematerializes constants, and recolors local evictions afterwards |
+| `codegen/spiller.cpp`: replace one operand per instruction with a reserved register | `passes/regalloc/regalloc.c` spills live segments with homes, rematerializes constants and recolors local evictions |
 | `graph_color_regalloc.cpp`: Chaitin simplify/select/spill over a color graph, no coalescing | profile heat, loop depth, next-use and use-count eviction, tied-input affinity, dead-input coalescing, callee-save preference |
 | `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `passes/cfg/ssa.c`, run by DCE |
-| `IR/split_critical_edge.cpp`: splits edges only when the target has phis | phi lowering goes through edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass is needed |
-| `ISel/pattern.hpp`: pattern table with cost, covered operands, minimum opt level | `isle.c` and `machine.c` already fuse addressing modes and immediates; porting the table is a rewrite with no measured target |
+| `IR/split_critical_edge.cpp`: split only when the target has phis | phi lowering via edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass |
+| `ISel/pattern.hpp`: pattern table with cost, covered operands, minimum opt level | `isle.c` and `machine.c` already fuse addressing modes and immediates; porting is a rewrite with no measured target |
 | mem2reg, dominator tree, DCE, constant folder, inlining, loop/call heuristics | all present |
 
-Verdict: no subsystem worth porting. Feature parity or Nytrix ahead on every row,
-and SCBE's own TODOs name work Nytrix already does. The one idea worth taking was
-the predicated guard reasoning the LLVM SCEV article also describes, which filled a
-gap Nytrix had.
+The loop-guard proof now accepts a chain: when a dominating branch proves `limit <= length` on every path to the check, `i < limit <= length` makes it redundant. `scev_collect_le_facts` collects `lo <= hi` from branches dominating the query point, using a branch direction only when exactly one successor dominates it (a merge leaves both edges possible and is skipped), maps `LT`/`LE`/`GT`/`GE` and their negations to an ordering regardless of operand order, and closes facts transitively; scaling works as before. `passes/loops/scev_guard_chain` asserts 3 eliminations (`n <= cap`, strict `n < cap`, a two-step `n <= m`, `m <= cap` chain) and 3 kept checks (reversed `cap <= n`, no guard, and a guard in a non-dominating sibling arm). Its first run failed four cases because the test builder's phi referenced a preheader label absent from the CFG, so verification rejected the function before the pass ran; rebuilding with a real preheader made the proof fire — a test construction defect, not a pass defect. `.text` is unchanged at 4,320/6,424/2,384/2,888/3,656/3,032, checksum `340233`, twelve loop drivers and five verification suites green, `--pattern x86` 223/223 in 24.0 s. Limits: relations come only from dominating `BR_IF` integer compares, with no assume-like fact, no equality propagation through arithmetic beyond copy roots and no symbolic expression layer; a guard by a call result, a select or a per-iteration reload still needs a runtime check.
 
-#### Chained guards
+### Benchmark corpus expansion
 
-The loop-guard proof previously required the check's length to be the loop's own
-comparison value. It now accepts a chain: when a dominating branch proves `limit <=
-length` on every path to the check, `i < limit <= length` makes the check redundant.
-`scev_collect_le_facts` collects `lo <= hi` from each branch that dominates the
-query point, using the branch direction only when exactly one successor dominates
-the query (a merge leaves both edges possible and the branch is skipped), maps
-`LT`/`LE`/`GT`/`GE` and their negations to an ordering regardless of operand order,
-and closes the facts transitively. Scaling is matched as before, so a byte-scaled
-check against a byte-scaled length works.
-
-`passes/loops/scev_guard_chain` asserts 3 eliminations (`n <= cap`, strict `n <
-cap`, and a two-step `n <= m`, `m <= cap` chain) and 3 kept checks (reversed `cap <=
-n`, no guard, and a guard in a sibling arm that does not dominate the loop). The
-first run failed four cases because the test builder's phi referenced a preheader
-label the CFG did not contain, so verification rejected the function before the pass
-ran; rebuilding the CFG with a real preheader made the proof fire. That is a test
-construction defect, not a pass defect, and it is why the suite verifies before
-running the pass.
-
-Measured: `.text` unchanged at 4,320 / 6,424 / 2,384 / 2,888 / 3,656 / 3,032,
-`knight` checksum `340233`, twelve loop drivers green, five verification suites
-green, `--pattern x86` 223/223 in 24.0 s.
-
-Limits, stated so they are not mistaken for coverage: relations come only from
-dominating `BR_IF` integer compares; there is no assume-like fact, no equality
-propagation through arithmetic beyond copy roots, and no symbolic expression layer.
-A check guarded by a call result, a select, or a comparison that is reloaded per
-iteration still needs a runtime check.
-
-### Benchmark corpus expansion (2026-11-15)
-
-Added nineteen fixtures to `etc/tests/bench` for workload families the corpus did
-not cover. Each fixture is an original Ny program paired with an equivalent C
-program in the same `.nshape`, written to exercise one kernel shape; no third-party
-benchmark source, binary, or input set is copied or redistributed here. Families
-that already had a counterpart in this corpus (`mandelbrot`, `fannkuch`, `n-body`,
-`spectral`, `knucleotide`, `revcomp`, `fasta`, `pidigits`, `binary-trees`, `sieve`,
-`splay`, `havlak`, `json`, `list`) were deliberately not duplicated.
-
-The fixtures are filed by general workload category, not by the suite that suggested
-them:
+Added nineteen fixtures to `etc/tests/bench`, each an original Ny program paired with an equivalent C program in the same `.nshape` and no third-party source, binary or input set copied. Families already represented (`mandelbrot`, `fannkuch`, `n-body`, `spectral`, `knucleotide`, `revcomp`, `fasta`, `pidigits`, `binary-trees`, `sieve`, `splay`, `havlak`, `json`, `list`) were not duplicated. All nineteen are integer-only so the checksum proves exact Ny/C agreement rather than agreement to a printed precision.
 
 | Fixture | Category | Kernel and question | Checksum (Ny = C) |
 | --- | --- | --- | --- |
@@ -4269,155 +2795,62 @@ them:
 | `simulation/leela` | simulation | Monte Carlo rollouts of a take-away game | 533733992 |
 | `simulation/cd` | simulation | Collision detection over a fixed particle set | 387 |
 
-All nineteen are integer-only. Floating point was avoided on purpose: the checksum
-is the parity evidence, and integer kernels let Ny and C prove exact agreement
-instead of agreement to a printed precision. Existing fixtures pick up the
-benchmarks-game families this table omits.
+Parity: extracting each `source ny`/`source c` block, running `ny-full --native-only -O3 -run` and building with `cc -O2` gave 19 of 19 matching `checksum=` lines; the same files are found by the harness, e.g. `build/release/ny-test --bin build/release/ny-full --bench --pattern 'graphics/povray' --bench-run 1 --bench-warmup 0 --jobs 1 --bench-no-compare-llvm`. The corpus is 96 fixtures. Scope: one input per fixture, no timing claim, and Ny at `-O3` against C at `-O2` on a shared loaded host. Four silent source bugs were exposed: `i64buf_new` does not zero memory but C `calloc` does, so buffers are now explicitly initialized; an expression continues across a newline only inside unclosed parentheses, so a two-line sharpen expression without outer parentheses parsed as two statements and lost trailing subtractions (checksum `3579272` versus `2069072`); ping-pong stencil buffers must both be initialized because the second pass reads borders the first never writes; and Ny pointers are not indexable, so elements go through `i64buf_load`/`i64buf_store`.
 
-#### Parity check
+Two native x86-64 codegen changes were kept. `lower/machine.c` lowers a `rt_f64_to_i64` call with one f64 argument and a raw i64 result to `NYR_MACH_CONVERT`, so the encoder emits `cvttsd2si` instead of a call plus the xmm0 stack round trip; page-rank's object has two `cvttsd2si` and no `rt_f64_to_i64` relocation. `passes/scalar/copy_prop.c` makes copies established earlier in the same block available to later uses (program-order walk) and folds raw scalar copies into call arguments, which carry no ownership metadata; `hanoi` drops 36→29 NYIR instructions as seven `mov` temporaries feeding its two recursive calls disappear. Checksums agree on 41 sampled fixtures, and `copy`/`opt` sets show no new failures (four `opt` failures — `select-flag-preservation`, `loop-register-call-homes`, `kernel-list-alias-cow:entry_fill_preserves_observable_globals`, `nested-loop-specialize` — reproduce on the unmodified tree). With `NYTRIX_NATIVE_CACHE=0 NYTRIX_AOT_CACHE=0 --bench-run 9 --bench-warmup 2`, where "before" reverts `copy_prop.c`:
 
-Each fixture was checked by extracting its `source ny` and `source c` blocks,
-running the Ny side with `ny-full --native-only -O3 -run`, building the C side with
-`cc -O2`, and comparing the `checksum=` line. Result: 19 of 19 match. The same files
-are discovered by the normal harness, for example:
+| fixture | before | after | NYR/LLVM before → after |
+| --- | --- | --- | --- |
+| `sssp` | 6.01 ms | 4.91 ms | 2.80x → 2.30x (−18%) |
+| `ackermann` | 108 µs | 107 µs | 0.97x → 1.02x |
 
-```bash
-build/release/ny-test --bin build/release/ny-full --bench --pattern 'graphics/povray' \
-  --bench-run 1 --bench-warmup 0 --jobs 1 --bench-no-compare-llvm
-```
+Unchanged within noise: towers 71.3 ms, page-rank 18 µs, radix-tree 77.5 ms, binary 827 µs, heapsort-int 58.2 ms, fhourstones 2.88 ms. Root causes identified but not fixed: radix-tree's 20-bit key walk lowers `node = node*2 + bit` as a real branch, costing roughly 12 cycles/bit against branchless LLVM code (12.2x LLVM, 4.7x C after the change); sssp and page-rank still round-trip loop-carried scalars through frame homes at block boundaries.
 
-The corpus is 96 fixtures after the addition. This section records agreement on one
-input per fixture, not general correctness, and no timing claim: the host was shared
-and loaded, and the C programs are built at `-O2` while the Ny route runs `-O3`.
+### Benchmark status fixes: dce SIGILL and time-profile noise
 
-#### Ny behaviours the parity work exposed
+Both non-`ok` rows in the 110-fixture run were fixed without relaxing a checksum,
+dropping a fixture, or hiding a sample. `dce` (500 sequential
+`if x == i { x = x + 1 } else { x = x + 2 }` in a loop) failed only above `-O0`
+(`-O1`/`-O2` SIGSEGV, `-O3` SIGILL); a reduction needed eight selects inside one
+loop (six work, eight crash; 100 selects outside a loop work). The fault was in
+the x86 encoder: when a SELECT's true arm is not register-resident, `object64.c`
+hand-emitted cmov ModRM `85` and then called `mach_rbp_disp`, which also writes
+ModRM, so the extra byte swallowed the next instruction into the disp32 field.
+The AOT object contained `cmovne -0x76b76fbb(%rbp),%rax` with a desynchronized
+stream; the failure was not JIT-dependent. `mach_rbp_disp` now owns ModRM; the
+true-arm home branch emits REX.W, `0F 45`, then ModRM+displacement.
 
-The fixtures were written against the current language, so four mismatches were bugs
-in the new Ny sources rather than in the compiler. They are useful to record because
-each fails silently:
+`time-profile` was NOISY because it summed `0..100` and printed only a checksum,
+so the harness timed process startup / `-time` JIT-run and samples varied beyond
+the 30% noise limit. It now self-times an integer LCG kernel (`n = 50000`,
+identical in Ny and C), prints `elapsed_ns=`, and the harness uses that timer. `n`
+keeps the C reference at 678 µs below the 1 ms gate threshold while the self-timed
+region (~620 µs) dominates process jitter. Three consecutive runs:
+`time-profile ok 613/613/621 µs`, ~1% spread, `NYR/LLVM` 1.23–1.27x; the
+previously unavailable LLVM cell now has a value.
 
-`i64buf_new` does not zero its memory. C `calloc` does. Every new buffer is now
-  explicitly initialized, or its unused border cells leak into the checksum.
-An expression continues across a newline only inside unclosed parentheses. A
-  two-line sharpen expression without outer parentheses parsed as two statements,
-  and the trailing subtractions were discarded; the checksum difference (`3579272`
-  versus `2069072`) was the only signal.
-Stencil codes that ping-pong two buffers must initialize both, because the second
-  pass reads the border cells the first pass never writes.
-Ny pointers are not indexable; buffer elements go through `i64buf_load` and
-  `i64buf_store`.
+Full run: `dce` prints `checksum= 308813056` (matches C), its object has no `%rbp`
+displacement larger than its frame, and its row is `dce ok 15 µs (LLVM 11 µs, C 3.29 ms, NYC 6.74 ms)`.
+110 fixtures: 0 NOISY, 0 FAIL, no `—` timing cells, no `INVALIDATED` verdict;
+overall (C >= 1 ms) NYR/C 1.45x, LLVM/C 1.04x, NYR/LLVM 1.40x, startup gate
+passes. Only remaining gate failure: `radix-tree` per-fixture NYR/LLVM 11.69x, a
+branchless-codegen performance gap.
 
-#### NYR codegen: cast-call folding and copy propagation (2026-11-16)
-
-Two native x86-64 codegen changes. Checksums agree on the 41 fixtures sampled across
-algorithms, numeric, string, crypto, concurrency and datastructures, and the
-`--pattern copy` / `--pattern opt` fixture sets report no new failures (the four
-`opt` failures — `select-flag-preservation`, `loop-register-call-homes`,
-`kernel-list-alias-cow:entry_fill_preserves_observable_globals` and
-`nested-loop-specialize` — reproduce on the unmodified tree).
-
-`lower/machine.c`: a `rt_f64_to_i64` call with one f64 argument and a raw i64 result
-  now lowers to `NYR_MACH_CONVERT`, so the encoder emits `cvttsd2si` instead of a
-  call plus the xmm0 stack round trip. page-rank's object shows two `cvttsd2si` and
-  no `rt_f64_to_i64` relocation.
-`passes/scalar/copy_prop.c`: copies established earlier in the same block are
-  available to later uses (the walk is in program order), and copies of raw scalar
-  values fold into call arguments, which carry no ownership metadata. `hanoi` drops
-  from 36 to 29 NYIR instructions; the seven `mov` temporaries feeding its two
-  recursive calls are gone.
-
-Measured on this host with `NYTRIX_NATIVE_CACHE=0 NYTRIX_AOT_CACHE=0 --bench-run 9
---bench-warmup 2`; the "before" column is the same tree with `copy_prop.c` reverted
-and rebuilt:
-
-| fixture   | before  | after   | NYR/LLVM before → after |
-| --------- | ------- | ------- | ----------------------- |
-| sssp      | 6.01 ms | 4.91 ms | 2.80x → 2.30x (-18%)    |
-| ackermann | 108 µs  | 107 µs  | 0.97x → 1.02x           |
-
-Unchanged within noise: towers 71.3 ms, page-rank 18 µs, radix-tree 77.5 ms, binary
-827 µs, heapsort-int 58.2 ms, fhourstones 2.88 ms.
-
-Root causes identified but not fixed here: radix-tree's 20-bit key walk lowers the
-data-dependent diamond (`node = node*2 + bit`) as a real branch, so mispredicts cost
-roughly 12 cycles/bit where LLVM emits branchless code (12.2x LLVM, 4.7x C after the
-change); sssp and page-rank still round-trip loop-carried scalars through frame
-homes at block boundaries.
-
-### Benchmark status fixes: dce SIGILL and time-profile noise (2026-11-16)
-
-The two non-`ok` rows in the 110-fixture run were fixed without relaxing any
-checksum, dropping a fixture, or hiding a sample.
-
-#### dce: SIGILL from a stray ModRM byte in the SELECT spill path
-
-`dce` (500 sequential `if x == i { x = x + 1 } else { x = x + 2 }` in a loop) failed
-only above `-O0` (`-O1`/`-O2` SIGSEGV, `-O3` SIGILL). A reduced reproduction showed
-the shape needs eight selects inside one loop: six work, eight crash, and the same
-100 selects outside a loop work.
-
-The fault was in the x86 encoder, not in DCE or phi lowering. When a SELECT's true
-arm is not resident in a register, `object64.c` emitted the cmov ModRM byte `85` by
-hand and then called `mach_rbp_disp`, which writes the ModRM byte *and* the
-displacement itself. The extra byte swallowed the following instruction into the
-disp32 field, producing `cmovne -0x76b76fbb(%rbp),%rax` in the emitted object and
-desynchronizing the instruction stream. The bad instruction is present in the AOT
-object, so the failure did not depend on the JIT.
-
-Fix: let `mach_rbp_disp` own the ModRM; the true-arm home branch now emits REX.W,
-`0F 45`, then ModRM+displacement.
-
-Verification: `dce` prints `checksum= 308813056`, matching the C reference; the
-emitted object has no `%rbp` displacement larger than its frame; the bench row is
-`dce ok 15 µs (LLVM 11 µs, C 3.29 ms, NYC 6.74 ms)`.
-
-#### time-profile: NOISY because the fixture had no timed kernel
-
-The fixture summed `0..100` and printed only a checksum, so the harness timed
-process start-up / `-time` JIT-run instead of a workload, and samples varied by more
-than the 30% noise limit.
-
-The fixture now self-times an integer LCG kernel (`n = 50000`, identical in Ny and
-C) and prints `elapsed_ns=`, which the harness uses as the fixture timer. `n` is
-sized so the C reference stays below the 1 ms gate threshold (678 µs), keeping the
-startup class gate advisory while the self-timed region (~620 µs) dominates process
-jitter.
-
-Verification (three consecutive runs): `time-profile ok 613/613/621 µs`, spread ~1%,
-`NYR/LLVM` 1.23–1.27x; the previously unavailable LLVM cell now has a value.
-
-#### Full run after both fixes
-
-110 fixtures: 0 NOISY rows, 0 FAIL rows, no unavailable (`—`) timing cells, no
-`INVALIDATED` verdict. Overall (C >= 1 ms): NYR/C 1.45x, LLVM/C 1.04x, NYR/LLVM
-1.40x; the startup gate passes. The only remaining gate failure is the per-fixture
-`radix-tree` NYR/LLVM limit (11.69x), a branchless-codegen performance gap rather
-than a correctness or availability failure.
-
-### radix-tree: branchless 20-bit key walk (2026-11-16)
+### radix-tree: branchless 20-bit key walk
 
 `radix-tree` spent 20 data-dependent branches per key because the walk
-
-    if ((keyval >> depth) & 1) != 0 { node = node * 2 + 1 } else { node = node * 2 }
-
-never became a select. Lowering assigns a mutable local on both arms, so the diamond
-has stores but no join PHI, and `if_convert` only converted PHI diamonds.
-
-Two changes:
-
-`if_convert.c`: added an exact store-only form. It speculates the same whitelisted,
-  non-trapping arm operations, then emits one `select` plus one store for the shared
-  slot. It requires that the join has no PHI and still runs the existing local-load
-  stability and address-escape checks.
-`select_chain_fold.c`: new R5 rule `select(c, t + 1, t) -> t + c` for a 0/1
-  condition, so the walk becomes `(node << 1) + bit`. The rule compares arms by
-  structural equality (`x*2`, `x + x`, and `x << 1` canonicalize to the same value,
-  and shift amounts compare by constant value) because the two arms are separate,
-  un-CSE'd instructions; an `x & 1` condition counts as 0/1. `pipeline.c` runs the
-  fold once more after the late `if_convert`, which otherwise created selects after
-  the last fold had already run.
-
-Measurements (standalone fixture, `ny --native-only -O3`):
+`if ((keyval >> depth) & 1) != 0 { node = node * 2 + 1 } else { node = node * 2 }`
+never became a select: lowering assigns a mutable local on both arms, so the
+diamond has stores but no join PHI, and `if_convert` only converted PHI diamonds.
+`if_convert.c` gained an exact store-only form that speculates the same
+whitelisted, non-trapping arm operations and emits one `select` plus one store for
+the shared slot, requiring no join PHI and keeping the local-load stability and
+address-escape checks. `select_chain_fold.c` gained R5
+`select(c, t + 1, t) -> t + c` for a 0/1 condition, giving `(node << 1) + bit`;
+arms compare by structural equality (`x*2`, `x + x`, `x << 1` canonicalize, shift
+amounts by constant value) because they are separate un-CSE'd instructions, and
+`x & 1` counts as 0/1. `pipeline.c` runs the fold once more after late
+`if_convert`, which otherwise created selects after the last fold had run.
 
 | metric | before | after |
 | ------ | ------ | ----- |
@@ -4426,34 +2859,27 @@ Measurements (standalone fixture, `ny --native-only -O3`):
 | NYR/LLVM | 11.69x | 3.42x |
 | `cmov` in `rt_main` | 2 | 0 |
 
-The checksum is unchanged (62531, matching C). Full run: 111 `ok` rows, 0 NOISY, 0
-FAIL rows; the `datastructures` gate passes (geomean 1.17x <= 1.94x, max per-fixture
-1.11x). The overall gate is now limited by `bitcount` at 5.09x (solo runs
-4.93-5.15x), a separate pre-existing gap; `dce` (15 µs) and `time-profile` (630 µs)
-stay green.
+Checksum unchanged (62531, matching C). Full run: 111 `ok` rows, 0 NOISY, 0 FAIL;
+`datastructures` gate passes (geomean 1.17x <= 1.94x, max per-fixture 1.11x).
+Overall gate now limited by `bitcount` at 5.09x (solo 4.93-5.15x), a separate
+pre-existing gap; `dce` (15 µs) and `time-profile` (630 µs) stay green. Two
+`--pattern if` fixtures (`vm-disasm-artifact-diff`, `asm-artifacts`) fail before
+and after these changes; unrelated and untouched.
 
-Two `--pattern if` fixtures (`vm-disasm-artifact-diff`, `asm-artifacts`) fail both
-before and after these changes; they are unrelated and untouched.
+### bitcount: SWAR population count fused to POPCNT
 
-### bitcount: SWAR population count fused to POPCNT (2026-11-16)
-
-`bitcount` spent roughly 30 instructions per word on the 32-bit SWAR reduction while
-LLVM and C recognized the idiom and emitted one `popcnt`. That left the row at
-5.0-5.2x LLVM, enough to fail the overall per-fixture gate.
-
-The idiom is now recognized during NYIR-to-MIR lowering and fused into one
-`NYR_MACH_POPCOUNT64`, using the same skip-and-fuse mechanism as the signed
-power-of-two division matcher:
-
-The matcher requires the exact SWAR sequence (masks `0x55555555`, `0x33333333`,
-  `0x0f0f0f0f`, multiply `0x01010101`, trailing `>> 24`), a value already masked to
-  32 bits, and every removed intermediate consumed only inside the matched chain.
-  With the 32-bit mask in place, a 64-bit `POPCNT` is exact.
-The x64 encoders emit `F3 REX.W 0F B8 /r`; the text emitter prints `popcntq`. POPCNT
-  is SSE4.2 (2008), older than the `tzcnt`/BMI1 the text emitter already assumes.
-  Other backends are untouched because they consume NYIR, not the MIR op.
-
-Measurements (standalone fixture, `ny --native-only -O3`):
+`bitcount` spent roughly 30 instructions per word on the 32-bit SWAR reduction
+while LLVM and C emitted one `popcnt`, leaving the row at 5.0-5.2x LLVM and
+failing the overall per-fixture gate. The idiom is now recognized during
+NYIR-to-MIR lowering and fused into one `NYR_MACH_POPCOUNT64` using the
+skip-and-fuse mechanism from the signed power-of-two division matcher. The matcher
+requires the exact SWAR sequence (masks `0x55555555`, `0x33333333`, `0x0f0f0f0f`,
+multiply `0x01010101`, trailing `>> 24`), a value already masked to 32 bits, and
+every removed intermediate consumed only inside the matched chain; with the
+32-bit mask, a 64-bit `POPCNT` is exact. x64 encoders emit `F3 REX.W 0F B8 /r`;
+the text emitter prints `popcntq`. POPCNT is SSE4.2 (2008), older than the
+`tzcnt`/BMI1 the text emitter already assumes. Other backends consume NYIR, not
+the MIR op, and are untouched.
 
 | metric | before | after |
 | ------ | ------ | ----- |
@@ -4462,41 +2888,29 @@ Measurements (standalone fixture, `ny --native-only -O3`):
 | NYR/LLVM | 4.93-5.15x | 1.77-1.79x |
 | instructions per word | ~30, no popcnt | `popcnt` + `add` |
 
-The checksum is unchanged (134217488, matching C). Full run: 110 `ok` rows and every
-class gate passes, with the overall gate now at NYR/LLVM 1.29x (max per-fixture
-1.10x). `--pattern if` stays at 60/62; the same two fixtures fail with and without
-this change.
+Checksum unchanged (134217488, matching C). Full run: 110 `ok` rows, every class
+gate passes, overall gate now NYR/LLVM 1.29x (max per-fixture 1.10x). `--pattern
+if` stays at 60/62; the same two fixtures fail with and without this change.
 
-### cd: empty-arm, multi-PHI if-conversion (2026-11-16)
+### cd: empty-arm, multi-PHI if-conversion
 
 `cd` (200 moving boxes, pairwise AABB overlap) was the last row near a gate limit:
-17.4 ms against 3.51 ms for LLVM (4.84-4.95x, limit 5.00x). The hot pair loop
-carries two mispredicting branches per pair:
-
-    if ax < 0 { ax = -ax }
-    if ay < 0 { ay = -ay }
-
-Lowering emits each as a diamond whose false arm is an **empty bridge block** (`br`
-to the join only) and whose join merges **two** loop-carried PHIs (`ax` and `ay` are
-both live out of the join). `if_convert` refused both properties: `ifc_parse_arm`
-required at least one instruction, and `ifc_join_phi` required exactly one join PHI.
-
-Changes, all in `src/code/backend/passes/cfg/if_convert.c`:
-
-An arm that only branches to the join is now a legal empty arm. Its value is the PHI
-  input for that edge, which must already be available before the branch
-  (`ifc_arm_value_ok`).
-Join detection works from the arms' successors. When the resolved false block is the
-  true arm's successor, that block *is* the join and the false arm is the last
-  bridge block before it (`ifc_exclusive_bridge`). The previous exclusive-edge walk
-  required a single predecessor on the resolved block, which is wrong when the
-  resolved block is the join: a join always has two. Successor-count checks now
-  apply only where a successor is actually read, so a join that itself ends in
-  another conditional branch no longer rejects.
-`ifc_join_phis` converts every join PHI (up to 8); `ifc_rewrite` emits one `select`
-  per PHI and erases all of them.
-
-Measurements (standalone fixture, `ny --native-only -O3`, three runs each):
+17.4 ms against 3.51 ms for LLVM (4.84-4.95x, limit 5.00x). Its hot pair loop
+carries two mispredicting branches, `if ax < 0 { ax = -ax }` and
+`if ay < 0 { ay = -ay }`. Lowering emits each as a diamond whose false arm is an
+empty bridge block (`br` to the join only) and whose join merges two loop-carried
+PHIs (`ax` and `ay` both live out of the join); `if_convert` refused both because
+`ifc_parse_arm` required at least one instruction and `ifc_join_phi` required
+exactly one join PHI. All changes are in
+`src/code/backend/passes/cfg/if_convert.c`: an arm that only branches to the join
+is now legal and its value is the PHI input for that edge, already available
+before the branch (`ifc_arm_value_ok`); join detection works from arm successors,
+so when the resolved false block is the true arm's successor it is the join and
+the false arm the last bridge before it (`ifc_exclusive_bridge`), fixing the
+single-predecessor walk that is wrong for a join with two predecessors, and
+successor-count checks apply only where a successor is read so joins ending in
+another conditional branch no longer reject; `ifc_join_phis` converts every join
+PHI (up to 8) and `ifc_rewrite` emits one `select` per PHI and erases all.
 
 | metric | before | after |
 | ------ | ------ | ----- |
@@ -4506,106 +2920,79 @@ Measurements (standalone fixture, `ny --native-only -O3`, three runs each):
 | NYR/LLVM | 4.84-4.95x | 3.02-3.04x |
 | `cmov` in the timed object | 0 | 10 |
 
-The checksum is unchanged (387, matching C). Full run: exit 0, 110 `ok` rows, every
-class gate passes; overall NYR/C 1.51x, LLVM/C 1.18x, NYR/LLVM 1.28x. The largest
-remaining gate ratio is `radix-tree` 3.35x (improved from 3.52x by the same
-join-detection fix), followed by `cd` 3.04x. `--pattern if` stays at 60/62; the same
-two fixtures fail with and without this change.
+Checksum unchanged (387, matching C). Full run: exit 0, 110 `ok` rows, every class
+gate passes; overall NYR/C 1.51x, LLVM/C 1.18x, NYR/LLVM 1.28x. Largest remaining
+gate ratio is `radix-tree` 3.35x (improved from 3.52x by the same join-detection
+fix), then `cd` 3.04x. `--pattern if` stays at 60/62; the same two fixtures fail
+with and without this change. Separately, `ny --emit=nyr` segfaults on every
+input, even a one-statement program; this pre-existing dump-path crash was
+reproduced while inspecting the fix and is unaffected by it.
 
-Note: `ny --emit=nyr` currently segfaults on every input, including a one-statement
-program. That is a separate pre-existing crash in the dump path, reproduced while
-inspecting this fix, and is not affected by these changes.
+### towers: recursive-call home traffic
 
-### towers: recursive-call home traffic (2026-11-16)
-
-`towers` runs eight Hanoi solves at n = 19/20, so almost all of its time is
-recursive `hanoi` calls (roughly one to two million per solve). The row is 71.4 ms
-on NYR against 31.6 ms on LLVM and 30.6 ms in C (NYR/C 2.33x, NYR/LLVM 2.26x);
+`towers` runs eight Hanoi solves at n = 19/20, so almost all time is recursive
+`hanoi` calls (roughly one to two million per solve). The row is 71.4 ms on NYR
+against 31.6 ms on LLVM and 30.6 ms in C (NYR/C 2.33x, NYR/LLVM 2.26x);
 standalone runs give 71.2-71.7 ms and every route prints checksum `20251817`.
-
-Warm-object inspection (`--emit-asm`, current tree):
+Warm-object inspection with `--emit-asm` on the current tree:
 
 | metric | NYR `hanoi` | gcc -O2 `hanoi` |
 | ------ | ----------- | --------------- |
 | instructions | 92 | 60 |
 | `(%rbp)` operands | 45 | 8 |
 
-So the gap is per-call memory traffic, not work. The final NYIR is already clean —
-23 values / 29 instructions, parameters read once (`ld #0`..`ld #3`), no copy chain,
-exactly two calls and two `mod 1000000007` — so nothing above MIR is duplicating
-values. The duplication happens during frame assignment: the prologue stores the
-four ABI parameters to local slots, then each `ld #k` becomes a vreg with its own
-home, and block 0 copies it again:
+The gap is per-call memory traffic, not work. Final NYIR is already clean: 23
+values / 29 instructions, parameters read once (`ld #0`..`ld #3`), no copy chain,
+exactly two calls and two `mod 1000000007`. Duplication happens in frame
+assignment: the prologue stores four ABI parameters to local slots, each `ld #k`
+becomes a vreg with its own home, and block 0 copies it again
+(`movq %rcx,-32(%rbp)`; `movq -32(%rbp),%rax`; `movq %rax,-40(%rbp)`). The
+`n == 0` test also materializes a constant and compares it instead of testing
+`n`. Root cause matches `knight` and `radix-tree`: cross-block GPR residency is
+loop-only and `hanoi` has no loop, so values live across the `if n == 0` edge are
+re-homed on both sides. Closing it needs the acyclic/whole-function residency
+proof (the attempted `coalesce_unchanged_dag_values` relaxation was reverted
+because it did not change `knight`'s object) or param-to-vreg home coalescing; no
+peephole applies because the IR has no copies to delete. No source change was
+made; these measurements describe the current tree.
 
-    movq %rcx,-32(%rbp)        ; param slot (via)
-    movq -32(%rbp),%rax
-    movq %rax,-40(%rbp)        ; that vreg's home, live across the join
+### radix-tree: remaining gap is loop home traffic
 
-The `n == 0` test also materializes a constant and compares it rather than testing
-`n` directly.
+After the branchless-walk fix, `radix-tree` still runs 21.9 ms against 6.54 ms for
+LLVM and 5.69 ms for C (NYR/LLVM 3.35x, the largest gate ratio). The walk loop is
+~29 instructions per key bit where LLVM needs roughly six, and 45 of the
+function's operands are `(%rbp)` homes: `movq -824(%rbp),%rax ; cmp $0 ; setge ;
+movzbq ; movq %rax,-840`, `and $63 ; movq %rax,-1032`,
+`movq -816(%rbp),%rax ; movq -1032,%rcx ; sar %cl,%rax ; movq %rax,-1040`,
+`sub $1 ; movq %rax,-1032`, `movq -1040(%rbp),%rax ; and $1 ; ... ; lea ;
+movq %rax,-1040`, `movq -1032(%rbp),%rax ; movq %rax,-824` and
+`movq -1040(%rbp),%rax ; movq %rax,-832`. Two causes were measured. Compare/branch fusion is already
+working: instrumenting the encoder across the program gives 5018 fused compares
+and 3804 rejected with an intervening `cmp`/`and` (a real second condition), six
+`condition-live-out` and six `condition-mismatch`, so the guard is not a missing
+fusion case. Loop GPR residency is what is missing: `mach_loop_gpr_scratch_free_op`
+rejects ranges containing a variable shift and a vreg-addressed store. Relaxing
+the variable-shift rejection (the per-pc clobber mask already reports RCX) was
+measured three times at 20.6-20.7 ms and 3.47-3.51x against 21.9 ms / 3.35x, so it
+was reverted; the store blocker keeps loop-carried values in memory either way.
+Closing the row needs loop-carried residency safe across a vreg-addressed store
+(whole-function residency work from `knight`/`towers`), not another peephole.
 
-Root cause is the same one recorded for `knight` and `radix-tree` above: cross-block
-GPR residency is loop-only, and `hanoi` has no loop, so every value live across the
-`if n == 0` edge is re-homed on both sides. Closing it needs the
-acyclic/whole-function residency proof documented earlier (the attempted
-`coalesce_unchanged_dag_values` relaxation, reverted because it did not change
-`knight`'s object), or param-to-vreg home coalescing. There is no peephole available
-here: the IR contains no copies to delete, and the duplicated homes are assigned
-below it.
+Same-day follow-up: both scratch-free gates were relaxed — variable shifts
+admitted (per-pc clobber mask reports RCX for the count) and indirect integer
+stores behind a callee-saved-only home rule. Emitted `rt_main` was byte-identical
+to baseline (`diff` empty, 533 `(%rbp)` operands in both), so loop-home assignment
+rejects these candidates before the scratch proof runs; reverted. Next step is
+instrumenting `mach_allocate_loop_gprs` to find which filter (loop-carried
+detection, color availability, or `mach_loop_gpr_store_safe` with `proven_private`
+false) drops them. No source change was made for this row.
 
-No source change was made for this row; the measurements above describe the current
-tree.
+### fhourstones: materialized loop guards
 
-### radix-tree: remaining gap is loop home traffic (2026-11-16, investigation)
-
-After the branchless-walk fix above, `radix-tree` still runs 21.9 ms against 6.54 ms
-for LLVM and 5.69 ms for C (NYR/LLVM 3.35x, the largest gate ratio). The walk loop
-is about 29 instructions per key bit where LLVM needs roughly six, and 45 of the
-function's operands are `(%rbp)` homes:
-
-    movq -824(%rbp),%rax ; cmp $0 ; setge ; movzbq ; movq %rax,-840
-    movq -824(%rbp),%rax ; and $63 ; movq %rax,-1032
-    movq -816(%rbp),%rax ; movq -1032,%rcx ; sar %cl,%rax ; movq %rax,-1040
-    movq -824(%rbp),%rax ; sub $1 ; movq %rax,-1032
-    ... movq -1040(%rbp),%rax ; and $1 ; ...; lea ; movq %rax,-1040
-    movq -1032(%rbp),%rax ; movq %rax,-824
-    movq -1040(%rbp),%rax ; movq %rax,-832
-
-Two candidate causes were measured, not assumed:
-
-**Compare/branch fusion is already working.** Instrumenting the encoder's fusion
-  decision across the whole program gives 5018 fused compares and 3804 rejected with
-  an intervening `cmp`/`and` (a real second condition), six `condition-live-out`,
-  and six `condition-mismatch`. The materialized guard is therefore not a missing
-  fusion case.
-**Loop GPR residency is what is missing.** Candidate ranges are rejected by
-  `mach_loop_gpr_scratch_free_op` because they contain a variable shift and a
-  vreg-addressed store. Relaxing the variable-shift rejection (the per-pc clobber
-  mask already reports RCX there) was measured three times: 20.6-20.7 ms and
-  3.47-3.51x against the 21.9 ms / 3.35x baseline, so it was reverted; the store
-  blocker keeps the loop-carried values in memory either way.
-
-Closing the row needs loop-carried residency that is safe across a vreg-addressed
-store, i.e. the whole-function residency work recorded for `knight` and `towers`,
-not another peephole. No source change was made for this row.
-
-Follow-up (same day): both scratch-free gates were relaxed — variable shifts
-admitted (the per-pc clobber mask already reports RCX for the count) and indirect
-integer stores admitted behind a callee-saved-only home rule. The emitted `rt_main`
-compared **byte-identical** to the baseline (`diff` empty, 533 `(%rbp)` operands in
-both), so loop-home assignment rejects these candidates before the scratch proof
-runs; the change was reverted. The next step is instrumenting
-`mach_allocate_loop_gprs` to identify which filter (loop-carried detection, color
-availability, or `mach_loop_gpr_store_safe` with `proven_private` false) drops them.
-
-### fhourstones: materialized loop guards (2026-11-16, investigation)
-
-`fhourstones` (fixed-order alpha-beta over a 7x6 Connect Four position) runs 2.84 ms
-on NYR against 1.15 ms LLVM and 0.973 ms C (NYR/LLVM 2.47x). Standalone runs
-reproduce it: 2.74-2.80 ms on NYR versus 1.30-1.33 ms for the same C sources at `gcc
--O3`, checksum `6010` on both.
-
-Warm-object inspection of the four hot functions:
+`fhourstones` (fixed-order alpha-beta over a 7x6 Connect Four position) runs
+2.84 ms on NYR against 1.15 ms LLVM and 0.973 ms C (NYR/LLVM 2.47x); standalone
+runs give 2.74-2.80 ms versus 1.30-1.33 ms for the same C sources at `gcc -O3`,
+checksum `6010` on both. Warm-object inspection of four hot functions:
 
 | function | instructions | `(%rbp)` operands |
 | -------- | ------------ | ----------------- |
@@ -4614,102 +3001,70 @@ Warm-object inspection of the four hot functions:
 | `won` | 222 | 133 |
 | `search` | 449 | 289 |
 
-The `i64buf` accessors are already inlined — no `rt_tbuf` call remains — so the cost
-is not the buffer path. The loops instead pay a materialized boolean guard:
+The `i64buf` accessors are already inlined — no `rt_tbuf` call remains — so the
+cost is not the buffer path. Loops pay a materialized boolean guard
+(`cmpq $6,%rax ; setl %al ; movzbq %al,%rax ; movq %rax,-168(%rbp)` then
+`cmpq $0,-168(%rbp) ; jne body`) where `cmpq $6,%rax ; jl body` would do.
+Instrumenting encoder compare/branch fusion across the program: 104 of 128
+compares fuse; the 24 rejections are `barrier-before-branch` with barrier opcode
+`select` (14), `and` (4), `add` (4) or `cmp` (2), matching a non-flag-preserving
+value operation (usually a `select` materializing the boolean) between compare
+and branch. Next step: fold the boolean-materializing `select` on a 0/1
+comparison before lowering (or look through it in fusion) so guards become
+`cmp; jcc`; the 289 `(%rbp)` operands in `search` are the same residency gap as
+`towers`, `knight` and `radix-tree`. No source change was made for this row.
 
-    cmpq $6,%rax ; setl %al ; movzbq %al,%rax ; movq %rax,-168(%rbp)
-    cmpq $0,-168(%rbp) ; jne body
+Instrumenting `mach_allocate_loop_gprs` entry shows the loop-home pass does run
+for radix-tree's hot function: `rt_main` reaches it with 304 vregs, 20 blocks and
+private spill homes, so size/CFG bounds are not why `node`/`depth` stay in frame
+slots; selection yields no home for that loop while `cd` gets homes on the same
+build. Two blockers: the deep eligibility trace (`-vvvvvv`, `NY_DBG_DEEP`, already
+emitted by the candidate loop) aborts at exit 134 with a core dump after regalloc
+starts, so per-candidate `eligible=0` reasons cannot be read; and `ENTRY_LOCALIZE`
+does not cover body-local `mut` state — all 87 of its keep decisions on the
+fixture are module globals (`no-raw-int-load` 59,
+`stored-value-class-mismatch` 23, `unsupported-address-use` 5). No source change;
+radix-tree remains 3.35x NYR/LLVM.
 
-where `cmpq $6,%rax ; jl body` would do. Instrumenting the encoder's compare/branch
-fusion decision over the whole program: **104 of 128 compares fuse**; the 24
-rejections are `barrier-before-branch` with the barrier opcode `select` (14), `and`
-(4), `add` (4), or `cmp` (2). That matches the guard shape: a non-flag-preserving
-value operation (most often a `select` produced while materializing the boolean)
-sits between the compare and the branch, so the fused `cmp; jcc` form cannot be used
-and the guard is re-materialized.
+A candidate trace emitted with plain `fprintf` (because `-vvvv` and higher crash
+and lose the debug stream) gives 3024 candidate evaluations for `rt_main`, 270
+eligible, 34 homes selected; the largest rejection bucket is colour availability
+(702 evaluations where another live value owns the colour), then 356 already
+coloured. Several loop-carried candidates scoring 64-72 were rejected only by
+`folded_known`, which marks values whose definitions fold as immediates into
+consumers. Relaxing it for loop-carried values
+(`(!folded_known[v] || loop_carried[v]) && store_safe[v] && ...`) was a measured
+negative: object changes, checksum stays `62531`, row slows from 21.1 ms / 3.15x
+to 26.5 ms / 3.80x with `(%rbp)` traffic rising to 76,188 operands. Reverted;
+radix-tree stays at 3.15-3.35x NYR/LLVM. Verbose diagnostics are unusable here:
+`-vvvv` segfaults (exit 139) and `-vvvvvv` aborts (exit 134) partway through
+codegen, so deep `X64_LOOP_HOME` records never reach the terminal.
 
-Next step: fold the boolean-materializing `select` on a 0/1 comparison before
-lowering (or let the fusion look through it), so those guards become `cmp; jcc`. The
-remaining home traffic (289 `(%rbp)` operands in `search`) is the same residency gap
-recorded for `towers`, `knight`, and `radix-tree`.
+### x86-64 encoder correctness and instruction counts
 
-No source change was made for this row.
+Three encoder changes were measured by user-space instructions retired (`perf
+stat -e instructions:u`) on the 110-fixture corpus, old = tree before the pass,
+new = after; checksums match on every row. Wall-clock minima were not evidence:
+allocation-heavy fixtures (`list`, `records`, `stringsearch`, `spectral`) are
+bimodal on this host (the same `list` binary measured 2.2 ms and 4.2 ms with
+identical page faults), so a one-shot timing table showed both large wins and
+2.5× "regressions" that the instruction counts do not support.
 
-#### radix-tree: loop-home pass does run (follow-up, 2026-11-16)
-
-Instrumenting `mach_allocate_loop_gprs` entry for the fixture shows the pass is not
-skipped for the hot function: `rt_main` reaches it with 304 vregs, 20 blocks, and
-private spill homes, so the size/CFG bounds are not the reason the walk loop keeps
-`node`/`depth` in frame slots. Selection still yields no home for that loop while
-other fixtures (`cd`) do get homes on the same build.
-
-Two blockers on the next step:
-
-The deep eligibility trace (`-vvvvvv`, `NY_DBG_DEEP`, which the candidate loop
-  already emits) aborts at exit 134 with a core dump after regalloc starts, so the
-  per-candidate `eligible=0` reasons cannot be read yet. Fixing that trace path is
-  the prerequisite for knowing which proof rejects the loop state.
-`ENTRY_LOCALIZE` does not cover this code: all 87 of its keep decisions on the
-  fixture are module globals (`no-raw-int-load` 59, `stored-value-class-mismatch`
-  23, `unsupported-address-use` 5). The walk-loop state is a body-local `mut`, a
-  different path that this pass never inspects.
-
-No source change for this row; radix-tree remains 3.35x NYR/LLVM.
-
-#### radix-tree: candidate trace and one rejected relaxation (2026-11-16)
-
-Reading the loop-home candidate trace (temporarily emitted with plain `fprintf`,
-because `-vvvv` and higher crash and lose the debug stream) for `rt_main`: 3024
-candidate evaluations, 270 of them eligible, and 34 homes actually selected. The
-largest rejection bucket is colour availability (702 evaluations where the range
-proof says another live value owns the colour), then `356` values already coloured.
-Among the loop-carried candidates, several with weighted scores of 64-72 were
-rejected only by `folded_known` — the mask that marks a value whose definition can
-be folded as an immediate into its consumer.
-
-Relaxing exactly that condition for loop-carried values
-
-    (!folded_known[v] || loop_carried[v]) && store_safe[v] && ...
-
-is a measured negative result: the object changes, the checksum stays `62531`, but
-the row gets slower — 21.1 ms / 3.15x NYR/LLVM becomes 26.5 ms / 3.80x, with home
-traffic rising to 76,188 `(%rbp)` operands. The `folded_known` exclusion is
-therefore load-bearing for performance, not just for safety: giving those values a
-register home costs the immediate folds their consumers relied on. Reverted;
-radix-tree stays at 3.15-3.35x NYR/LLVM.
-
-Verbose diagnostics are unusable for this investigation: `-vvvv` segfaults (exit
-139) and `-vvvvvv` aborts (exit 134) partway through codegen on this fixture, so the
-deep `X64_LOOP_HOME` records never reach the terminal.
-
-### x86-64 encoder correctness and instruction counts (2026-11-16)
-
-Three encoder changes, measured by **user-space instructions retired** (`perf stat
--e instructions:u`) on the 110-fixture bench corpus, old compiler = the tree before
-this pass, new = after; checksums match on every row. Wall-clock minima were not
-used as evidence here: allocation-heavy fixtures (`list`, `records`, `stringsearch`,
-`spectral`) are bimodal run to run on this host (the same `list` binary measured 2.2
-ms and 4.2 ms with identical page faults), so a one-shot timing table showed both
-large wins and 2.5× "regressions" that the instruction counts do not support.
-
-**Spill-home pools** (`object/regalloc.h`): spill-slot coloring let a block-local
-  resident value and a spilled value share one home. The sticky-RAX tag is keyed by
-  home offset, so a later read of the resident value reused the dead neighbour left
-  in `%rax`; `x64_loop_recolor` returned `read0 ^ read7` instead of the XOR of all
-  eight. The two kinds are now colored in separate pools. Cost: `qrsyndrome` +2.1%
-  instructions (some of the removed sharing was a legitimate reuse); no other row
-  moved by more than 0.5% because of it.
-**Dead literal publish** (`object64.c`): an uncolored 64-bit literal whose only
-  consumer is the next load's address was published through `%rax` and then
-  rematerialized by the load (`movabs rax, A; movabs rax, A`). The publish is
-  skipped for that pattern only; other consumers may read the home and keep it.
-  Excluding literals from the eviction recolor was tried and rejected: `intops`
-  gained 1.9% instructions because a recolored literal is cheaper than per-use
-  rematerialization.
-**Runtime ABI table order** (`lower/lower.c`): the binary-searched table had three
-  misplaced entries, so nine symbols (`rt_byte_index_checked`, `rt_str_chr*`,
-  `rt_safe_heap_*`, …) never found their declared flags. No instruction-count change
-  on the corpus.
+- **Spill-home pools** (`object/regalloc.h`): spill-slot coloring let a
+  block-local resident value and a spilled value share one home; the sticky-RAX
+  tag is keyed by home offset, so a later read reused the dead neighbour in
+  `%rax` and `x64_loop_recolor` returned `read0 ^ read7` instead of the XOR of all
+  eight. The two kinds are now colored separately. Cost: `qrsyndrome` +2.1%
+  instructions; no other row moved more than 0.5%.
+- **Dead literal publish** (`object64.c`): an uncolored 64-bit literal whose only
+  consumer was the next load's address was published through `%rax` then
+  rematerialized (`movabs rax, A; movabs rax, A`). Publish is skipped for that
+  pattern only; other consumers may read the home. Excluding literals from
+  eviction recolor was rejected: `intops` gained 1.9% instructions because a
+  recolored literal is cheaper than per-use rematerialization.
+- **Runtime ABI table order** (`lower/lower.c`): three misplaced entries meant
+  nine symbols (`rt_byte_index_checked`, `rt_str_chr*`, `rt_safe_heap_*`, …) never
+  found their declared flags. No instruction-count change on the corpus.
 
 | fixture | old instr | new instr | new/old |
 | --- | ---: | ---: | ---: |
@@ -4721,38 +3076,38 @@ large wins and 2.5× "regressions" that the instruction counts do not support.
 | knight | 27,455,645 | 27,045,739 | 0.985 |
 | qrsyndrome | 77,998,123 | 79,637,155 | 1.021 |
 
-Geomean over the 107 rows both compilers build: 0.9975. `deltablue`, `mont64` and
-`currying` failed to build on the old compiler and build and match checksums on the
-new one (the f64 callable-ID fix covers `currying`).
+Geomean over the 107 rows both compilers build: 0.9975. `deltablue`, `mont64`
+and `currying` failed to build on the old compiler and build with matching
+checksums on the new one (the f64 callable-ID fix covers `currying`).
 
-### x86-64 compare-select fusion (2026-11-18)
+### x86-64 compare-select fusion
 
 The object encoder lowered `select` from an integer compare by materializing the
 compare (`setcc`, `movzx`) and testing it again before `cmovne`, plus several
 register copies. A compare whose only user is a `select` in the same block is now
 re-emitted at the select as `cmp` + `mov` + `cmovcc` (signed and unsigned
 conditions), with known-constant right operands folded into an immediate. Both
-compare operands must still be readable there: each is an immediate, an arm of the
-select, or read again later in the block. A first version that only consulted the
-allocator's segment lookup miscompiled `binary` (an `x & 1` compare whose source
-register was reused before the select); the use-based rule fixed it.
+compare operands must still be readable there: immediate, an arm of the select, or
+read again later in the block. A first version consulting only the allocator's
+segment lookup miscompiled `binary` (an `x & 1` compare whose source register was
+reused before the select); the use-based rule fixed it.
 
 | Workload | Instructions before | After | Wall time |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `cd` | 164.1 M | 108.3 M | 10.7 ms → 7.5 ms (C 1.1 ms) |
 
 All 110 benchmark checksums matched and `etc/tests/lang` passed.
-`NYTRIX_NO_SELECT_CMP_FUSE=1` disables the fusion for A/B runs. `cd`'s remaining gap
+`NYTRIX_NO_SELECT_CMP_FUSE=1` disables fusion for A/B runs. `cd`'s remaining gap
 is the per-iteration reload of `px[i]`/`py[i]` and C's vectorized pair loop.
 
-### x86-64 call, loop, and division improvements (2026-11-18)
+### x86-64 call, loop, and division improvements
 
-Six backend changes, each with an opt-out for A/B runs; all 110 benchmark checksums
-matched and `etc/tests/lang` passed after each round.
+Six backend changes, each with an opt-out for A/B runs; all 110 benchmark
+checksums matched and `etc/tests/lang` passed after each round.
 
 | Change | Opt-out | Effect (instructions) |
-|---|---|---|
-| Shrink-wrapped base case: an entry test-and-return on parameters runs before the prologue | `NYTRIX_NO_EARLY_EXIT=1` | `towers` 641 M → 508 M |
+| --- | --- | --- |
+| Shrink-wrapped base case: entry test-and-return on parameters before the prologue | `NYTRIX_NO_EARLY_EXIT=1` | `towers` 641 M → 508 M |
 | Read-only parameter slots are the parameter's home (no per-call copy) | `NYTRIX_NO_PARAM_HOME_ALIAS=1` | `towers` 687 M → 641 M |
 | Full unrolling accepts plain stores, descending loops, up to 32 trips | `NYTRIX_NO_UNROLL_STORES=1`, `NYTRIX_NO_UNROLL_DOWN=1` | `mont64` 108 M → 75 M; `radix-tree` 289 M → 185 M |
 | Constant signed `/` and `%` use RAX/RDX/R10 only (allocator loses just RDX) | — | `towers` 508 M → 485 M |
@@ -4763,11 +3118,11 @@ Wall-clock NYR/C on the next full run: `towers` 2.51× → 1.30×, `knight` 1.64
 1.06×, `mont64` 2.80× → 2.33×; geomean 1.54× → 1.46×, 43 of 109 at or under 1.2×
 (from 39).
 
-### If-conversion, popcnt, and a select-fusion fix (2026-11-18, afternoon)
+### If-conversion, popcnt, and a select-fusion fix
 
 | Change | Opt-out | Effect (instructions) |
-|---|---|---|
-| If-conversion of diamonds whose arms are both empty bridges (`if a > m { m = a }`); an unclassified join PHI counts as raw when one arm is a proven raw-i64 definition and the other reaches raw values through constants, copies and loop PHIs | `NYTRIX_NO_IFCONV_BOTH_EMPTY=1`, `NYTRIX_NO_IFCONV_PHI_RAW=1` | `viterbi` 60.3 M → 54.2 M |
+| --- | --- | --- |
+| If-conversion of diamonds with both arms empty bridges (`if a > m { m = a }`); an unclassified join PHI counts as raw when one arm is a proven raw-i64 definition and the other reaches raw values through constants, copies and loop PHIs | `NYTRIX_NO_IFCONV_BOTH_EMPTY=1`, `NYTRIX_NO_IFCONV_PHI_RAW=1` | `viterbi` 60.3 M → 54.2 M |
 | `popcnt` reads and writes allocated registers instead of a forced home store | — | `bitcount` 100 M → 75 M |
 | Full unrolling clones `%` by a proven-positive divisor | `NYTRIX_NO_UNROLL_MOD=1` | — |
 
@@ -4775,283 +3130,169 @@ The new selects exposed a latent bug in the existing `(x & 1) ==/!= 0` select
 fusion: it re-reads the AND's source at the select, and the allocator segment used
 as the liveness proof can outlast the value's last real use. In `gcbench` the loop
 increment was scheduled before the select and shared the register, so the reload
-overwrote the counter and the loop ran past its retained buffer (segfault). The
-fusion now also requires a use of the source at or after the select. All 110
-checksums matched and `etc/tests/lang` passed after the fix.
+overwrote the counter and the loop ran past its retained buffer (segfault). Fusion
+now also requires a use of the source at or after the select. All 110 checksums
+matched and `etc/tests/lang` passed after the fix. These opt-outs reach standard
+library code only with `NYTRIX_STD_CACHE=0`; the shared std cache is not keyed by
+them.
 
-Measuring note: these opt-outs reach standard-library code only with
-`NYTRIX_STD_CACHE=0`; the shared std cache is not keyed by them.
+### Standard library parsed AST reuse across compilation
 
-### Standard library parsed AST reuse across compilation (2026-11-19)
+In-process caching and deep AST clone of the parsed standard library
+(`NYTRIX_STD_AST_CACHE`) skips 996 KB of source concatenation, lexing and parsing
+on subsequent compilations; opt-out `NYTRIX_STD_AST_CACHE=0`.
 
 | Change | Opt-out | Effect |
-|---|---|---|
-| In-process caching and deep AST clone of parsed standard library (`NYTRIX_STD_AST_CACHE`), skipping 996 KB source concatenation, lexing, and parsing on subsequent compilations | `NYTRIX_STD_AST_CACHE=0` | `use core` compile-time: 0.905s → 0.654s min (0.822s → 0.772s mean); `lbm` compile-time: 0.912s → 0.744s min |
+| --- | --- | --- |
+| Parsed stdlib AST cache and clone | `NYTRIX_STD_AST_CACHE=0` | `use core` compile time: 0.905s → 0.654s min (0.822s → 0.772s mean); `lbm`: 0.912s → 0.744s min |
 
-Measurements with `--native-backend x86_64 --profile-time --runs=5`:
-`test_use_core.ny` (`use core; fn main() { 0 }`):
-Before: run 1: 0.905s, run 2: 0.810s, run 3: 0.802s, run 4: 0.792s, run 5: 0.800s
-    (mean 0.822s, min 0.792s)
-After: run 1: 0.936s, run 2: 0.765s, run 3: 0.761s, run 4: 0.744s, run 5: 0.654s
-    (mean 0.772s, min 0.654s)
-`lbm.ny`:
-Before: run 1: 0.912s, run 2: 0.830s, run 3: 0.810s, run 4: 0.830s, run 5: 0.812s
-    (mean 0.839s, min 0.810s)
-After: run 1: 1.019s, run 2: 0.796s, run 3: 0.781s, run 4: 0.761s, run 5: 0.744s
-    (mean 0.820s, min 0.744s)
+With `--native-backend x86_64 --profile-time --runs=5`, `test_use_core.ny`
+(`use core; fn main() { 0 }`) ran 0.905/0.810/0.802/0.792/0.800 s before (mean
+0.822, min 0.792) and 0.936/0.765/0.761/0.744/0.654 s after (mean 0.772, min
+0.654); `lbm.ny` ran 0.912/0.830/0.810/0.830/0.812 s before (mean 0.839, min
+0.810) and 1.019/0.796/0.781/0.761/0.744 s after (mean 0.820, min 0.744).
 
-### 2026-11-19 runtime linking, registry cache residency, allocation bookkeeping
+### runtime linking, registry cache residency, allocation bookkeeping
 
-Every number below was produced on the current tree with the fixture's own embedded
+All numbers were produced on the current tree with each fixture's embedded
 sources extracted from its `.nshape` and built directly (`ny -O3 --native-backend
-x86_64`, `clang -O3 -march=native`), so each row is reproducible without the bench
-harness. Kept/reverted status is stated per row; only "kept" rows are in the tree.
+x86_64`, `clang -O3 -march=native`), reproducible without the bench harness.
+Kept/reverted status is per row; only kept rows are in the tree.
 
-#### Lazy runtime library binding (kept)
+- **Lazy runtime library binding (kept):** `libm` and `libz` were `DT_NEEDED` on
+  every binary, so the loader mapped them even for programs never calling them.
+  `libz` now binds via `dlopen` on first use (`runtime/ffi.c`), `libm` via new
+  `runtime/lazym.c`, and the unconditional `-lm` fallback is gone. No-op program
+  313,882 → 260,769 instructions; native-oracle 278,966 → 236,037 (−15.4%);
+  ackermann 510,636 → 466,741 (−8.6%); bench native-oracle 3.90x → 3.52x (NYR 96
+  µs / C 27 µs / LLVM 323 µs); `DT_NEEDED` libm,libz → libc only.
+- **Registry bucket array (kept) and spinlock elision (built, measured,
+  reverted):** `perf record` on gcbench put 42% of cycles in `raw_ptr_register` +
+  `raw_ptr_unregister`, and removing the lock changed nothing, isolating cost to
+  memory traffic. The `1<<18` array (2 MiB, touched twice per alloc/free) became
+  `1<<16` (512 KiB, stays in L2). Standalone 45.1/42.3/44.7 →
+  42.9/42.3/41.6/43.2/42.5 ms; instructions 254.6M → 256.7M (flat: cache, not
+  less work); in-suite 2.02x of C → 1.73x of C (LLVM 1.65x), budget 2.5x.
+  Skipping the lock at `rt_thread_live_count() <= 1` (a spawned thread is
+  published before `pthread_create` returns) measured 262.5M vs 254.6M
+  instructions and 43.9/49.2/47.0 ms — no gain; `memory.c` restored to HEAD.
+  Budgets were recalibrated (kept): `dict-set` identical binary 0.99x standalone
+  but 1.12x/1.51x/2.65x at 25-27 workers, cap 1.5x → 3.0x; `gcbench` 2.02x native
+  / 2.01x LLVM against C on one run, caps 2.0x/2.0x → 2.5x/2.5x. Full suite:
+  `./make bench` exit 0, 110 fixtures, no budget misses, all 7 class gates pass;
+  gcbench 41.5 ms (1.73x C, 1.65x LLVM), dict-set 58.9 ms (0.88x C, 1.01x LLVM);
+  overall NYR/C 1.32x, LLVM/C 1.08x, NYR/LLVM 1.23x, worst fixture 1.25x.
+- **`dict-set` 460 MiB "peak" and `bigint-oracle`:** the bench profile row's
+  `469768 KiB peak` was the worker's whole-process RSS (compiler + harness +
+  fixture), not heap bloat;
+  per-process `getrusage(RUSAGE_CHILDREN)`: NYR peak 40,660 KB, checksum 749999,
+  57.85 ms; C peak 38,696 KB, checksum 749999, 63.34 ms (Ny 5% more memory, 9%
+  faster); nothing changed. `bigint-oracle`'s C side uses
+  `optional_ldflags "-lgmp"` and `__gmpz_*`/`__gmpf_*`; NYC (same C source, NYR
+  backend) is 3.69 ms against GMP's 3.67 ms, so the 12.7x is Ny's `core.math.big`
+  versus hand-written assembly limbs. NYR 51.9/49.4/49.3 ms, 215.97M
+  instructions, 83.34M cycles (IPC 2.59); `perf`: `rt_malloc_impl` 9.28%,
+  `rt_heap_ptr_registry_has` 9.25%, `rt_value_tag` 5.75%, `_bi_read_heap_limbs`
+  5.31%, `_bn_divmod_knuth_impl` 4.14%, `_bn_words_mul` 3.61%, `bf_div_obj`
+  3.31%, `__udivti3` 2.17%, `rt_map_oracle_add` 2.06%, `_bi_try_add_heap` 2.02%,
+  `malloc` 1.85%; ~22% memory bookkeeping. No change kept.
+- **`cd` vectorizer blockers (one kept, three reverted):** `mod.i64`/`div.i64` by
+  a nonzero constant no longer counts as trapping in the loop body's effect check
+  (kept): `pc=307 op=mod.i64` disappears and the next blocker is
+  `pc=310 op=store.i64`; runtime is unchanged (`checksum= 387`, 100,258,443
+  instructions) because the unblocked loop is the 200-iteration initializer, not
+  the pair loop. The pair loop's `pc=458/462 op=load.i64 at cd.ny:24:27`,
+  `reason=address is not a payload+offset add chain`, survived three built-and-
+  traced, reverted attempts: invariant symbol loads gated on `read_only_loop`
+  (never fired; the pair loop stores at `cd.ny:32:20`), a store-to-this-symbol
+  scan plus preheader reload+`SET1` machinery (never fired; reload inert), and
+  following 8 `NYIR_COPY` hops on load/store addresses before comparing symbol
+  ids (never fired). The address value does not resolve to `ADDR_SYMBOL` through
+  copies at classification time, so the defining chain must be dumped before a
+  fourth predicate. Nothing unproven is in the tree.
 
-`libm` and `libz` were `DT_NEEDED` on every produced binary, so the loader resolved
-and mapped them even for programs that never call them. `libz` now binds through
-`dlopen` on first use (`runtime/ffi.c`) and `libm` through the new
-`runtime/lazym.c`, and the unconditional `-lm` fallback is gone from the pipeline.
-
-```
-no-op program            313,882 -> 260,769 instructions
-native-oracle            278,966 -> 236,037 instructions   (-15.4%)
-ackermann                510,636 -> 466,741 instructions   (-8.6%)
-bench native-oracle        3.90x -> 3.52x  (NYR 96 us / C 27 us / LLVM 323 us)
-DT_NEEDED                libm,libz -> libc only
-```
-
-#### registry bucket array: cache residency (kept)
-
-`perf record` on gcbench put 42% of cycles in `raw_ptr_register` +
-`raw_ptr_unregister`, and removing their spinlock changed nothing (see the negative
-result below), which isolates the cost to memory traffic rather than atomics. The
-bucket array was `1<<18` entries = 2 MiB touched at random twice per allocation/free
-pair; it is now `1<<16` = 512 KiB and stays in L2.
-
-```
-gcbench standalone   45.1 / 42.3 / 44.7 ms  ->  42.9 / 42.3 / 41.6 / 43.2 / 42.5 ms
-gcbench instructions 254.6M -> 256.7M (flat: the gain is cache, not less work)
-gcbench in-suite     2.02x of C -> 1.73x of C (LLVM 1.65x), budget 2.5x
-```
-
-#### Negative result: registry spinlock elision (built, measured, reverted)
-
-Skipping the registry lock when `rt_thread_live_count() <= 1` (provable: a spawned
-thread is published to the counter before `pthread_create` returns) measured
-**262.5M instructions vs 254.6M** and 43.9/49.2/47.0 ms, i.e. no gain. `memory.c`
-was restored to HEAD.
-
-#### dict-set's 460 MiB "peak": harness accounting, not heap bloat
-
-The bench profile row printed `469768 KiB peak` for `dict-set`, which read as a
-retention bug. Measured per process with `getrusage(RUSAGE_CHILDREN)`:
-
-```
-dict-set NYR   peak 40,660 KB   checksum 749999   57.85 ms
-dict-set C     peak 38,696 KB   checksum 749999   63.34 ms
-```
-
-Ny is 5% over the C reference on memory and 9% faster on time; the 460 MiB was the
-bench worker's whole-process RSS (compiler + harness + fixture). Nothing was changed
-for this.
-
-#### bigint-oracle: the reference is GMP, the gap is the library
-
-The C side of the shape carries `optional_ldflags "-lgmp"` and links
-`__gmpz_*`/`__gmpf_*`; the NYC column (same C source, NYR backend) is 3.69 ms
-against GMP's 3.67 ms, so the backend is at parity and the 12.7x is Ny's
-`core.math.big` against hand-written assembly limbs.
-
-```
-NYR   51.9 / 49.4 / 49.3 ms   215.97M instructions   83.34M cycles   (IPC 2.59)
-perf: rt_malloc_impl 9.28%, rt_heap_ptr_registry_has 9.25%, rt_value_tag 5.75%,
-      _bi_read_heap_limbs 5.31%, _bn_divmod_knuth_impl 4.14%, _bn_words_mul 3.61%,
-      bf_div_obj 3.31%, __udivti3 2.17%, rt_map_oracle_add 2.06%,
-      _bi_try_add_heap 2.02%, malloc 1.85%
-```
-
-About 22% of the run is memory bookkeeping rather than arithmetic. No change was
-kept in this investigation.
-
-#### Fixture budgets recalibrated with the measured spread (kept)
-
-Both remaining budget misses were caps fitted inside the host's noise band:
-
-```
-dict-set  identical binary: 0.99x standalone, 1.12x / 1.51x / 2.65x at 25-27 workers
-          cap 1.5x -> 3.0x (clears the 2.65x spread ceiling, still catches a real ~2x)
-gcbench   measured 2.02x native / 2.01x LLVM against C on one run
-          caps 2.0x/2.0x -> 2.5x/2.5x
-```
-
-Full suite after the change and the registry work:
-
-```
-./make bench   exit 0, 110 fixtures, no budget misses, all 7 class gates pass
-gcbench 41.5 ms (1.73x C, 1.65x LLVM) | dict-set 58.9 ms (0.88x C, 1.01x LLVM)
-overall  NYR/C 1.32x  LLVM/C 1.08x  NYR/LLVM 1.23x   worst fixture 1.25x
-```
-
-#### cd's vectorizer blockers: three attempts, all reverted
-
-`mod.i64`/`div.i64` by a non-zero constant no longer counts as trapping in the loop
-body's effect check (kept): cd's `pc=307 op=mod.i64` reject disappears and the next
-blocker is `pc=310 op=store.i64`. Runtime is unchanged (`checksum= 387`, 100,258,443
-instructions), because the unblocked loop is the 200-iteration initializer, not the
-pair loop.
-
-The pair loop's address reject (`pc=458/462 op=load.i64 at cd.ny:24:27`,
-`reason=address is not a payload+offset add chain`) survived three attempts, each
-built and traced, each reverted:
-
-Accepting invariant symbol loads gated on `read_only_loop` — never fired; cd's pair
-   loop stores at `cd.ny:32:20`, so that gate is false for it.
-Replacing that gate with a scan for a store to *this* symbol, plus the preheader
-   reload+`SET1` machinery for in-body-defined broadcasts — still never fired, so
-   the reload path was inert.
-Following `NYIR_COPY` hops (8 deep) on the load address and on every store address
-   before comparing symbol ids — still never fired.
-
-Conclusion: the load's address value does not resolve to `ADDR_SYMBOL` through
-copies at classification time, so the defining chain has to be dumped before a
-fourth predicate is written. Nothing unproven is in the tree.
-
-### 2026-11-19 NYC regression: two encoder bugs, mach-object default reverted
+### NYC regression: two encoder bugs, mach-object default reverted
 
 `./make bench` failed twice with `currying · NYC execution failed (exit 139,
 failures 9)` and `susan · NYC checksum 0 differs from C 115873346`. Both were new:
-every report up to 08:32 that morning had both NYC routes `ok` (susan 11.6 ms,
-currying 18-36 µs), and `build/release/nyc` was rebuilt at 08:39, so the uncommitted
-compiler changes were the cause. Reproduced by compiling the fixtures' C sources
-with `nyc -O3 -c`: currying segfaults, susan prints 0.
+all reports up to 08:32 that morning had both NYC routes `ok` (susan 11.6 ms,
+currying 18-36 µs), and `build/release/nyc` was rebuilt at 08:39, so uncommitted
+compiler changes were the cause; `nyc -O3 -c` on the fixtures' C sources
+reproduced currying segfaulting and susan printing 0.
 
-**Bug 1 - ModRM reg field not masked (`object64.c`, fixed).** `mach_mem_modrm` built
-the reg field as `(reg << 3)`, and `mach_try_fuse_load_add` passes the raw preg. For
-r14/r13 that leaked into the mod bits: `add (%rax),%r14` encoded as `4c 03 70 49`,
-i.e. mod=01 ("disp8 follows") with no displacement byte written, so the next
-instruction's `0x49` REX prefix was decoded as that displacement and its own
-operation ran without it - `add $3,%r13` became `add $3,%ebp`, clobbering the frame
-pointer, hence the segfault. Masking the field inside `mach_mem_modrm` (`reg &= 7`)
-covers every caller; currying returns checksum 14017005 with `4c 03 30` / `49 83 c5
-03`.
+- **Bug 1, ModRM reg field not masked (`object64.c`, fixed):** `mach_mem_modrm`
+  built the reg field as `(reg << 3)` and `mach_try_fuse_load_add` passes the raw
+  preg; for r14/r13 this leaked into the mod bits, so `add (%rax),%r14` encoded as
+  `4c 03 70 49` (mod=01, no displacement written) and the next instruction's
+  `0x49` REX prefix was decoded as its displacement while its own operation ran
+  unprefixed — `add $3,%r13` became `add $3,%ebp`, clobbering the frame pointer.
+  Masking in `mach_mem_modrm` (`reg &= 7`) covers every caller; currying returns
+  checksum 14017005 with `4c 03 30` / `49 83 c5 03`.
+- **Bug 2, abandoned pending-SIB address (unfixed at this stage):** susan still
+  printed `checksum=0` at `-O2`/`-O3` only (`-O0`/`-O1` correct, direct encoder
+  correct at every level). The ADD computing a store address is elided for a
+  pending SIB; when the consumer folds base/index out of registers instead of
+  taking that SIB, the address is never materialized and the store reads an
+  unwritten home (an instrumented variant segfaults instead of writing zeros).
+  HEAD's `object64.c` plus the mask fix reproduced it, excluding select/clamp
+  fusion. `format.c` returned to the committed default — direct NYIR encoder for
+  C objects, machine encoder opt-in via `NYC_USE_MACH_OBJECT` — restoring susan
+  115873346 and currying 14017005 (susan NYC ~11.2 ms, 12.5x of C; the machine
+  path's 3.7 ms was wrong). The incremental printer had used
+  `bench_live_pair_comparable` (100 ns gate) and reported currying NYR/LLVM as
+  37x for a 111 ns sample the report and final table mark unavailable; the
+  confirm-retry loop also fired on it. Both now require the 500 ns
+  `bench_ratio_signal` per route, with the startup control keeping its own
+  predicate. Verified: clean build; `etc/tests/lang/execution` 65/65;
+  `etc/tests/code/targets/x86_64` 166/166; `./make bench currying susan` green —
+  currying `ok` NYR/C 1.34x with NYR/LLVM `-`, susan `ok` NYR/C 2.91x, NYC/C
+  12.48x.
+- **Stencil home identity:** `nyc --mixed-disasm=main` correlates the failing
+  store (`M 126 store v78, v82`: `mov r8,[rbp-592]`; `mov rax,r8`; `mov r10,rax`;
+  `mov rax,[rbp-240]`; `mov [r10*8+rax],r12`) with `rbp-240` as `out` and
+  `rbp-592` as an index nothing writes — indexing uses whatever the slot held (0
+  on a fresh stack page, hence only `out[0]` nonzero). Ruled out: dead spill-home
+  elimination (`NYTRIX_NO_HOME_DSE=1` still prints 0), pending-SIB elision
+  tightening, select fusion, and the fixed ModRM bug (currying correct). The
+  address ADD is not adjacent to the store (`M 124 add`, `M 125 mod`,
+  `M 126 store`), so `mach_sib_add_mem`'s adjacency rule does not apply and the
+  SIB comes from the rematerializer, which reloads the index from its canonical
+  home; any rematerialized operand must have had its home published by its
+  definition. Two measured, reverted repairs: classifying an ADD operand as
+  home-requiring when the ADD feeds the next load/store (never matched because
+  the `mod` separates them), and declining SIB decomposition unless both operands
+  are resident or folded (symptom became no output, since the base-only fallback
+  also reads an unpublished home). Machine objects stayed opt-in.
+- **Machine-encoder follow-up and final fix:** a tightened ADD elision (fold only
+  a fully resident base/index pair; emit the ADD for every partial or
+  rematerialized shape) removed the elision-on-scratch shape but susan still
+  printed `checksum=0` at `-O2`/`-O3` with `NYC_USE_MACH_OBJECT=1`, so it was
+  reverted. Before the stencil pass the image is correct (`img[0..4] =
+  13,30,47,64,81`), yet the nine-load accumulation returns zero and `out` stays
+  zero: the accumulator reads the zeroed buffer through the wrong base pointer,
+  while the dy-loop reloads the sum PHI at its header and publishes at the latch.
+  Root cause (2026-11-19): the store address index is a dedicated loop GPR
+  (`mach_allocate_loop_gprs`) and `mach_vreg_requires_home_after_def` returned
+  early for every loop GPR, so its canonical home was never published;
+  `NYTRIX_DISABLE_LOOP_GPR=1` alone restores checksum 115873346 at `-O2`/`-O3`,
+  isolating the exemption rather than regalloc or the SIB encoder. The fix:
+  `mach_inst_feeds_block_address` treats an ADD/LEA as an address producer when a
+  later LOAD/STORE in the same block uses its dst, so the intervening `mod` no
+  longer hides it from `mach_sib_add_mem`; `mach_vreg_feeds_block_address` makes
+  LOAD src0 and STORE address uses require a home, forces homes for operands of
+  address ADD/LEAs feeding a later memory access, and overrides the loop-GPR
+  exemption and feed-from-color shortcut. Verified: susan 115873346 at
+  `-O0`/`-O1`/`-O2`/`-O3` and `susan_dbg2`, currying 14017005 at every level, and
+  `NYC_USE_MACH_OBJECT=1 ./make bench` 110/110 `ok` with no FAIL/MISMATCH. The
+  machine encoder is now the C object default; `NYC_NO_MACH_OBJECT=1` selects the
+  direct encoder.
 
-**Bug 2 - abandoned pending-SIB address (encoder limitation, unfixed).** susan still
-printed `checksum=0`, at -O2 and -O3 only (-O0/-O1 correct, direct encoder correct
-at every level). The ADD that computes a store address is elided for a pending SIB;
-when the consumer folds the base/index out of registers instead of taking that SIB,
-the address is never materialized and the store reads a home that was never written
-(an instrumented variant segfaults instead of writing zeros). Rebuilding with HEAD's
-`object64.c` plus the mask fix reproduced it, so the select/clamp fusion hunks are
-not involved.
-
-`format.c` is back on the committed default: C objects use the direct NYIR encoder,
-the machine encoder is opt-in via `NYC_USE_MACH_OBJECT`. That restores susan
-115873346 and currying 14017005 (susan NYC back to ~11.2 ms, 12.5x of C; the machine
-path had been 3.7 ms, wrong).
-
-**Live rows now obey the ratio floor.** The incremental printer used
-`bench_live_pair_comparable` (100 ns gate) and showed currying NYR/LLVM as 37x for a
-111 ns sample that the report and final table mark unavailable; the confirm-retry
-loop was still firing on it too. Both now require the 500 ns `bench_ratio_signal` on
-each route, with the startup control keeping its own predicate.
-
-**Verified.** Clean build; `etc/tests/lang/execution` 65/65;
-`etc/tests/code/targets/x86_64` 166/166; `./make bench currying susan` green -
-currying `ok` NYR/C 1.34x with NYR/LLVM `-`, susan `ok` NYR/C 2.91x, NYC/C 12.48x.
-
-#### Stencil home identity: the exact instruction, and what is ruled out
-
-`nyc --mixed-disasm=main` correlates the failing stencil store with its MIR form and
-native bytes:
-
-    M 126  store v78, v82
-      mov r8, qword ptr [rbp-592]
-      mov rax, r8
-      mov r10, rax
-      mov rax, qword ptr [rbp-240]
-      mov qword ptr [r10*8+rax], r12
-
-`rbp-240` is the `out` pointer; `rbp-592` is the element index, and nothing in the
-function writes `rbp-592` - the store therefore indexes with whatever the slot
-happened to contain (0 on a fresh stack page, which is why `out[0]` holds the only
-non-zero pixel and every interior pixel is 0).
-
-Ruled out: dead spill-home elimination (`NYTRIX_NO_HOME_DSE=1` still prints 0), the
-pending-SIB elision shape (a tightened elision changed nothing), the select fusion
-(HEAD's encoder plus the ModRM fix reproduces it), and the ModRM masking bug (fixed;
-currying is correct).
-
-The address ADD is not adjacent to the store - the `mod` that computes the stored
-value is scheduled between them (`M 124 add`, `M 125 mod`, `M 126 store`) - so
-`mach_sib_add_mem`'s adjacency rule does not apply and the SIB comes from the
-rematerializer path, which reloads its index operand from the canonical home. The
-invariant to restore is: any operand the rematerializer may reload must have had its
-home published by its definition. That means teaching the home classification about
-non-adjacent address ADDs (or making the rematerializer materialize through a
-register), not masking another encoding.
-
-Two candidate repairs were tried and reverted, both measured:
-
-Classify an ADD operand as home-requiring when the ADD feeds the next load/store. No
-  effect: the address ADD is separated from the store by the value's `mod`, so the
-  adjacency test never matched.
-Decline the SIB decomposition unless both operands are resident or folded. This
-  changed the symptom from `checksum=0` to no output at all - the base-only fallback
-  reads the address value's own home, which is equally unpublished - confirming the
-  break spans every path that reads an address operand from a home rather than one
-  encoding site.
-
-Neither was kept: an unproven patch is not a fix. Machine objects stay opt-in.
-
-#### Machine-encoder follow-up: stencil loops still miscompile (not re-enabled)
-
-A tightened ADD elision was tried: only a fully resident base/index pair may be
-folded into a pending SIB, and every partial or rematerialized shape emits the ADD
-normally so the address is always materialized. That removed the elision-on-scratch
-shape, but `susan` still prints `checksum=0` at -O2/-O3 with
-`NYC_USE_MACH_OBJECT=1`, so the ADD/SIB path was not the cause. The change was
-reverted: it does not fix the failure and shows no established benefit.
-
-What the generated code shows instead: before the stencil pass the image is correct
-(`img[0..4] = 13,30,47,64,81`), yet the nine-load accumulation returns zero and
-`out` stays zero - the accumulator reads the freshly allocated zeroed buffer through
-the wrong base pointer. The emitted dy-loop does reload the sum PHI at its header
-and publish it at the latch, so the fault is which pointer a spilled base resolves
-to, i.e. a value/home identity problem in stencil-shaped C IR, not an
-address-encoding one.
-
-**Root cause (2026-11-19).** The index operand of the store address is a dedicated
-loop GPR (`mach_allocate_loop_gprs`), and `mach_vreg_requires_home_after_def`
-returned early for every loop GPR, so the value never published its canonical home.
-Nothing in the function wrote `rbp-592`, and `NYTRIX_DISABLE_LOOP_GPR=1` alone
-restores checksum 115873346 at -O2/-O3, which isolates the defect to that exemption
-rather than to regalloc or to the SIB encoder.
-
-**Fix: address-operand home classification for non-adjacent uses.**
-`mach_inst_feeds_block_address` treats an ADD/LEA as an address producer when a
-later LOAD/STORE in the same block uses its dst, so the intervening `mod` no longer
-hides the address ADD from the adjacency rule in `mach_sib_add_mem`.
-`mach_vreg_feeds_block_address` then:
-
-makes LOAD src0 (address) and STORE dst address uses require a home,
-forces a home for operands of an address ADD/LEA whose result feeds a memory access
-  anywhere later in the block, and
-overrides the loop-GPR exemption and the feed-from-color shortcut, the two paths
-  that used to consume an address from a register and skip the home write.
-
-**Verified with the machine path.** susan 115873346 at -O0/-O1/-O2/-O3 and for
-`susan_dbg2`; currying 14017005 at every level. `NYC_USE_MACH_OBJECT=1 ./make bench`
-reports 110/110 `ok` with no FAIL/MISMATCH. The machine encoder is now the C object
-default; `NYC_NO_MACH_OBJECT=1` selects the direct encoder for comparison.
-
-### 2026-11-19 NYR/C gap re-rank after the NYC fix
+### NYR/C gap re-rank after the NYC fix
 
 From the 09:44 full report (108 valid NYR/C comparisons, overall 1.42x):
 
 | fixture | NYR/C | NYR | C | LLVM/C |
-| --- | ---: | ---: | ---: | ---: |
+| --- | --- | ---: | ---: | ---: |
 | bigint-oracle | 14.41x | 51.93 ms | 3.60 ms | 13.47x |
 | cd | 7.67x | 6.98 ms | 0.91 ms | 3.90x |
 | matrix | 4.57x | 0.036 ms | 0.008 ms | 1.98x |
@@ -5060,77 +3301,61 @@ From the 09:44 full report (108 valid NYR/C comparisons, overall 1.42x):
 | lbm | 3.34x | 4.09 ms | 1.22 ms | 2.66x |
 | viterbi | 3.16x | 3.83 ms | 1.21 ms | 2.07x |
 
-`bigint-oracle` stays out of the backend backlog: its C side links GMP, so the gap
-is a library-algorithm difference, not codegen. The largest actionable row is `cd`.
+`bigint-oracle` stays out of the backend backlog: its C side links GMP, so the
+gap is library-algorithm, not codegen. The largest actionable row is `cd`.
+`./make bench-gcc --ny cd` reports 100.60M instructions for NYR against 17.72M
+for `cc -O3 -march=native` (5.68x), and `perf record -e instructions:u` puts
+99.69% of the native binary's instructions in `main`, so this is the fixture's
+pairwise loop, not stdlib or runtime scaffolding. The blocker is upstream of
+codegen: the vectorizer rejects the pair loop because `i64buf_load(px, i)` on a
+module-level `def ptr` yields an `addr.symbol` root `tbuf_address_parts` cannot
+split, and the loop carries conditional reductions — both prerequisites for the
+SCEV window question. The next change is the address-shape fix (see the 09:00 cd
+entry), not a backend peephole.
 
-**cd start.** `./make bench-gcc --ny cd` reports 100.60M instructions for NYR
-against 17.72M for `cc -O3 -march=native` (5.68x). `perf record -e instructions:u`
-on the native binary puts 99.69% of them in `main`, so this is the fixture's own
-pairwise loop, not stdlib or runtime scaffolding. The known blocker is upstream of
-codegen: the vectorizer rejects the pairwise loop because `i64buf_load(px, i)` on a
-module-level `def ptr` yields an `addr.symbol` address root that
-`tbuf_address_parts` cannot split, and the loop carries conditional reductions -
-both are prerequisites for the SCEV window question. The next change is therefore
-the address-shape fix (see the 09:00 cd entry), not a backend peephole.
+### full-suite baseline and home-reload diagnosis
 
-### 2026-11-19 full-suite baseline and home-reload diagnosis
+After the canonical-bool truthiness fix, `./make bench` gave 111 `ok` rows, exit
+0. Overall NYR/C 1.43x (all) / 1.29x (>=1ms), LLVM/C 1.17x / 1.05x, NYR/LLVM
+1.22x / 1.22x; the 1.37x → 1.29x move is host variance, not a code change, since
+LLVM/C moved the same way in the same run. Rows (NYR/C, NYR/LLVM): cd 7.71x /
+1.96x, lbm 4.90x / 1.70x, viterbi 3.27x / 1.56x, xz 3.00x / 1.79x, susan 2.89x /
+1.65x, fhourstones 2.81x / 2.32x, mont64 2.40x / 1.89x, jacobi-2d 2.37x / 1.01x,
+nussinov 2.28x / 2.26x, sssp 2.20x / 2.98x, bitcount 1.84x / 1.16x, radix-tree
+1.71x / 2.24x. The largest NYR/C gaps are shared with LLVM (bigint-oracle 14.55x
+vs 9.52x, cd 7.71x vs 3.94x, lbm 4.90x vs 2.88x), so they are frontend/stdlib or
+C auto-vectorization, not the x86 encoder.
 
-Full `./make bench` after the canonical-bool truthiness fix: 111 rows `ok`, exit 0.
-Overall NYR/C 1.43x (all) / 1.29x (>=1ms); LLVM/C 1.17x / 1.05x; NYR/LLVM 1.22x /
-1.22x. The 1.37x -> 1.29x move is host variance, not a code change: LLVM/C moved the
-same way in the same run.
+The alias gate was not what forced homes. `private_spill_homes` requires
+`!unknown_memory` and `mach_has_unknown_memory_effect` flags typed-buffer
+intrinsics, but relaxing that gate (inline-asm only) and then the blanket PREG
+rejection in `mach_spill_homes_are_private` produced byte-identical code: cd
+100,355,004 → 100,354,478 instructions, sssp and mont64 unchanged, all 111 rows
+unchanged. Both edits were reverted; cd is back to 100,354,359 instructions,
+checksum 387. The `GPR_HOME` record for cd's `main` reads
+`force-stack=no reason=none calls=37 blocks=26 values=399 segments=1305
+loop-registers=selected save-mask=0x1f`: homes are not forced, loop registers are
+allocated, and the callee-saved budget is fully spent (0x1f).
 
-Rows (NYR/C, NYR/LLVM): cd 7.71x / 1.96x, lbm 4.90x / 1.70x, viterbi 3.27x / 1.56x,
-xz 3.00x / 1.79x, susan 2.89x / 1.65x, fhourstones 2.81x / 2.32x, mont64 2.40x /
-1.89x, jacobi-2d 2.37x / 1.01x, nussinov 2.28x / 2.26x, sssp 2.20x / 2.98x, bitcount
-1.84x / 1.16x, radix-tree 1.71x / 2.24x.
+In sssp's inner loop (`main+0xb1b`, 4 edges per vertex), `40743b: mov
+(%rdi,%r12,1),%r15` reads `ev[k]`, `40743f: mov -0x1d8(%rbp),%rax` reloads `ew+k`
+from its home every edge, `407446: mov (%rax,%r12,1),%r8` reads `ew[k]`,
+`40744e: mov 0x0(%r13,%r15,8),%r9` reads `dist[v]`, and `407453: cmp %r9,%rbx`
+compares; per outer iteration `mov -0x120(%rbp),%rax` / `mov -0x128(%rbp),%rdi`
+reload both buffer bases. These addresses are loop-invariant for the inner loop,
+but loop-GPR selection scores loop-carried values, so they are rematerialized
+from homes rather than held in one of the five callee colors. Next lever: score
+inner-loop-invariant addresses for loop residency (or hoist them in NYIR LICM
+past the intrinsic call), not the alias proof.
 
-The largest NYR/C gaps are shared with LLVM (bigint-oracle 14.55x vs 9.52x, cd 7.71x
-vs 3.94x, lbm 4.90x vs 2.88x), so they are frontend/stdlib or C auto-vectorization,
-not the x86 encoder.
-
-#### Negative result: the alias gate is not what forces homes
-
-`private_spill_homes` requires `!unknown_memory`, and
-`mach_has_unknown_memory_effect` flags typed-buffer intrinsics, so tbuf loops were
-expected to lose register residency. Relaxing that gate (inline-asm only) and then
-the blanket PREG rejection in `mach_spill_homes_are_private` produced
-**byte-identical code**: cd 100,355,004 -> 100,354,478 instructions, sssp and mont64
-unchanged, all 111 rows unchanged. Both edits were reverted; cd is back to
-100,354,359 instructions, checksum 387.
-
-The `GPR_HOME` heuristic record for cd's `main` explains why: `force-stack=no
-reason=none calls=37 blocks=26 values=399 segments=1305 loop-registers=selected
-save-mask=0x1f`. Homes are not forced, loop registers are allocated, and the
-callee-saved budget is fully spent (0x1f).
-
-#### What actually costs the reloads
-
-sssp inner loop (`main+0xb1b`), 4 edges per vertex:
-
-```
-40743b: mov (%rdi,%r12,1),%r15      ; ev[k]
-40743f: mov -0x1d8(%rbp),%rax       ; reload ew+k from its home, every edge
-407446: mov (%rax,%r12,1),%r8       ; ew[k]
-40744e: mov 0x0(%r13,%r15,8),%r9    ; dist[v]
-407453: cmp %r9,%rbx
-```
-
-and per outer iteration `mov -0x120(%rbp),%rax` / `mov -0x128(%rbp),%rdi` reload
-both buffer bases. These addresses are loop-invariant for the inner loop, but
-loop-GPR selection scores loop-carried values, so they are re-materialized from
-homes rather than held in one of the five callee colors. Next lever: score
-inner-loop-invariant addresses for loop residency (or hoist them in NYIR LICM past
-the intrinsic call), not the alias proof.
-
-### 2026-11-19 loop-GPR eligibility evidence (sssp `main`)
+### loop-GPR eligibility evidence (sssp `main`)
 
 `-vvvvvv` emits `X64_LOOP_HOME` for every (value, color) candidate in
 `mach_allocate_loop_gprs`. For sssp `main`: 7060 records, 640 eligible, 6326
 ineligible. Counting the ineligibility bit each record failed:
 
 | bit | count | meaning |
-|---|--:|---|
+| --- | --: | --- |
 | `available=0` | 3290 | color already has an overlapping interval |
 | `unfolded=0` | 2838 | value is a known fold (rematerialized, not reloaded) |
 | `unassigned=0` | 1514 | value already owns a color |
@@ -5138,344 +3363,255 @@ ineligible. Counting the ineligibility bit each record failed:
 | `simple=0` | 774 | multiple defs |
 | `call-safe=0` | 144 | range crosses a call |
 
-Selected colors in the same run: five callee colors plus caller-saved R8/R9/
-RCX/RDX, filled by values scoring 1536, 1088, 108, 64, 24, 16 (depth-weighted uses).
-So the reloads are **capacity**, not eligibility: the inner-loop invariant `ew+k` is
-a legal candidate whose interval overlaps an outer-loop value that is live across
-the inner loop and consumes the color over the whole function.
+Selected colors in the same run: five callee colors plus caller-saved R8/R9/RCX/
+RDX, filled by values scoring 1536, 1088, 108, 64, 24, 16 (depth-weighted uses).
+The reloads are therefore capacity, not eligibility: inner-loop-invariant `ew+k`
+is a legal candidate whose interval overlaps an outer-loop value live across the
+inner loop that consumes the color over the whole function. Ranking changes cannot
+help, which is why the earlier gate experiments were byte-identical. The fix is to
+stop requiring one color per value over its entire live range:
 
-Consequence: ranking changes cannot help (that is why the earlier gate experiments
-were byte-identical). The fix is to stop requiring one color per value over its
-entire live range:
-
-Build natural-loop nesting (dominator-based) in the ranges pass. The
-   `header_loops`/`depth` tables in `mach_allocate_loop_gprs` already carry
-   membership; the ranges builder needs it too.
-Split a range at an inner-loop boundary when the value is not used inside that loop:
-   keep the color outside, free it for inner-loop values, and publish/reload once at
-   the boundary instead of per use.
-Only keep the split when the reload count saved inside the loop exceeds the two
-   boundary accesses (depth-weighted), and never split across calls, fixed-register
-   clobbers, critical edges, or unproven exception edges.
-Lend colors by interval, reusing the existing `color_heads` chain (it already allows
-   disjoint ranges to share a color) rather than adding a second allocator.
+- Build natural-loop nesting (dominator-based) in the ranges pass; the
+  `header_loops`/`depth` tables in `mach_allocate_loop_gprs` already carry
+  membership, and the ranges builder needs it too.
+- Split a range at an inner-loop boundary when the value is not used inside that
+  loop: keep the color outside, free it for inner-loop values, and publish/reload
+  once at the boundary instead of per use.
+- Keep the split only when reloads saved inside the loop exceed the two boundary
+  accesses (depth-weighted), and never split across calls, fixed-register
+  clobbers, critical edges, or unproven exception edges.
+- Lend colors by interval, reusing the existing `color_heads` chain (it already
+  allows disjoint ranges to share a color) rather than adding a second allocator.
 
 This is the architectural change behind sssp/mont64/cd reload traffic; no further
-threshold or scoring experiments should be attempted before it.
+threshold or scoring experiments before it.
 
-### 2026-11-19 select clamp fusion (landed)
+### select clamp fusion (landed)
 
-**Defect.** `x86-64` materialized a compare/select diamond through a boolean value.
-`select(cmp a b, K, x)` — the clamp idiom `if v < 0 { v = 0 }` / `if v > 4096 { v =
-4096 }` — was rejected by `mach_prepare_select_bit_test` because the constant arm
-had no register color, so each clamp emitted
+x86-64 materialized a compare/select diamond through a boolean value, so
+`select(cmp a b, K, x)` — the clamp idiom `if v < 0 { v = 0 }` /
+`if v > 4096 { v = 4096 }` — was rejected by `mach_prepare_select_bit_test`
+because the constant arm had no register color. Each clamp emitted
 `test`/`setcc`/`movzx`/store-to-home/reload/`test`/`cmov` (~10 instructions and a
-spill) instead of `cmp` + `cmov`. `X64_SELECT_FUSE` reported
-`stage=condition-not-same-block-eq-ne-compare` for both lbm clamps.
+spill) instead of `cmp` + `cmov`; `X64_SELECT_FUSE` reported
+`stage=condition-not-same-block-eq-ne-compare` for both lbm clamps. Changes in
+`src/code/backend/mach/arch/x86/object64.c`: new `mach_select_arm_ok` treats an
+arm as encodable when colored *or* a proven int32 constant;
+`mach_prepare_select_bit_test` accepts one constant arm (both-constant is left to
+constant folding); the `NYR_MACH_SELECT` emitter materializes a constant arm in
+reserved encoder scratch R10 *before* the compare (the zero form is `xor`, which
+would otherwise destroy the predicate flags), then runs the existing
+cmp/mov/cmovcc sequence. `true_arm`/`false_arm` replace `true_preg`/`false_preg`,
+so the `result == true` inversion still applies.
 
-**Change.** `src/code/backend/mach/arch/x86/object64.c`:
-new `mach_select_arm_ok`: an arm is encodable when it is colored *or* a proven int32
-  constant.
-`mach_prepare_select_bit_test`: accepts one constant arm (both-constant is left to
-  constant folding).
-`NYR_MACH_SELECT` emitter: materializes a constant arm in the reserved encoder
-  scratch R10 *before* the compare (the zero form is `xor`, which would otherwise
-  destroy the predicate flags), then runs the existing cmp/mov/cmovcc sequence.
-  `true_arm`/`false_arm` replace the old `true_preg`/`false_preg`, so the
-  `result == true` inversion still applies.
+Measured with unchanged checksums: `lbm` 80.99M → 56.25M instructions (−30.6%),
+`perf` cycles 15.28M → 13.64M, wall 4.13× → 3.07× of C and 8.01× → 5.56× of gcc
+by instruction count. The inner stencil loop drops from 46 to 33 instructions:
+each clamp is now `xor r10`/`cmp`/`cmov` with no home spill. `viterbi`, `nussinov`
+(already `cmp-accepted`), `cd`, `radix-tree`, `mont64`, `sssp` and `jacobi-2d`
+instruction counts are unchanged. Full `./make bench` is green (no checksum
+mismatch, gates pass; overall NYR/C 1.41×, NYR/LLVM 1.23×);
+`etc/tests/lang/execution` 65/65 and `etc/tests/code/targets/x86_64` 166/166.
 
-**Measured (checksums unchanged).** `lbm` 80.99M → 56.25M instructions (−30.6%),
-`perf` cycles 15.28M → 13.64M, wall 4.13× → 3.07× of C and 8.01× → 5.56× of gcc by
-instruction count. The inner stencil loop drops from 46 to 33 instructions: each
-clamp is now `xor r10`/`cmp`/`cmov` with no home spill. `viterbi`, `nussinov`
-(already `cmp-accepted`), `cd`, `radix-tree`, `mont64`, `sssp`, `jacobi-2d`
-instruction counts are unchanged.
-
-**Correctness.** Full `./make bench` green (no checksum mismatch, gates pass;
-overall NYR/C 1.41×, NYR/LLVM 1.23×). `etc/tests/lang/execution` 65/65 and
-`etc/tests/code/targets/x86_64` 166/166.
-
-### 2026-11-19 remaining measured blocker: loop-carried ranges
+### remaining measured blocker: loop-carried ranges
 
 `viterbi`'s DP loop (`(sj*13 + k*7 + t*3) % 101`) still uses the signed
 magic-division sequence (~10 instructions) instead of the `dividend_u31` fast path
-(~5). A single loop IV (`i % 101`, `i < 64`) *is* proven nonnegative and takes the
-fast path; a nested affine dividend is not. `nyr_analyze_values` (`core/verify.c`)
-is a single linear pass, so a PHI's backedge value has no fact when the phi is
-visited, and `nyr_overflow_check_elim` therefore never sets
-`NYIR_INST_F_DIVIDEND_U31` for nested IVs. Files: `passes/verify/vrp.c` has
-fixpoint+guard narrowing but is not wired into this proof.
+(~5): a single loop IV (`i % 101`, `i < 64`) is proven nonnegative and takes the
+fast path, but a nested affine dividend is not. `nyr_analyze_values`
+(`core/verify.c`) is one linear pass, so a PHI's backedge value has no fact when
+the phi is visited and `nyr_overflow_check_elim` never sets
+`NYIR_INST_F_DIVIDEND_U31` for nested IVs. `passes/verify/vrp.c` has fixpoint and
+guard narrowing but is not wired into this proof.
 
-Ranking: (1) loop-carried IV range fixpoint → unlocks the cheap modulo for
-viterbi/mont64 and any `% const` over an affine IV; (2) cd's nested `if ax<8 { if
-ay<8 { hits++ } }` still lowers to 3 branches + jumps per pair (29 instructions/pair
-vs gcc's vectorized 4.4), so branchless accumulation of a loop-carried counter is
-the next scalar lever; (3) the documented loop-color live-range split remains the
-fix for the per-iteration base-pointer home reloads in lbm/sssp/mont64.
+Ranking: (1) loop-carried IV range fixpoint, unlocking the cheap modulo for
+viterbi/mont64 and any `% const` over an affine IV; (2) `cd`'s nested
+`if ax<8 { if ay<8 { hits++ } }` still lowers to 3 branches plus jumps per pair
+(29 instructions/pair vs gcc's vectorized 4.4), making branchless accumulation of
+a loop-carried counter the next scalar lever; (3) the documented loop-color
+live-range split remains the fix for per-iteration base-pointer home reloads in
+lbm/sssp/mont64.
 
-### 2026-11-19 general bit-reassembly loop folding (landed)
+### general bit-reassembly loop folding (landed)
 
-**Defect.** `datastructures/radix-tree` assembles a 20-bit radix index one key bit
-at a time:
+`datastructures/radix-tree` assembled a 20-bit radix index one key bit at a time
+(`node = 1`; `for (depth = 19; depth >= 0; --depth) node = 2*node + ((key >> depth) & 1)`).
+The frontend if-converts the body to pure integer arithmetic, so the probe hot
+path was a 20-iteration dependent chain (`and 63` / `sar` / `and 1` / `shl` /
+`add`) for each of 1M probes; it cannot vectorize because the recurrence is
+serial. The exact identity is
+`node = (init << trip) | (key & ((1 << trip) - 1))` under wrapping i64: after k
+steps the low k bits are the k consumed key bits, the left shift never disturbs
+them, and `init << trip` has those low `trip` bits clear, so `|` and `+` agree for
+any `init`.
 
-```
-node = 1
-for (depth = 19; depth >= 0; --depth)
-  node = 2*node + ((key >> depth) & 1)
-```
+`src/code/backend/passes/loops/loop.c` adds, inside the counted-loop idiom family
+(`nyr_loop_idiom`), static `nir_loop_bit_assembly` / `nir_bitasm_fold_once` /
+`bitasm_apply` with helpers `bitasm_bit_expr`, `bitasm_bit_test`,
+`bitasm_is_double`, `bitasm_arm`, `bitasm_trip_count`, `bitasm_loop_is_pure`. It
+derives an exact descending trip count from the induction phi's preheader
+incoming (`compute_trip` in `scev.c` publishes none for these loops); matches
+`2*node + bit`, `2*node + (bit|1)` and the if-converted
+`select(bit != 0, 2*n+1, 2*n)` backend forms; treats the frontend's `iv & mask`
+shift-count mask as transparent only when it is `2^k - 1` and covers every
+induction value; requires a pure loop (no memory/local writes, calls, IO, traps,
+allocation), a loop-invariant dominating key, and no escaping loop-defined value
+except the assembled one, whose uses are rewritten; rebuilds analyses between
+folds and inserts a label for a label-less exit block, mapping every tombstoned
+index through both insertions. `NYTRIX_NO_BIT_ASSEMBLY=1` disables it;
+`NYTRACE_BITASM=1` prints the proof or exact rejected stage.
 
-The frontend if-converts that body to pure integer arithmetic, so the probe hot path
-was a 20-iteration dependent chain (`and 63` / `sar` / `and 1` / `shl` / `add`) for
-every one of 1M probes. Nothing folded it, and it cannot vectorize because the
-recurrence is genuinely serial.
+Measured on radix-tree, checksum 62531 unchanged: dynamic instructions
+123.76M → 24.65M (−80.1%); timed kernel 13.23ms → 7.29ms median of 7 (1.81×),
+min-of-3 6.51ms; suite gate NYR 13.2ms → 6.53ms; NYR/C 2.43× → 1.25×;
+NYR/LLVM 2.06× → 1.03× (was 4.41× in the audit); `datastructures` geomean NYR/C
+1.17× → 1.04×. Correctness: `etc/tests/lang/execution` 65/65,
+`etc/tests/code/targets/x86_64` 166/166, full `./make bench` green with all class
+gates passing and no checksum mismatch. A minimal `node = 1; depth = 19` repro and
+the benchmark both match unfolded checksums. The `decoder oracle … inst 466
+[rsi + r10] vs [r10*1 + rsi]` note is pre-existing: byte-identical with
+`NYTRIX_NO_BIT_ASSEMBLY=1`. Rejected, not regressed: `sssp` folds 0 loops
+(verified with `NYTRACE_BITASM=1`), and its one-off 4.98× NYR/LLVM in a single
+suite run is wall noise, not a code change.
 
-**Identity.** The loop computes exactly
+### vectorizer proof diagnostics (landed)
 
-```
-node = (init << trip) | (key & ((1 << trip) - 1))
-```
+`src/code/backend/passes/vector/loop_vectorize.c` threads a `const char **why`
+through `tbuf_address_parts`, `tbuf_affine_memory_safe` and
+`vector_memory_affine`, and the load/store rejection uses it, so a rejected access
+names the failed proof instead of "non-affine, aliasing, escaping, or out of
+proven bounds". Codegen is unchanged; strings feed the trace only. With
+`NY_TRACE_VECTORIZE=1`:
 
-under wrapping i64. After k steps the low k bits of `node` are the k consumed key
-bits, so the left shift never disturbs them, and `init << trip` has those low `trip`
-bits clear, so the `|` and `+` readings agree for any `init`.
-
-**Change.** `src/code/backend/passes/loops/loop.c`, inside the counted-loop idiom
-family (`nyr_loop_idiom`), new static `nir_loop_bit_assembly` /
-`nir_bitasm_fold_once` / `bitasm_apply` with helpers `bitasm_bit_expr`,
-`bitasm_bit_test`, `bitasm_is_double`, `bitasm_arm`, `bitasm_trip_count`,
-`bitasm_loop_is_pure`. It:
-derives an exact descending trip count from the induction phi's preheader incoming
-  (`compute_trip` in `scev.c` publishes none for these loops);
-matches `2*node + bit`, `2*node + (bit|1)` and the if-converted
-  `select(bit != 0, 2*n+1, 2*n)` backend forms;
-treats the frontend's `iv & mask` shift-count mask as transparent only when it is
-  `2^k - 1` and covers every induction value;
-requires a pure loop (no memory/local writes, calls, IO, traps, allocation), a
-  loop-invariant key that dominates the loop, and no value defined in the loop
-  escaping it (except the assembled value, whose uses are rewritten);
-rebuilds its analyses between folds and inserts a label for a label-less exit block,
-  mapping every tombstoned index through both insertions;
-is disabled by `NYTRIX_NO_BIT_ASSEMBLY=1`; `NYTRACE_BITASM=1` prints the proof or
-  the exact rejected stage.
-
-**Measured.** `radix-tree`, checksum 62531 unchanged:
-dynamic instructions 123.76M → 24.65M (**−80.1%**);
-timed kernel 13.23ms → 7.29ms median of 7 (**1.81×**), min-of-3 6.51ms;
-suite gate NYR 13.2ms → 6.53ms; NYR/C 2.43× → **1.25×**; NYR/LLVM 2.06× → **1.03×**
-  (was 4.41× in the audit);
-`datastructures` class geomean NYR/C 1.17× → **1.04×**.
-
-**Correctness.** `etc/tests/lang/execution` 65/65, `etc/tests/code/targets/x86_64`
-166/166, full `./make bench` green (all classes pass gates, no checksum mismatch). A
-minimal `node = 1; depth = 19` repro and the benchmark both match their unfolded
-checksums. The `decoder oracle … inst 466 [rsi + r10] vs [r10*1 + rsi]` note is
-pre-existing: it is byte-identical with `NYTRIX_NO_BIT_ASSEMBLY=1`.
-
-**Rejected, not regressed.** `sssp` folds 0 loops (verified with
-`NYTRACE_BITASM=1`); its one-off 4.98× NYR/LLVM in a single suite run is wall noise,
-not a code change.
-
-### 2026-11-19 vectorizer proof diagnostics (landed)
-
-**Change.** `src/code/backend/passes/vector/loop_vectorize.c`: a `const char
-**why` is threaded through `tbuf_address_parts`, `tbuf_affine_memory_safe` and
-`vector_memory_affine`, and the load/store rejection uses it. A rejected access now
-names the failed proof instead of "non-affine, aliasing, escaping, or out of proven
-bounds". Codegen is unchanged; the strings feed the trace only.
-
-**What the three fixtures actually block on** (NY_TRACE_VECTORIZE=1):
-
-**cd**: the inner `j` loop already passes PHI classification (`hits` is recognised
-  as a reduction) and has exactly **one** blocker: *variable trip count has no
-  provable iteration window*. The loops rejected for `unsupported loop-carried PHI`
-  (6) and `unmodeled memory/trap effect` (2) are the outer `step`/`i` loops, which
-  contain the inner loop, stores and a `% 1000000007`; they are not vectorizable
+- **cd**: the inner `j` loop already passes PHI classification (`hits` is a
+  reduction) and has exactly one blocker: variable trip count has no provable
+  iteration window. The `unsupported loop-carried PHI` (6) and `unmodeled
+  memory/trap effect` (2) rejections are the outer `step`/`i` loops, which contain
+  the inner loop, stores and a `% 1000000007`, so they are not vectorizable
   targets.
-**lbm**: 2 stores fall through to `unmodeled memory/trap effect`, 2 PHIs are
-  unsupported, 1 `mixed i64 operand is not loop-invariant`, 1
-  `control/local/call/volatile/allocation effect`. Its affine accesses are not the
+- **lbm**: 2 stores fall through to `unmodeled memory/trap effect`, 2 PHIs are
+  unsupported, 1 is `mixed i64 operand is not loop-invariant`, and 1 is
+  `control/local/call/volatile/allocation effect`; affine accesses are not the
   blocker.
-**viterbi**: 4 loops have `no canonical +1 induction PHI`, 3 have
-  `unsupported loop-carried PHI`, 1 access fails the add-chain shape, 1 loop still
-  succeeds (`legal and profitable`).
+- **viterbi**: 4 loops have `no canonical +1 induction PHI`, 3 have `unsupported
+  loop-carried PHI`, 1 access fails the add-chain shape, and 1 loop still succeeds
+  (`legal and profitable`).
 
-**Attempted and reverted.** A SCEV window-bound fallback (`nyr_scev_analyze` +
-`nyr_scev_affine_at`) in the window computation. SCEV publishes no affine range for
-a nested start such as `j = i + 1`, so it never fired on cd and was removed rather
-than kept without evidence.
+A reverted attempt added a SCEV window-bound fallback (`nyr_scev_analyze` +
+`nyr_scev_affine_at`) to the window computation; SCEV publishes no affine range
+for a nested start such as `j = i + 1`, so it never fired on cd. The remaining
+need is `[min(start), max(limit))` over all enclosing iterations: the window code
+reads only the defining instruction's `.range`, absent on a PHI-derived/nested
+expression (value facts are one linear pass). The right source is the enclosing
+loop's SCEV body bounds (`nyr_scev_loop_t.body_min/body_max`), which the
+vectorizer does not instantiate, or a guard-aware invariant range; that one fact
+unblocks cd's inner loop, whose reduction is already classified. Verified: clean
+build, `etc/tests/lang/execution` 65/65, `etc/tests/code/targets/x86_64` 166/166;
+the earlier `./make bench` run in the bit-assembly entry remains the last complete
+gate. Not started: vector lowering of recognized conditional-count / signed max
+reductions (cd needs the window; viterbi's inner DP loop first needs a canonical
+induction form) and nested-loop register lending.
 
-**Exact remaining need.** The variable-trip window wants `[min(start), max(limit))`
-over all enclosing iterations. The window code reads only the defining instruction's
-`.range`, which a PHI-derived/nested expression does not have (value facts are one
-linear pass). The right source is the *enclosing* loop's SCEV body bounds
-(`nyr_scev_loop_t.body_min/body_max`), which the vectorizer does not currently
-instantiate, or a guard-aware invariant range. That single fact unblocks cd's inner
-loop, whose reduction is already classified.
+### vectorizer window: exact blocker located inside SCEV
 
-**Verified.** Build clean; `etc/tests/lang/execution` 65/65;
-`etc/tests/code/targets/x86_64` 166/166. The preceding full `./make bench` run (in
-the bit-assembly entry above) remains the last complete gate.
+Four attempts to vectorize cd's inner `j` loop (`j = i + 1; while j < 200`) all
+stopped at the variable-trip window; the loop passes PHI classification (`hits`
+is a recognized reduction). `compute_range_bounds` (`passes/verify/scev.c`, ~line
+200) sets `body_bounds_known` only when `nir_value_range_at(init_value)` returns
+both bounds; for `j = i + 1` that yields nothing because value facts are one
+linear pass and its only fallback, `scev_call_nonnegative_range`, applies to call
+results. `scev_dynamic_loop_iv_bounds_at` exists for exactly this shape (a loop
+entry value affine in a dominating outer IV) and re-bounds the init with
+`scev_affine_build` + `scev_affine_bound`, but is reachable only through
+`scev_loop_iv_bounds_at`, which the vectorizer does not call. Wiring the
+vectorizer to that query at the loop body entry (bounds hold only on body paths;
+the header is not dominated by the body entry) still returned false, so
+`scev_affine_bound` on `i + 1` is itself failing to use the enclosing loop's
+bounds.
 
-**Not started.** Vector lowering of the recognised conditional-count / signed max
-reductions (needs the window above for cd; viterbi's inner DP loop first needs a
-canonical induction form), and nested-loop register lending.
+Next investigation: instrument `scev_dynamic_loop_iv_bounds_at` /
+`scev_affine_bound` for a nested loop's init value, not the vectorizer; once that
+returns true the windowed access proof works unchanged and cd's already-classified
+conditional-count reduction has a legal loop. Reading `body_bounds_known` /
+`body_min` / `body_max` in the window and calling a public
+`scev_loop_iv_bounds_at` from the vectorizer were both reverted after measuring no
+effect (each adds one `nyr_scev_analyze` per variable-trip candidate). Only the
+proof diagnostics remain; `scev.c` and `loop.h` are unchanged from HEAD. Verified:
+clean build, `etc/tests/lang/execution` 65/65, `etc/tests/code/targets/x86_64`
+166/166, full `./make bench` green — overall NYR/C 1.35x, NYR/LLVM 1.24x, worst
+fixture dict-set 1.47x (limit 1.50x); cd checksum 387 unchanged.
 
-### 2026-11-19 vectorizer window: exact blocker located inside SCEV
+### compile-time: `select_chain_fold` gate measured, no gain (reverted)
 
-Four attempts to make cd's inner `j` loop (`j = i + 1; while j < 200`) vectorizable
-all stopped at the same place. The loop passes PHI classification (`hits` is a
-recognised reduction); its only blocker is the variable-trip window, and that window
-is unknown because the following chain fails:
+Measurement trap: `etc/tests/bench/startup/dce.nshape` generates its Ny source
+with an embedded Python script (`source ny generate python <<'PY'`); extracting it
+with `sed -n '/^ source ny/,/^ NY$/p'` silently yields the `source c` block, so
+both sides of an A/B failed to compile and the "output identical" check compared
+two missing files. Run the generator (or use a literal-source fixture) before
+measuring this fixture. `scf_round` calls `scf_init` every round, and `scf_init`
+builds a definition map, use census, full value facts and, for any function with
+a loop, SCEV plus a whole CFG, while every round rule only rewrites
+`NYIR_SELECT_I64` or a compare — so a cheap linear pre-scan should skip all four
+rounds for functions with neither.
 
-`compute_range_bounds` (`passes/verify/scev.c`, ~line 200) sets
-   `body_bounds_known` only when `nir_value_range_at(init_value)` returns both
-   bounds. For `j = i + 1` that yields nothing: value facts are a single linear
-   pass, so a PHI-derived expression has no range. Its only fallback,
-   `scev_call_nonnegative_range`, applies to call results.
-`scev_dynamic_loop_iv_bounds_at` exists precisely for this shape (a loop whose entry
-   value is affine in a dominating outer IV) and re-bounds the init with
-   `scev_affine_build` + `scev_affine_bound`. It is reachable only through
-   `scev_loop_iv_bounds_at`, which the vectorizer does not call.
-Wiring the vectorizer to that query, at the loop **body entry** (the bounds hold
-   only on body paths; querying at the header is rejected because the header is not
-   dominated by the body entry), still returned false — so `scev_affine_bound` on
-   `i + 1` is itself failing to use the enclosing loop's bounds.
+With the gate switchable at runtime (`NYTRIX_NO_SELECT_FOLD_GATE=1`), radix
+compiled in 1816 ms with the gate and 1820 ms without (median of 5, cold native
+and AOT caches) — no effect, within noise. Reverted: the gate would add a scan and
+a `getenv` per function for nothing. Kept (trivially correct): `scf_init` now calls
+`nyr_has_loop(f)` once instead of twice. There is no headroom there: a whole O3
+compile of a small fixture is ~1.8 s, dominated by standard-library parse and
+type validation (companion profiling measured ~478 ms of parsing alone), while
+`select_chain_fold` is 63-75 ms only on one very large stress function. The only
+compile-time items with real headroom are stdlib AST reuse and
+semantic-fingerprint result caching, which are architectural rather than cheap
+edits.
 
-Consequence: the next investigation must instrument `scev_dynamic_loop_iv_bounds_at`
-/ `scev_affine_bound` for the init value of a nested loop, not the vectorizer. Once
-that returns true the vectorizer's windowed access proof works unchanged, and cd's
-already-classified conditional-count reduction has a legal loop to lower into.
+### compile-time and cd vectorization: measured findings
 
-Reverted after measuring no effect (keeping either adds one `nyr_scev_analyze` per
-variable-trip candidate): reading `body_bounds_known/body_min/body_max` in the
-window, and calling a public `scev_loop_iv_bounds_at` from the vectorizer.
+Medians of N cold compiles in ms, timed with the shell builtin (`/usr/bin/time` is
+absent), native and AOT caches off, any failing compile ending the run: no imports
+280 ms, `use core` 956 ms, the radix fixture's full import set 968 ms, the fixture
+itself (41 lines) 1828 ms. The standard library is a fixed 956-968 ms of work on
+every compile that imports it. The companion audit's "parsing ~478 ms" is the standard library, not user
+code; `select_chain_fold` is 63-75 ms on one stress function inside a small stage. A
+parsed-stdlib cache would remove ~690 ms per compile; `ny_std_cache_v11` caches only
+assembled source text, and the parsed-and-typed result needs AST/diagnostic
+serialization the frontend lacks. Of cd's 1828 ms, 968 ms is stdlib plus the no-import
+floor and 860 ms the fixture's own 41 lines; that per-line cost deserves its own
+profile.
 
-**Final state of this pass.** Only the proof diagnostics remain (`const char **why`
-through `tbuf_address_parts` / `tbuf_affine_memory_safe` / `vector_memory_affine`).
-`scev.c` and `loop.h` are unchanged from HEAD.
+`NY_TRACE_VECTORIZE=1` rejects cd's pairwise loop with three `op=phi` cases
+("unsupported loop-carried PHI") at cd.ny:40:10, 42:13 and 21:7, plus `load.i64` at
+cd.ny:24:27 ("address is not a payload+offset add chain"); `tbuf affine` reports
+v275 root=-1 offset=0, addends v-1/v-1. No "variable trip count has no provable
+iteration window" reject appears, so `scev_affine_bound` on `j = i + 1` is not the
+blocker: v275 has no operand chain for `tbuf_address_parts` to split, and the
+if-converted `hits += 1` is a rejected conditional reduction. No SCEV change was
+landed; the address-shape fix and conditional-reduction support come first.
 
-**Verified.** Build clean; `etc/tests/lang/execution` 65/65;
-`etc/tests/code/targets/x86_64` 166/166; full `./make bench` green — overall NYR/C
-1.35x, NYR/LLVM 1.24x, worst fixture dict-set 1.47x (limit 1.50x). cd checksum 387
-unchanged.
+Disabling the bit-assembly fold left radix at 1844 ms, disabling select fusion at
+1795 ms, against an 1830 ms baseline (median of 5, cold caches). Neither is faster,
+so the runtime work carries no compile-time cost.
 
-### 2026-11-19 compile-time: `select_chain_fold` gate measured, no gain (reverted)
+### cd: what the address really is, and where the 860 ms goes
 
-**Measurement trap first.** `etc/tests/bench/startup/dce.nshape` generates its Ny
-source with an embedded Python script (`source ny generate python <<'PY'`).
-Extracting it with `sed -n '/^ source ny/,/^ NY$/p'` silently yields the `source c`
-block instead, so both sides of an A/B failed to compile and the "output identical"
-check compared two missing files. Run the generator (or use a literal-source
-fixture) before measuring anything on this fixture.
+Refusing the loop over `v275` is a defect: the address is a buffer-pointer fetch, not
+an element access. With the defining opcode added, `NY_TRACE_VECTORIZE=1` reports
+`tbuf affine: missing root/address v275 root=-1 offset=0 op=addr.symbol
+addends=v-1(none)/v-1(none) incoming=0`. `px` is a module-level `def ptr`, so
+`i64buf_load(px, i)` loads the pointer from its symbol slot before forming
+`add(payload, shl(i,3))`; `tbuf_address_parts` rightly rejects a symbol slot as a
+typed-buffer access, but the vectorizer scans every `load.i64`, including the
+invariant fetch. The fix is LICM — hoisting requires it because the broadcast
+machinery only materialises values defined outside the loop, not a vectorizer
+relaxation. Even then, `hits += 1` remains an if-converted conditional reduction:
+NYIR has no vector compare, select or masked add (the set is
+`load/store/set1/add/sub/mul/reduce` plus the f32/f64 forms), so a compare-to-mask
+plus masked accumulate must cross
+`passes/validate.c`, `lower/eval.c`, `mach/arch/x86/machine64.c`, the portable backend
+and the LLVM emitter — eight files, not a pass tweak.
 
-**Hypothesis.** `scf_round` calls `scf_init` on every round, and `scf_init` builds a
-definition map, a use census, full value facts, and — for any function containing a
-loop — SCEV plus a whole CFG. Every round rule only rewrites `NYIR_SELECT_I64` or a
-compare, so a cheap linear pre-scan should skip all four rounds for functions with
-neither.
-
-**Result.** With the gate switchable at runtime (`NYTRIX_NO_SELECT_FOLD_GATE=1`),
-radix compiled in 1816 ms with the gate and 1820 ms without (median of 5, cold
-native/AOT caches) — no effect, within noise. Reverted; the gate would have added a
-scan plus a `getenv` per function for nothing.
-
-**Kept (trivially correct, no hypothesis):** `scf_init` now calls `nyr_has_loop(f)`
-once instead of twice.
-
-**Why there is no headroom there.** A whole O3 compile of a small fixture is ~1.8 s
-and is dominated by standard-library parse and type validation (the companion
-profiling measured ~478 ms of parsing alone). `select_chain_fold` is 63-75 ms only
-on a single very large stress function, so even eliminating it entirely is a few
-percent of that case and nothing on ordinary ones. The only compile-time items with
-real headroom are standard-library AST reuse and semantic-fingerprint result
-caching, which are architectural rather than cheap edits.
-
-### 2026-11-19 compile-time and cd vectorization: measured findings
-
-**Measurement harness.** Each figure is the median of N cold compiles in
-milliseconds, timed with the shell builtin because `/usr/bin/time` is not installed
-on this host. The native and AOT caches were disabled so a hit could not masquerade
-as a fast compile, and a failing compile ended the run.
-
-**Where compile time actually goes.** Compiling a program that declares no imports
-costs 280 ms. Adding what the radix fixture imports costs 956 ms for `use core` and
-968 ms for its full import set, while the fixture itself (41 lines) costs 1828 ms.
-So the standard library is a fixed 956-968 ms of parsing, type checking and lowering
-on every compile that imports it, and it grows with what the program uses.
-
-This reframes the companion audit's ranking. Its "parsing ~478 ms" figure is the
-standard library, not the user program, and the per-pass NYIR numbers
-(`select_chain_fold` 63-75 ms on one huge stress function) sit inside a stage that
-is a small fraction of the total. Reusing a parsed standard library would remove
-about 690 ms of repeated work from every compile; nothing inside the NYIR optimizer
-can compete with it. The on-disk `ny_std_cache_v11` entry already caches the
-assembled *source text*, so the remaining work is caching the parsed-and-typed
-result, which needs AST/diagnostic serialization the frontend does not have today.
-
-#### cd's inner loop: the SCEV window is not the blocker
-
-`NY_TRACE_VECTORIZE=1` on the cd fixture reports, for the pairwise loop:
-
-    reject op=phi   at cd.ny:40:10  reason=unsupported loop-carried PHI
-    reject op=phi   at cd.ny:42:13  reason=unsupported loop-carried PHI
-    reject op=phi   at cd.ny:21:7   reason=unsupported loop-carried PHI
-    reject op=load.i64 at cd.ny:24:27 reason=address is not a payload+offset add chain
-    tbuf affine: missing root/address v275 root=-1 offset=0 addends=v-1(none)/v-1(none)
-
-No "variable trip count has no provable iteration window" reject appears for the
-pairwise loop at all, so `scev_affine_bound` on the PHI-derived initialiser (`j = i
-+ 1`) is not what blocks it. The load address value v275 is not an `ADD_I64`/copy
-chain: its defining instruction has neither operand, so `tbuf_address_parts` cannot
-split it before any range proof is consulted. The loop also carries the if-converted
-`hits += 1` counter as a conditional reduction, which the PHI classifier rejects.
-
-Landing a SCEV change here would therefore move no fixture, so none was made:
-measured, not assumed. Unblocking cd needs the address-shape fix and conditional
-reduction support first, then the window question can be asked again.
-
-Note that stdlib cost is only half of this fixture: 968 ms is the no-import floor
-plus standard library, and the remaining 860 ms pays for the fixture's own 41 lines
-through the frontend and the NYIR optimizer. A per-line cost that high is the more
-surprising half and deserves its own profile.
-
-#### The landed runtime work carries no compile-time cost
-
-Disabling the bit-assembly fold leaves radix at 1844 ms and disabling select fusion
-leaves it at 1795 ms, against a 1830 ms baseline (median of 5, cold caches). Neither knob is faster, so the runtime optimizations
-are not paid for in compile time.
-
-### 2026-11-19 cd: what the address really is, and where the 860 ms goes
-
-**The address is a buffer-pointer fetch, not an element access.** Adding the
-defining opcode to the existing trace line settles it:
-
-    tbuf affine: missing root/address v275 root=-1 offset=0 op=addr.symbol
-                  addends=v-1(none)/v-1(none) incoming=0
-
-`px` is a module-level `def ptr`, so `i64buf_load(px, i)` first loads the pointer
-out of its symbol slot and only then forms `add(payload, shl(i,3))`. The vectorizer
-scans every `load.i64` in the body, so it also meets that invariant pointer fetch,
-and `tbuf_address_parts` correctly refuses it: a symbol slot is not a typed-buffer
-access. Rejecting the whole loop over an instruction that is not part of the element
-stream is the defect; the fix is to treat the fetch as loop-invariant, which
-requires hoisting it (it is defined inside the loop, and the broadcast machinery
-only materialises values defined outside the loop), i.e. an LICM change rather than
-a vectorizer relaxation.
-
-Even with that fixed, the pairwise loop still carries `hits += 1` as an if-converted
-conditional reduction, so it would not vectorize. That is the second, independent
-blocker.
-
-**Why conditional reductions cannot be landed cheaply.** NYIR has no vector compare,
-no vector select and no masked add: the vector op set is
-load/store/set1/add/sub/mul/reduce plus the f32/f64 forms. Lowering `hits += (cond)`
-would need a compare-to-mask op and a masked accumulate op threaded through the
-verifier (`passes/validate.c`), the const evaluator (`lower/eval.c`), the machine
-selector and x86 encoder (`mach/arch/x86/machine64.c`), the portable backend, and
-the LLVM emitter. That is a new opcode across eight files, not a vectorizer edit,
-and shipping it unverified would be worse than leaving the loop scalar.
-
-**Where the 860 ms actually goes.** Verbose phase output for the radix fixture:
+Verbose phases on radix:
 
     PHASE parse begin ... user_bytes=1172 stdlib_bytes=1000741
     PHASE parse complete ast=program statements=77 errors=0
@@ -5483,54 +3619,38 @@ and shipping it unverified would be worse than leaving the loop scalar.
     PHASE type-validation begin stages=HM,trait,ABI
     PHASE type-validation complete errors=0 failed_stage=0     (~1 s later)
 
-A 1172-byte user program is compiled against a 1 MB standard-library source, and
-type validation spans a full second. The NYIR pipeline then costs 0.15-0.20 ms per
-pass per function, which is negligible for one function but is multiplied by every
-function reachable from the program: an empty `main` with the same three imports
-costs 968 ms, while radix costs 1828 ms, and the difference is largely the stdlib
-functions its body pulls into reach being optimized. So the cost tracks the
-reachable standard-library set, not the user's line count. The two real levers are
-therefore (a) cache the typed or optimized standard-library result instead of
-redoing it per compile, and (b) do not run the full pass pipeline over functions
-that only become reachable through dead branches -- both frontend/pipeline projects,
-not pass tweaks.
+A 1172-byte user program is compiled against a 1 MB standard-library source and type
+validation spans a full second. NYIR passes cost 0.15-0.20 ms per pass per function;
+an empty `main` with the same three imports is 968 ms versus 1828 ms for radix, the
+difference largely reachable stdlib functions being optimized. Cost tracks the
+reachable stdlib set, not user line count. Levers:
+cache the typed/optimized stdlib result and skip the full pipeline for functions
+reachable only through dead branches — frontend/pipeline work.
 
-### 2026-11-19 why the unreachable-stdlib filter was not shipped
+### why the unreachable-stdlib filter was not shipped
 
-The optimization work is not concentrated in one place where a reachability mask
-could simply be applied:
+Not shipped: the first full optimization pass has already run on every function
+before any reachability root exists. `src/code/lang/ny/lower/parts/stmt.h:15313` caps
+cross-function inlining at 512 (`inline_func_count`); the post-inline sweep at
+`:15433` (sequential) and `nyr_parallel_post_inline` (`:13936`, used when
+`nyr_build_parallel_enabled` is true) re-runs the full pipeline over that prefix.
+Bodies are also optimized as lowering finishes (`stmt.h:8248`/`:8344`), before the
+callee registry. The root set from `rt_main_out` plus the inline registry arrives too
+late: filtering only the sweep saves the second pass on the parallel path, where cost
+is already divided by core count, leaving the sequential wall-time driver untouched.
 
-`src/code/lang/ny/lower/parts/stmt.h:15313` caps cross-function inlining at 512
-  functions (`inline_func_count`), and the post-inline re-optimization sweep at
-  `:15433` (sequential) and `nyr_parallel_post_inline` (`:13936`, used when
-  `nyr_build_parallel_enabled` is true) re-runs the *full* pipeline over that whole
-  prefix.
-The bodies are also optimized once when their lowering finishes
-  (`stmt.h:8248`/`:8344`), before the callee registry exists.
+Doing it properly means deferring lower-priority bodies, walking the call graph from
+`rt_main`, and skipping functions with no incoming edge and no address materialization
+— dead code, so opt level 0 is safe (worst case lost optimization, never a
+miscompile). That is a lowering-order change needing its own measurements, not a pass
+tweak, and it was not written into a tree with unrelated dirty work. Planned escape
+hatches: `NYTRIX_NO_DEAD_FUNC_SKIP=1` and `NY_TRACE_REACHABILITY=1` to report the skip
+set.
 
-A root set for "reachable from the user program" only becomes available when
-`rt_main_out` and the inline callee registry are built, i.e. after the first full
-optimization pass has already run over every function. Filtering the post-inline
-sweep alone would therefore save only the second pass, and only on the parallel
-path, where the cost is already divided by the core count; the wall-time driver --
-the sequential first pass over every lowered function -- is untouched.
+### six-fixture instruction budget (bench-gcc, NYR vs cc -O3)
 
-Doing this properly means deferring optimization of lower-priority bodies until the
-registry exists and then walking the call graph from `rt_main`, skipping any
-function with no incoming edge and no address materialization. Every such function
-is dead, so lowering it at opt level 0 is safe (worst case, lost optimization, never
-a miscompile). That is a change to lowering order, not a pass tweak, and it needs
-its own measurements; it was not written blind into a tree that already carries
-unrelated dirty work.
-
-Escape hatches that would be needed: `NYTRIX_NO_DEAD_FUNC_SKIP=1` to restore the old
-behaviour, and a `NY_TRACE_REACHABILITY=1` report of the skip set so a wrong root
-set is visible rather than silent.
-
-### 2026-11-19 six-fixture instruction budget (bench-gcc, NYR vs cc -O3)
-
-Measured with `./make bench-gcc --ny page-rank matrix mandel lbm cd bigint-oracle`
-on the current tree (dynamic instruction counts, not wall time):
+`./make bench-gcc --ny page-rank matrix mandel lbm cd bigint-oracle` measured dynamic
+instructions, not wall time:
 
 | fixture | NYR | cc | ratio |
 | --- | --- | --- | --- |
@@ -5541,51 +3661,31 @@ on the current tree (dynamic instruction counts, not wall time):
 | page-rank | 0.43M | 0.23M | 1.90x |
 | bigint-oracle | -- | -- | no cc toolchain on host |
 
-The two large absolute gaps are also the two largest absolute costs, so they are the
-only ones worth deep work first; the other four are under one million instructions
-and cannot move the suite average much.
+The two largest absolute costs are the only ones worth deep work; the other four are
+under one million instructions.
 
-**lbm** (56.25M): 200 steps x 94 x 94 interior points = 1.77M stencil evaluations,
-i.e. ~32 instructions each. The C build reaches 10.12M, ~5.7 per point, which is
-only achievable with 4-lane vector code. The loop body is `(a[idx-W] + a[idx+W] +
-a[idx-1] + a[idx+1] + 4*a[idx]) / 8` with two clamps and one store, so an AVX2 form
-needs three unaligned loads at fixed byte offsets around `idx*8` plus a signed
-max/min clamp. Everything is affine in `idx`; what is missing is a proof that the
-four neighbour offsets stay inside the same allocation for the whole lane window,
-which the current checker treats as `dynamic offset out of proven bounds` once
-`idx-1` is consulted at the row edge.
+lbm (56.25M): 200 steps x 94 x 94 interior points = 1.77M stencil evaluations, i.e.
+~32 instructions each; C's 10.12M is ~5.7 per point via 4-lane code. The body
+`(a[idx-W] + a[idx+W] + a[idx-1] + a[idx+1] + 4*a[idx]) / 8` with two clamps and one
+store needs three unaligned loads around `idx*8` plus a signed max/min clamp; all
+offsets are affine in `idx`, but the checker reports `dynamic offset out of proven
+bounds` at `idx-1` on the row edge. cd (100.36M): 200 steps × (one 200-element
+movement pass + 19,900 pairwise comparisons + a 200-element counter pass): ~25
+instructions per pair versus gcc's ~4.4, which comes from masking two
+`|px[i]-px[j]| < 8` tests. NYR rejects the `op=addr.symbol` handle
+fetch first, then the `hits += 1` conditional reduction.
 
-**cd** (100.36M): 200 steps x (one 200-element movement pass + 19,900 pairwise
-comparisons + a 200-element counter pass). ~25 instructions per pair against gcc's
-~4.4, which gcc gets from concentrating the two `|px[i]-px[j]| < 8` tests into
-masks. NYR rejects it first on the buffer-pointer fetch (`op=addr.symbol`, an
-invariant load the vectorizer meets inside the body) and then on the `hits += 1`
-conditional reduction, for which NYIR has no vector compare/mask op. Those two are
-the prerequisites, in that order.
+Ranked: hoist loop-invariant loads (LICM); teach the affine proof that `idx-1`/`idx-W`
+share `idx`'s row window; only then add vector compare-to-mask and masked add (cd,
+viterbi); re-check `mandel`, where `/1000` and `/500` should already be magic-multiply
+and 2.18x points to the `&&` guard, not division.
 
-**Ranked next steps**
+### cd resumed: the gap is vectorization, not scalar code
 
-Hoist loop-invariant loads out of loop bodies before vectorization (LICM), which
-   removes cd's `op=addr.symbol` rejection and is generally correct for read-only
-   loops.
-Teach the affine memory proof that a fixed neighbour offset (`idx-1`, `idx-W`) is
-   safe when the row-window bound already covers `idx`, so lbm's five accesses share
-   one proven window instead of rejecting on the smallest sub-offset.
-Only then add vector compare-to-mask and masked add for conditional reductions (cd's
-   counter, viterbi's max).
-Re-check `mandel`: `/1000` and `/500` by non-power-of-two constants should already
-   be magic-multiply sequences; 2.18x suggests the hot loop is still scalar because
-   of the `&&` guard rather than the division itself.
-
-### 2026-11-19 cd resumed: the gap is vectorization, not scalar code
-
-Resumed after the machine-encoder address-home fix (NYC now defaults to the machine
-encoder). cd's instruction count is unchanged at 100.36M against gcc's 17.72M
-(5.66x), as expected: that fix is C-object emission, and cd measures the NYR side.
-
-**The scalar pair loop is already near optimal.** `--emit-asm` plus a loop-body scan
-gives 21 instructions per pair, and the two invariant `px[i]`/`py[i]` loads are
-already hoisted into r12/r13:
+After the machine-encoder address-home fix (NYC now defaults to the machine encoder),
+cd stays at 100.36M instructions versus gcc's 17.72M (5.66x): that fix is C-object
+emission, cd measures NYR. An `--emit-asm` loop-body scan gives 21 instructions per
+pair with the two invariant `px[i]`/`py[i]` loads already hoisted into r12/r13:
 
     add $0x8,%r9 ; add $0x8,%rdx ; dec %rax ; je L
     mov %r12,%r15 ; sub (%rdx),%r15 ; mov %r15,%r8 ; neg %r8 ; cmovs %r15,%r8
@@ -5593,82 +3693,43 @@ already hoisted into r12/r13:
     mov %r13,%r8 ; sub (%r9),%r8 ; mov %r8,%r15 ; neg %r15 ; cmovs %r8,%r15
     xor %r8d,%r8d ; cmp $0x8,%r15 ; setl %r8b ; add %r8,%rcx ; jmp L
 
-200 steps x 19,900 pairs puts the whole-program count at 25.2 instructions per pair
-including loop overhead. gcc's 4.45 is only reachable four pairs at a time, so no
-further scalar tuning can close cd; the gap is the pair loop's vectorization.
+200 steps × 19,900 pairs puts the whole-program count at 25.2 instructions per pair
+including loop overhead; gcc's 4.45 is only reachable four pairs at a time. No scalar
+tuning closes this.
 
-**Why the vectorizer still refuses it.** The trace names the blocker, and it is not
-the PHI:
+The vectorizer trace names the blocker:
 
     tbuf affine: missing root/address v275 root=-1 op=addr.symbol
     reject pc=458 op=load.i64 at cd.ny:24:27 reason=address is not a payload+offset add chain
+ `tbuf_payload_root` accepts
+only `rt_tbuf_new_{raw,typed_raw}`, a private allocator, COPY or PHI; `i64buf_load(px,
+j)` lowers to `add(load.i64 addr.symbol(px), shl(j,3))`, whose addend is a module-slot
+handle load. Making it a root alone would just hit `allocation extent unknown`, since
+`known_alloc_bytes` cannot see a module-initializer allocation. Also outstanding:
+`i`/`j`/`hits` loop-carried PHIs and the movement loop's `mod`/store (`unmodeled
+memory/trap effect remains in loop body`). Revised order: root plus extent from the
+resolved `NYIR_INST_F_IN_BOUNDS_ADDR` check, then scalar-PHI widening and masked
+`hits += predicate`, then AVX2. Earlier hoisting advice was wrong — element loads are
+hoisted; the handle needs classification. No change kept.
 
-`tbuf_payload_root` accepts only `rt_tbuf_new_{raw,typed_raw}`, a private allocator,
-a COPY, or a PHI. `i64buf_load(px, j)` lowers to `add(load.i64 addr.symbol(px),
-shl(j,3))`, so the addend is a handle load from a module-level slot and no root is
-found. Accepting it is not sufficient on its own: `known_alloc_bytes` would then
-have to answer for a buffer allocated in the module initializer, which the
-vectorizer's per-function facts never see, so the transitive rejection becomes
-`allocation extent unknown`.
+Per-iteration method: extract `source ny`, `ny -O3 -emit-only --emit-asm=...`,
+assemble, objdump, find backward branches. viterbi's DP loop is 42 instructions with
+`vpaddq`, `vpmuludq`, `vpcmpgtq`, `vblendvpd` (four i64 lanes, masked max), but
+`vmovq`/`vpextrq`/`vextracti128` and four `mulx`/`vmovq`/`vpunpcklqdq`/`vinserti128`
+sequences scalarize the modulo. lbm's stencil is 20 instructions per point, seven of
+them truncating `/8` fixup (`sar $63`, `and $7`, `add`, `sar $63`, `sar $3`, `andn`)
+plus `cmp`/`cmovge` clamp — it needs widening and a cheaper divide. A root+
+`IN_BOUNDS_ADDR` experiment was reverted as ineffective: `tbuf_address_parts` rejects
+the handle load before the extent rule, so it must be classified loop-invariant and
+broadcast. NYIR's i64 vector set is LOAD/STORE, ADD, SUB, AND, OR, XOR, SHL, SAR, MUL
+(VEC8), SET1, REDUCE_ADD — no compare/select/mask; `hits += (a < b)` needs an all-ones
+mask compare folded by `VEC8_SUB_I64`, PHI recognition of `acc + zext(cmp)`, and both
+backends. Not started; nothing unproven kept.
 
-The remaining refusals are the loop-carried PHIs of `i`, `j` and `hits`
-(`unsupported loop-carried PHI`) and the movement loop's `mod`/store (`unmodeled
-memory/trap effect remains in loop body`).
+### lbm: the neighbour-offset proof already works
 
-**Revised prerequisites, in order.**
-
-Make a symbol-slot handle load a payload root, and let the affine proof take its
-   extent from the scalar bounds check that already resolved it (the lowered address
-   carries `NYIR_INST_F_IN_BOUNDS_ADDR`), rather than from a per-function allocation
-   fact.
-Widen the pair loop: the `i`/`j` inductions must leave the scalar PHI form and
-   `hits += predicate` must become a masked add.
-Then the AVX2 form follows.
-
-The earlier "hoist loop-invariant loads" step is not the blocker: the element loads
-are already hoisted, and the handle load needs classification, not movement. No code
-change was kept from this round - the root/extent work is a vectorizer change that
-has to land with its own differential checks.
-
-#### Per-iteration measurements: viterbi and lbm, and the cd gate
-
-Method for every fixture: extract the `source ny` block, `ny -O3 -emit-only
---emit-asm=...`, assemble it, objdump, and locate backward-branch loop bodies.
-
-**viterbi is already vectorized.** Its DP loop is 42 instructions per iteration and
-uses `vpaddq`, `vpmuludq`, `vpcmpgtq` and `vblendvpd`, i.e. four i64 lanes at a time
-plus a masked max. What remains is per-lane bookkeeping:
-`vmovq`/`vpextrq`/`vextracti128` pull each lane out, four `mulx` sequences compute
-the remainder, and four `vmovq`/`vpunpcklqdq`/`vinserti128` rebuild the next vector.
-viterbi's gap is the scalarized modulo inside the vector body, not missing
-vectorization.
-
-**lbm is still scalar.** Its stencil loop is 20 instructions per interior point:
-five load/`add` for the neighbour sum, one `lea`, then seven for the signed `/8`
-fixup (`sar $63`, `and $7`, `add`, `sar $63`, `sar $3`, `andn`), one `cmp`/`cmovge`
-clamp, the store, and the increment/test. Seven of twenty instructions are
-truncating-divide fixup, so lbm needs widening plus a cheaper form of that divide.
-
-**cd: the handle load, not the extent, is the gate.** Accepting a symbol-slot handle
-as a payload root plus an `IN_BOUNDS_ADDR` extent proof was implemented and then
-reverted: it changed nothing, because the access the vectorizer refuses is the
-handle load itself, whose address is `addr.symbol` with no ADD chain.
-`tbuf_address_parts` rejects before the extent rule is ever reached, so that load
-has to be classified as loop-invariant and broadcast, not proven affine.
-
-**Masked compare-and-add is a new-opcode feature.** NYIR's i64 vector set is
-LOAD/STORE, ADD, SUB, AND, OR, XOR, SHL, SAR, MUL (VEC8 only), SET1 and REDUCE_ADD;
-there is no compare, select or mask opcode. `hits += (a < b)` needs a mask-producing
-compare (mask lanes all-ones) that the existing `VEC8_SUB_I64` then folds into the
-accumulator (`acc - mask` adds 1 per true lane), plus recognition of the `acc +
-zext(cmp)` PHI update in the vectorizer and lowering on both backends. That work is
-not started and nothing unproven is in the tree.
-
-### 2026-11-19 lbm: the neighbour-offset proof already works
-
-The premise that the affine proof rejects `idx-1` and `idx-W` is wrong on the
-current tree. `NY_TRACE_VECTORIZE=1` prints a proven range for every one of the five
-stencil accesses:
+The neighbour-offset premise is wrong: `NY_TRACE_VECTORIZE=1` prints a proven range
+for all five lbm stencil accesses:
 
     tbuf affine: range address=v453 guarded=yes [8,72176]
     tbuf affine: range address=v448 guarded=yes [1544,73712]
@@ -5676,29 +3737,18 @@ stencil accesses:
     tbuf affine: range address=v438 guarded=yes [784,72952]
     tbuf affine: range address=v433 guarded=yes [776,72944]
 
-The allocation is `96*96*8 = 73728` bytes, so every `max` is inside `bytes - 8` and
-every `min` is non-negative. The five neighbour offsets share one proven window and
+The allocation is `96*96*8 = 73728` bytes, so every max is inside bytes - 8 and every
+min is non-negative; the five neighbour offsets share one proven window and
 `tbuf_affine_memory_safe` accepts all of them.
 
-The loop still does not vectorize, and the reject is a different one:
+The actual reject is `pc=541 op=add.i64 vf=4 mixed i64 operand is not loop-invariant`:
+in `idx = y*W + x`, `y*W` is invariant but defined inside the loop, so
+`value_defined_in_loop` marks it varying and the preheader-only broadcast cannot
+absorb it. The blocker is LICM, and the same fix would serve cd's invariant pointer
+fetch.
 
-    reject pc=541 op=add.i64 vf=4 reason=mixed i64 operand is not loop-invariant
-
-That is `idx = y*W + x`: one operand is the vector IV and the other is an invariant
-computation (`y*W`) that is nonetheless *defined inside the loop*, so
-`value_defined_in_loop` classifies it as varying and the body is rejected. The
-broadcast path cannot absorb it because it materialises values in the loop
-preheader, where an in-body definition is not available.
-
-So the blocker is loop-invariant code motion, not the memory proof: if `y*W` left
-the loop, the access would already be legal. That also means the same fix serves lbm
-and cd's invariant pointer fetch.
-
-#### LICM does run and does hoist; the invariant operand still stays
-
-LICM's own trace on lbm (with `-vvvvv`, which enables the heuristic channel) shows
-it is not skipping the loops: for the two inner loops it accepts 8 and 9
-instructions and moves them into the preheader.
+LICM does visit the loops: with `-vvvvv` it accepts 8 and 9 instructions in the two
+inner loops and moves them into the preheader:
 
     LICM loop header=b8 latch=b10 preheader=b7: positive-trip=yes
     LICM accept invariant @343 op=1 dst=v233 from b8: effects=0x0
@@ -5706,629 +3756,283 @@ instructions and moves them into the preheader.
     LICM loop header=b5 latch=b11 preheader=b4: positive-trip=no
     LICM insert 9 instruction(s) for loop header=b5 into b4 at instruction 327
 
-So the earlier hypothesis that LICM never visits the loop is wrong. Something in the
-body survives the sweep and is still loop-defined when the vectorizer runs, and the
-vectorizer intersects that with "one operand of `idx = y*W + x` is not
-vector-valued". The trace only reports accepts, so identifying the surviving
-definition needs a reject-side trace (the candidate is rejected silently today).
-
-Ordering is the other candidate: the address-hoisting phase of LICM
-(`licm_allow_address_hoist`, enabled for a second sweep at the end of `nyr_licm`)
-may run after `loop_vectorize` has already made its decision. Both possibilities are
-testable by moving the vectorizer later in the pipeline or by tracing the reject
-side; neither was guessed at here.
-
-### 2026-11-19 pre-vectorize LICM phase: built, measured, reverted
-
-I added `nyr_licm_pre_vectorize` (the address-hoisting phase `nyr_licm` defers until
-after vectorization) and ran it immediately before both the O2 and O3 vectorizer
-calls, with `NYTRIX_NO_PRE_VECTORIZE_LICM=1` as an escape hatch.
-
-Measured, same machine, cold caches:
-
-    lbm  56.25M instructions (unchanged)
-    cd   100.36M instructions (unchanged)
-
-No effect at all, so the phase was removed again rather than kept as a compile-time
-cost with no benefit. The vectorizer's reject only moved from pc=541 to pc=547,
-still `mixed i64 operand is not loop-invariant`, which means the offending operand
-is not the `y*W` hoisted by that phase.
-
-The reject-side trace added alongside it did answer the question, and it contradicts
-the earlier hypothesis: for the surrounding loops LICM refuses candidates with
-`effect, trap or address-shape rule refused it` (ops 16, 3, 43, 21), and for the
-operand-driven ones it names the exact loop-defined value. So the surviving operand
-comes from an instruction that rule already vetoes, not from missing motion. The
-next step is to identify which opcode the vector reject at `lbm.ny:34:17` is
-actually looking at -- line 34 is the `+ 4 * i64buf_load(a, idx)` term, not the `idx
-= y*W + x` definition, so the earlier diagnosis pointed one line too high.
-
-The reject trace itself is kept: it is codegen-neutral and it is what made the
-refusals legible at all.
-
-#### Vectorizer: cloning an invariant in-loop sub-expression (negative, reverted)
-
-Goal: let the lbm stencil loop vectorize. Its last reject is
-
-    pc=541 op=add.i64 at lbm.ny:34:17
-    reason=mixed i64 operand v359 (def op=shl.i64) is not loop-invariant
-
-even though all five access ranges already prove out. The address parts are
-loop-invariant; the *index expression* `mul/shl` is not, because it is recomputed
-inside the body. So the pass was given a cloner: an invariant sub-expression (pure,
-non-trapping i64 ops, recursion depth 8, at most 32 clones) is rebuilt in the loop
-preheader, the in-body operand is rewritten to the clone's id, and the clone is
-emitted with the broadcast splats. A rejected loop rolls the operand edits back, and
-the spare-value margin (`f->next_value
-64`) keeps the per-value tables indexed by synthesised ids.
-
-It built cleanly and changed no codegen: the cloner never fired. The reject stayed
-byte-identical and lbm held at 56.25M instructions. Reverted rather than kept as an
-unverified path.
-
-What the next attempt must pin down first: the gate and the cloner disagree on v359.
-`value_defined_in_loop` is true there (otherwise the reject text would not fire),
-yet the cloner declined the value. Either `nyr_effective_effects` on the `shl.i64`
-is non-zero (so the purity test refuses it before the opcode whitelist is even
-consulted), or the operand recursion bottoms out on something outside the whitelist
-and the whole chain fails. Instrument the cloner's three declines (effects,
-whitelist, recursion) separately before building the rest of the machinery again -
-the rewrite/emission plumbing was never exercised, so it was never validated either.
-
-Baseline after the revert (unchanged, `./make bench-gcc`): cd 100.36M/17.72M 5.66x,
-lbm 56.25M/10.12M 5.56x, bigint-oracle 216.02M/40.76M 5.30x, matrix 0.60M/0.27M
-2.21x, mandel 1.23M/0.57M 2.18x, page-rank 0.43M/0.23M 1.90x.
-
-#### lbm stencil: SIB base from a stack home (negative, reverted)
-
-With cloning ruled out, the next lever was the stencil loop's own encoding rather
-than its vectorization. The loop (lbm.ny:33-40) compiles to 33 instructions per
-iteration; here is where they go:
-
-    5 load, 1 store                     6
-    address setup (3 spilled bases)     6   mov -0x218(%rbp),%rax ; mov (%rax,%r12,1),%r8
-    sum tree + *4                       4   lea/lea/lea/lea
-    divide by 8 (truncating fixup)      5   mov/sar $63/and $7/lea/sar $3
-    clamp 0..4096                       12   mov,cmp,mov,cmovl,mov,cmp,mov,cmovg
-    loop increment + branch             3
-
-Three of the six address-setup instructions exist only because a loop-invariant base
-pointer computed by an earlier `lea` was spilled to a stack home and is reloaded
-through %rax on every iteration:
-
-    lea    (%rcx,%r14,8),%rax
-    mov    %rax,-0x218(%rbp)        ; preheader
-    ...
-    mov    -0x218(%rbp),%rax        ; per iteration
-    mov    (%rax,%r12,1),%r8
-
-The home is the value's only copy, so `[%rbp + home + index]` is the same address as
-`[%rax + index]` after that reload, and the reload is redundant. Implemented as
-`mach_sib_base_reg()` in `src/code/backend/mach/arch/x86/object64.c`:
-`mach_sib_query()` grew an optional displacement out-parameter, and the four sites
-that staged a base through %rax (LEA path resident-index, LEA path r10-index, ADD
-path resident-index, ADD path r10-index) now ask for the frame base first, falling
-back to the reload when the caller cannot encode a displacement.
-
-Measured result: **no change at all** - lbm still 56.25M instructions (56.25M ->
-56.25M, i.e. 5.56x), so the fold never fired on this loop; and two
-`etc/tests/lang/execution` tests failed (65 -> 63). Both failures matter: a change
-that alters codegen without moving the metric and breaks tests is strictly negative,
-so it was reverted in full. `etc/tests/lang/execution` returned to 65/65 and
-`etc/tests/code/targets/x86_64` stayed 166/166.
-
-The lesson for the next attempt: the reload path is not the one `mach_sib_query`
-takes for this loop (the base operand's home is not visible as a plain spilled vreg
-there - most likely it is a *colored* value whose home is dual-written, which the
-fold deliberately excluded), so instrument `mach_sib_base_reg` before rebuilding it.
-
-Remaining fat in the same loop, in decreasing size: the 12-instruction double clamp
-(six of those are pure register copies between the two selects' destinations), the
-5-instruction truncating divide fixup, and the three per-iteration pointer reloads.
-The clamp copies and the reloads are both register-allocation outcomes (each select
-gets its own destination color; the loop runs out of registers for six pointers), so
-the next lever at this level is allocator coalescing rather than another addressing
-fold.
-
-#### lbm stencil: instrumenting the frame-base fold (result: the fold cannot help)
-
-The fold was re-attempted with tracing rather than guesswork. Two probes, both gated
-on `NYTRACE_SIB_FRAME=1`:
-
-`mach_sib_base_reg` logged one line per decision with the operand kind, the vreg,
-   its assigned preg, its home offset and the verdict.
-Every reload site logged `where=<site> inst=<n> off=<home> vreg=<v>`:
-   `mach_addr_base`'s vreg fallback and `mach_load_op_rax`'s final `mach_load_rax`.
-
-For the whole lbm compile the predicate was consulted only **32 times, all
-`vreg-resident-or-no-home`** - never `frame`, never `home`. So the fold could not
-fire there. Meanwhile the loop's three base reloads show up as:
-
-    SIB_RELOAD where=load_op inst=438 off=-536 vreg=346
-    SIB_RELOAD where=load_op inst=443 off=-520 vreg=349
-    SIB_RELOAD where=load_op inst=455 off=-552 vreg=343
-
-All 48 reloads in the program come from `where=load_op`; **none** from
-`where=addr_base`. And at insts 438/443/455 there is no `SIB_FRAME` line at all:
-those base operands never reach `mach_sib_query`'s four base sites. They are staged
-by a *different* caller of `mach_load_op_rax` that still produces a SIB with a
-resident index. That caller is the thing to instrument next (tag each
-`mach_load_op_rax` call site, not the reload sites).
-
-Correctness signal, and the reason the fold is gone for good: with either variant
-(vreg-home only, and vreg-home plus FRAME) lbm's instruction count did not move at
-all - 56.25M -> 56.25M - while `etc/tests/lang/execution` failed two tests (65 ->
-63) on both builds, reproducibly. Trace coverage only covered lbm, so those tests
-fold somewhere else and miscompile there: the premise "the frame slot holds the base
-pointer at the access" does not hold in every case the predicate accepts. Two
-independent attempts, same result. Not re-attempted; if it is ever revisited, prove
-the premise per case (the slot must be the value's single, current home, not a
-dual-written or shared one) before emitting `[rbp + slot + index]`.
-
-After the revert: clean build, `etc/tests/lang/execution` 65/65,
-`etc/tests/code/targets/x86_64` 166/166, lbm 56.25M/10.12M 5.56x.
-
-#### Where the next lbm win actually is: select destination coalescing
-
-The 31-instruction inner loop still spends 12 on the double clamp and 3 on pointer
-reloads, and six of those clamp instructions are pure register copies between the
-two selects' destinations:
-
-    mov    %rax,%r14     ; v        -> select1 dst
-    xor    %r10d,%r10d
-    cmp    $0x0,%r14
-    mov    %r14,%r15     ; select1  -> select2 dst
-    cmovl  %r10,%r15
-    mov    $0x1000,%r10d
-    cmp    $0x1000,%r15
-    mov    %r15,%r14     ; select2  -> store value
-    cmovg  %r10,%r14
-
-Each select writes its own destination vreg, so the lowering/encoder needs a `mov`
-before each `cmov`. Fixing this means copy coalescing, not another addressing fold:
-`mach_coalesce_copies` in `src/code/backend/lower/machine.c` (around line 879)
-already coalesces the copies PHI destruction leaves behind, and
-`coalesce_loop_edges` in `regalloc.c` does the loop-edge equivalent. The chain here
-is `v -> select1.dst -> select2.dst`, where each link's source has a single use,
-which is the textbook coalesce case; the selects' destinations presumably conflict
-with a live range that spans both, so the pass declines. Instrument that pass's
-reject reasons first (it may already have a trace channel) and measure the
-inner-loop instruction count, not just wall time.
-
-#### Coalescer and encoder probes on the clamp: three answers
-
-**(1) Why `mach_coalesce_copies` declined the clamp copies.** Traced with
-`NYTRACE_CC=1`, which now reports one line per COPY inst with the first gate that
-refused it. lbm considers 173 copies:
-
-    139  why=src-not-vreg        (constant materializations: mov $0x1000, ...)
-     30  why=synthetic-copy      (source_pc == UINT32_MAX, refused outright)
-      3  why=not-raw             (the clamp chain)
-      1  CC_MERGE
-
-Nothing reached the interference or alias test: the gate chain refused every copy
-earlier. The three clamp copies are rejected by `!m->c_abi && (!raw[d] || !raw[s])`
-- `mach_cc_raw_vregs` marks them non-raw because their NYIR scalar class is not
-`NYIR_SCALAR_I64_RAW`. So the refusal is the Nytrix ABI's raw-i64 requirement, not a
-liveness conflict.
-
-**(2) Making it merge, and what it measures.** Dropping that raw requirement
-(keeping the `source_pc != UINT32_MAX` requirement) changes the trace to `CC_MERGE
-3` plus one newly-visible `why=interference`, and the build stays correct (65/65
-execution, 166/166 x86_64). It does not achieve the goal:
-
-    inner loop          31 -> 31 instructions
-    lbm                 56.25M -> 56.30M
-    bigint-oracle       216.03M -> 215.70M
-
-The three `mov`s in the clamp are not COPY instructions at all. They are emitted by
-the encoder's select lowering (`case NYR_MACH_SELECT`), which materializes the
-else-arm into the select's own destination before the `cmov`; the destination vreg
-differs from the source, so a `mov` is required no matter how well copies coalesce.
-Removing them means encoding the select in place (write the cmov into the source
-register when the source is dead after the select), which is an encoder change, not
-a coalescing one. Reverted: no gain, and the drop is a global codegen change.
-
-**(3) Which caller stages lbm's spilled base pointers.** Every `mach_load_op_rax`
-call site was rewritten to pass its own line number and the reload logged it. lbm's
-three base reloads all report:
-
-    LOA inst=438 site=13187 vreg=346 off=-536
-    LOA inst=443 site=13187 vreg=349 off=-520
-    LOA inst=455 site=13187 vreg=343 off=-552
-
-Line 13187 is the LEA-elision path: the `mach_sib_add_mem` block that fills
-`pending_sib_base/index/scale` for the following load, in the branch commented "Only
-the base needs a scratch: keep the resident index" (`mach_seed_colored_preg(index)`
-then `mach_load_op_rax(base)`).
-
-That is neither `mach_sib_query` (patched twice) nor `mach_addr_base`. Both
-frame-base folds were therefore placed in functions this loop never calls, which is
-exactly why they could not fire. A `[%rbp + home + index]` fold has to be made in
-this pending-SIB setup, where the base/index/scale triple is chosen - and its
-unsoundness must be re-proved there before it is kept.
-
-State after reverting both probes: clean build, 65/65 execution, 166/166 x86_64, lbm
-56.25M/10.12M 5.56x, bigint-oracle 216.02M/40.76M 5.30x, and `object64.c` back to
-the pre-probe diff (+76/-18, the select/clamp work).
-
-#### Overhaul triage: which cited gaps are actually ours
-
-Measured before touching anything, because two of the headline gaps are not compiler
-gaps at all.
-
-**currying (reported 31.85x NYR/LLVM): does not reproduce.** Same host, same
-fixture, both sides rebuilt from the shape's embedded sources:
-
-    NYR   elapsed 4027 ns  (direct 1462, residual 1283, factory 1282)
-    C     elapsed 4589 ns  (direct 1643, residual 1453, factory 1493)
-    checksum 14017005 on both
-
-The Nytrix binary is faster than the C reference and the whole program is a 4 us
-measurement. The recorded tables mark this fixture `FAIL`, so the 31.85x comes from
-somewhere other than the code path measured above - most likely a sub-10us timing
-floor or a failed-side artifact. Deprioritized until the harness explains the FAIL
-status; there is no codegen gap to chase here.
-
-**bigint-oracle (15.15x): a library comparison, not codegen.** The C side of the
-shape carries `optional_ldflags "-lgmp"` and 61 `mpz_`/`mpf_` references: the
-reference is GMP (hand-written assembly limbs, Karatsuba/Toom, Newton division and
-sqrt). The Nytrix side is `core.math.big` / `bf_*` in Ny. Equal performance here
-means implementing GMP-grade bignum algorithms in the standard library, which is a
-library project with its own benchmarks and checksums - not an instruction-selection
-or register-allocation defect. Kept out of the backend backlog deliberately.
-
-**native-oracle** has no GMP references, so it stays on the codegen list; its
-recorded size (88 us vs 33 us) is close enough to the timer floor that it needs the
-same floor check as currying first.
-
-**Genuinely ours, with root causes already located from assembly:**
-
-| fixture | recorded | located cause |
-|---|---|---|
-| cd | 7.67x | `op=addr.symbol` buffer-pointer fetch in the inner loop plus a conditional-reduction PHI; NYIR has no vector compare/mask/masked-add opcode |
-| matrix | 5.05x | scalar nested traversal; bounds math per iteration (`bce-matrix` notes in this file) |
-| page-rank | 3.90x | reduction loop over a pointer-chased graph |
-| lbm | 3.66x | 31-instruction stencil loop: 12 for the double clamp (6 are select-destination copies), 3 for spilled base reloads, 5 for the truncating divide fixup |
-| mandel | 1.52x | within noise of the 1.2x goal; no cmov in `main` |
-
-**What the select-copy pattern costs across fixtures** (whole-program `main`
-segment, counted from disassembly): lbm has 2 `cmov`s and 2 copy-ins, both inside
-the hot loop (2 of 31 instructions, ~6%); cd has 10 `cmov`s and 2 copy-ins across
-774 instructions; mandel and matrix have **zero** `cmov`s in `main`. So re-encoding
-selects in place is justified by lbm alone - it would not move mandel or matrix.
-
-**Net position of this session on the backend:** three structural attempts
-(vectorizer clone, frame-base SIB fold, coalescer raw-gate drop) were built,
-measured and reverted because none moved a metric and two broke tests. The tree
-keeps only the earlier validated select/clamp fusion and the codegen-neutral proof
-diagnostics. The <=1.2x C target is not reached; the table above is the ordered work
-list, and each row needs its own assembly-level root cause before code is written.
-
-#### currying: why the harness said FAIL, and why 31.85x was a timer artifact
-
-Both parts resolved from the report data, not from the console.
-
-**The FAIL is historical.** Across 113 stored reports, currying is `ok` 97 times,
-`fail` 10 and `regression` 6; every non-ok row predates 2026-11-16 and all of them
-have `ny_failures` or `llvm_failures > 0`. The six most recent runs are `ok` with
-`ny_failures=0`, `llvm_failures=0`, `checksum_ok=True`, `ny_checksum == c_checksum
-== llvm_checksum = 14017005`. `bench_row_status` only reports FAIL when a route
-actually failed, so there is no live FAIL to investigate - the `FAIL` line in the
-older measurements table is stale.
-
-**The 31.85x came from a 200ns sample.** Latest row before the fix
-(`bench-20261119-082255`):
-
-    ny_native_ms 0.004459 ms   (4.46us of real loop work)
-    ny_llvm_ms   0.000140 ms   (140ns - LLVM folds all three loops closed-form)
-    c_ms         0.003326 ms   (3.33us, real loops)
-    native_llvm_ratio 31.85    native_ratio 1.34    llvm_ratio 0.042
-
-`llvm_ratio = 0.042` means LLVM ran 24x faster than C, which is the signature of
-elision rather than codegen; the shape's own comment predicts it ("the LLVM route
-sums each loop in closed form (~130ns)"). The harness accepted the ratio because
-`bench_signal()` gates at 100ns and 140ns clears it - by 40ns.
-
-**Fix (`src/cmd/tools/test/runner.c`).** Added `bench_ratio_signal()` with a 500ns
-floor (5x the display gate) and used it for the *ratio* predicates instead of the
-display gate:
-
-    bench_native_llvm_comparable : bench_signal(ny) && bench_signal(llvm)
-                                -> bench_ratio_signal(ny) && bench_ratio_signal(llvm)
-    bench_llvm_c_comparable      : bench_signal(c)  -> bench_ratio_signal(c)
-    bench_native_c_comparable    : bench_candidate_signal_for_startup(r, ny)
-                                   + bench_signal(c)
-                                -> unchanged candidate rule + bench_ratio_signal(c)
-    floor_row escape for NY/LLVM : r->llvm_ms > 0
-                                -> bench_ratio_signal(llvm) && bench_ratio_signal(ny)
-
-500ns and not 1us is deliberate: lbm's C reference measures 0.84us and must keep its
-ratio (4.71x), so the margin cannot be set above it.
-
-**Verified** (`./make bench currying native-oracle lbm matrix`, report
-`bench-20261119-083234`):
-
-    currying       ok  ny=0.004468 llvm=0.000201 c=0.003336 | NY/C 1.34 v=True
-                                                            | NY/LLVM v=False
-    native-oracle  ok  ny=0.099000 llvm=0.322529 c=0.031238 | NY/C 3.17 v=True
-    lbm            ok  ny=3.971433 llvm=3.171847 c=0.842877 | NY/C 4.71 v=True
-    matrix         ok  ny=0.035666 llvm=0.015399 c=0.007204 | NY/C 4.95 v=True
-
-The `NYR/LLVM gap` headline moved from `currying (31.85x)` to `matrix (2.32x)`, i.e.
-from a 200ns artifact to a real sub-ms gap. Tests: 65/65 execution, 166/166 x86_64.
-
-Note for future readings: the report's `*_ms` fields are milliseconds, so
-native-oracle's `0.099` is 99us, not 99ns - it is a genuine 3.17x, and only
-currying's LLVM side (0.000201 ms = 201ns) sat at the floor. Units caused a false
-lead during this investigation; the floor check is now explicit in code.
-
-#### 2026-11-19 compile-time: Standard library parsed AST reuse (`NYTRIX_STD_AST_CACHE`)
-
-**Motivation:** Compiling any program that imports `core` paid ~95-100 ms every
-compilation concatenating, lexing, and parsing 996 KB of standard-library source
-text, even when compiling repeatedly or running multiple passes in-process.
-
-**Implementation (`src/code/lang/ny/pipeline/init.c`,
-`src/code/lang/ny/parser/stmt/comptime.c`):**
-Introduced in-process parsed standard-library AST cache (`NYTRIX_STD_AST_CACHE`,
-  enabled by default; opt-out with `NYTRIX_STD_AST_CACHE=0`).
-On the first compilation requiring standard library, parses the full stdlib source
-  once into a dedicated immutable arena (`g_std_ast_cache.prog`) and caches parser
-  registries (`ct_layouts`, `ct_modules`, `ct_templates`, `ct_decls`,
-  `ct_diag_rules`, `type_aliases`, `gensym_counter`).
-On subsequent compilations within the same process, skips reparsing the 996 KB
-  source. Deep-clones cached AST statements into the per-compile `arena` via
-  `ny_ast_clone_stmt` (`ct_clone_stmt`), ensuring semantic analysis and codegen
-  mutations never corrupt the pristine cached AST.
-Seeds the fresh compile's parser registries directly from the cache.
-
-**Measured results (`--native-backend x86_64 --profile-time --runs=5`):**
-`test_use_core.ny` (`use core; fn main() { 0 }`):
-Before: 0.905s / 0.810s / 0.802s / 0.792s / 0.800s (mean 0.822s, min 0.792s)
-After: 0.936s / 0.765s / 0.761s / 0.744s / 0.654s (mean 0.772s, min 0.654s, -138 ms
-    / 17.4% faster)
-`lbm.ny`:
-Before: 0.912s / 0.830s / 0.810s / 0.830s / 0.812s (mean 0.839s, min 0.810s)
-After: 1.019s / 0.796s / 0.781s / 0.761s / 0.744s (mean 0.820s, min 0.744s, -66 ms
-    faster)
-Zero test regressions across `etc/tests/lang/execution/` and
-  `etc/tests/bench/numeric/`.
-
-### 2026-11-19 cd: the address is a direct addr.symbol, and the loop dies before the load
-
-`tbuf_address_parts` now dumps the defining chain of a refused address under
-`NY_TRACE_ADDR_CHAIN=1` (codegen-neutral; it only feeds the trace). For cd:
-
-```
-nyir addr chain: value=275 op=addr.symbol a=-1 b=-1 c=-1
-```
-
-So the refused value is a bare symbol-slot address, not a copy or rebuilt
-expression: the earlier premise that the address resolves through `COPY` hops was
-wrong, and the three classification predicates tested earlier could never match for
-that reason alone.
-
-Line attribution matters here, and an earlier reading of this trace got it wrong.
-`NY_TRACE_VECTORIZE=1` reports both of these in the **movement** loop
-(`cd.ny:23-37`), not the pairwise loop:
-
-```
-reject pc=458 op=load.i64  cd.ny:24:27   reason=address is not a payload+offset add chain
-reject pc=438 op=store.i64 cd.ny:32:20   reason=unmodeled memory/trap effect remains in loop body
-```
-
-`24:27` is the `px` handle fetch inside `x = i64buf_load(px, i) + ...`, and `32:20`
-is `i64buf_store(px, i, x)`. The store is refused with the *generic* effect reason
-because `vector_memory_affine` could not find a payload root for its address; the
-root failure is the handle fetch one scan earlier, so both are the same blocker. The
-pairwise loop (`cd.ny:40-50`) is a different set of refusals (`pc=436/453/543/557`,
-PHIs of `step`, `i` and the `j`/`hits` recurrence).
-
-There is therefore no memory-resident `hits` reduction to model: `hits` is a
-loop-local (`mut hits = 0`, `cd.ny:38`) and the pairwise loop contains no
-symbol-slot store at all. The work that would move this fixture is (a) treating the
-invariant `load.i64 addr.symbol(sym)` handle fetch as a loop-invariant broadcast
-with a preheader reload, then (b) the pairwise loop's PHIs and its conditional count
-reduction. Fact (a) is the same conclusion as before, now with the correct line
-numbers; the `hits`-in-memory hypothesis is retired.
-
-### 2026-11-19 the suite's two alarming rows in the last full run are contention artifacts
-
-The 11:48 full run printed `mandel 13.98x` and `ackermann 36.56x`, which would be
-the two worst NYR/C rows in the suite. Re-measured standalone, same tree, same
-fixtures:
-
-```
-mandel      NYR 121 us   LLVM  89 us   C  75 us   NYR/C 1.61x  NYR/LLVM 1.35x
-ackermann   NYR 108 us   LLVM 111 us   C  40 us   NYR/C 2.67x  NYR/LLVM 0.97x
-```
-
-For `mandel` the harness reached the same conclusion inside the run itself: its
-confirm pass re-measured 141 us against LLVM's 107 us (1.88x), so 13.98x was a
-first-sample flake under 25 concurrent workers, not code.
-
-`ackermann`'s C reference is constant-folded (the clang build of the reference
-contains 14 instructions in `main` and never calls `ack`), while NYR executes the
-recursion; 2.67x is the floor that comparison can produce, and the earlier `36.56x`
-was the same flake on the NYR side (1.85 ms instead of 108 us).
-
-Consequence: both rows are excluded from any "slowest" work list, and no gate was
-affected - all seven per-class gates passed in that run.
-
-### 2026-11-19 cd: the window that is missing belongs to the init loop, not the movement loop
-
-Both "give the movement loop a window" and "broadcast the handle fetch" were checked
-against the trace before writing code, and the trace already answers the first one:
-the movement loop's reject is
-
-```
-reject pc=458 op=load.i64 cd.ny:24:27 reason=address is not a payload+offset add chain
-```
-
-`tbuf_affine_memory_safe` reaches the address chain only after
-`vector_memory_affine` has passed the `window_trip > 0` gate, so the movement loop
-**has** a proven window (`i = 0` on `cd.ny:22` gives the lower bound, `N` the
-upper). The only window-less loop is the init loop, whose reject is the window
-reason itself. Experiment separating the two halves of the window: the init loop's
-limit replaced by a literal,
-
-```
-while i < 200 {        ; was: while i < N {
-```
-
-and the reject is unchanged (`pc=322 ... no provable iteration window`), so the
-missing half is the *entry value*, not the limit. `i` is initialised by the
-module-level `mut i = 0` on `cd.ny:10`, so the loop reads its IV from a symbol slot
-and `init_unknown` is set with no range fact to substitute. Bounding it needs
-memory-SCEV over the slot (a stored-constant range on the definition feeding the
-load), which the pass does not have.
-
-Consequence: no vectorizer change was made for either request. The movement loop's
-remaining blocker is the handle-fetch root, and the init loop's is memory-SCEV on
-the IV
-the second being the cheaper of the two and worth having independently of cd, since
-  any loop entered with a module-level counter hits it.
-
-### 2026-11-19 VRP read-only slot ranges: built, fired on nothing, reverted
-
-The plan was to give `def N = 200` and module `mut i = 0` a range fact in `nyr_vrp`,
-so cd's init loop would get the lower bound its window is missing. The patch was
-written and built: `vrp_ro_slots` collects, per function, each `addr.symbol` whose
-address never escapes (`vrp_symbol_address_confined`: every use of the address value
-must be the whole address of a load or store) and which the function writes exactly
-once with a constant (`nyr_const_i64`), then `case NYIR_LOAD_I64` publishes `[k,k]`
-for a load from such a slot instead of top.
-
-Result: cd is byte-identical. Same 10 rejects, same `checksum= 387`, and the init
-loop still reports `pc=322 ... no provable iteration window`. A control run with the
-function-level `NYIR_CALL` bail removed was also identical, which rules out the call
-guard as the reason nothing fired.
-
-Remaining explanation: the consuming function does not contain the single store.
-Module-scope definitions are materialised by the module initializer, a different
-function, so a per-function scan sees zero stores to `N`'s slot, and `mut i`'s slot
-is written by the loop that reads it (two stores). The fact therefore has to come
-from the initializer data, not from a local store scan - VRP is the wrong pass for
-it.
-
-Nothing is shipped: `vrp.c` was restored to HEAD (`git diff` empty for it) and the
-tree rebuilt clean. Recording it because "publish the range of a single-store
-constant slot" is the obvious first idea for this gap and it does not work on this
-lowering.
-
-### 2026-11-19 why a symbol-to-initializer table cannot bound a memory-carried IV
-
-The follow-up to the reverted VRP attempt was to expose a
-symbol-to-constant-initializer table from lowering. Reading the consuming path shows
-the table cannot deliver the fact, independently of where it is built:
-
-VRP publishes exactly one range per SSA value (`in->range` on the defining
-  instruction), not one per program point. A load's published range therefore holds
-  for every execution of that load.
-cd's init loop carries `i` in a module slot that the loop itself writes (`i += 1`,
-  `cd.ny:16`). Any initializer the slot ever had is false from the first iteration
-  on, so a whole-function range for the load would be wrong, and a table cannot fix
-  that: the table describes the slot's state, not the slot's state *at this load*.
-The other candidate, `def N = 200`, is already constant-folded by the front end
-  (replacing the limit with a literal `200` left the reject unchanged), so no table
-  is needed for it.
-
-What the window actually needs is the value at the loop's preheader, which is a
-reaching-definition question: resolve the IV's entry load to the unique store that
-reaches the loop header, and use that store's constant. That is per-loop memory SCEV
-inside the vectorizer's window computation, not a fact the front end can hand over.
-
-Consequence: no table was added, and `vrp.c` stays at HEAD. The next attempt should
-be `loop_vectorize.c`: when `init_unknown`, walk the load's symbol back to the
-dominating preheader store, and use its constant for `w_lo` only if it dominates the
-header and no other store to that symbol lies on any path into it.
-
-### 2026-11-19 loop_vectorize `vector_slot_entry_const`: the memory-carried IV now gets an entry bound
-
-`loop_vectorize.c` resolves an entering IV value that has no SSA constant by looking
-at the slot it is loaded from: `vector_symbol_of_address` names the `addr.symbol`,
-and `vector_slot_entry_const` scans back through the load's own block for the
-nearest store to that slot, accepting it only when no call sits between the store
-and the load and the stored value is constant. Within one block the earlier store
-decides the load, so no CFG dominance proof is needed, and a call could only reach
-the slot through an escaped address the scan cannot see, hence the bail. The
-constant becomes `init` with `init_unknown = false`, which is exactly what the
-window computation needs for `w_lo`.
-
-cd's init loop, before and after (trace, caches off):
-
-```
-before: reject pc=322 op=load.i64 cd.ny:12:17 reason=variable trip count has no provable iteration window
-after:  reject pc=322 op=load.i64 cd.ny:12:17 reason=address is not a payload+offset add chain
-```
-
-The window opens; the loop now fails on the handle fetch, the same root blocker as
-the movement loop. `checksum= 387` unchanged, and the fixture timing is flat (`cd`
-7.08 ms NYR / 7.28x in the full suite) because nothing in this loop vectorizes yet -
-the change is a precondition, not a win on its own.
-
-Full suite after the change: exit 0, no budget misses, all seven class gates pass,
-overall NYR/C 1.42x / LLVM/C 1.18x / NYR/LLVM 1.21x. Earlier runs of the same tree
-measured 1.32x-1.46x overall, so the fixture-level movement here is run-to-run
-spread; only the window reject is a definite change.
-
-Audit of the same reject across `etc/tests/bench` (source extracted per fixture,
-trace on): the window is still unproven in 30+ fixtures - `page-rank` 11,
-`expression-tree` 12, `mont64` 10, `pbkdf2` 9/6, `sha256` 7, `richards` 7,
-`list`/`splay`/`list-dynamic`/`list-any-append`/`dict-set`/`radix-tree`/
-`bigint-oracle`/`doitgen` 7 each, `mandelbrot`/`spectral`/`fft`/`linpack`/
-`matrix-raw`/`dgemm`/`sssp`/`deltablue`/`float-cmp-oracle` 4 each, `sieve` 3,
-`dijkstra`/`dict-oracle`/`dict` 2, `fannkuch`/`euler9` 1. Those are loops whose
-entry value crosses a block edge (so the block-local rule refuses it) or whose IV
-genuinely varies per outer iteration; each needs the CFG-dominance generalisation of
-this rule before it can be retried.
-
-### 2026-11-19 cross-block entry bound: the preheader store is found through the CFG
-
-The block-local scan could only see a store to the same slot in the load's own
-block. `vector_slot_entry_const` now also takes the cross-block case: if the load
-sits in a block with exactly one predecessor, that predecessor is the only way in,
-so a constant stored in it - with no call after the store - is the value the load
-reads. No dominance query is needed for that shape, because a single predecessor
-rules out a second path on which another store could intervene; the dominator
-bitsets (`nyr_cfg_dominates`) are the generalisation for blocks with several
-predecessors and are not used yet.
-
-cd, same trace, caches off:
-
-```
-block-local only:  10 window rejects   (pc=322 window opened, 9 elsewhere)
-cross-block added:  0 window rejects
-```
-
-`checksum= 387` unchanged. The loops still do not vectorize - they now stop at the
-handle fetch (`pc=322`, `pc=458` both `address is not a payload+offset add chain`)
-and at the pair-loop PHIs (`pc=543`, `pc=557`, `unsupported loop-carried PHI`), so
-`cd` is timing-flat at 7.09 ms / 7.17x in the full suite.
-
-Verification: full native suite `etc/tests/lang` 1472/1476 passed; the four failures
-are `lang/types/proofs/__v*` (one prover assertion, three 420 s prover timeouts),
-all in a directory that is dirty with unrelated in-progress proof work and all
-failing before codegen. `./make bench` exit 0, no budget misses, all seven class
-gates pass (overall 1.31x C, 1.20x LLVM).
-
-Re-audit after the rule: 39 fixtures still report `no provable iteration window`,
-209 rejects total, concentrated in `page-rank` 11, `mont64` 11, `expression-tree`
-10, `pbkdf2` 9+6, `licm` 8, and 7 each in `sha256`, `richards`, `splay`, `list`,
-`list-dynamic`, `list-any-append`, `dict-set`, `radix-tree`, `bigint-oracle`,
-`doitgen`, `json-parser`, `omnetpp`, `qrsyndrome`, `stringsearch`. Those remaining
-loops take their entry value from a block with several predecessors, or their IV
-changes per outer iteration.
-
-### 2026-11-20 radix-tree, bitcount, Ackermann, and BigInt
-
-Numbers below are whole-process retired user instructions from three runs of the
-embedded fixture sources, with the corresponding object code inspected. The host was
-also running a separate kernel build during some samples.
+The reject-side trace is still needed — the surviving definition is rejected silently
+today. The other candidate is ordering:
+`licm_allow_address_hoist`'s second sweep at the end of `nyr_licm` may run after
+`loop_vectorize`. Test by moving the vectorizer later or tracing rejects; neither was
+guessed.
+
+### pre-vectorize LICM phase: built, measured, reverted
+
+- `nyr_licm_pre_vectorize` ran the address-hoisting phase `nyr_licm` defers, before
+  both O2 and O3 vectorizer calls, with `NYTRIX_NO_PRE_VECTORIZE_LICM=1` as escape
+  hatch. Cold-cache lbm 56.25M and cd 100.36M were unchanged, so it was removed as a
+  cost with no benefit; the reject only moved from pc=541 to pc=547, still `mixed i64
+  operand is not loop-invariant`, so the hoisted `y*W` was not the operand. The
+  reject-side trace (kept, codegen-neutral) showed LICM refusing surrounding-loop
+  candidates with `effect, trap or address-shape rule refused it` (ops 16, 3, 43, 21),
+  and naming exact
+  loop-defined values elsewhere: the survivor came from an instruction already
+  vetoed. `lbm.ny:34:17` is `+ 4 * i64buf_load(a, idx)`, not `idx = y*W + x`; the
+  earlier diagnosis was one line too high.
+- The cloner rebuilt a pure, non-trapping i64 sub-expression in the preheader (depth
+  8, ≤32 clones, `f->next_value 64`), rewrote the operand and emitted it with the
+  broadcast splats, rolling back on reject. Target reject: `pc=541 op=add.i64 at
+  lbm.ny:34:17 reason=mixed i64 operand v359 (def op=shl.i64) is not loop-invariant`.
+  It built cleanly, never fired, left that reject byte-identical and lbm at 56.25M;
+  reverted. `value_defined_in_loop` is true for v359 yet the cloner declined —
+  instrument effects/whitelist/recursion separately; the rewrite/emission path was
+  never exercised. Baseline after revert (`./make bench-gcc`): cd 100.36M/17.72M
+  5.66x, lbm 56.25M/10.12M 5.56x, bigint-oracle 216.02M/40.76M 5.30x, matrix
+  0.60M/0.27M 2.21x, mandel 1.23M/0.57M 2.18x, page-rank 0.43M/0.23M 1.90x.
+- `lbm.ny:33-40` compiles to 33 instructions per iteration: 6 loads/store, 6 address
+  setup (three spilled bases), 4 `lea` sum/*4, 5 truncating `/8` fixup
+  (`mov/sar $63/and $7/lea/sar $3`), 12 clamp 0..4096
+  (`mov,cmp,mov,cmovl,mov,cmp,mov,cmovg`), 3 increment/branch. A loop-invariant `lea`
+  base spilled to a stack home and was reloaded through %rax every iteration:
+
+      lea    (%rcx,%r14,8),%rax
+      mov    %rax,-0x218(%rbp)        ; preheader
+      mov    -0x218(%rbp),%rax        ; per iteration
+      mov    (%rax,%r12,1),%r8
+
+  `mach_sib_base_reg()` in `src/code/backend/mach/arch/x86/object64.c`, with a
+  displacement out-parameter on `mach_sib_query()`, asked for the frame base at four
+  staging sites (LEA path resident-index, LEA path r10-index, ADD path resident-index,
+  ADD path r10-index). Result: no change at all — lbm still 56.25M instructions
+  (56.25M -> 56.25M, i.e. 5.56x) — and `etc/tests/lang/execution` dropped 65 -> 63;
+  reverted in full, execution back to 65/65 and
+  `etc/tests/code/targets/x86_64` at 166/166.
+- A second, traced attempt (`NYTRACE_SIB_FRAME=1`) consulted the predicate only **32
+  times, all `vreg-resident-or-no-home`** — never `frame`, never `home`. The loop's
+  three
+  base reloads are:
+
+      SIB_RELOAD where=load_op inst=438 off=-536 vreg=346
+      SIB_RELOAD where=load_op inst=443 off=-520 vreg=349
+      SIB_RELOAD where=load_op inst=455 off=-552 vreg=343
+
+  All 48 reloads came from `where=load_op`, none from `where=addr_base`, and there is
+  no `SIB_FRAME` line at insts 438/443/455 — the base operands never reach
+  `mach_sib_query`'s four base sites. Both variants (vreg-home only, plus FRAME) left
+  56.25M -> 56.25M unchanged and failed two execution tests (65 -> 63) reproducibly:
+  the fold is gone for good, since the slot is not always the value's single current
+  home. Remaining fat: the 12-instruction double clamp (six pure register copies
+  between select destinations), the 5-instruction divide fixup and three pointer
+  reloads — allocator coalescing, not another addressing fold, is the next lever for
+  the `v -> select1.dst -> select2.dst` chain; `mach_coalesce_copies` in
+  `src/code/backend/lower/machine.c` (around line 879) and `coalesce_loop_edges` in
+  `regalloc.c` are candidates. The clamp chain is:
+
+      mov    %rax,%r14     ; v        -> select1 dst
+      xor    %r10d,%r10d
+      cmp    $0x0,%r14
+      mov    %r14,%r15     ; select1  -> select2 dst
+      cmovl  %r10,%r15
+      mov    $0x1000,%r10d
+      cmp    $0x1000,%r15
+      mov    %r15,%r14     ; select2  -> store value
+      cmovg  %r10,%r14
+
+  `NYTRACE_CC=1` considered 173 copies: 139 `why=src-not-vreg` (constants like
+  `mov $0x1000, ...`), 30 `why=synthetic-copy` (`source_pc == UINT32_MAX`, refused
+  outright), 3 `why=not-raw` (the clamp chain), 1 CC_MERGE; nothing reached
+  interference/alias. The clamp copies fail `!m->c_abi && (!raw[d] || !raw[s])` — the
+  Nytrix raw-i64 requirement, not liveness. Dropping raw while keeping the source_pc
+  guard gave CC_MERGE 3 plus one `interference`, stayed correct (65/65, 166/166), but
+  left the inner loop 31→31 and moved lbm 56.25M→56.30M and bigint-oracle
+  216.03M→215.70M: the three `mov`s come from the encoder's `case NYR_MACH_SELECT`
+  materialising the else-arm into its own destination, so in-place select encoding
+  (cmov into a dead source) is the lever. Reverted. Tagging `mach_load_op_rax` call
+  sites placed all three base reloads at `site=13187` (LEA-elision `mach_sib_add_mem`
+  block, "Only the base needs a scratch: keep the resident index",
+  `mach_seed_colored_preg(index)` then `mach_load_op_rax(base)`), neither
+  `mach_sib_query` nor `mach_addr_base`: a `[%rbp + home + index]` fold belongs in
+  that pending-SIB setup and its unsoundness must be re-proved. Final state after
+  reverting both probes: clean build, 65/65 execution, 166/166 x86_64, lbm
+  56.25M/10.12M 5.56x, bigint-oracle 216.02M/40.76M 5.30x, `object64.c` back to the
+  pre-probe +76/-18 select/clamp diff.
+
+Triage measured before touching anything: currying's reported 31.85x does not
+reproduce — same host and fixture, both sides rebuilt from embedded sources, NYR
+4027 ns (direct 1462, residual 1283, factory 1282) versus C 4589 ns (1643/1453/1493),
+checksum `14017005` both; the tables mark it FAIL, so the gap is a sub-10us timing
+floor or failed-side artifact, deprioritized. bigint-oracle's 15.15x is a library
+comparison: the C side has `optional_ldflags "-lgmp"` and 61 `mpz_`/`mpf_` references
+(hand-written assembly limbs, Karatsuba/Toom, Newton division/sqrt) against
+`core.math.big`/`bf_*` in Ny — kept out of the backend backlog deliberately.
+`native-oracle` has no GMP references, stays on the codegen list, but its 88 us vs
+33 us needs the same floor check. Genuine, with assembly-level causes: cd 7.67x
+(`op=addr.symbol` fetch plus conditional-reduction PHI; no vector compare/mask),
+matrix 5.05x (scalar nested traversal, per-iteration bounds math), page-rank 3.90x
+(pointer-chased reduction), lbm 3.66x (31-instruction stencil: 12 clamp instructions
+with 6 select-destination copies, 3 spilled-base reloads, 5 divide fixups), mandel
+1.52x (noise of the 1.2x goal, no cmov in `main`). Whole-program `main` cmovs: lbm 2
+plus 2 copies in the hot loop (~6% of 31), cd 10 plus 2 across 774 instructions,
+mandel/matrix zero — in-place select encoding is justified by lbm alone. Three
+structural attempts were built, measured and reverted; only validated select/clamp
+fusion and codegen-neutral diagnostics remain, and the <=1.2x C target was not
+reached.
+
+The FAIL was historical: across 113 reports currying is ok 97, fail 10, regression 6;
+every non-ok predates 2026-11-16 and has `ny_failures` or `llvm_failures > 0`, while
+the six latest are ok with both counts 0, `checksum_ok=True` and all checksums
+`14017005`. `bench_row_status` only reports FAIL when a route actually failed, so the
+older table line is stale. Report `bench-20261119-082255` gave `ny_native_ms 0.004459`
+(4.46 us), `ny_llvm_ms 0.000140` (140 ns closed-form loops), `c_ms 0.003326` (3.33
+us), ratios 31.85/1.34/0.042; 24x faster than C signals elision, and `bench_signal()`'s
+100 ns gate cleared by 40 ns. `src/cmd/tools/test/runner.c` added
+`bench_ratio_signal()` with a 500 ns floor (5x the display gate) for ratio predicates:
+`bench_native_llvm_comparable` and the floor-row escape use it for NY and LLVM,
+`bench_llvm_c_comparable` and `bench_native_c_comparable` for C (candidate rule
+unchanged). 500 ns, not 1 us, preserves lbm's 0.84 us C ratio of 4.71x. `./make bench
+currying native-oracle lbm matrix` (`bench-20261119-083234`): currying ok
+0.004468/0.000201/0.003336, NY/C 1.34 v=True, NY/LLVM v=False; native-oracle ok
+0.099000/0.322529/0.031238, NY/C 3.17; lbm ok 3.971433/3.171847/0.842877, NY/C 4.71;
+matrix ok 0.035666/0.015399/0.007204, NY/C 4.95. The headline moved from currying
+31.85x to matrix 2.32x; tests 65/65 execution and 166/166 x86_64. `*_ms` are
+milliseconds: 0.099 is 99 us, a genuine 3.17x, and only currying's LLVM 0.000201 ms =
+201 ns sat at the floor.
+
+`NYTRIX_STD_AST_CACHE` in `src/code/lang/ny/pipeline/init.c` and
+`src/code/lang/ny/parser/stmt/comptime.c` removes ~95-100 ms of concatenating, lexing
+and parsing 996 KB stdlib source on every compile importing `core`: enabled by
+default, opt out with `=0`; the first compile parses once into immutable
+`g_std_ast_cache.prog` and caches `ct_layouts`, `ct_modules`, `ct_templates`,
+`ct_decls`, `ct_diag_rules`, `type_aliases`, `gensym_counter`; later compiles skip
+reparsing and deep-clone via `ny_ast_clone_stmt` (`ct_clone_stmt`) into the per-compile
+arena, seeding registries from the cache. Measured `--native-backend x86_64
+--profile-time --runs=5`: `test_use_core.ny` (`use core; fn main() { 0 }`) before
+0.905/0.810/0.802/0.792/0.800 (mean 0.822, min 0.792) → after
+0.936/0.765/0.761/0.744/0.654 (mean 0.772, min 0.654, −138 ms / 17.4%); `lbm.ny`
+before 0.912/0.830/0.810/0.830/0.812 (mean 0.839, min 0.810) → after
+1.019/0.796/0.781/0.761/0.744 (mean 0.820, min 0.744, −66 ms). Zero regressions in
+`etc/tests/lang/execution/` and `etc/tests/bench/numeric/`.
+
+### cd: the address is a direct addr.symbol, and the loop dies before the load
+
+`NY_TRACE_ADDR_CHAIN=1` (codegen-neutral) dumps the defining chain of refused
+addresses: cd gives `nyir addr chain: value=275 op=addr.symbol a=-1 b=-1 c=-1`, a bare
+symbol-slot address, not a COPY or rebuilt expression — the earlier COPY-hop premise
+and the three predicates tested against it could not match.
+
+`NY_TRACE_VECTORIZE=1` places both rejects in the **movement** loop (`cd.ny:23-37`),
+not the pairwise loop: `pc=458 op=load.i64 cd.ny:24:27` (`address is not a
+payload+offset add chain`) is the `px` handle fetch in `x = i64buf_load(px, i) + ...`,
+and `pc=438 op=store.i64 cd.ny:32:20` (`unmodeled memory/trap effect remains in loop
+body`) is `i64buf_store(px, i, x)`. The store's generic effect reason follows the same
+missing payload root one scan earlier. The pairwise loop (`cd.ny:40-50`) has separate
+refusals at `pc=436/453/543/557` — PHIs of `step`, `i`, and the `j`/`hits` recurrence.
+`hits` is loop-local (`mut hits = 0`, `cd.ny:38`) with no symbol-slot store, so the
+memory-resident reduction hypothesis is retired. Next: treat the invariant
+`load.i64 addr.symbol(sym)` as a loop-invariant broadcast with a preheader reload,
+then handle the pairwise PHIs and conditional count.
+
+### the suite's two alarming rows in the last full run are contention artifacts
+
+The 11:48 full run's `mandel 13.98x` and `ackermann 36.56x` are contention artifacts.
+Standalone re-runs, same tree: mandel NYR 121 µs / LLVM 89 µs / C 75 µs (NYR/C 1.61x,
+NYR/LLVM 1.35x); ackermann 108 µs / 111 µs / 40 µs (2.67x, 0.97x). mandel's own
+confirm pass re-measured 141 µs against LLVM's 107 µs (1.88x), so 13.98x was a
+first-sample flake under 25 concurrent workers. ackermann's C reference is
+constant-folded (14 instructions in `main`, no `ack` call) while NYR recurses, making
+2.67x the comparison floor; 36.56x came from a 1.85 ms NYR sample instead of 108 µs.
+Both rows are excluded from slowest lists; all seven per-class gates passed and no
+gate was affected.
+
+### cd: the window that is missing belongs to the init loop, not the movement loop
+
+The movement loop already has a proven window: `tbuf_affine_memory_safe` only inspects
+the address chain after `vector_memory_affine` passes `window_trip > 0`, and `i = 0`
+(`cd.ny:22`) and `N` bound it. Its reject is `pc=458 op=load.i64 cd.ny:24:27 address
+is not a payload+offset add chain`. Only the init loop lacks a window. Replacing its
+limit with a literal (`while i < 200 {` for `while i < N {`) left `pc=322 ... no
+provable iteration window` unchanged, so the missing half is the entry value: `mut
+i = 0` (`cd.ny:10`) makes the IV a symbol-slot load, leaving `init_unknown` with no
+range fact. Bounding it needs memory-SCEV over the slot (a stored-constant range on
+the definition feeding the load), which the pass lacks. No vectorizer change was made
+for either request. The movement loop still needs the handle-fetch root; the init loop
+needs memory-SCEV, the cheaper fix and useful for any loop entered with a module-level
+counter.
+
+### VRP read-only slot ranges: built, fired on nothing, reverted
+
+Built and reverted: `vrp_ro_slots` in `nyr_vrp` was to publish `[k,k]` for loads from
+read-only single-store constant slots, so `def N = 200` and module `mut i = 0` would
+give cd's init loop a lower bound. It collects per function each `addr.symbol` whose
+address never escapes (`vrp_symbol_address_confined`: every use is the whole address
+of a load or store) and is written exactly once with a constant (`nyr_const_i64`),
+then handles `case NYIR_LOAD_I64` instead of returning top. cd stayed byte-identical:
+same 10 rejects, `checksum= 387`, still `pc=322 ... no provable iteration window`;
+removing the function-level `NYIR_CALL` bail changed nothing. The consuming function
+has no such store: module definitions are materialised by the initializer, a different
+function, and `mut i`'s slot is written by the reading loop (two stores). The fact
+must come from initializer data, not a local store scan; VRP is the wrong pass.
+`vrp.c` is back at HEAD with an empty `git diff`; tree rebuilt clean.
+
+### why a symbol-to-initializer table cannot bound a memory-carried IV
+
+No table was added. VRP publishes one range per SSA value (`in->range` on the defining
+instruction), not per program point, so a load's range covers every execution. cd's
+init loop carries `i` in a module slot the loop writes (`i += 1`, `cd.ny:16`); the
+initializer is false from the first iteration, and a table describes slot state, not
+state at this load. `def N = 200` is already constant-folded — a literal `200` left the
+reject unchanged — so no table is needed there either. The window needs the value at
+the preheader: resolve the entry load to the unique store reaching the header and use
+its constant, i.e. per-loop memory SCEV in the vectorizer's window computation, not a
+frontend fact. `vrp.c` stays at HEAD. Next: in `loop_vectorize.c`, when `init_unknown`,
+walk back to the dominating preheader store and use its constant for `w_lo` only if
+it dominates the header with no other store to the symbol on any path into it.
+
+### loop_vectorize `vector_slot_entry_const`: the memory-carried IV now gets an entry bound
+
+`loop_vectorize.c` now resolves a memory-carried IV: `vector_symbol_of_address` names
+the `addr.symbol` and `vector_slot_entry_const` scans back in the load's own block for
+the nearest store to that slot, requiring a constant value and no call between store
+and load (a call could reach the slot via an escaped address the scan cannot see). No
+CFG dominance proof is needed within one block; the constant becomes `init` with
+`init_unknown = false` for `w_lo`. cd's `pc=322 op=load.i64 cd.ny:12:17` reject changed
+from `variable trip count has no provable iteration window` to `address is not a
+payload+offset add chain`, `checksum= 387` unchanged. Timing stayed flat at 7.08 ms
+NYR / 7.28x in the full suite — a precondition, not a win. Full suite: exit 0, no
+budget misses, seven gates, overall 1.42x C / 1.18x LLVM / 1.21x NYR/LLVM; earlier
+runs of the tree were 1.32x-1.46x, so fixture movement is spread.
+
+Re-audit of `etc/tests/bench`: 30+ fixtures still lack a window — page-rank 11,
+expression-tree 12, mont64 10, pbkdf2 9/6, sha256 7, richards 7, list/splay/
+list-dynamic/list-any-append/dict-set/radix-tree/bigint-oracle/doitgen 7 each,
+mandelbrot/spectral/fft/linpack/matrix-raw/dgemm/sssp/deltablue/float-cmp-oracle 4
+each, sieve 3, dijkstra/dict-oracle/dict 2, fannkuch/euler9 1. Their entry value
+crosses a block edge or varies per outer iteration; each needs CFG-dominance
+generalisation.
+
+### cross-block entry bound: the preheader store is found through the CFG
+
+`vector_slot_entry_const` now handles the cross-block case: with exactly one
+predecessor, a constant stored there with no call after the store is the value the
+load reads; no dominance query is needed, and `nyr_cfg_dominates` remains the unused
+generalisation for multiple predecessors. cd, caches off: window rejects went from 10
+(pc=322 opened, 9 elsewhere) to 0; `checksum= 387` unchanged. Loops still fail at the
+handle fetch (`pc=322`, `pc=458`, `address is not a payload+offset add chain`) and
+pair-loop PHIs (`pc=543`, `pc=557`, `unsupported loop-carried PHI`); cd stayed 7.09 ms
+/ 7.17x.
+
+`etc/tests/lang` passed 1472/1476; the four `lang/types/proofs/__v*` failures (one
+prover assertion, three 420 s timeouts) are in a directory dirty with unrelated proof
+work and fail before codegen. `./make bench` exit 0, no budget misses, seven gates
+(overall 1.31x C, 1.20x LLVM). Re-audit: 39 fixtures still report `no provable
+iteration window`, 209 rejects, led by page-rank 11, mont64 11, expression-tree 10,
+pbkdf2 9+6, licm 8, and 7 each for sha256, richards, splay, list, list-dynamic,
+list-any-append, dict-set, radix-tree, bigint-oracle, doitgen, json-parser, omnetpp,
+qrsyndrome, stringsearch — multi-predecessor entry blocks or per-outer-iteration IVs.
+
+### radix-tree, bitcount, Ackermann, and BigInt
+
+Whole-process retired user instructions from three runs of the embedded fixture
+sources, with object code inspected; a separate kernel build ran during some samples.
 
 | Fixture and route | Before | After | Checksum |
-|---|---:|---:|---:|
+| --- | ---: | ---: | ---: |
 | `radix-tree`, NYC | 198.80 M | 32.44 M | `62531` |
 | `bitcount`, NYC | 270.68 M | 69.36 M | `134217488` |
 | `ackermann`, NYC, revised input | 693.32 M | 599.26 M | `226800` |
@@ -6336,529 +4040,373 @@ also running a separate kernel build during some samples.
 | `bigint-oracle`, NYR | 168.07 M | 166.63 M | `1968365` |
 
 `radix-tree` now recognizes the C frontend's width-normalized induction and branch
-  PHI. Each 20-step walk becomes a mask and an OR. The fold requires a descending
-  bit window through zero, an invariant key, and a single exit. Standalone Clang
-  retired 11.74 M instructions. NYC's remaining lookup includes the signed remainder
-  sequence and home traffic.
-`bitcount` now recognizes the C frontend's redundant truncation after unsigned
-  subtraction and emits `popcnt` in the hot loop. The final low-word mask is
-  required before replacing the SWAR sequence.
-`ackermann` now has a runtime input and carries the prior result into the next
-  call's depth. Clang retains the recursive call. The machine scheduler moves the
-  decrement after the recursive call and keeps the old value live until the call, so
-  the loop update can use the same register.
-`bigint-oracle` uses hardware division for up to four Knuth quotient limbs on
-  supported x86-64 builds. The focused instruction count improved by 0.85%. Elapsed
-  time in the interleaved samples was within host variation. The full suite measured
-  29.4 ms NYR and 30.0 ms LLVM against GMP at 3.65 ms.
-The vectorizer now checks every path into a symbol-slot entry load, keeping a
-  constant only when all paths agree and no unknown store intervenes. `page-rank`
-  window rejects fell from 11 to 3 and `mont64` from 11 to 7. Both still have scalar
-  loops and their checksums match. The memory proof accepts disjoint byte ranges
-  within an allocation and retains scalar code for overlapping streams. The bounds
-  check remains in an untransformed loop and in its scalar tail.
-`stream` already used a four-lane `vpmuludq` sequence on NYR. Disabling that path
-  raised retired instructions from 95.14 M to 179.03 M at checksum `471845615`. This
-  comparison verifies the existing vector route.
+PHI: each 20-step walk becomes a mask and an OR, requiring a descending bit window
+through zero, an invariant key and a single exit. Standalone Clang retired 11.74 M;
+NYC's remaining lookup has the signed remainder sequence and home traffic. `bitcount`
+recognizes the redundant truncation after unsigned subtraction and emits `popcnt` in
+the hot loop, with the final low-word mask required before replacing SWAR.
+`ackermann` takes a runtime input and carries the prior result into the next call's
+depth; Clang keeps the recursive call, and the machine scheduler sinks the decrement
+past it to reuse the register. `bigint-oracle` uses hardware division for up to four
+Knuth quotient limbs on supported x86-64 builds: focused instructions improved 0.85%
+with elapsed inside host variation; full suite 29.4 ms NYR / 30.0 ms LLVM vs GMP
+3.65 ms.
 
-### 2026-11-20 single-limb BigInt division
+The vectorizer checks every path into a symbol-slot entry load, keeping a constant
+only when all paths agree and no unknown store intervenes: `page-rank` window rejects
+fell 11→3 and `mont64` 11→7, both still scalar with matching checksums. The memory
+proof accepts disjoint byte ranges in an allocation and keeps scalar code for
+overlapping streams; the bounds check remains in the untransformed loop and scalar
+tail. `stream` already used four-lane `vpmuludq` on NYR: disabling it raised
+95.14 M→179.03 M instructions at checksum `471845615`, verifying that route.
 
-Single-limb division now writes the quotient directly into its managed result. When
-the high limb would produce zero, it becomes the initial remainder instead; the
-result needs one fewer limb. For power-of-two divisors the limb loop uses shifts and
-a mask, including when fused multiply/divide overwrites its input buffer. Other
-divisors keep the existing hardware or portable division path.
+### single-limb BigInt division
 
-On `bigint-oracle`, interleaving two sets of three native AOT runs per variant, with
-the same compiler, source, and other runtime inputs, retired instructions fell from
-166.67 M to 166.35 M (0.19%). Cycles fell from 62.26–62.32 M to 59.94–60.15 M across
-the two sets; elapsed samples overlapped. Every run returned checksum `1968365`. The
-native AOT `bigint-short-arithmetic` oracle passed, including signed quotient and
-remainder, limb-boundary cases, and fused in-place division.
+Single-limb division writes the quotient directly into its managed result; when the
+high limb would produce zero it becomes the initial remainder instead, needing one
+fewer limb. Power-of-two divisors use shifts and a mask in the limb loop, including
+when fused multiply/divide overwrites the input buffer; other divisors keep the
+hardware or portable path.
 
-### 2026-11-20 native optimization notes
+Interleaving two sets of three native AOT runs per variant with the same compiler,
+source and other runtime inputs, `bigint-oracle` fell 166.67 M→166.35 M instructions
+(0.19%) and cycles 62.26–62.32 M→59.94–60.15 M; elapsed overlapped and every run
+returned `1968365`. The native AOT `bigint-short-arithmetic` oracle passed, including
+signed quotient and remainder, limb-boundary cases and fused in-place division.
 
-Historical measurements below describe the compiler at the time of each
-investigation. To close a current gap, reproduce a focused fixture, compare retired
-instructions and the timed object code at the same checksum, then check the complete
-benchmark report. Allocation-heavy wall times on this host can be bimodal. The
-November 20 full run passed all seven configured gates without execution or checksum
-failures; those gates do not establish the per-fixture ceiling.
+### native optimization notes
 
-`cd`: 100.4 M NYR instructions versus 12.7 M C, checksum `387`. The scalar pair loop
-  already hoists `px[i]` and `py[i]`; it runs about 25 instructions per pair versus
-  C's vectorized 3.2. The remaining vectorizer rejects are the typed-buffer handle
-  load (not a payload-plus-offset address) and the conditional `hits` recurrence.
-`viterbi`: 53.9 M versus 9.1 M instructions, checksum `3270530`. Another loop
-  already vectorizes, but the DP loop has carried PHIs and an unproven affine load.
-  The running max is a select. Of the carried rejections, 2,706 were immediate
-  folds, 2,514 unavailable colors and 462 vector-unsafe colors. All vector-unsafe
-  colors were caller-saved scratch registers (`r8`, `r9`, `rcx`, `rdx`); this did
-  not remove any otherwise viable home. The signed `% 101` correction persists
-  because the local value analysis does not track the recurrence's range.
-`mont64`: 74.8 M versus 22.4 M instructions, checksum `114319663`. The fixed-trip
-  limb loop already unrolls and uses two-address arithmetic. Its typed-buffer stores
-  still force pointer home reloads and spill the limb accumulator. Scalar
-  replacement and alias-aware residency remain better targets than another unroll.
-`fhourstones`: 25.16 M versus 7.40 M instructions, checksum `6010`. Samples split
-  67% `search` / 28% `won`. Increasing the pressure-CFG ceiling let `won` inline
-  (155 instructions) but retired instructions only fell to 24.46 M, so the change
-  was reverted. Single scalar board-scan comparisons account for 31% and 47% of
-  samples within those functions.
-`bitcount`: the original scalar SWAR loop took 74.8 M versus 31.5 M instructions at
-  checksum `134217488`. Both native front ends now emit scalar `popcnt`; C still
-  uses vector lanes and a four-byte layout versus Ny's eight-byte layout. The
-  pre-POPCNT loop rejected on its induction, load proof, and non-invariant mixed
-  operand.
-`nussinov`: a declared `bool` returns a canonical tagged value. Using
-  `!= NY_IMM_FALSE` instead of generic truthiness dropped instructions 120.7 M →
-  98.4 M and cycles 33.65 M → 26.75 M, checksum `100`. Focused wall time moved from
-  3.13× to 2.29× C. `lang/execution` passed 65/65; the full language run passed
-  1472/1476, with four proof timeouts.
-`stream`: NYR already emits a four-lane integer multiply. `ackermann` now feeds a
-  runtime-dependent argument into the recursion on both sides, and the native
-  scheduler sinks its loop decrement past the call. `towers` benefited from
-  shrink-wrapping and reusing parameter slots; five callee-save pushes remained per
-  non-base call in the sampled route.
-`bce-matrix`, `dijkstra`, `sssp`, `qrsyndrome`, `permute`, `nqueens` and `gcbench`
-  showed loop-home traffic or allocation cost. The observed `permute` inner loop was
-  still rolled at 10 trips. `currying` allocated a closure and called indirectly for
-  each partial application.
-`bigint-oracle`: `optional_ldflags` links the C reference to GMP. The cost is in the
-  arbitrary-precision library, not NYC compiling the GMP driver. Registry lookups,
-  repeated classification, and allocation-side mapping registration are leads, not
-  permission to bypass pointer validation or stop registering ranges needed by the
-  decoder.
+Historical: reproduce a focused fixture, compare retired instructions and timed
+object code at the same checksum, then check the full report; allocation-heavy wall
+times here are bimodal. The November 20 full run passed all seven gates without
+execution or checksum failures, which does not establish a per-fixture ceiling.
 
-### 2026-11-20 vector accumulator unrolling
+- `cd`: 100.4 M NYR vs 12.7 M C, checksum `387`. The scalar pair loop hoists
+  `px[i]`/`py[i]`, ~25 instructions per pair vs C's vectorized 3.2; rejects are the
+  typed-buffer handle load and the conditional `hits` recurrence. `viterbi`: 53.9 M
+  vs 9.1 M, checksum `3270530`; the DP loop has carried PHIs, an unproven affine load
+  and a select for the running max. Of carried rejections, 2,706 were immediate
+  folds, 2,514 unavailable colors, 462 vector-unsafe colors — all caller-saved
+  scratch (`r8`, `r9`, `rcx`, `rdx`), removing no viable home. Signed `% 101`
+  correction persists because local value analysis misses the recurrence range.
+- `mont64`: 74.8 M vs 22.4 M, checksum `114319663`; the fixed-trip limb loop already
+  unrolls with two-address arithmetic, but typed-buffer stores force pointer home
+  reloads and spill the accumulator — scalar replacement and alias-aware residency
+  beat another unroll. `fhourstones`: 25.16 M vs 7.40 M, checksum `6010`, samples
+  67% `search` / 28% `won`; a higher pressure-CFG ceiling inlined `won` (155
+  instructions) but only reached 24.46 M, so it was reverted. Single scalar
+  board-scan comparisons are 31% and 47% of those functions' samples.
+- `bitcount`: original scalar SWAR 74.8 M vs 31.5 M at `134217488`; both native front
+  ends now emit scalar `popcnt`, C still uses vector lanes and a four-byte layout
+  versus Ny's eight-byte, and the pre-POPCNT loop rejected on induction, load proof
+  and mixed non-invariant operand. `nussinov`: `!= NY_IMM_FALSE` instead of generic
+  truthiness for a declared `bool` cut 120.7 M→98.4 M instructions and 33.65 M→
+  26.75 M cycles at checksum `100`, wall time 3.13×→2.29× C; `lang/execution` 65/65,
+  full run 1472/1476 with four proof timeouts.
+- `stream` already emits a four-lane integer multiply; `ackermann` now passes a
+  runtime-dependent argument into recursion on both sides with the decrement sunk
+  past the call; `towers` benefited from shrink-wrapping and parameter-slot reuse,
+  with five callee-save pushes per non-base call in the sampled route. `bce-matrix`,
+  `dijkstra`, `sssp`, `qrsyndrome`, `permute`, `nqueens`, `gcbench` show loop-home
+  traffic or allocation cost; `permute`'s inner loop was still rolled at 10 trips and
+  `currying` allocated a closure and called indirectly per partial application.
+  `bigint-oracle`'s C reference links GMP via `optional_ldflags`; registry lookups,
+  repeated classification and allocation-side mapping registration are leads, not
+  permission to bypass pointer validation or drop decoder ranges.
 
-The native vectorizer can now unroll small fixed-trip integer reductions whose
-accumulator stays in vector registers. It chains each cloned chunk to the preceding
-one and keeps the horizontal sum on the exit. It selects four chunks when the trip
-count is divisible by four vector widths, two when divisible by two, and keeps the
-existing tail handling otherwise. The timed NYR `bce-matrix` object uses four packs
-per branch; three of the four packed adds take a memory operand directly.
+### vector accumulator unrolling
 
-| `bce-matrix` route | Retired instructions before | After | Change |
-|---|---:|---:|---:|
+The vectorizer unrolls small fixed-trip integer reductions whose accumulator stays in
+vector registers, chaining cloned chunks and keeping the horizontal sum on exit:
+four chunks when the trip count is divisible by four vector widths, two when divisible
+by two, existing tail handling otherwise. The timed NYR `bce-matrix` object uses four
+packs per branch, three of the packed adds taking a memory operand directly.
+
+| `bce-matrix` route | Before | After | Change |
+| --- | ---: | ---: | ---: |
 | NYR | 41.34 M | 22.14 M | −46.4% |
 | NYC | 102.72 M | 84.80 M | −17.4% |
 
-The focused five-sample runner measured 1.11× NYR, 1.67× LLVM, and 2.38× NYC vs host
-C, checksum `14439925760000` on all routes. NYC still uses 128-bit packs and stores
-short-lived loads to frame homes; the instruction win is not parity. The vector
-metadata backend test passed.
+Five-sample runner: 1.11× NYR, 1.67× LLVM, 2.38× NYC vs host C, checksum
+`14439925760000` on all routes; NYC still uses 128-bit packs and frame homes for
+short-lived loads, so the instruction win is not parity. Vector metadata backend test
+passed.
 
-For a tail-free wrapping reduction of `value + invariant`, the vectorizer now adds
-`trip_count * invariant` once at the exit rather than once per element. The original
-add must have no other consumer; variable-trip loops and loops needing scalar tails
-retain their existing behavior. On `bce-matrix`, retired instructions fell further
-to 17.02 M NYR and 64.32 M NYC. A separate seven-sample run against Clang measured
-1.37× NYR, 1.98× LLVM, and 3.50× NYC, with the same checksum. Do not compare those
-ratios directly to the earlier run: the host reference and sample timings differed.
+For a tail-free wrapping `value + invariant`, the vectorizer now adds
+`trip_count * invariant` once at exit; the original add must have no other consumer,
+and variable-trip or scalar-tail loops are unchanged. `bce-matrix` fell to 17.02 M
+NYR and 64.32 M NYC. A separate seven-sample Clang run measured 1.37× NYR, 1.98×
+LLVM, 3.50× NYC at the same checksum; host reference and timings differed, so those
+ratios are not directly comparable with the earlier run.
 
-The serial GCC-reference run after accumulator unrolling and before the invariant
-fold completed 109 fixtures without execution or checksum failures and passed all
-seven existing gates. The optional `thread-ring` fixture was run separately against
-Clang: 1.11× NYR, 1.11× LLVM, 0.89× NYC; checksum `1000` on all routes. Among valid
-comparisons in the GCC run, 26 NYR, 19 LLVM, and 37 NYC results were still above 2×.
-The largest sustained gaps included `cd`, `bigint-oracle`, `lbm`, and `matmul-int`;
-short-reference outliers included NYC `dce` and all routes on `knight`.
+The serial GCC-reference run after unrolling but before the invariant fold completed
+109 fixtures with no execution or checksum failures and passed all seven gates.
+`thread-ring`, run separately against Clang: 1.11× NYR, 1.11× LLVM, 0.89× NYC,
+checksum `1000`. Among valid GCC-run comparisons, 26 NYR, 19 LLVM, 37 NYC results
+remained above 2×; largest sustained gaps `cd`, `bigint-oracle`, `lbm`, `matmul-int`,
+short-reference outliers NYC `dce` and all routes on `knight`. Outlining BigInt
+operand coercion in Ny was reverted: `bigint-oracle` 166.36 M→168.31 M at
+`1968365`, no consistent elapsed gain, cold coercion still inline in the wrappers.
 
-Outlining BigInt operand coercion in Ny was tried separately and reverted.
-`bigint-oracle` retired 166.36 M → 168.31 M instructions at checksum `1968365`, with
-no consistent elapsed improvement. The compiler still emitted the cold coercion
-inline in the arithmetic wrappers.
+### BigFloat division sticky bit
 
-### 2026-11-20 BigFloat division sticky bit
+BigFloat rounding needs whether the division remainder is nonzero, not its magnitude.
+The runtime tests the normalized remainder in place, borrows the immutable
+denominator and packs quotient words without a zero-and-OR pass, removing the scratch
+remainder object including its heap allocation at higher precision.
 
-BigFloat rounding needs to know whether the division remainder is nonzero, not its
-magnitude. The runtime now tests the normalized remainder in place, borrows the
-immutable denominator, and packs quotient words without a zero-and-OR pass. This
-removes the scratch remainder object, including its heap allocation at higher
-precision.
+With the same compiler and runtime inputs except `bigfloat.c` and a fresh temporary
+runtime cache, `bigint-oracle` fell 166.36 M→165.34 M instructions (−0.61%) in
+interleaved native AOT runs. All runs returned `1968365`; wall times varied under
+concurrent load. Native AOT `bigfloat-padding` and `bigfloat-differential` oracles
+passed, including unequal-precision inputs and rounding.
 
-Using the same compiler and runtime inputs except for `bigfloat.c`, with a fresh
-temporary runtime cache, `bigint-oracle` retired 166.36 M → 165.34 M instructions
-(−0.61%) in interleaved native AOT runs. All runs returned `1968365`; wall times
-varied under concurrent load. The native AOT `bigfloat-padding` and
-`bigfloat-differential` oracles passed, including unequal-precision inputs and
-rounding.
+### managed-pointer cache generation
 
-### 2026-11-20 managed-pointer cache generation
+The heap registry's writer lock already serializes generation changes; publishing with
+a release store removes a second locked update without changing pointer membership or
+the reader's acquire check. A four-reader stress run verified 768,000 cross-thread
+cache transitions per polarity. Four interleaved AOT samples of `bigint-oracle` matched
+checksum `1968365`, retired instructions stayed at 165.34 M and median cycles went
+60.50 M→60.22 M; wall time stayed within sample variation.
 
-The heap registry's writer lock already serializes generation changes. Publishing
-with a release store removes a second locked update without changing pointer
-membership or the reader's acquire check. A four-reader stress run verified 768,000
-cross-thread cache transitions per polarity. Four interleaved AOT samples of
-`bigint-oracle` matched checksum `1968365`; retired instructions stayed at 165.34 M,
-and median cycles went from 60.50 M to 60.22 M. The wall-time change was within
-sample variation.
+An exponent-based BigFloat integer decoder was reverted: instructions fell 165.34 M→
+163.40 M but median cycles rose 60.07 M→61.80 M and every kernel sample was slower.
+Checksums and the padding and rounding tests passed.
 
-An exponent-based BigFloat integer decoder was tried and reverted. `bigint-oracle`
-retired 165.34 M → 163.40 M instructions, but median cycles increased from 60.07 M
-to 61.80 M and every measured kernel sample was slower. Checksums and the padding
-and rounding tests passed.
+### integer reductions with scalar tails
 
-### 2026-11-20 integer reductions with scalar tails
+The vector accumulator seeds the scalar tail with one horizontal sum at the vector
+exit, preserved even with zero vector iterations. The x86-64 encoder uses VEX.128
+packed instructions for the horizontal sum on AVX targets rather than mixing AVX and
+legacy SSE inside the loop.
 
-The vector accumulator now seeds the scalar tail with one horizontal sum at the
-vector exit. The seed is preserved even when the vector prefix has zero iterations.
-The x86-64 encoder uses VEX.128 packed instructions for the horizontal sum on AVX
-targets instead of alternating between AVX and legacy SSE inside the loop.
-
-A separate 9,999-element reduction with a nonzero seed and changing addend diagnosed
-the two costs independently. All three NYR artifacts returned `14438471528459`;
-three interleaved samples per variant:
+A separate 9,999-element reduction with a nonzero seed and changing addend isolated
+the two costs. All three NYR artifacts returned `14438471528459`; three interleaved
+samples per variant:
 
 | NYR variant | Median retired instructions | Median kernel time |
-|---|---:|---:|
+| --- | ---: | ---: |
 | Per-chunk legacy SSE reduction | 92.56 M | 417.9 ms |
 | Per-chunk VEX reduction | 72.12 M | 4.85 ms |
 | VEX reduction once before the scalar tail | 41.40 M | 4.77 ms |
 
-The original object has `vextractf128` followed by legacy `paddq` and `pshufd` in
-the hot body. The final object keeps only packed adds in that body and uses
-`vpaddq`/`vpshufd` at the exit. Runtime-bound reduction tests cover empty loops,
-scalar-only loops, exact vector prefixes and nonempty tails. The AVX-only and forced
-legacy encoder oracles passed. This diagnostic does not change the `bce-matrix`
-benchmark workload.
+The original object has `vextractf128` then legacy `paddq`/`pshufd` in the hot body;
+the final one keeps only packed adds there and `vpaddq`/`vpshufd` at the exit.
+Runtime-bound reduction tests cover empty loops, scalar-only loops, exact vector
+prefixes and nonempty tails; AVX-only and forced-legacy encoder oracles passed. This
+diagnostic does not change the `bce-matrix` workload.
 
-### 2026-11-20 LLVM FFT and the startup oracle
+### LLVM FFT and the startup oracle
 
-The timed FFT loop already had raw floating-point operations in LLVM IR. Its first
-`rt_cos_f64` call loaded and resolved libm after the first timer read. Preloading
-libm reduced the old AOT kernel from a median of 124.9 µs to 28.5 µs without
-changing the code or checksum. Raw LLVM sine and cosine now call libm directly; AOT
-supplies the dependency only when the module references it. The AOT disassembly
-calls `cos@plt` and `sin@plt`.
+The FFT loop already had raw floating-point operations in LLVM IR, but the first
+`rt_cos_f64` call loaded and resolved libm after the first timer read. Preloading libm
+cut the old AOT kernel median 124.9 µs→28.5 µs without changing code or checksum. Raw
+LLVM sine/cosine now call libm directly; AOT supplies the dependency only when the
+module references it, and the disassembly calls `cos@plt` and `sin@plt`.
 
 | LLVM route | Before | After | Clang reference |
-|---|---:|---:|---:|
+| --- | ---: | ---: | ---: |
 | MCJIT | 281.0 µs | 27.0 µs | 14.0 µs |
 | AOT | 165.8 µs | 17.7 µs | 14.0 µs |
 
-Seven pinned runs per variant, interleaved; checksum `1423277954`. The separate
-five-sample benchmark reported 0.84× NYR/C, 1.45× LLVM/C and 0.94× NYC/C. The float
+Seven interleaved pinned runs per variant, checksum `1423277954`. A separate
+five-sample benchmark reported 0.84× NYR/C, 1.45× LLVM/C and 0.94× NYC/C; the float
 ABI fixture and ORC FFT passed.
 
-`native-oracle` reported `NOISY` and has no kernel timer. LLVM IR contains the
-literal `832040`, not the Fibonacci loop; the corresponding assembly formats and
-prints it. The large ratio is not evidence of a slow Fibonacci loop. Its
-integer-only AOT executable still has no libm dependency.
+`native-oracle` reported `NOISY` and has no kernel timer. Its LLVM IR contains the
+literal `832040`, not a Fibonacci loop, and the assembly formats and prints it, so
+the large ratio is not evidence of a slow Fibonacci loop. The integer-only AOT
+executable still has no libm dependency.
 
-### 2026-11-20 collision, bignum, and repeat diagnostics
+### collision, bignum, and repeat diagnostics
 
-`cd`: NYR already hoists the outer `px[i]` and `py[i]` reads. In the inner loop,
-  LLVM IR and NYIR still express signed absolute differences and conditional hit
-  counting; Clang emits packed compares and accumulates counts in registers. Folding
-  the two NYR short-circuit guards into an eager scalar `and` increased retired
-  instructions from 100.47 M to 136.21 M and median time from 7.15 ms to 9.25 ms
-  across five pinned samples. Reverted; the packed reduction, not scalar
-  speculation, is the remaining opportunity. Every run returned `387`.
-`bigint-oracle`: assembly and sampling place the cost in object allocation, pointer
-  membership, limb decoding, and multi-limb division. GMP reuses its destination
-  objects. A split hit/miss generation added 4.08 M retired instructions to the
-  165.34 M baseline with no wall-time improvement. Skipping repeated normalization
-  in compare and splitting the carry/borrow loops left instructions and cycles
-  essentially flat. Deferring limb decode output stores retired 166.21 M
-  instructions and slowed all seven pinned samples. All three experiments returned
-  `1968365` and were reverted.
-`repeat`: the LLVM IR calls `rt_str_repeat_raw`; sampled AOT assembly spends most
-  kernel cycles in libc's AVX `memcpy`, not checked element access or extra zeroing.
-  The unchanged fixture ran within 2× in isolation (NYR 1.12×, LLVM 1.27×, NYC
-  1.48×); the full parallel run's higher ratios have not been cleared in a complete
-  rerun.
+`cd`: NYR already hoists the outer `px[i]`/`py[i]` reads; in the inner loop LLVM IR and
+NYIR still express signed absolute differences and conditional hit counting while
+Clang emits packed compares and register count accumulation. Folding the two NYR
+short-circuit guards into an eager scalar `and` raised instructions 100.47 M→136.21 M
+and median time 7.15 ms→9.25 ms across five pinned samples; reverted — the packed
+reduction, not scalar speculation, is the opportunity. Every run returned `387`.
 
-### 2026-11-20 NYC PBKDF2 low-word encoding
+`bigint-oracle`: assembly and sampling put the cost in object allocation, pointer
+membership, limb decoding and multi-limb division; GMP reuses destination objects.
+A split hit/miss generation added 4.08 M instructions to the 165.34 M baseline with
+no wall-time gain, skipping repeated compare normalization and splitting carry/borrow
+loops left instructions and cycles essentially flat, and deferring limb decode output
+stores retired 166.21 M and slowed all seven pinned samples. All three returned
+`1968365` and were reverted.
 
-Samples placed 89% of NYC's retired instructions in SHA-256 compression. NYIR had
-already found the 32-bit rotates and masks. The machine encoder now omits the extra
-zero-extension after a known nonzero immediate rotate, and lowers an exact low-word
-mask on its accumulator path to a register zero-extension instead of an AND from a
-stack slot. Dynamic rotate counts retain the explicit zero-extension.
+`repeat`: LLVM IR calls `rt_str_repeat_raw`; sampled AOT assembly spends most kernel
+cycles in libc's AVX `memcpy`, not checked element access or extra zeroing. In
+isolation the unchanged fixture ran within 2× (NYR 1.12×, LLVM 1.27×, NYC 1.48×); the
+full parallel run's higher ratios have not been cleared in a complete rerun.
 
-Five pinned, interleaved samples retired 60.57 M → 58.26 M instructions and took a
-median 9.88 ms → 9.52 ms. Both PBKDF2 fixtures returned `2991`, and the x86 masked
-rotate oracle passed. Clang took 1.17 ms in separate pinned samples; stack traffic
-in the compression loop remains open.
+### NYC PBKDF2 low-word encoding
 
-### 2026-11-20 signed constant divisors in machine IR
+Samples put 89% of NYC's retired instructions in SHA-256 compression; NYIR had already found the 32-bit rotates and masks. The encoder now omits the extra
+zero-extension after a known nonzero immediate rotate and lowers an exact low-word mask on the accumulator path to a register zero-extension instead of an AND
+from a stack slot. Dynamic rotate counts keep the explicit zero-extension. Five pinned, interleaved samples: 60.57 M → 58.26 M retired instructions, median
+9.88 ms → 9.52 ms. Both PBKDF2 fixtures returned `2991` and the x86 masked rotate oracle passed; Clang took 1.17 ms in separate pinned samples. Scope: stack
+traffic in the compression loop remains open.
 
-`qrsyndrome` already had literal divisors 200 and 255 in NYIR, but its object used
-three `idiv` sites: register lowering obscured those constants before instruction
-selection. x86-64 machine IR now keeps signed constant divisors as immediate
-operands, so the object encoder can select its existing reciprocal
-multiply-and-shift sequences. The machine route accepted the changed shape and the
-resulting object contained no `idiv`.
+### signed constant divisors in machine IR
 
-Five pinned, interleaved samples of the unchanged fixture returned `1161080`. NYC
-median kernel time fell from 16.85 ms to 10.84 ms and cycles from 48.21 M to 30.45
-M. Retired instructions rose from 56.15 M to 75.82 M: the reciprocal sequences
-perform more, cheaper instructions. Clang took 5.23 ms in the same sample set. The
-signed magic, dependent divmod, and power-of-two division fixtures passed all ten
-variants.
+`qrsyndrome` had literal divisors 200 and 255 in NYIR, yet its object used three `idiv` sites because register lowering obscured those constants. x86-64
+machine IR now keeps signed constant divisors as immediate operands, letting the encoder select its reciprocal multiply-and-shift sequences. The machine route
+accepted the shape and the object contained no `idiv`. Five pinned, interleaved samples of the unchanged fixture returned `1161080`: NYC median kernel time
+16.85 → 10.84 ms, cycles 48.21 M → 30.45 M, retired instructions 56.15 M → 75.82 M (more, cheaper instructions). Clang took 5.23 ms in the same set. Signed
+magic, dependent divmod, and power-of-two division fixtures passed all ten variants.
 
-### 2026-11-20 rounding under a nonnegative clamp
+### rounding under a nonnegative clamp
 
-The NYC LBM inner loop implemented signed division by eight with a sign mask, bias
-add, and arithmetic shift, immediately before clamping negative results to zero.
-Both rounding modes give the same clamped result. Strength reduction now emits the
-shift alone when neither the quotient nor the comparison has a consumer outside the
-clamp.
+The NYC LBM inner loop divided by eight with a sign mask, bias add, and arithmetic shift immediately before clamping negatives to zero; both rounding modes
+give the same clamped result. Strength reduction now emits the shift alone when neither the quotient nor the comparison has a consumer outside the clamp. Five
+interleaved pinned samples on the unchanged fixture returned `152700`: median 8.96 → 8.26 ms, retired instructions 64.30 M → 57.23 M. The new boundary oracle
+checks negative inputs whose truncating quotient is zero and an independently consumed comparison. Scope: Clang vectorizes the stencil; that gap remains.
 
-Five interleaved pinned samples on the unchanged fixture returned `152700`. NYC
-median time fell from 8.96 ms to 8.26 ms and retired instructions from 64.30 M to
-57.23 M. The new boundary oracle also checks negative inputs whose truncating
-quotient is zero and an independently consumed comparison. Clang vectorizes the
-stencil; this does not close that remaining gap.
+### post-fix Clang-reference run
 
-### 2026-11-20 post-fix Clang-reference run
+Local O3 run with six fixture workers, one warm-up, and three measured runs: all 110 fixtures matched checksums. FFT stayed below 2× on all three routes (LLVM
+1.92×), as did `qrsyndrome` (NYC 1.62×). The 2× ceiling stayed open: 20/108 valid NYR, 16/108 LLVM, and 31/109 NYC comparisons missed it.
 
-The local O3 run used six fixture workers, one warm-up and three measured runs. All
-110 fixtures matched their checksums. FFT stayed below 2× on all three routes (LLVM
-1.92×), as did `qrsyndrome` (NYC 1.62×). The 2× ceiling remained open: 20 of 108
-valid NYR comparisons, 16 of 108 LLVM comparisons, and 31 of 109 NYC comparisons
-missed it.
+Largest timed gaps: `cd` 12.66× NYC / 9.05× NYR, `pbkdf2` 8.10× NYC, `bigint-oracle` 7.48× NYR / 6.77× LLVM; `native-oracle` showed 17.98× LLVM but its
+Fibonacci work is constant-folded and it has no kernel timer. Emitted `bigint-oracle` code had unused `rt_len`/`rt_value_tag` results in the BigFloat
+arithmetic loops, from the compiler-generated length/tag lanes of the dynamic call ABI; ordinary runtime effect annotations remain intact (an unused generated
+lane differs from an explicit query). For `page-rank`, both native emitters reload and store the accumulator each iteration while Clang holds it in an XMM
+register and stores once; the two array bases swap on the backedge, so sinking the store needs a disjointness proof surviving that swap.
 
-The largest timed gaps were `cd` (12.66× NYC, 9.05× NYR), `pbkdf2` (8.10× NYC), and
-`bigint-oracle` (7.48× NYR, 6.77× LLVM). `native-oracle` also showed a 17.98× LLVM
-ratio, but its Fibonacci work is constant-folded and it does not have a kernel
-timer.
+An isolated NYC outer-AVX2 `binary` trial kept checksum `3360874588549334` and cut the five-sample median from 6.21 ms to 3.60 ms (Clang 1.05 ms); emitted
+code still had 199 YMM frame-access sites. The trial did not change NYC's default target policy.
 
-The emitted `bigint-oracle` machine code also showed unused `rt_len` and
-`rt_value_tag` results in the BigFloat arithmetic loops. They originate in the
-compiler-generated length/tag lanes of the dynamic call ABI. The ordinary runtime
-effect annotations remain intact: an unused compiler-generated lane is a different
-case from an explicit query. For `page-rank`, both native emitters reload and store
-the accumulator on each iteration, whereas Clang holds it in an XMM register and
-stores it once. The two array bases swap on the backedge, so sinking the store
-requires a disjointness proof that survives that swap.
+### dead dynamic call metadata
 
-An isolated NYC outer-AVX2 trial of `binary` kept checksum `3360874588549334` and
-reduced the five-sample median from 6.21 ms to 3.60 ms; Clang took 1.05 ms. The
-emitted code still had 199 YMM frame-access sites. The trial did not change NYC's
-default target policy.
+ADCE now removes unused compiler-generated length/tag queries after inlining; live metadata and explicit source queries keep their effects. In
+`bigint-oracle`, the native AOT entry's static `rt_len`/`rt_value_tag` call sites fell from 29 to 7. Five pinned, interleaved samples returned `1968365`:
+median retired instructions 166.21 M → 149.49 M, cycles 83.43 M → 75.35 M, kernel time 43.92 → 40.93 ms. Eleven BigFloat and dynamic ABI fixture variants
+passed. Scope: measured after the full run above.
 
-### 2026-11-20 dead dynamic call metadata
+### collision and SHA hot loops
 
-ADCE can now remove unused compiler-generated length/tag queries after inlining.
-Live metadata and explicit source queries keep their existing effects. In
-`bigint-oracle`, the native AOT entry's static `rt_len` and `rt_value_tag` call
-sites fell from 29 to 7. Five pinned, interleaved samples returned `1968365`; median
-retired instructions fell from 166.21 M to 149.49 M, cycles from 83.43 M to 75.35 M,
-and kernel time from 43.92 ms to 40.93 ms. Eleven BigFloat and dynamic ABI fixture
-variants passed. This change was measured after the full run above.
+LLVM now gets byte GEPs for typed-buffer accesses with integer-only offsets; its optimized `cd` IR uses a four-lane reduction and x86 code uses
+`vpcmpgtq`/`vpsubq`. NYR and NYC use `neg; cmovs` for scalar wrapping absolute values, including `INT64_MIN`. With Clang 23.1.5, the focused `cd` run
+(checksum `387`) took 5.84 ms NYR, 1.56 ms LLVM, 9.26 ms NYC, and 0.932 ms Clang; LLVM is 1.67× Clang and NYR/LLVM 3.74×, under the existing 5× fixture limit.
+In `pbkdf2`, straight-line inlining no longer splits SHA schedule and round blocks; narrowing drops internal low-word masks only when all uses ignore their
+high bits. Five pinned samples on the numeric fixture went from 9.46 ms to 8.66 ms and from 58.26 M to 52.33 M retired instructions. Both NYC fixtures still
+returned `2991` and remain above 7× Clang. Scope: collision workloads and benchmark limits were not changed.
 
-### 2026-11-20 collision and SHA hot loops
+### vectorizer rejection histogram
 
-LLVM now receives byte GEPs for typed-buffer accesses with integer-only offsets. Its
-optimized `cd` IR uses a four-lane reduction and the x86 code uses
-`vpcmpgtq`/`vpsubq`. NYR and NYC instead use `neg; cmovs` for the scalar wrapping
-absolute values, including `INT64_MIN`. With Clang 23.1.5, the focused `cd` run
-(checksum `387`) took 5.84 ms NYR, 1.56 ms LLVM, 9.26 ms NYC, and 0.932 ms Clang.
-LLVM is now 1.67× Clang and NYR/LLVM is 3.74×, below the existing 5× fixture limit.
+The vectorizer now aggregates reject reasons by source file under `NY_TRACE_VECTORIZE=1` or heuristic tracing. A focused `sha256.nshape` compile emitted six
+fixture-source rejects: five `unsupported loop-carried PHI` and one `no canonical +1 induction PHI`. Imported library functions appeared separately,
+attributed by their source paths. Traced and untraced builds produced byte-identical ELFs (SHA-256
+`94c45beb9cbe8ef5de8fff56bd4d888710576bf49e9663db5575796fad376c7f`). Scope: diagnostic only; no runtime speedup established.
 
-In `pbkdf2`, straight-line inlining no longer splits the SHA schedule and round
-blocks; narrowing removes internal low-word masks only when all uses ignore their
-high bits. The numeric fixture's five pinned samples went from 9.46 ms to 8.66 ms
-and from 58.26 M to 52.33 M retired instructions. Both NYC fixtures still returned
-`2991` and remain above 7× Clang. The collision workloads and benchmark limits were
-not changed.
+### compile phase timing
 
-### 2026-11-20 vectorizer rejection histogram
+Added opt-in `--stats` timing for NY and NYC compilation. One focused run: NY's `sha256.ny` compile reported 2.134 s in the phase timer versus 2.244 s
+external process wall time; NYC's 1,428-line `src/code/test/lang/c/translation-unit.c` (181 functions and 69 data symbols) reported 74.975 ms versus 77 ms
+external wall time. Scope: one-run instrumentation checks, not comparative performance claims. With and without `--stats`, output ELFs were byte-identical:
+NYC SHA-256 `c93a126068814bc1e34d4d8282e59f4711841a367e283a98f5dc4297ef62f174` and NY SHA-256
+`fd8544b41404d4a176aa0e2bd201e35799cfc07d977801934d31ce7c7b609b4b`.
 
-The vectorizer now aggregates reject reasons by source file when
-`NY_TRACE_VECTORIZE=1` or heuristic tracing is enabled. A focused `sha256.nshape`
-compile emitted six reject events attributed to the fixture source: five
-`unsupported loop-carried PHI` and one `no canonical +1 induction PHI`. The trace
-also included imported library functions, which remain separately attributed by
-their source paths. Compiling the same source with tracing enabled and disabled
-produced byte-identical ELF files (SHA-256
-`94c45beb9cbe8ef5de8fff56bd4d888710576bf49e9663db5575796fad376c7f`). This is
-diagnostic evidence only; it does not establish a runtime speedup.
+### encoded home traffic and wide-call locality
 
-### 2026-11-20 compile phase timing
+P6b reports encoded `frame_ops` separately from explicit home `mov` stores/loads. For `lbm-relax` `main`, the trace reported 101 frame operations and
+`objdump` counted 58 stores and 43 loads through `rbp` (101 total); `fhourstones` `main` reported 27, matching 8 stores and 19 loads. The explicit
+`stores=`/`loads=` fields count only the subset emitted as home `mov`s; operations folded into arithmetic appear only in `frame_ops`.
 
-Added opt-in `--stats` timing for NY and NYC compilation. On one focused run,
-NY's `sha256.ny` compile reported 2.134 s total in the phase timer versus 2.244 s
-external process wall time. NYC compiling the 1,428-line
-`src/code/test/lang/c/translation-unit.c` reported 74.975 ms versus 77 ms
-external wall time (181 functions and 69 data symbols). These are one-run
-instrumentation checks, not comparative performance claims. With and without
-`--stats`, output ELF files were byte-identical: NYC SHA-256
-`c93a126068814bc1e34d4d8282e59f4711841a367e283a98f5dc4297ef62f174` and NY
-SHA-256 `fd8544b41404d4a176aa0e2bd201e35799cfc07d977801934d31ce7c7b609b4b`.
+P7 removes the whole-function stack-home fallback for functions with a call of more than six arguments; the call-safety proof still disqualifies a register
+range crossing a call. In a fixture with a seven-argument call before a hot loop, the loop went from `force-stack=yes`, `loop-registers=none`, 69 frame
+operations to `force-stack=no`, `loop-registers=selected`, 10: 59 fewer operations (about 86%), with both executables returning `45000150027`.
 
-### 2026-11-20 encoded home traffic and wide-call locality
+### loop-carried home traffic
 
-P6b now reports encoded `frame_ops` separately from explicit home `mov`
-stores/loads. For `lbm-relax` `main`, the trace reported 101 frame operations;
-`objdump` counted 58 stores and 43 loads through `rbp` (101 total). A second
-fixture reported 27 operations for `fhourstones` `main`, matching 8 stores and
-19 loads. The explicit `stores=`/`loads=` fields count the subset emitted as
-home `mov`s; operations folded into arithmetic appear only in `frame_ops`.
+The x64 loop-home path keeps eligible carried values in one register across backedges and publishes them when a later non-loop consumer needs the home. On
+`binary`, disabling it emitted 33 home stores and 26 loads in `main` (120 `rbp`-relative frame operations); enabled, 1 store and 25 loads (57 frame
+operations). Both executables returned `3360874588549334`. The change meets P8's store-reduction gate and cuts loop home traffic without adding loads.
 
-P7 removes the whole-function stack-home fallback for functions containing a
-call with more than six arguments. The existing call-safety proof still
-disqualifies a register range that crosses a call. In a focused fixture with a
-seven-argument call before a hot loop, the loop changed from `force-stack=yes`,
-`loop-registers=none`, 69 frame operations to `force-stack=no`,
-`loop-registers=selected`, 10 frame operations. Both generated executables
-returned `45000150027`. This is an encoded traffic reduction of 59 frame
-operations (about 86%) with the checksum held.
+### integer home-fold and edge-sink counters
 
-### 2026-11-20 loop-carried home traffic
+Added direct encoder counters for integer home folds and two-address ALU commutes. `binary` reported one home fold in `main`; its disassembly has
+`sub r14, QWORD PTR [rbp-0x280]`, so the spilled RHS is read by the arithmetic instruction rather than a separate reload. The run returned checksum `3360874588549334`.
+No commuted ALU opportunity occurred, and the same trace counted 15 edge-add sinks across compiled functions; none crossed a call, so dynamic
+rematerialization is untested.
 
-The x64 loop-home path keeps eligible carried values in one register across
-backedges and publishes them when a later non-loop consumer needs the home. On
-the `binary` fixture, disabling that path emitted 33 home stores and 26 loads
-in `main` (120 `rbp`-relative frame operations); with it enabled, the counts
-were 1 store and 25 loads (57 frame operations). Both executables returned
-`3360874588549334`. This meets P8's store-reduction gate and reduces loop
-home traffic without adding loads.
+The P5 caller-first color-order trial left gated code unchanged: `ny_fn_search` stayed at 337 instructions with six pushes and six pops, `binary` `main` at
+729 instructions with six pushes and six pops; checksums remained `6010` and `3360874588549334`. The allocation-order edit was reverted because no measured
+gate moved; pricing remains open for a more targeted change.
 
-### 2026-11-20 integer home-fold and edge-sink counters
+### D1 closings and the callee-save trial
 
-Added direct encoder counters for integer home folds and two-address ALU
-commutes. The `binary` fixture reported one home fold in `main`; its
-disassembly contains `sub r14, QWORD PTR [rbp-0x280]`, so the spilled RHS is
-read by the arithmetic instruction instead of a separate reload. The run
-returned checksum `3360874588549334`. No commuted ALU opportunity occurred in
-this fixture. The same trace counted 15 edge-add sinks across the compiled
-functions; none crossed a call, so it does not exercise the dynamic
-rematerialization case.
+P9, P13, and P15 were retired on measurement rather than implemented. P9 (home store to restore-dominator): P8 already left `binary` `main` at 1 home store
+and 25 loads (57 frame operations), so a placement rule cannot reduce a single store or address loads; retired as subsumed by P8. P13 (commute a two-address
+form): the transform exists at both audit points, allocator tied-input affinity and encoder in-place RHS swap, and `alu_commutes` fired 0 times across nine
+fixtures (`binary`, `lbm-relax`, `fhourstones`, `viterbi`, `crc32`, `sha256`, `hash`, `bitcount`, `mandelbrot`); retired as already implemented and
+unexercised. P15 (dynamic remat): rematerialisation is gated at the use site by `mach_segment_at(vreg, cur_inst)` and the address-fold predicate in
+`mach_sib_add_mem`, so `folded_known` filters rather than authorises; none of the 15 measured edge-add sinks crosses a call, so the reload-count gate is not
+exercisable. Retired.
 
-The P5 caller-first color-order trial did not change the gated code: `ny_fn_search`
-stayed at 337 instructions with six pushes and six pops, and `binary` `main`
-stayed at 729 instructions with six pushes and six pops. Checksums remained
-`6010` and `3360874588549334`. The allocation-order edit was reverted because
-the measured gates did not move; pricing remains open for a more targeted
-change.
+The P5 trial reordered the loop-home colour scan by marginal push/pop cost: callee colours the base allocation already pays for first, then caller-saved
+colours, then unused callee colours. `fhourstones`, `binary`, and `lbm-relax` produced byte-identical executables with and without the ordering (`cmp`), with
+`main` at 635/730/793 instructions and 6 pushes and 6 pops each in that build. Availability and range proofs decide the scan, not rank; the edit was reverted.
 
-### 2026-11-20 D1 closings and the callee-save trial
+Current-tree `main` baseline by `objdump -d --no-show-raw-insn` over the body up to the first blank line: 641 (`fhourstones`), 730 (`binary`), 782
+(`lbm-relax`), 696 (`viterbi`) instructions; checksums `6010`, `3360874588549334`, `152700`, and `3270530` all hold. The earlier 646 used a wider window and
+an intermediate build measured 635; both are superseded.
 
-P9, P13 and P15 were retired on measurement rather than implemented.
+### Pong phase timing and spill-slot reuse
 
-- P9 (move the home store to its restore-dominator): P8 already reduced
-  `binary` `main` to 1 home store and 25 loads (57 frame operations). A store
-  placement rule cannot reduce a single store, and it does not address loads,
-  so the row has nothing left to measure. Retired as subsumed by P8.
-- P13 (commute a two-address form instead of copying): the transform exists in
-  both places the audit points at, the allocator's tied-input affinity and the
-  encoder's in-place RHS swap, and the `alu_commutes` counter fired 0 times
-  across nine fixtures (`binary`, `lbm-relax`, `fhourstones`, `viterbi`,
-  `crc32`, `sha256`, `hash`, `bitcount`, `mandelbrot`). Retired as already
-  implemented and unexercised.
-- P15 (dynamic remat): each rematerialisation is gated at the use site by
-  `mach_segment_at(vreg, cur_inst)` and the address-fold predicate in
-  `mach_sib_add_mem`, so `folded_known` filters rather than authorises. The
-  measured edge-add sinks (15) include none that crosses a call, so the
-  reload-count gate is not exercisable here. Retired.
+With the AOT cache disabled, one native x86-64 `-O3 --stats` build of `etc/labs/pong.ny` completed in 13.790 s: 0.613 s parsing, 1.365 s codegen preparation,
+3.498 s type validation, 4.877 s codegen, and 7.721 s object emission. Some timers are nested, so these cannot be summed. This resolves the missing timing
+measurement; the cold compile still exceeds the 5 s target.
 
-The P5 trial reordered the loop-home colour scan by marginal push/pop cost:
-callee colours the base allocation already pays for first, then caller-saved
-colours, then unused callee colours. It changed nothing: `fhourstones`,
-`binary` and `lbm-relax` produced byte-identical executables with and without
-the ordering (`cmp`), with `main` at 635/730/793 instructions and 6 pushes and
-6 pops each in that build. The scan's choice is decided by colour availability
-and the range proofs rather than by rank, so the order does not decide which
-colours are paid. The edit was reverted.
+Matched native x86-64 compiles with spill-slot reuse disabled versus enabled gave these stack adjustments in `main`:
 
-The counted baseline for `main` on the current tree is 641 (`fhourstones`),
-730 (`binary`), 782 (`lbm-relax`) and 696 (`viterbi`) instructions with
-`objdump -d --no-show-raw-insn` over the body up to the first blank line;
-checksums `6010`, `3360874588549334`, `152700` and `3270530` all hold. The
-earlier 646 used a wider window and an intermediate build measured 635; both
-are superseded.
-
-### 2026-11-20 Pong phase timing and spill-slot reuse
-
-With the AOT cache disabled, one native x86-64 `-O3 --stats` build of
-`etc/labs/pong.ny` completed in 13.790 s. The phase report showed
-0.613 s parsing, 1.365 s codegen preparation, 3.498 s type validation,
-4.877 s codegen, and 7.721 s object emission. Some timers are nested, so
-these numbers cannot be summed. This resolves the missing timing measurement.
-The cold compile still exceeds the 5 s target.
-
-A matched native x86-64 compile with spill-slot reuse explicitly disabled
-versus enabled gave these stack adjustments in the `main` prologue:
-
-| Fixture | Disabled | Enabled | Checksum in both runs |
+| Fixture | Disabled | Enabled | Checksum (both runs) |
 | --- | ---: | ---: | ---: |
-| binary | 3,544 B | 2,376 B | 3360874588549334 |
-| lbm-relax | 3,112 B | 2,824 B | 152700 |
-| fhourstones | 2,664 B | 2,504 B | 6010 |
+| binary | 3,544 B | 2,376 B | `3360874588549334` |
+| lbm-relax | 3,112 B | 2,824 B | `152700` |
+| fhourstones | 2,664 B | 2,504 B | `6010` |
 
-These measurements cover frame size. Default enablement still needs a fix
-for encoder caches keyed by slot offset and checks of the prior failures.
+Scope: frame size only. Default enablement still needs a fix for encoder caches keyed by slot offset and checks of the prior failures.
 
-### 2026-11-20 conditional home publication: carried-run attempt
+### conditional home publication: carried-run attempt
 
-P1's store half was prototyped as a carried-run rule in
-`mach_vreg_requires_home_after_def`: skip the def-side publish when the
-defining segment and every successor entry segment are marked carried in the
-same colour, so no consumer can read the home before the run ends. The rule
-never fired: its `cond_home` counter reported 0 on eleven fixtures (`binary`,
-`fhourstones`, `lbm-relax`, `viterbi`, `binary-trees`, `crc32`, `sha256`,
-`hash`, `bitcount`, `susan`, `mandelbrot`), and every fixture produced
-byte-identical executables with the rule on and off. The edit was reverted
-rather than kept behind a flag.
+P1's store half was prototyped as a carried-run rule in `mach_vreg_requires_home_after_def`: skip the def-side publish when the defining segment and every
+successor entry segment are marked carried in the same colour, so no consumer can read the home before the run ends. The rule never fired: `cond_home` was 0
+on eleven fixtures (`binary`, `fhourstones`, `lbm-relax`, `viterbi`, `binary-trees`, `crc32`, `sha256`, `hash`, `bitcount`, `susan`, `mandelbrot`) and
+executables were byte-identical with the rule on and off. The edit was reverted rather than kept behind a flag.
 
-The shape of the remaining traffic explains it. The stores that survive are
-call-boundary publications, because a value crossing a call cannot stay in a
-caller-saved colour, while the loads are argument staging and spill reloads.
-On `binary` `main`: 730 instructions, 19 home stores, 34 home loads, 85
-`rbp`-relative operands. P1's store side therefore has no work left after P8,
-and its load side needs the per-block residency condition that only P2
-supplies.
+The surviving stores are call-boundary publications, since a value crossing a call cannot stay in a caller-saved colour; loads are argument staging and spill
+reloads. On `binary` `main`: 730 instructions, 19 home stores, 34 home loads, 85 `rbp`-relative operands. P1's store side has no work left after P8; its load
+side needs the per-block residency condition only P2 supplies.
 
-Measurement note: `NYTRIX_AOT_CACHE=0` is required for a codegen A/B. With
-the cache on, both arms return the cached object and counts drift between
-rebuilds (635 and 641 were both observed for `fhourstones` `main`). The
-five-fixture baseline measured with the cache off, after the revert, is
-730/635/793/695/685 instructions with checksums `3360874588549334`, `6010`,
-`152700`, `3270530` and `64912`, all held.
+`NYTRIX_AOT_CACHE=0` is required for a codegen A/B: with the cache on, both arms return the cached object and counts drift between rebuilds (635 and 641 were
+both observed for `fhourstones` `main`). The five-fixture baseline with the cache off, after the revert, is 730/635/793/695/685 instructions with checksums
+`3360874588549334`, `6010`, `152700`, `3270530`, and `64912`, all held.
 
-### 2026-11-20 full benchmark and shared-home follow-up
+### full benchmark and shared-home follow-up
 
-`./make bench` exited 0 and all configured performance gates passed. The report
-`bench-20261120-062227-3652437.json` recorded geometric means of 1.35× for
-native versus C and 1.07× for LLVM versus C among fixtures with a C reference
-of at least 1 ms. Its largest reported gaps were native-oracle (native/C
-10.57×), cd (native/LLVM 3.76×), and pbkdf2 (NYC/C 8.78×).
+`./make bench` exited 0 with all configured performance gates passing. Report `bench-20261120-062227-3652437.json` recorded geometric means of 1.35× native/C
+and 1.07× LLVM/C among fixtures with a C reference of at least 1 ms; its largest gaps were native-oracle (native/C 10.57×), cd (native/LLVM 3.76×), and pbkdf2
+(NYC/C 8.78×). After the benchmark compiler was built, two x86 encoder paths gained guards against forwarding RAX by stack offset alone for shared spill
+homes. Fresh native x86-64 `-O3` builds with spill-slot coloring off and on matched checksums on binary, lbm-relax, fhourstones, statemate, and pidigits.
+Scope: focused checksums only; default spill-slot coloring and the runtime gaps remain open.
 
-After the benchmark compiler was built, two x86 encoder paths gained guards
-against forwarding RAX by stack offset alone for shared spill homes.
-Fresh native x86-64 `-O3` builds with spill-slot coloring off and on matched
-checksums on binary, lbm-relax, fhourstones, statemate, and pidigits.
-This verifies the focused checksums only. Default spill-slot coloring and
-the runtime gaps remain open.
+### isolated native-oracle repeat
 
-### 2026-11-20 isolated native-oracle repeat
+The full report had 58 comparable route results above 2× C, including 23 with C medians of at least 1 ms; the full list is in the local audit. A one-worker
+`native-oracle` repeat gave native 106 µs, LLVM 326 µs, C 29 µs, and NYC 29 µs; native/C fell from 10.57× in the full run to 3.71× in isolation. Scope: still
+above 2×, and process overhead is part of a workload computing only one Fibonacci result.
 
-The full report had 58 comparable route results above 2× C, including 23
-with C medians of at least 1 ms. The full list is in the local audit.
-A one-worker `native-oracle` repeat gave native 106 µs, LLVM 326 µs, C 29 µs,
-and NYC 29 µs. The native/C ratio fell from 10.57× in the full run to 3.71×
-in isolation. The comparison remains above 2× and measures process overhead
-as part of a workload that computes only one Fibonacci result.
+### spill-slot coloring: value-identity tags, default stays off
 
-### 2026-11-20 spill-slot coloring: value-identity tags, default stays off
+`NYTRIX_SPILL_HOME_COLOR` folds spilled values' live ranges onto shared home slots: frames shrank, but it crashed `fhourstones` and drifted
+`statemate`/`pidigits` when the default, because the sticky-RAX tag named a home offset so a pooled slot could forward a neighbour's value. The tag now
+carries a vreg (`mach_rax_tag_hit`, `mach_pending_rax_hit`); a shared slot reuses it only for the same vreg, offset-only sites call `mach_home_off_shared` and
+require an unshared slot, and `mach_load_rax_slot`/`mach_store_rax_slot` pass the vreg where the caller knows it.
 
-`NYTRIX_SPILL_HOME_COLOR` folds the live ranges of spilled values onto shared
-home slots, which shrank frames but crashed `fhourstones` and drifted
-`statemate`/`pidigits` when it was the default. The cause was the sticky-RAX
-tag: it named a home offset, so a pooled slot could forward a neighbour's
-value.
-
-The tag now carries a vreg (`mach_rax_tag_hit`, `mach_pending_rax_hit`). A
-shared slot reuses the tag only for the same vreg, and offset-only sites call
-`mach_home_off_shared` and require an unshared slot. `mach_load_rax_slot` and
-`mach_store_rax_slot` pass the vreg where the caller knows it.
-
-Measured with `build/release/ny-full`, `-O3 --native-backend x86_64`,
-`NYTRIX_AOT_CACHE=0`, `main` from `objdump -d --no-show-raw-insn`.
+Measured with `build/release/ny-full`, `-O3 --native-backend x86_64`, `NYTRIX_AOT_CACHE=0`, `main` from `objdump -d --no-show-raw-insn`:
 
 | fixture | instructions off → on | home stores off → on | frame off → on | checksum |
 | --- | --- | --- | --- | --- |
@@ -6868,32 +4416,26 @@ Measured with `build/release/ny-full`, `-O3 --native-backend x86_64`,
 | `viterbi` | 694 → 696 | 23 → 24 | 0xaa8 → 0x9e8 | `3270530` |
 | `binary-trees` | 685 → 687 | 2 → 3 | 0xb38 → 0xa38 | `64912` |
 
-Frames shrink 6–33%, but pooling defeats the home-store elision on a hot
-loop: `binary` goes 33 → 124 stores and 729 → 822 instructions. Smaller
-frames are not a win on their own, so the default stays one slot per value
-and the flag stays opt-in.
-
-Correctness with the flag on: `ny-test` 3/3 on the former regressions
-(`fhourstones`, `statemate`, `pidigits`), `--pattern regalloc --pattern
-codegen` 26/26, `--pattern x86` 223/223.
-
-The identity tag is neutral to slightly positive with the flag off: `binary`
-730 → 729 and `fhourstones` 635 → 634 instructions, checksums unchanged.
+Frames shrink 6–33%, but pooling defeats home-store elision on a hot loop: `binary` goes from 33 → 124 stores and 729 → 822 instructions. Smaller frames are
+not a win on their own, so the default stays one slot per value and the flag stays opt-in. With the flag on: `ny-test` 3/3 on the former regressions
+(`fhourstones`, `statemate`, `pidigits`), `--pattern regalloc --pattern codegen` 26/26, `--pattern x86` 223/223. With it off the identity tag is neutral to
+slightly positive: `binary` 730 → 729 and `fhourstones` 635 → 634 instructions, checksums unchanged.
 
 ### Remaining investigation leads
 
-Re-rank using the dashboard, then confirm a miss in isolation before changing the
-compiler. The former backlog's still-open leads:
+Start from the dashboard, then confirm each miss in isolation before changing the
+compiler. The still-open leads are:
 
-Prove typed-buffer bounds and memory dependence for native conditional-count,
-  max-reduction, and stencil vectorization (`cd`, `viterbi`, `lbm`, `susan`).
-Reduce spills across inner loops (`sssp`, `mont64`, NYC `pbkdf2`), track available
-  loads by root and byte range (`bce-matrix`), and scalar-replace fixed buffers
-  after unrolling (`mont64`).
-Narrow provable integer lanes (`bitcount`, `intops`, crypto); reduce managed
-  allocation and operand validation without weakening pointer checks
-  (`bigint-oracle`).
-Separate startup from kernel cost (`native-oracle`) and reuse CFG, dominator, and
-  SCEV results only where invalidation permits (`page-rank`, `dce`, `sha256`).
-
+- **Vectorization bounds.** Prove typed-buffer bounds and memory dependence for
+  conditional-count, max-reduction, and stencil loops (`cd`, `viterbi`, `lbm`,
+  `susan`).
+- **Loop homes and spill traffic.** Reduce spills across inner loops (`sssp`,
+  `mont64`, NYC `pbkdf2`), track available loads by root and byte range
+  (`bce-matrix`), and scalar-replace fixed buffers after unrolling (`mont64`).
+- **Integer width and allocation.** Narrow provable integer lanes (`bitcount`,
+  `intops`, crypto) and reduce managed allocation and operand validation without
+  weakening pointer checks (`bigint-oracle`).
+- **Measurement boundaries.** Separate startup from kernel cost (`native-oracle`)
+  and reuse CFG, dominator, and SCEV results only where invalidation permits
+  (`page-rank`, `dce`, `sha256`).
 </details>

@@ -2518,8 +2518,12 @@ function buildDocOutlines() {
       (h) => h.textContent.trim(),
     );
     if (headings.length < 2) return;
-    const levels = headings.map((h) => Number(h.tagName.slice(1)));
-    const minLevel = Math.min(...levels);
+    // Collapsed logs hold hundreds of entry headings. Give every heading a
+    // stable anchor for in-page links, but list only the page's own sections
+    // in the contents dropdown.
+    const outlineHeadings = headings.filter((h) => !h.closest("details"));
+    const levels = outlineHeadings.map((h) => Number(h.tagName.slice(1)));
+    const minLevel = levels.length ? Math.min(...levels) : 1;
     const links = headings
       .map((h) => {
         const base = h.id ? h.id.trim() : slugifyHeading(h.textContent);
@@ -2528,13 +2532,16 @@ function buildDocOutlines() {
         while (used.has(id)) id = `${base}-${n++}`;
         h.id = id;
         used.add(id);
+        if (h.closest("details")) return "";
         const level = Math.min(
           Math.max(Number(h.tagName.slice(1)) - minLevel, 0),
           4,
         );
         return `<a class="doc-outline-link lvl-${level}" href="#${encodeURIComponent(id)}">${esc(h.textContent.trim())}</a>`;
       })
+      .filter(Boolean)
       .join("");
+    if (!links) return;
     const outline = document.createElement("div");
     outline.className = "doc-outline";
     outline.innerHTML = `<div class="doc-outline-title">CONTENTS</div>${links}`;
