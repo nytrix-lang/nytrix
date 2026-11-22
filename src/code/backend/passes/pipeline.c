@@ -2317,6 +2317,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_run_seq(f, pre_vec_canon_nocse, 8, stats, dump, &ok);
         }
       }
+      if (ok && getenv("NYTRIX_DUMP_PREVEC_NYIR"))
+        nyr_dump(stderr, f, "prevec");
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
           !nyr_pass_stopped)
         nyr_run_pass(f,

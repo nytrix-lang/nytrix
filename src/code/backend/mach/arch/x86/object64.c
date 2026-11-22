@@ -4166,6 +4166,37 @@ static bool mach_commit_vreg(nyr_x64_mach_enc_t *e,
   return mach_store_rax_slot(e, off, dst ? (int)dst->as.reg : -1);
 }
 
+/*
+ * setcc dst8; movzx dst32, dst8 straight into a register-allocated
+ * destination. The RAX route (setcc al; movzx; mov dst, rax) costs one more
+ * instruction and clobbers RAX. Returns 0 when dst has no def register, 1 on
+ * success, -1 on an emit failure.
+ */
+static int mach_setcc_into_def_preg(nyr_x64_mach_enc_t *e,
+                                    const nyr_mach_operand_t *dst, int off,
+                                    unsigned char setcc) {
+  static int disabled = -1;
+  if (disabled < 0)
+    disabled = getenv("NYTRIX_NO_SETCC_DIRECT") != NULL;
+  if (!dst || dst->kind != NYR_MACH_OPERAND_VREG || disabled)
+    return 0;
+  int preg = mach_vreg_def_preg(e, dst->as.reg);
+  if (preg <= 0 || preg > 15)
+    return 0;
+  unsigned low = (unsigned)preg & 7u;
+  unsigned char rex_b = (unsigned char)(0x40 | (preg >= 8 ? 1 : 0));
+  unsigned char rex_rb = (unsigned char)(0x40 | (preg >= 8 ? 5 : 0));
+  if ((preg >= 4 && !mach_u8(e, rex_b)) || !mach_u8(e, 0x0f) ||
+      !mach_u8(e, setcc) || !mach_u8(e, (unsigned char)(0xc0 | low)) ||
+      (preg >= 4 && !mach_u8(e, rex_rb)) || !mach_u8(e, 0x0f) ||
+      !mach_u8(e, 0xb6) ||
+      !mach_u8(e, (unsigned char)(0xc0 | (low << 3) | low)))
+    return -1;
+  if (preg == 10)
+    mach_r10_index_invalidate(e);
+  return mach_commit_preg(e, dst, off, (unsigned)preg, false) ? 1 : -1;
+}
+
 static bool mach_mov_reg_rax(nyr_x64_mach_enc_t *e, int preg) {
   if (preg == 0)
     return true;
@@ -18010,6 +18041,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           unsigned char setcc = mach_cond_setcc(in->condition, true);
           if (!setcc)
             return mach_err(e, "x64 machine form encode: bad float cond");
+          int direct_set = mach_setcc_into_def_preg(e, &in->dst, dst, setcc);
+          if (direct_set < 0)
+            return false;
+          if (direct_set > 0)
+            break;
           if (!mach_u8(e, 0x0f) || !mach_u8(e, setcc) || !mach_u8(e, 0xc0) ||
               !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) ||
               !mach_u8(e, 0xb6) || !mach_u8(e, 0xc0) ||
@@ -18112,6 +18148,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         unsigned char setcc = mach_cond_setcc(in->condition, false);
         if (!setcc)
           return mach_err(e, "x64 machine form encode: bad cmp cond");
+        int direct_set = mach_setcc_into_def_preg(e, &in->dst, dst, setcc);
+        if (direct_set < 0)
+          return false;
+        if (direct_set > 0)
+          break;
         if (!mach_u8(e, 0x0f) || !mach_u8(e, setcc) || !mach_u8(e, 0xc0) ||
             !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) ||
             !mach_u8(e, 0xb6) || !mach_u8(e, 0xc0) ||

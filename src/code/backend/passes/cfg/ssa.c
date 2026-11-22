@@ -349,7 +349,26 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
         return false;
       }
     }
-    if (!term || (term->op != NYIR_BR && term->op != NYIR_RET)) {
+    /*
+     * A label-less block holding only NOPs after an unconditional terminator
+     * (erased arms, DCE holes) is unreachable. Giving it a fallthrough edge
+     * would make it a phantom predecessor of the next label, breaking
+     * single-predecessor bridges and join PHI edge counts.
+     */
+    bool dead_nop_island = false;
+    if (!term && b > 0 && cfg->block_label[b] < 0) {
+      size_t prev_end = nyr_block_last_non_nop(f, cfg, b - 1);
+      const nyr_inst_t *prev = prev_end > cfg->block_start[b - 1]
+                                   ? &f->data[prev_end - 1]
+                                   : NULL;
+      dead_nop_island =
+          prev && (prev->op == NYIR_BR || prev->op == NYIR_RET ||
+                   (prev->op == NYIR_INLINE_ASM &&
+                    (prev->imm == -14 || prev->imm == -82 ||
+                     prev->imm == -83)));
+    }
+    if (!dead_nop_island &&
+        (!term || (term->op != NYIR_BR && term->op != NYIR_RET))) {
       if (b + 1 < blocks &&
           !cfg_add_successor(successors, successor_counts, b, b + 1)) {
         if (succ_heap) {

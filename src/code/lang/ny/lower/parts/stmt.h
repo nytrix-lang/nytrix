@@ -14449,24 +14449,20 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
   size_t *edge_off = calloc(func_count + 1, sizeof(*edge_off));
   size_t *stack = malloc(func_count * sizeof(*stack));
   uint32_t *mark = calloc(func_count, sizeof(*mark));
-  bool *self_ref = calloc(n, sizeof(*self_ref));
-  if (!edge_off || !stack || !mark || !self_ref) {
+  (void)inline_changed;
+  (void)opt_level;
+  if (!edge_off || !stack || !mark) {
     free(edge_off);
     free(stack);
     free(mark);
-    free(self_ref);
     return 0;
   }
   size_t edge_count = 0;
   for (size_t i = 0; i < func_count; ++i) {
     for (size_t k = 0; k < funcs[i].len; ++k) {
       size_t t = nyr_build_name_map_find(map, funcs[i].data[k].symbol);
-      if (t != SIZE_MAX) {
-        if (t != i)
-          edge_count++;
-        else if (i < n)
-          self_ref[i] = true;
-      }
+      if (t != SIZE_MAX && t != i)
+        edge_count++;
     }
     edge_off[i + 1] = edge_count;
   }
@@ -14475,7 +14471,6 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
     free(edge_off);
     free(stack);
     free(mark);
-    free(self_ref);
     return 0;
   }
   for (size_t i = 0, e = 0; i < func_count; ++i)
@@ -14486,8 +14481,14 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
     }
   size_t levels = 0;
   for (size_t c = 0; c < n; ++c) {
-    bool want = !inline_changed || inline_changed[c] ||
-                (opt_level >= 2 && self_ref[c]);
+    /*
+     * Every function gets the post-inline optimizer run, exactly like the
+     * sequential sweep. Skipping bodies whose inlining did not change looked
+     * free but is not: the second O3 run is what fully unrolls and
+     * if-converts leaf helpers (radix-tree 2.3x, records 2x slower without
+     * it), and the parallel route must reproduce the sequential result.
+     */
+    bool want = true;
     uint32_t stamp = (uint32_t)c + 1;
     size_t level = 0, sp = 0;
     mark[c] = stamp;
@@ -14528,7 +14529,6 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
   free(edge_off);
   free(stack);
   free(mark);
-  free(self_ref);
   return levels ? levels : 1;
 }
 

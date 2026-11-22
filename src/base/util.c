@@ -603,8 +603,19 @@ bool ny_cache_publish_file(const char *temporary, const char *destination) {
       (uint64_t)incoming.st_size > limit)
     return false;
   intptr_t lock = ny_cache_directory_lock(directory, true);
-  if (!lock)
-    return false;
+  if (!lock) {
+    /*
+     * Another process holds the directory lock (pruning or publishing).
+     * The publish itself is one atomic rename, so do it without pruning
+     * instead of discarding a finished artifact; parallel bench and test
+     * workers otherwise lost most cache saves and recompiled every run.
+     */
+#ifdef _WIN32
+    return MoveFileExA(temporary, destination, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    return rename(temporary, destination) == 0;
+#endif
+  }
   bool ok = false;
   uint64_t bytes = (uint64_t)incoming.st_size;
   size_t count = 1, entry_count = 0;

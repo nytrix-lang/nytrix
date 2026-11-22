@@ -1947,6 +1947,323 @@ static int strength_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
 }
 
 /*
+ * Affine strength reduction. A multiply or shift by a constant whose operand
+ * is affine in a basic IV of this loop,
+ *
+ *   x = (a*iv + b) * C     (b loop-invariant, a and C constants)
+ *
+ * advances by a*step*C per iteration, so it becomes its own IV:
+ *
+ *   preheader: x0 = clone of x with iv := init
+ *   header:    w = phi(pre: x0, latch: w + a*step*C)
+ *
+ * This covers what the plain `iv * C` rewrite above cannot: non-constant
+ * (loop-invariant) IV inits such as `k = i + 1`, and products of whole
+ * affine expressions such as `(3*i + 5*k) * M` from a divisibility test or
+ * `((k + 1) << 8) + j` row addressing. Arithmetic wraps, so the identity
+ * holds modulo 2^64 for any step.
+ */
+typedef struct {
+  const nyr_func_t *f;
+  const int *defs;
+  const nyr_cfg_t *cfg;
+  const bool *member;
+  int iv;
+} iv_affine_ctx_t;
+
+static bool iv_affine_in_loop(const iv_affine_ctx_t *c, int v) {
+  return v >= 0 && v < c->f->next_value && c->defs[v] >= 0 &&
+         (size_t)c->defs[v] < c->f->len &&
+         c->member[c->cfg->inst_block[(size_t)c->defs[v]]];
+}
+
+/* Coefficient of the IV in `v`, or false when `v` is not affine in it. */
+static bool iv_affine_coeff(const iv_affine_ctx_t *c, int v, unsigned depth,
+                            int64_t *coeff) {
+  if (v < 0 || v >= c->f->next_value || depth > 12)
+    return false;
+  if (v == c->iv) {
+    *coeff = 1;
+    return true;
+  }
+  if (!iv_affine_in_loop(c, v)) {
+    *coeff = 0;
+    return true;
+  }
+  const nyr_inst_t *in = &c->f->data[(size_t)c->defs[v]];
+  int64_t k = 0, ca = 0, cb = 0;
+  switch (in->op) {
+  case NYIR_CONST_I64:
+    *coeff = 0;
+    return true;
+  case NYIR_COPY:
+    return iv_affine_coeff(c, in->a, depth + 1, coeff);
+  case NYIR_ADD_I64:
+  case NYIR_SUB_I64:
+    if (!iv_affine_coeff(c, in->a, depth + 1, &ca) ||
+        !iv_affine_coeff(c, in->b, depth + 1, &cb))
+      return false;
+    *coeff = in->op == NYIR_ADD_I64 ? wrap_add(ca, cb)
+                                    : (int64_t)((uint64_t)ca - (uint64_t)cb);
+    return true;
+  case NYIR_MUL_I64:
+    if (nyr_const_i64(c->f, c->defs, in->b, &k) &&
+        iv_affine_coeff(c, in->a, depth + 1, &ca)) {
+      *coeff = wrap_mul64(ca, k);
+      return true;
+    }
+    if (nyr_const_i64(c->f, c->defs, in->a, &k) &&
+        iv_affine_coeff(c, in->b, depth + 1, &cb)) {
+      *coeff = wrap_mul64(cb, k);
+      return true;
+    }
+    return false;
+  case NYIR_SHL_I64:
+    if (!nyr_const_i64(c->f, c->defs, in->b, &k) || k < 0 || k > 62 ||
+        !iv_affine_coeff(c, in->a, depth + 1, &ca))
+      return false;
+    *coeff = wrap_mul64(ca, (int64_t)((uint64_t)1 << (unsigned)k));
+    return true;
+  default:
+    return false;
+  }
+}
+
+/*
+ * Plan a copy of the in-loop expression `v` with the IV replaced by its
+ * init: in-loop nodes are recorded in post-order (operands first) before
+ * anything is inserted, because insertion shifts the indices `defs` and the
+ * CFG refer to. Values defined outside the loop dominate the preheader end
+ * and are used directly.
+ */
+typedef struct {
+  int value[24];
+  nyr_inst_t inst[24];
+  size_t len;
+} iv_affine_plan_t;
+
+static bool iv_affine_plan(const iv_affine_ctx_t *c, int v, iv_affine_plan_t *p,
+                           unsigned depth) {
+  if (v == c->iv || !iv_affine_in_loop(c, v))
+    return true;
+  if (depth > 12)
+    return false;
+  for (size_t k = 0; k < p->len; ++k)
+    if (p->value[k] == v)
+      return true;
+  const nyr_inst_t *in = &c->f->data[(size_t)c->defs[v]];
+  if (in->op == NYIR_COPY)
+    return iv_affine_plan(c, in->a, p, depth + 1) && p->len < 24 &&
+           ((p->value[p->len] = v), (p->inst[p->len++] = *in), true);
+  if (in->op != NYIR_CONST_I64 && (!iv_affine_plan(c, in->a, p, depth + 1) ||
+                                   !iv_affine_plan(c, in->b, p, depth + 1)))
+    return false;
+  if (p->len >= 24)
+    return false;
+  p->value[p->len] = v;
+  p->inst[p->len++] = *in;
+  return true;
+}
+
+/* Insert the planned copy at `*at`; returns the value standing for `root`. */
+static int iv_affine_emit(nyr_func_t *f, const iv_affine_plan_t *p, int iv,
+                          int init, int root, size_t *at) {
+  int mapped[24];
+#define IV_AFFINE_MAP(x)                                                       \
+  ({                                                                           \
+    int _x = (x), _r = _x == iv ? init : _x;                                   \
+    for (size_t _k = 0; _k < p->len; ++_k)                                     \
+      if (p->value[_k] == _x)                                                  \
+        _r = mapped[_k];                                                       \
+    _r;                                                                        \
+  })
+  for (size_t k = 0; k < p->len; ++k) {
+    nyr_inst_t in = p->inst[k];
+    if (in.op == NYIR_COPY) {
+      mapped[k] = IV_AFFINE_MAP(in.a);
+      continue;
+    }
+    if (in.op != NYIR_CONST_I64) {
+      in.a = IV_AFFINE_MAP(in.a);
+      in.b = IV_AFFINE_MAP(in.b);
+    }
+    in.dst = f->next_value++;
+    in.flags &= ~NYIR_INST_F_EFFECTS_KNOWN;
+    in.effects = NYIR_EFFECT_NONE;
+    in.phi_incoming = NULL;
+    in.phi_incoming_len = 0;
+    if (!insert_inst(f, *at, in))
+      return -1;
+    ++*at;
+    mapped[k] = in.dst;
+  }
+  return IV_AFFINE_MAP(root);
+#undef IV_AFFINE_MAP
+}
+
+static int affine_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
+                              const int *defs, const iv_loop_t *lp) {
+  static int disabled = -1;
+  if (disabled < 0)
+    disabled = getenv("NYTRIX_NO_AFFINE_SR") != NULL;
+  if (disabled)
+    return 0;
+  bool *member = calloc(cfg->block_count, sizeof(*member));
+  nyr_use_def_t uses = {0};
+  if (!member || !iv_loop_members(cfg, lp, member) ||
+      !nyr_build_use_def(f, &uses)) {
+    free(member);
+    return -1;
+  }
+  /* Register pressure guard: every reduction adds a loop-carried value. */
+  size_t header_phis = 0;
+  for (size_t i = cfg->block_start[lp->header_block];
+       i < cfg->block_end[lp->header_block]; ++i)
+    if (f->data[i].op == NYIR_PHI)
+      ++header_phis;
+  int rc = 0;
+  for (size_t v = 0; v < lp->iv_count && header_phis < 10 && rc == 0; ++v) {
+    const basic_iv_t *iv = &lp->ivs[v];
+    if (iv->pre_label < 0 || iv->latch_label < 0)
+      continue;
+    iv_affine_ctx_t ctx = {
+        .f = f, .defs = defs, .cfg = cfg, .member = member, .iv = iv->iv};
+    /*
+     * Walk backwards so the outermost product of an expression is reduced
+     * first; its inner products then die instead of each becoming a
+     * loop-carried value of its own.
+     */
+    for (size_t idx = f->len; idx-- > 0;) {
+      const nyr_inst_t *in = &f->data[idx];
+      if (!member[cfg->inst_block[idx]] || in->dst < 0 ||
+          (in->op != NYIR_MUL_I64 && in->op != NYIR_SHL_I64))
+        continue;
+      if (uses.offsets[in->dst] == uses.offsets[in->dst + 1])
+        continue;
+      /* `iv * C` with a constant init is the plain rewrite's job. */
+      int ra = iv_root_copy(f, defs, in->a), rb = iv_root_copy(f, defs, in->b);
+      if (iv->init_is_const && (ra == iv->iv || rb == iv->iv))
+        continue;
+      int64_t coeff = 0;
+      if (!iv_affine_coeff(&ctx, in->dst, 0, &coeff) || coeff == 0)
+        continue;
+      int old_dst = in->dst;
+      bool local = true;
+      for (size_t u = uses.offsets[old_dst]; u < uses.offsets[old_dst + 1];
+           ++u) {
+        size_t user = uses.users[u];
+        if (user >= f->len || !member[cfg->inst_block[user]]) {
+          local = false;
+          break;
+        }
+      }
+      if (!local)
+        continue;
+      size_t pre_block = SIZE_MAX;
+      if (!find_block_by_label(cfg, iv->pre_label, &pre_block) ||
+          member[pre_block])
+        continue;
+      size_t pre_at = nyr_block_last_non_nop(f, cfg, pre_block);
+      while (pre_at > cfg->block_start[pre_block] &&
+             (f->data[pre_at - 1].op == NYIR_BR ||
+              f->data[pre_at - 1].op == NYIR_BR_IF ||
+              f->data[pre_at - 1].op == NYIR_RET ||
+              f->data[pre_at - 1].op == NYIR_NOP))
+        pre_at--;
+      if (find_backedge_idx(f, lp->header_label, iv->latch_label) ==
+              SIZE_MAX ||
+          find_label_idx(f, lp->header_label) == SIZE_MAX)
+        continue;
+      iv_affine_plan_t plan = {.len = 0};
+      if (!iv_affine_plan(&ctx, old_dst, &plan, 0))
+        continue;
+      nyr_inst_t proto = *in;
+      int64_t step = wrap_mul64(coeff, iv->step);
+      /* All analysis reads above are done; the function mutates now. */
+      int x0 = iv_affine_emit(f, &plan, iv->iv, iv->init_v, old_dst, &pre_at);
+      int step_c = f->next_value++;
+      int wphi = f->next_value++;
+      int wnext = f->next_value++;
+      nyr_inst_t cs = {.op = NYIR_CONST_I64,
+                       .dst = step_c,
+                       .a = -1,
+                       .b = -1,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .imm = step};
+      if (x0 < 0 || !insert_inst(f, pre_at, cs)) {
+        rc = -1;
+        break;
+      }
+      size_t hidx = find_label_idx(f, lp->header_label);
+      nyr_phi_incoming_t *incoming = malloc(2 * sizeof(*incoming));
+      if (hidx == SIZE_MAX || !incoming) {
+        free(incoming);
+        rc = -1;
+        break;
+      }
+      incoming[0] = (nyr_phi_incoming_t){.predecessor_label = iv->pre_label,
+                                         .value = x0};
+      incoming[1] = (nyr_phi_incoming_t){.predecessor_label = iv->latch_label,
+                                         .value = wnext};
+      nyr_inst_t phi = {.op = NYIR_PHI,
+                        .dst = wphi,
+                        .a = -1,
+                        .b = -1,
+                        .c = -1,
+                        .d = -1,
+                        .e = -1,
+                        .f = -1,
+                        .scalar_class = proto.scalar_class,
+                        .phi_incoming = incoming,
+                        .phi_incoming_len = 2};
+      if (!insert_inst(f, header_phi_end(f, hidx), phi)) {
+        free(incoming);
+        rc = -1;
+        break;
+      }
+      size_t op_idx = SIZE_MAX;
+      for (size_t k = 0; k < f->len; ++k)
+        if (f->data[k].dst == old_dst && f->data[k].op == proto.op) {
+          op_idx = k;
+          break;
+        }
+      if (op_idx == SIZE_MAX || !nyr_replace_all_uses(f, old_dst, wphi)) {
+        rc = -1;
+        break;
+      }
+      nyr_erase_instruction(f, op_idx);
+      size_t back = find_backedge_idx(f, lp->header_label, iv->latch_label);
+      nyr_inst_t next = {.op = NYIR_ADD_I64,
+                         .dst = wnext,
+                         .a = wphi,
+                         .b = step_c,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .scalar_class = proto.scalar_class,
+                         .effects = NYIR_EFFECT_NONE};
+      if (back == SIZE_MAX || !insert_inst(f, back, next)) {
+        rc = -1;
+        break;
+      }
+      if (iv_trace_enabled())
+        fprintf(stderr,
+                "[iv-elim] affine SR loop L%lld v%d -> phi v%d step %lld\n",
+                (long long)lp->header_label, old_dst, wphi, (long long)step);
+      rc = 1;
+      break;
+    }
+  }
+  nyr_use_def_free(&uses);
+  free(member);
+  return rc;
+}
+
+/*
  * If a primary induction variable is only used in its own step and a single
  * header comparison against a constant bound, and the same loop carries a
  * positive-multiple scaled IV (e.g. byte offset i*4), rewrite the comparison
@@ -2135,6 +2452,14 @@ static int iv_transform_once(nyr_func_t *f) {
     }
   }
   for (size_t i = 0; i < loop_count; ++i) {
+    int rc = affine_reduce_once(f, &cfg, defs, &loops[i]);
+    if (rc != 0) {
+      free(defs);
+      nyr_cfg_free(&cfg);
+      return rc;
+    }
+  }
+  for (size_t i = 0; i < loop_count; ++i) {
     int rc = eliminate_scaled_guard_iv_once(f, &cfg, defs, &loops[i]);
     if (rc != 0) {
       free(defs);
@@ -2190,6 +2515,8 @@ bool nyr_iv_elim(nyr_func_t *f) {
       nyr_ir_func_free(&candidate);
       break; /* reject this conservative opportunity */
     }
+    /* Drop products an affine rewrite left dead before the next round. */
+    (void)nyr_dce(&candidate);
     nyr_ir_func_free(&work);
     work = candidate;
     changed = true;

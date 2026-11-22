@@ -728,8 +728,43 @@ static bool nyr_native_jit_materialize_x64(
   }
   nyr_obj_free(&code);
 
+  /*
+   * Large images repeat a few thousand symbols across tens of thousands of
+   * relocations. Resolve each (symbol, call-ness) once and share one far
+   * stub per target instead of a linear definition search, a runtime lookup
+   * and a /proc/self/maps scan per relocation.
+   */
+  typedef struct {
+    const char *symbol;
+    bool plt;
+    void *target;
+    bool have_stub;
+    size_t stub;
+  } nyr_jit_reloc_memo_t;
+  size_t memo_cap = 64;
+  while (memo_cap < reloc_count * 2 && memo_cap < ((size_t)1 << 30))
+    memo_cap <<= 1;
+  nyr_jit_reloc_memo_t *memo = calloc(memo_cap, sizeof(*memo));
   for (size_t i = 0; i < reloc_count; ++i) {
-    void *target_ptr;
+    void *target_ptr = NULL;
+    bool plt = relocs[i].type == NY_RELOC_PLT32;
+    nyr_jit_reloc_memo_t *slot = NULL;
+    if (memo && relocs[i].symbol) {
+      uint64_t h = UINT64_C(1469598103934665603) ^ (uint64_t)plt;
+      for (const char *c = relocs[i].symbol; *c; ++c)
+        h = (h ^ (unsigned char)*c) * UINT64_C(1099511628211);
+      for (size_t k = (size_t)h & (memo_cap - 1);;
+           k = (k + 1) & (memo_cap - 1)) {
+        if (!memo[k].symbol ||
+            (memo[k].plt == plt && strcmp(memo[k].symbol, relocs[i].symbol) == 0)) {
+          slot = &memo[k];
+          break;
+        }
+      }
+      if (slot->symbol)
+        target_ptr = slot->target;
+    }
+    if (!target_ptr) {
     int def_index = nyr_x64_obj_def_index(defs, def_count, relocs[i].symbol);
     /*
      * A call relocation never targets a data cell. A Ny global named like a
@@ -748,7 +783,14 @@ static bool nyr_native_jit_materialize_x64(
       target_ptr = nyr_native_jit_symbol(memory, defs, def_count, def_index,
                                          relocs[i].symbol, runtime_services);
     }
+    if (slot && target_ptr) {
+      slot->symbol = relocs[i].symbol;
+      slot->plt = plt;
+      slot->target = target_ptr;
+    }
+    }
     if (!target_ptr) {
+      free(memo);
       nyr_set_error(err, err_len, "native JIT: unresolved symbol '%s'",
                     relocs[i].symbol);
       image->memory = memory;
@@ -759,12 +801,19 @@ static bool nyr_native_jit_materialize_x64(
     unsigned char *patch_at = memory + relocs[i].disp_off;
     uintptr_t after = (uintptr_t)(patch_at + 4);
     int32_t disp;
+    if (!nyr_jit_rel32((uintptr_t)target_ptr, after, &disp) && slot &&
+        slot->have_stub &&
+        nyr_jit_rel32((uintptr_t)(memory + slot->stub), after, &disp)) {
+      memcpy(patch_at, &disp, sizeof(disp));
+      continue;
+    }
     if (!nyr_jit_rel32((uintptr_t)target_ptr, after, &disp)) {
       if (relocs[i].type == NY_RELOC_PC32 &&
           !nyr_native_jit_target_is_code(target_ptr)) {
         nyr_set_error(err, err_len,
                       "native JIT: PC32 data relocation '%s' out of range",
                       relocs[i].symbol);
+        free(memo);
         image->memory = memory;
         image->size = mapping_size;
         nyr_jit_image_free(image);
@@ -776,6 +825,7 @@ static bool nyr_native_jit_materialize_x64(
         nyr_set_error(err, err_len,
                       "native JIT: relocation '%s' out of range",
                       relocs[i].symbol);
+        free(memo);
         image->memory = memory;
         image->size = mapping_size;
         nyr_jit_image_free(image);
@@ -788,9 +838,14 @@ static bool nyr_native_jit_materialize_x64(
       memcpy(stub + 2, &absolute, sizeof(absolute));
       stub[10] = 0xff;
       stub[11] = 0xe0;
+      if (slot) {
+        slot->have_stub = true;
+        slot->stub = offset;
+      }
     }
     memcpy(patch_at, &disp, sizeof(disp));
   }
+  free(memo);
 
   int entry_index = nyr_x64_obj_def_index(defs, def_count, "rt_main");
   if (entry_index < 0 || defs[entry_index].off >= text_len ||

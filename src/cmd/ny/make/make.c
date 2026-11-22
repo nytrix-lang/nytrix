@@ -1202,7 +1202,9 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
   static const char *test[] = {"ny", "ny-full", "ny-test"};
   static const char *test_shared_std[] = {"ny", "ny-full", "ny-test", "std",
                                           "std_bc"};
-  static const char *bench_shared_std[] = {"ny", "ny-test", "std", "std_bc"};
+  static const char *bench[] = {"ny", "ny-full", "nyc", "ny-test"};
+  static const char *bench_shared_std[] = {"ny",  "ny-full", "nyc",
+                                           "ny-test", "std", "std_bc"};
   static const char *fuzz[] = {"ny", "ny-test"};
   static const char *user_fuzz[] = {"ny-full", "ny-test"};
   static const char *fmt[] = {"ny-fmt"};
@@ -1260,11 +1262,11 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
           strncmp(unknown[i], "--std-bc=", 9) == 0)
         use_shared_std = false;
     }
-    *targets = use_shared_std ? bench_shared_std : fuzz;
+    *targets = use_shared_std ? bench_shared_std : bench;
     *target_count =
         use_shared_std
             ? (int)(sizeof(bench_shared_std) / sizeof(bench_shared_std[0]))
-            : (int)(sizeof(fuzz) / sizeof(fuzz[0]));
+            : (int)(sizeof(bench) / sizeof(bench[0]));
   } else if (strcmp(cmd, "fuzz") == 0) {
     *targets = user_fuzz;
     *target_count = (int)(sizeof(user_fuzz) / sizeof(user_fuzz[0]));
