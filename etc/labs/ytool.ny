@@ -1,18 +1,15 @@
 #!/usr/bin/env ny
-;; Keywords: wayland x11 input automation mouse keyboard windows cli
-;; ytool - one input-automation tool for Wayland and X11.
+;; Keywords: wayland x11 desktop input automation mouse keyboard windows cli
+;; ytool - one input-automation utility tool for Wayland/X11.
 ;;
-;; Merges the X11 command set (xtool) with the dependency-free Wayland seat
-;; driver (wtool): virtual keyboard, virtual pointer and input method over the
+;; Combines the X11 window automation command set with a dependency-free
+;; Wayland seat driver: virtual keyboard, virtual pointer and input method over the
 ;; Wayland wire protocol, plus XTest/Xlib window automation on X11.
 ;;
 ;;   ytool probe | env | selftest | run SCRIPT
 ;;   ytool type TEXT | key SEQ | move X Y | click X Y   (auto backend)
 ;;   ytool wayland <cmd>   force Wayland
 ;;   ytool x11 <cmd>       force the X11 command set (xdotool-style)
-
-;; Keywords: x11 desktop automation mouse keyboard windows input cli
-;; X11 automation utility like xdotool.
 
 #link "libX11.so"
 #link "libX11.so.6"
@@ -2202,7 +2199,7 @@ if cmd == "type" || cmd == "key" || cmd == "mousemove" || cmd == "click" {
 }
 
 if(cmd == "version" || cmd == "--version") {
-   print("xtool 0.1")
+   print("ytool 0.1")
    exit(0)
 }
 
