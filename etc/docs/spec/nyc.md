@@ -282,6 +282,83 @@ a `bzImage` or userspace boot test. See the
 [verification evidence](#verification-evidence) for the remaining gates and the
 [changelog](../CHANGELOG.md) for user-visible changes.
 
+## Remaining acceptance
+
+NYC is accepted for the kernel only when every gate below passes. Until
+then, the [verification evidence](#verification-evidence) records partial
+results; it does not replace these gates. For each fix, record the defect,
+change, regression, and evidence in this specification and summarize
+user-visible changes in the [changelog](../CHANGELOG.md).
+
+### Required acceptance
+
+- [ ] From unmodified upstream Linux 7.3 sources and a fresh output tree,
+  produce x86-64 `vmlinux`, `bzImage`, and all configured modules. Compile every
+  target C translation unit with NYC, including dependency generation; GNU
+  `as` may assemble the output and the host compiler may build host tools.
+  No target-C fallback, stale output reuse, GCC dependency-generation
+  workaround, or modified kernel sources count.
+- [ ] Fit both upstream real-mode setup constraints. Boot the resulting
+  protected `bzImage` in QEMU and verify initramfs `/init` executes. Direct
+  PVH ELF boots and focused relinks are diagnostic, not acceptance.
+- [ ] Review the complete compiler, assembler, linker, modpost, and `objtool`
+  diagnostics. Fix unsafe output and optimizer verifier failures without
+  suppressing warnings or removing configured protections.
+- [ ] Record the configuration, source and compiler identity, toolchain,
+  exact commands, configured target object inventory, and compiler provenance
+  for every object. Count actual target C units; classify failures,
+  unsupported cases, and any workarounds. Keep the accepted build and QEMU
+  smoke test as a permanent regression.
+- [ ] Establish assembly/direct-object/physical-machine parity over the native
+  benchmark set, including unsigned and 16/32-bit forms. Support PIC,
+  retpolines, named sections, stack guards, and frame-pointer omission without
+  the stack encoder, then remove the obsolete fallback.
+- [ ] Close the open C boundary cases: remaining complex forms, kernel tracing
+  flags, direct-object assembly annotations, and incomplete FS/GS address-space
+  forms and execution coverage. The specification records the narrower verified
+  subsets.
+
+### Correctness verification programme
+
+- [ ] **P0 — Harness.** Audit the existing test, differential, and benchmark
+  lanes for false positives, truncated exit comparisons, matching failures,
+  stale output, silent exclusions, fragile expected failures, and duplication.
+  Distinguish pass, miscompile, compile/link/runtime failure, timeout,
+  unsupported, and invalid test. Inject faults to prove the harness detects
+  wrong output, bad assembly, link failures, crashes, timeouts, and stale
+  binaries; every real regression must fail the test command.
+- [ ] **P1 — Differential execution.** Compare NYC/NYR, NYC/LLVM, GCC, and
+  Clang at supported optimization levels on well-defined, deterministic C.
+  Compare full output, status and signal, binary and memory results, exact
+  integers, appropriate floating-point semantics, ABI results, and side
+  effects. Separate compile acceptance from execution coverage; resolve
+  oracle disputes against the language contract.
+- [ ] **P2 — Automated bug discovery.** Reuse existing generators, torture
+  suites, or fuzzers for integer conversions, aliasing/casts, aggregates and
+  bitfields, variadics, GNU attributes/asm, atomics, SSA/CFG, scalar and loop
+  optimization, register allocation and spills, and ELF/linking. Retain
+  deterministic seeds, rule out undefined behavior, minimize mismatches to
+  the first divergent stage, and add focused regressions by root cause.
+- [ ] **P3 — Compiler invariants.** Check typed AST/IR, SSA dominance and PHI
+  edges, optimizer rewrites, machine liveness and allocation, spill and
+  frame layout, ABI constraints, and ELF sections/symbols/relocations. Fail
+  at the first invalid boundary. Enable expensive checks in test and debug
+  builds without imposing them on normal compilation.
+- [ ] **P4 — Conformance.** Pair positive execution and negative diagnostic
+  tests for supported C and GNU C constructs encountered in Linux, SQLite,
+  system headers, and other real workloads. Do not count untested features.
+- [ ] **P5 — System acceptance.** Fulfil the protected kernel artifact,
+  provenance, diagnostic, and boot gates above.
+- [ ] **P6 — Reproducibility.** Preserve compiler revision, flags, dependencies,
+  target, checksums, seeds, object provenance, and reproduction commands.
+  Consider self-hosting only if it serves the existing architecture; identical
+  binaries are not proof of semantics.
+- [ ] **P7 — Cost.** Keep fast deterministic checks separate from deep
+  differential/fuzzing/sanitizer lanes and full system checks. Reuse the
+  current harness, safely cache reproducible inputs, parallelize independent
+  cases, retain failures, and report compiler time and peak memory against a
+  stable baseline without slowing ordinary builds.
+
 ## Verification evidence
 
 <details>
@@ -2468,5 +2545,104 @@ with `set_thread_area` and checked a named load, compound store and
 address-of dereference against GCC. These tests do not establish support
 for all segment-qualified declarators, native encoder parity, or kernel
 boot.
+
+### Kernel boot continuation: setup size, IRQ, workqueue, and xarray
+
+These runs continue the protected Linux 7.3 builds above. Each item names its
+run directory under `/tmp`.
+
+- All 20 setup C recipes replayed with the default NYC compiler and
+  linked with unmodified upstream `setup.ld`. The setup uses 56 total
+  sectors, `.text32` ends at `0x5fee`, and `_end=0x78d0`. The
+  map is `/tmp/nyc-setup-size-matrix.keti7sbz/setup.map`. A diagnostic
+  image using those default setup objects unpacked the initramfs and
+  reproduced the serial IRQ-probe stall. A fresh protected build with
+  the compiler and config frozen is underway in
+  `/tmp/nyc-protected-default.ZzOHHVtU`.
+
+- The IRQ boundary fix restored both stack-switch calls in the saved APIC
+  and IRQ recipes. The resulting image passed serial IRQ probing and
+  exposed a workqueue fault. The high-priority pool selector retained
+  the flag value 16 in a local `_Bool`, yielding an out-of-bounds
+  array index. The frontend now canonicalizes automatic `_Bool`
+  initialization and assignment. The workqueue replay emits `setne`,
+  the C frontend suite passed, and the setup boundary stayed at
+  `0x5fee`. A fresh protected compiler snapshot with both changes is
+  building in `/tmp/nyc-protected-corrected.Fncoo4ZO`.
+  The focused bzImage with both fixes reached `/init` and printed
+  `NYC_KERNEL_INIT_REACHED`. This reused other kernel objects and
+  passed the setup video prompt with a Space key. See
+  `/tmp/nyc-hidden-relink.y4m9fybn/serial.log`.
+
+- The earlier default setup replay ends `.text32` at `0x6107`, 263
+  bytes beyond the first acceptable linker boundary. See
+  `/tmp/nyc-setup-size-matrix.3q9ecc3v/setup.map`.
+
+- Eliminating unnecessary sign-bit bias on already zero-extended
+  unsigned 32-bit comparisons moved the isolated setup boundary from
+  `0x6107` to `0x60f1`. The current full compiler replay ends at
+  `0x6102` with concurrent optimizer changes included. See
+  `/tmp/nyc-setup-size-matrix.dytb4del/setup.map`. The C frontend suite
+  passed with operands above `INT_MAX`.
+
+- Folding immediate push/pop/store chains through dead caller-saved
+  registers into direct frame-home pops saved 46 bytes against a
+  compiler rebuilt with only that fold disabled. The latest
+  replay with concurrent backend changes ends `.text32` at `0x60d4`,
+  212 bytes over the boundary. The real-mode QEMU string probe matched
+  the baseline marker and the frontend suite passed. See
+  `/tmp/nyc-setup-size-matrix.7gh83ouw/setup.map`.
+
+- Replaying the startup units and `lib/xarray.o` with the corrected
+  compiler and reusing the saved kernel objects produced a diagnostic
+  bzImage. The iomap initcall returned 0 and initramfs unpacked. An
+  unmodified serial-probe run left PID 1 sleeping in
+  `probe_irq_on → msleep → schedule_timeout`. See
+  `/tmp/nyc-hidden-relink.3o_iq089/pid1-stack.log`. The full C frontend
+  suite, C lexer, backend IR acceptance, and shared API acceptance passed.
+  A separate diagnostic boot bypassed that serial initcall and omitted
+  the emulated NIC. The ATA IRQ then exposed a null list predecessor in
+  `insert_work+0xca`, reached from `__queue_work` via the active pool's
+  worklist. See `/tmp/nyc-hidden-relink.3o_iq089/serial-minimal.log`.
+  Repeated live snapshots found the same queued PID 1 timer after its
+  deadline had passed, with jiffies advancing between samples. A
+  separate run confirmed timer softirq bit 1 pending while the
+  registered `ksoftirqd/0` thread slept. See
+  `/tmp/nyc-hidden-relink.3o_iq089/softirq-worker-stack.log` and
+  `timer-stack-{1,2}.log` in the same directory.
+
+- A diagnostic bzImage with fresh `softirq.o`, `timer.o`,
+  `smpboot.o`, `apic.o`, and `workqueue.o` also reached the serial
+  probe with timer softirq bit 1 pending and PID 1's timer past expiry.
+  After the guest settled, QEMU reported the one-shot local APIC timer
+  at zero with empty local APIC interrupt request and in-service
+  registers. See `/tmp/nyc-hidden-relink.xed2pkay/pid1-softirq-stack.log`
+  and `interrupt-controller.log` in the same directory.
+
+- The fresh retry in `/tmp/nyc-continue-kernel-20261121042155` reproduced
+  the setup link failure. Its diagnostic map at `/tmp/nyc-setup-map.txt`
+  places `.pecompat` at `0x7000` and `_end` at `0x88d0`. With
+  the following sections the same size, `.text32` must end at or before
+  `0x6000` to move `.pecompat` back a page. A replay of the 20 setup C
+  recipes at `-Os`, `-O1`, `-O2`, `-O3`, and `-Os` with size
+  inlining disabled saved 929 bytes by selecting the smallest object per
+  recipe. The upstream link still rejected the result. The replay map
+  in `/tmp/nyc-setup-size-matrix.1lqg0d4r/smallest.map` shows
+  `.text32` ending at `0x62d3` and `_end` still at `0x88d0`.
+
+- Cross-target artifact freshness and case-specific negative diagnostics
+  passed the C frontend suite and fault injection. `bench-gcc` now rejects
+  matching failures and missing checksums and isolates duplicate fixture
+  basenames. Both routes passed the `bitcount` smoke test using existing
+  binaries. The normal rebuild is blocked by pending vectorizer changes.
+
+- The width and mixed-shape lanes now require fresh artifacts and exact
+  output. Fault injection caught stale executables, invalid assembly,
+  compile or link artifact failures, wrong output or status, a crash,
+  a timeout, and bypassed machine emission.
+
+- The same configuration requests 16 bytes of function-entry padding.
+  A direct NYC/GCC object comparison showed that NYC's kernel compatibility
+  mode accepts the flag without emitting the padding or patch table.
 
 </details>
