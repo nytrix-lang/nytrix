@@ -269,6 +269,7 @@ typedef struct {
   ny_ctok_t *tokens;
   size_t token_count;
   size_t pos;
+  bool has_hidden_visibility;
   c_source_file_t *files;
   size_t file_count;
   size_t file_capacity;
@@ -8745,6 +8746,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
       !parse_alignment_attribute(p, &declaration_alignment, NULL))
     return false;
   bool is_const = p->last_type_const;
+  bool is_volatile = p->last_type_volatile;
   if (type_array) {
     c_array_shape_t shape = p->last_type_array;
     size_t len = p->last_type_array_size;
@@ -8762,6 +8764,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
           global && global->is_array && global->type == element_type &&
           (global->array_rank == shape.rank || !global->array_rank) &&
           global->is_const == is_const &&
+          global->is_volatile == is_volatile &&
           (!global->len || !len || global->len == len);
       if (global && (!compatible || (!is_external && !global->is_external &&
                                      !global->is_tentative))) {
@@ -8802,6 +8805,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
                          .array_rank = shape.rank,
                          .array_stride = stride,
                          .is_const = is_const,
+                         .is_volatile = is_volatile,
                          .is_external = is_external,
                          .is_tentative = !is_external};
         global = &p->globals[p->global_count - 1];
@@ -8922,6 +8926,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
                       (global->array_rank == current_declarator.array_rank ||
                        (global->is_external && !global->array_rank)) &&
                       global->is_const == is_const &&
+                      global->is_volatile == is_volatile &&
                       (!global->len || !len || global->len == len);
     if (global && (!compatible || (!is_external && !global->is_external &&
                                    !global->is_tentative))) {
@@ -8975,6 +8980,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
           .is_signed_array = element_type == C_CHAR || element_type == C_I16 ||
                              element_type == C_I32 || element_type == C_I64,
           .is_const = is_const,
+          .is_volatile = is_volatile,
           .is_external = is_external,
           .is_tentative = !is_external,
           .alignment = object_alignment};
@@ -9222,11 +9228,12 @@ static bool try_collect_byte_array(c_parser_t *p, bool *matched) {
   if (*matched)
     return true;
   size_t type_pos = p->pos;
-  bool is_external = false, is_const = false;
+  bool is_external = false, is_const = false, is_volatile = false;
   while (tok_is(p, type_pos, "const") || tok_is(p, type_pos, "static") ||
          tok_is(p, type_pos, "extern") || tok_is(p, type_pos, "volatile")) {
     is_external |= tok_is(p, type_pos, "extern");
     is_const |= tok_is(p, type_pos, "const");
+    is_volatile |= tok_is(p, type_pos, "volatile");
     ++type_pos;
   }
   if (tok_is(p, type_pos, "struct") || tok_is(p, type_pos, "union"))
@@ -9512,6 +9519,7 @@ static bool try_collect_byte_array(c_parser_t *p, bool *matched) {
       .is_signed_array = signed_byte || element_type == C_I16 ||
                          element_type == C_I32 || element_type == C_I64,
       .is_const = is_const,
+      .is_volatile = is_volatile || probe.last_type_volatile,
       .is_external = is_external && !has_initializer,
       .is_tentative = !is_external && !has_initializer,
       .section = owned_section};
@@ -19816,6 +19824,9 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
                               nyc_abi_t abi, char *err, size_t err_len,
                               FILE *macro_output) {
   *p = (c_parser_t){.abi = abi, .err = err, .err_len = err_len};
+  bool hidden_visibility = false;
+  bool visibility_stack[128];
+  size_t visibility_depth = 0;
   p->base_path = source->base_path;
   p->path_maps = source->path_maps;
   p->path_map_count = source->path_map_count;
@@ -20204,9 +20215,45 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
       } else if (active && preproc_directive(token, "pragma", &argument)) {
         const char *name = NULL;
         size_t length = 0;
-        if (preproc_read_identifier(token, &argument, &name, &length) &&
-            length == 4 && memcmp(name, "once", 4) == 0)
+        if (!preproc_read_identifier(token, &argument, &name, &length))
+          continue;
+        if (length == 4 && !memcmp(name, "once", 4)) {
           p->files[current_file].once = true;
+        } else if (length == 3 && !memcmp(name, "GCC", 3) &&
+                   preproc_read_identifier(token, &argument, &name, &length) &&
+                   length == 10 && !memcmp(name, "visibility", 10)) {
+          bool valid = preproc_read_identifier(token, &argument, &name, &length);
+          if (valid && length == 3 && !memcmp(name, "pop", 3)) {
+            valid = visibility_depth != 0;
+            if (valid)
+              hidden_visibility = visibility_stack[--visibility_depth];
+          } else if (valid && length == 4 && !memcmp(name, "push", 4)) {
+            preproc_skip_space(token.start, token.len, &argument);
+            valid = argument < token.len && token.start[argument++] == '(' &&
+                    preproc_read_identifier(token, &argument, &name, &length) &&
+                    visibility_depth < sizeof(visibility_stack) /
+                                           sizeof(visibility_stack[0]);
+            bool hidden = valid && length == 6 && !memcmp(name, "hidden", 6);
+            valid = hidden ||
+                    (valid && length == 7 && !memcmp(name, "default", 7));
+            preproc_skip_space(token.start, token.len, &argument);
+            valid = valid && argument < token.len && token.start[argument++] == ')';
+            if (valid) {
+              visibility_stack[visibility_depth++] = hidden_visibility;
+              hidden_visibility = hidden;
+              p->has_hidden_visibility |= hidden;
+            }
+          } else {
+            valid = false;
+          }
+          preproc_skip_space(token.start, token.len, &argument);
+          if (!valid || argument != token.len) {
+            snprintf(err, err_len,
+                     "%s:%u: unsupported or malformed GCC visibility pragma",
+                     p->files[current_file].path, token.line);
+            goto fail;
+          }
+        }
       } else if (active && preproc_directive(token, "include", &argument)) {
         if (argument < token.len && token.start[argument] != '"' &&
             token.start[argument] != '<') {
@@ -20448,6 +20495,7 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
       snprintf(err, err_len, "out of memory retaining C source locations");
       goto fail;
     }
+    token.hidden_visibility = hidden_visibility;
     p->tokens[p->token_count++] = token;
     if (token.kind == NY_CTOK_EOF)
       break;
@@ -21589,6 +21637,59 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
   return true;
 }
 
+static const char *visibility_link_symbol(const char *symbol) {
+  if (!strncmp(symbol, "__nyc_extern_", sizeof("__nyc_extern_") - 1))
+    return symbol + sizeof("__nyc_extern_") - 1;
+  if (!strncmp(symbol, "__nyc_data_", sizeof("__nyc_data_") - 1))
+    return symbol + sizeof("__nyc_data_") - 1;
+  return symbol;
+}
+
+static bool retain_hidden_declaration(c_parser_t *p, nyc_unit_t *unit,
+                                      ny_ctok_t name, bool defined) {
+  if (!name.hidden_visibility)
+    return true;
+  bool needs_directive = defined;
+  for (size_t f = 0; f < unit->count; ++f)
+    for (size_t i = 0; i < unit->funcs[f].len; ++i) {
+      nyr_inst_t *in = &unit->funcs[f].data[i];
+      if (!in->symbol ||
+          (in->op != NYIR_ADDR_SYMBOL && in->op != NYIR_CALL))
+        continue;
+      const char *symbol = visibility_link_symbol(in->symbol);
+      if (strlen(symbol) != name.len || memcmp(symbol, name.start, name.len))
+        continue;
+      in->flags |= NYIR_INST_F_SYMBOL_NONPREEMPTIBLE;
+      unit->has_hidden_references = true;
+    }
+  /* Instruction emitters annotate surviving references after optimization. */
+  for (size_t d = 0; !needs_directive && d < unit->data_count; ++d)
+    for (size_t i = 0; i < unit->data[d].reloc_count; ++i) {
+      const char *symbol =
+          visibility_link_symbol(unit->data[d].relocs[i].symbol);
+      needs_directive |= strlen(symbol) == name.len &&
+                         !memcmp(symbol, name.start, name.len);
+    }
+  if (!needs_directive)
+    return true;
+  static const char prefix[] = "\t.hidden\t";
+  if (name.len > SIZE_MAX - sizeof(prefix)) {
+    fail(p, "hidden symbol name is too large");
+    return false;
+  }
+  size_t len = sizeof(prefix) - 1 + name.len;
+  unsigned char *directive = malloc(len);
+  if (!directive) {
+    fail(p, "out of memory retaining hidden visibility");
+    return false;
+  }
+  memcpy(directive, prefix, sizeof(prefix) - 1);
+  memcpy(directive + sizeof(prefix) - 1, name.start, name.len);
+  bool ok = retain_file_scope_assembly(p, directive, len);
+  free(directive);
+  return ok;
+}
+
 bool nyc_unit_prune_static(nyc_unit_t *unit, char *err, size_t err_len) {
   return prune_unreferenced_static_functions(NULL, unit, err, err_len);
 }
@@ -21859,6 +21960,25 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
   }
   if (ok)
     ok = prune_unreferenced_static_functions(&parser, out, err, err_len);
+  if (ok && parser.has_hidden_visibility && abi == NYC_ABI_SYSV_X86_64) {
+    for (size_t i = 0; ok && i < parser.global_count; ++i) {
+      const c_global_t *global = &parser.globals[i];
+      if (global->is_local)
+        continue;
+      ok = retain_hidden_declaration(&parser, out, global->name,
+                                     !global->is_external);
+    }
+    for (size_t i = 0; ok && i < parser.function_count; ++i) {
+      const c_function_t *function = &parser.functions[i];
+      if (function->is_static)
+        continue;
+      ny_ctok_t name = function->has_asm_alias ? function->asm_alias
+                                              : function->name;
+      name.hidden_visibility = function->name.hidden_visibility;
+      ok = retain_hidden_declaration(&parser, out, name,
+                                      function->defined && !function->no_emit);
+    }
+  }
   if (ok) {
     out->raw_file_scope_asm = parser.raw_file_scope_asm;
     parser.raw_file_scope_asm = NULL;

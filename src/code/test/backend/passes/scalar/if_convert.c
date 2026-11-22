@@ -495,8 +495,47 @@ static int run_unclassified_phi_case(int variant) {
   return ok ? 0 : 1;
 }
 
+static int run_short_circuit_phi_case(void) {
+  const char *name = "if-convert-short-circuit-phi";
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int zero = nyr_opt_const(&f, 0);
+  int one = nyr_opt_const(&f, 1);
+  int two = nyr_opt_const(&f, 2);
+  int first = nyr_opt_cmp(&f, one, one, NYIR_CMP_EQ);
+  nyr_opt_br_if(&f, first, 10);
+  nyr_opt_label(&f, 20);
+  nyr_opt_br(&f, 50);
+  nyr_opt_label(&f, 10);
+  int second = nyr_opt_cmp(&f, one, two, NYIR_CMP_EQ);
+  nyr_opt_br_if(&f, second, 40);
+  nyr_opt_label(&f, 30);
+  nyr_opt_br(&f, 50);
+  nyr_opt_label(&f, 40);
+  nyr_opt_br(&f, 50);
+  nyr_opt_label(&f, 50);
+  nyr_phi_incoming_t *incoming = malloc(3 * sizeof(*incoming));
+  if (!incoming)
+    exit(2);
+  incoming[0] = (nyr_phi_incoming_t){.predecessor_label = 20, .value = zero};
+  incoming[1] = (nyr_phi_incoming_t){.predecessor_label = 30, .value = one};
+  incoming[2] = (nyr_phi_incoming_t){.predecessor_label = 40, .value = two};
+  int result = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_PHI,
+                                            .dst = -1,
+                                            .phi_incoming = incoming,
+                                            .phi_incoming_len = 3});
+  nyr_opt_ret(&f, result);
+
+  bool ok = nyr_opt_verify(&f, name) && nyr_opt_eval(&f, name) == 1 &&
+            nyr_if_convert(&f) && nyr_opt_verify(&f, name) &&
+            nyr_opt_eval(&f, name) == 1;
+  nyr_ir_func_free(&f);
+  return ok ? 0 : 1;
+}
+
 int main(void) {
-  return run_phi_metadata_case() || run_unclassified_phi_case(0) ||
+  return run_short_circuit_phi_case() ||
+         run_phi_metadata_case() || run_unclassified_phi_case(0) ||
          run_unclassified_phi_case(1) || run_unclassified_phi_case(2) ||
          run_unclassified_phi_case(3) ||
          run_case("if-convert-false", 7, false, false, false, 5, true) ||

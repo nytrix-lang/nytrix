@@ -1947,6 +1947,145 @@ static int strength_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
 }
 
 /*
+ * If a primary induction variable is only used in its own step and a single
+ * header comparison against a constant bound, and the same loop carries a
+ * positive-multiple scaled IV (e.g. byte offset i*4), rewrite the comparison
+ * onto the scaled IV and erase the dead primary IV to save a loop GPR.
+ */
+static int eliminate_scaled_guard_iv_once(nyr_func_t *f, const nyr_cfg_t *cfg,
+                                          const int *defs,
+                                          const iv_loop_t *lp) {
+  if (!f || !cfg || !defs || !lp || lp->iv_count < 2)
+    return 0;
+  nyr_use_def_t uses = {0};
+  if (!nyr_build_use_def(f, &uses))
+    return -1;
+  size_t header_blk = cfg->inst_block[lp->header_idx];
+  for (size_t i = 0; i < lp->iv_count; ++i) {
+    const basic_iv_t *prim = &lp->ivs[i];
+    if (!prim->init_is_const || prim->step <= 0 || prim->iv < 0 ||
+        (size_t)prim->iv >= uses.value_count)
+      continue;
+    if (!value_only_used_by(&uses, prim->update_v, prim->phi_idx))
+      continue;
+    size_t cmp_idx = SIZE_MAX;
+    size_t copy_idx = SIZE_MAX;
+    int cmp_val = prim->iv;
+    bool ok_uses = true;
+    for (size_t u = uses.offsets[prim->iv]; u < uses.offsets[prim->iv + 1];
+         ++u) {
+      size_t user = uses.users[u];
+      if (user == prim->update_idx)
+        continue;
+      if (user >= f->len) {
+        ok_uses = false;
+        break;
+      }
+      if (f->data[user].op == NYIR_CMP_I64 &&
+          cfg->inst_block[user] == header_blk && cmp_idx == SIZE_MAX &&
+          copy_idx == SIZE_MAX) {
+        cmp_idx = user;
+        cmp_val = prim->iv;
+      } else if (f->data[user].op == NYIR_COPY && f->data[user].dst >= 0 &&
+                 (size_t)f->data[user].dst < uses.value_count &&
+                 cfg->inst_block[user] == header_blk && cmp_idx == SIZE_MAX &&
+                 copy_idx == SIZE_MAX) {
+        int cv = f->data[user].dst;
+        if (uses.offsets[cv + 1] != uses.offsets[cv] + 1) {
+          ok_uses = false;
+          break;
+        }
+        size_t cu = uses.users[uses.offsets[cv]];
+        if (cu >= f->len || f->data[cu].op != NYIR_CMP_I64 ||
+            cfg->inst_block[cu] != header_blk) {
+          ok_uses = false;
+          break;
+        }
+        copy_idx = user;
+        cmp_idx = cu;
+        cmp_val = cv;
+      } else {
+        ok_uses = false;
+        break;
+      }
+    }
+    if (!ok_uses || cmp_idx == SIZE_MAX)
+      continue;
+    const nyr_inst_t *cmp = &f->data[cmp_idx];
+    bool iv_on_lhs = cmp->a == cmp_val;
+    int bound_v = iv_on_lhs ? cmp->b : cmp->a;
+    if ((!iv_on_lhs && cmp->b != cmp_val) || bound_v < 0 ||
+        bound_v >= f->next_value || defs[bound_v] < 0)
+      continue;
+    const nyr_inst_t *bound_in = &f->data[(size_t)defs[bound_v]];
+    if (bound_in->op != NYIR_CONST_I64)
+      continue;
+    int64_t bound_c = bound_in->imm;
+    __int128 diff = (__int128)bound_c - (__int128)prim->init;
+    if (diff < 0 || diff > (INT64_MAX / 4))
+      continue;
+    for (size_t j = 0; j < lp->iv_count; ++j) {
+      if (j == i)
+        continue;
+      const basic_iv_t *sc = &lp->ivs[j];
+      if (!sc->init_is_const || sc->step <= prim->step ||
+          sc->step % prim->step != 0)
+        continue;
+      int64_t scale = sc->step / prim->step;
+      if (scale <= 1 || sc->init < INT64_MIN / 4 || sc->init > INT64_MAX / 4)
+        continue;
+      __int128 new_bound = (__int128)sc->init + (__int128)scale * diff;
+      if (new_bound < INT64_MIN / 4 || new_bound > INT64_MAX / 4)
+        continue;
+      if (new_bound + sc->step > INT64_MAX / 2)
+        continue;
+      int nb_v = f->next_value++;
+      if (!nir_ensure_inst_space(f, 1)) {
+        nyr_use_def_free(&uses);
+        return -1;
+      }
+      memmove(&f->data[cmp_idx + 1], &f->data[cmp_idx],
+              (f->len - cmp_idx) * sizeof(*f->data));
+      f->data[cmp_idx] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                      .dst = nb_v,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = (int64_t)new_bound,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = f->data[cmp_idx + 1].debug};
+      f->len += 1;
+      size_t new_cmp = cmp_idx + 1;
+      if (iv_on_lhs) {
+        f->data[new_cmp].a = sc->iv;
+        f->data[new_cmp].b = nb_v;
+      } else {
+        f->data[new_cmp].b = sc->iv;
+        f->data[new_cmp].a = nb_v;
+      }
+      nyr_clear_derived_facts(&f->data[new_cmp]);
+      size_t p_phi =
+          prim->phi_idx >= cmp_idx ? prim->phi_idx + 1 : prim->phi_idx;
+      size_t p_upd =
+          prim->update_idx >= cmp_idx ? prim->update_idx + 1 : prim->update_idx;
+      nyr_erase_instruction(f, p_phi);
+      nyr_erase_instruction(f, p_upd);
+      if (copy_idx != SIZE_MAX) {
+        size_t p_cp = copy_idx >= cmp_idx ? copy_idx + 1 : copy_idx;
+        nyr_erase_instruction(f, p_cp);
+      }
+      nyr_use_def_free(&uses);
+      return 1;
+    }
+  }
+  nyr_use_def_free(&uses);
+  return 0;
+}
+
+/*
  * Return 1 for one transform, 0 for none, -1 for allocation/build failure.
  */
 static int iv_transform_once(nyr_func_t *f) {
@@ -1989,6 +2128,14 @@ static int iv_transform_once(nyr_func_t *f) {
   }
   for (size_t i = 0; i < loop_count; ++i) {
     int rc = strength_reduce_once(f, &cfg, defs, &loops[i]);
+    if (rc != 0) {
+      free(defs);
+      nyr_cfg_free(&cfg);
+      return rc;
+    }
+  }
+  for (size_t i = 0; i < loop_count; ++i) {
+    int rc = eliminate_scaled_guard_iv_once(f, &cfg, defs, &loops[i]);
     if (rc != 0) {
       free(defs);
       nyr_cfg_free(&cfg);

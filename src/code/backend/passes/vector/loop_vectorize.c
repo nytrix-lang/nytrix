@@ -243,6 +243,29 @@ static bool op_is_vec_i64_bin(nyr_op_t op) {
          op == NYIR_OR_I64 || op == NYIR_XOR_I64 || op == NYIR_MUL_I64;
 }
 
+static bool lv_value_is_u32(const nyr_func_t *f, const int *defs, int v,
+                            unsigned depth) {
+  if (!f || !defs || v < 0 || v >= f->next_value || depth > 16 || defs[v] < 0)
+    return false;
+  const nyr_inst_t *in = &f->data[(size_t)defs[v]];
+  if (in->op == NYIR_COPY)
+    return lv_value_is_u32(f, defs, in->a, depth + 1);
+  if (in->op == NYIR_CONST_I64)
+    return in->imm >= 0 && (uint64_t)in->imm <= UINT32_MAX;
+  if (in->range.has_min && in->range.min >= 0 && in->range.has_max &&
+      (uint64_t)in->range.max <= UINT32_MAX)
+    return true;
+  if (in->op == NYIR_AND_I64) {
+    int64_t c = 0;
+    if ((nyr_const_i64(f, defs, in->a, &c) && c >= 0 &&
+         (uint64_t)c <= UINT32_MAX) ||
+        (nyr_const_i64(f, defs, in->b, &c) && c >= 0 &&
+         (uint64_t)c <= UINT32_MAX))
+      return true;
+  }
+  return false;
+}
+
 static bool op_is_vec_f64_bin(nyr_op_t op) {
   return op == NYIR_ADD_F64 || op == NYIR_SUB_F64 || op == NYIR_MUL_F64 ||
          op == NYIR_DIV_F64;
@@ -729,6 +752,8 @@ static int tbuf_payload_root(const nyr_func_t *f, const int *defs, int value,
     return value;
   if (in->op == NYIR_CALL && tbuf_is_private_allocator(in->symbol))
     return value;
+  if (in->op == NYIR_ALLOCA && in->imm > 0)
+    return value;
   if (in->op == NYIR_COPY)
     return tbuf_payload_root(f, defs, in->a, depth + 1);
   int64_t bytes = 0;
@@ -762,6 +787,42 @@ static tbuf_offset_t tbuf_offset_value(const nyr_func_t *f, const int *defs,
                            .dynamic = true,
                            .has_dynamic_key = true,
                            .dynamic_key = value};
+  }
+  if (in->op == NYIR_PHI) {
+    affine_t extra = affine_value(f, defs, cfg, in_loop, value, iv, 0);
+    if (extra.ok && extra.root < 0)
+      return (tbuf_offset_t){
+          .ok = true, .offset = extra.offset, .stride = extra.stride};
+    if (in->phi_incoming_len == 2 && in->phi_incoming) {
+      int pre = -1, back = -1;
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int incoming = in->phi_incoming[k].value;
+        if (incoming < 0 || incoming >= f->next_value)
+          continue;
+        if (defs[incoming] < 0 ||
+            !value_defined_in_loop(f, defs, cfg, in_loop, incoming))
+          pre = incoming;
+        else
+          back = incoming;
+      }
+      if (pre >= 0 && back >= 0 && defs[back] >= 0) {
+        const nyr_inst_t *upd = &f->data[(size_t)defs[back]];
+        int step_op = -1;
+        if (upd->op == NYIR_ADD_I64 && upd->a == value)
+          step_op = upd->b;
+        else if (upd->op == NYIR_ADD_I64 && upd->b == value)
+          step_op = upd->a;
+        int64_t step_val = 0;
+        tbuf_offset_t init_off =
+            tbuf_offset_value(f, defs, cfg, in_loop, pre, iv, depth + 1);
+        if (step_op >= 0 && init_off.ok && init_off.stride == 0 &&
+            nyr_const_i64(f, defs, step_op, &step_val)) {
+          init_off.stride = step_val;
+          return init_off;
+        }
+      }
+    }
+    return bad;
   }
   tbuf_offset_t a = {0}, b = {0}, out = {0};
   if (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) {
@@ -1620,20 +1681,96 @@ static bool fresh_labels(const nyr_func_t *f, int64_t *a, int64_t *b,
   *c = max_label + 3;
   return true;
 }
+enum {
+  VEC_RED_NONE = 0,
+  VEC_RED_ADD = 1,
+  VEC_RED_SMAX = 2,
+  VEC_RED_SMIN = 3
+};
+
+#define VEC_MAX_EXTRA_PHIS 8
+
+typedef struct {
+  int phi_dst;
+  int phi_init;
+  int64_t preheader_label;
+  size_t phi_idx;
+  size_t update_idx;
+  int64_t step;
+  bool update_has_phi_on_left;
+  bool vec_arith;
+  bool const_init;
+  int64_t const_init_val;
+  int step4_v;
+  int init_v;
+} vec_extra_phi_t;
+
+static void lv_shift_tracked_indices(size_t at, size_t delta, size_t *cmp_idx,
+                                     size_t *control_idx, size_t *update_idx,
+                                     size_t *phi_idx,
+                                     size_t *preheader_insert_at,
+                                     vec_extra_phi_t *extra_phis,
+                                     size_t extra_phi_count) {
+  if (cmp_idx && at <= *cmp_idx)
+    *cmp_idx += delta;
+  if (control_idx && at <= *control_idx)
+    *control_idx += delta;
+  if (update_idx && at <= *update_idx)
+    *update_idx += delta;
+  if (phi_idx && at <= *phi_idx)
+    *phi_idx += delta;
+  if (preheader_insert_at && *preheader_insert_at != SIZE_MAX &&
+      at <= *preheader_insert_at)
+    *preheader_insert_at += delta;
+  for (size_t e = 0; e < extra_phi_count; ++e) {
+    if (at <= extra_phis[e].phi_idx)
+      extra_phis[e].phi_idx += delta;
+    if (extra_phis[e].update_idx != SIZE_MAX && at <= extra_phis[e].update_idx)
+      extra_phis[e].update_idx += delta;
+  }
+}
+
+static nyr_inst_t lv_make_inst(nyr_op_t op, int dst, int a, int b, int c,
+                               int64_t imm, nyr_cmp_t cmp,
+                               nyr_scalar_class_t sc) {
+  nyr_inst_t in = {.op = op,
+                   .dst = dst,
+                   .a = a,
+                   .b = b,
+                   .c = c,
+                   .d = -1,
+                   .e = -1,
+                   .f = -1,
+                   .imm = imm,
+                   .cmp = cmp,
+                   .scalar_class = sc};
+  in.effects = nyr_inst_effects(&in);
+  return in;
+}
+
 static bool use_allowed(const nyr_func_t *f, const nyr_cfg_t *cfg,
                         const bool *in_loop, const bool *vec_value,
                         const bool *mask_value, const bool *rewritten,
                         const bool *broadcast_value, size_t user,
-                        size_t reduction_update_idx, int reduction_term) {
+                        size_t reduction_update_idx, size_t reduction_cmp_idx,
+                        int reduction_kind, int reduction_term) {
   if (!f || !cfg || !in_loop || user >= f->len ||
       !in_loop[cfg->inst_block[user]])
     return false;
   const nyr_inst_t *in = &f->data[user];
-  if (user == reduction_update_idx)
+  if (user == reduction_cmp_idx)
+    return (reduction_kind == VEC_RED_SMAX || reduction_kind == VEC_RED_SMIN) &&
+           in->op == NYIR_CMP_I64 && reduction_term >= 0 &&
+           vec_value[reduction_term];
+  if (user == reduction_update_idx) {
+    if (reduction_kind == VEC_RED_SMAX || reduction_kind == VEC_RED_SMIN)
+      return in->op == NYIR_SELECT_I64 && reduction_term >= 0 &&
+             vec_value[reduction_term];
     return (in->op == NYIR_ADD_I64 || in->op == NYIR_ADD_F64) &&
            ((in->a == reduction_term && in->b >= 0) ||
             (in->b == reduction_term && in->a >= 0)) &&
            vec_value[reduction_term];
+  }
   if (in->op == NYIR_STORE_I64)
     return in->c >= 0 && vec_value[in->c] &&
            !(mask_value && mask_value[in->c]);
@@ -1682,11 +1819,125 @@ static void replace_uses_outside_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
   }
 }
 
+static int vec_resolve_copy(const nyr_func_t *f, const int *defs,
+                            size_t val_count, int v) {
+  for (unsigned steps = 0; steps < 8; ++steps) {
+    if (v < 0 || (size_t)v >= val_count || defs[v] < 0)
+      return v;
+    const nyr_inst_t *in = &f->data[(size_t)defs[v]];
+    if (in->op != NYIR_COPY)
+      return v;
+    v = in->a;
+  }
+  return v;
+}
+
+static bool vec_value_nonnegative(const nyr_func_t *f, const int *defs,
+                                  size_t val_count, int v, unsigned depth,
+                                  bool *bounded_low);
+
+static bool vec_sub_self_shr(const nyr_func_t *f, const int *defs,
+                             size_t val_count, int lhs, int rhs) {
+  int a = vec_resolve_copy(f, defs, val_count, lhs);
+  int b = vec_resolve_copy(f, defs, val_count, rhs);
+  if (b < 0 || (size_t)b >= val_count || defs[b] < 0)
+    return false;
+  const nyr_inst_t *bin = &f->data[(size_t)defs[b]];
+  if (bin->op == NYIR_AND_I64) {
+    int64_t m = 0;
+    int inner = -1;
+    if (nyr_const_i64(f, defs, bin->b, &m) && m >= 0)
+      inner = bin->a;
+    else if (nyr_const_i64(f, defs, bin->a, &m) && m >= 0)
+      inner = bin->b;
+    else
+      return false;
+    b = vec_resolve_copy(f, defs, val_count, inner);
+    if (b < 0 || (size_t)b >= val_count || defs[b] < 0)
+      return false;
+    bin = &f->data[(size_t)defs[b]];
+  }
+  if (bin->op != NYIR_SAR_I64)
+    return false;
+  int64_t sh = 0;
+  if (!nyr_const_i64(f, defs, bin->b, &sh) || sh < 1 || sh > 62)
+    return false;
+  return vec_resolve_copy(f, defs, val_count, bin->a) == a;
+}
+
+static bool vec_value_nonnegative(const nyr_func_t *f, const int *defs,
+                                  size_t val_count, int v, unsigned depth,
+                                  bool *bounded_low) {
+  if (bounded_low)
+    *bounded_low = false;
+  v = vec_resolve_copy(f, defs, val_count, v);
+  if (v < 0 || (size_t)v >= val_count || depth > 8 || defs[v] < 0)
+    return false;
+  const nyr_inst_t *in = &f->data[(size_t)defs[v]];
+  if (in->range.has_min && in->range.min >= 0) {
+    if (bounded_low && in->range.has_max && in->range.max <= (1LL << 61))
+      *bounded_low = true;
+    return true;
+  }
+  if (in->op == NYIR_CONST_I64) {
+    if (in->imm < 0)
+      return false;
+    if (bounded_low && in->imm <= (1LL << 61))
+      *bounded_low = true;
+    return true;
+  }
+  if (in->op == NYIR_AND_I64) {
+    int64_t ma = 0, mb = 0;
+    if (nyr_const_i64(f, defs, in->a, &ma) && ma >= 0) {
+      if (bounded_low && ma <= (1LL << 61))
+        *bounded_low = true;
+      return true;
+    }
+    if (nyr_const_i64(f, defs, in->b, &mb) && mb >= 0) {
+      if (bounded_low && mb <= (1LL << 61))
+        *bounded_low = true;
+      return true;
+    }
+    bool ba = false, bb = false;
+    if (vec_value_nonnegative(f, defs, val_count, in->a, depth + 1, &ba)) {
+      if (bounded_low)
+        *bounded_low = ba;
+      return true;
+    }
+    if (vec_value_nonnegative(f, defs, val_count, in->b, depth + 1, &bb)) {
+      if (bounded_low)
+        *bounded_low = bb;
+      return true;
+    }
+    return false;
+  }
+  if (in->op == NYIR_SAR_I64)
+    return vec_value_nonnegative(f, defs, val_count, in->a, depth + 1,
+                                 bounded_low);
+  if (in->op == NYIR_ADD_I64) {
+    bool ba = false, bb = false;
+    return vec_value_nonnegative(f, defs, val_count, in->a, depth + 1, &ba) &&
+           vec_value_nonnegative(f, defs, val_count, in->b, depth + 1, &bb) &&
+           ba && bb;
+  }
+  if (in->op == NYIR_SUB_I64) {
+    bool ba = false;
+    if (vec_value_nonnegative(f, defs, val_count, in->a, depth + 1, &ba) &&
+        vec_sub_self_shr(f, defs, val_count, in->a, in->b)) {
+      if (bounded_low)
+        *bounded_low = ba;
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool emit_i64_vector_accumulator(
     nyr_func_t *f, int vf, const bool *in_loop, int scalar_phi, int scalar_init,
     int vector_phi, int vector_update, int scalar_result,
     int64_t preheader_label, int64_t header_label, int64_t latch_label,
-    int64_t dispatch_label, int invariant_term, int64_t trip) {
+    int64_t dispatch_label, int invariant_term, int64_t trip,
+    int reduction_kind) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg))
     return false;
@@ -1727,22 +1978,35 @@ static bool emit_i64_vector_accumulator(
     return false;
   }
 
-  int zero = f->next_value++;
+  bool is_minmax =
+      reduction_kind == VEC_RED_SMAX || reduction_kind == VEC_RED_SMIN;
   int vector_zero = f->next_value++;
   size_t at = block_insert_before_terminator(f, &cfg, preheader);
-  if (!nir_ensure_inst_space(f, 2)) {
-    nyr_cfg_free(&cfg);
-    return false;
+  if (is_minmax) {
+    if (!nir_ensure_inst_space(f, 1)) {
+      nyr_cfg_free(&cfg);
+      return false;
+    }
+    memmove(&f->data[at + 1], &f->data[at], (f->len - at) * sizeof(*f->data));
+    f->data[at] = lv_make_inst(NYIR_VEC8_SET1_I64, vector_zero, scalar_init,
+                               -1, -1, 0, NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+    f->len += 1;
+  } else {
+    int zero = f->next_value++;
+    if (!nir_ensure_inst_space(f, 2)) {
+      nyr_cfg_free(&cfg);
+      return false;
+    }
+    memmove(&f->data[at + 2], &f->data[at], (f->len - at) * sizeof(*f->data));
+    f->data[at] = (nyr_inst_t){.op = NYIR_CONST_I64, .dst = zero, .imm = 0};
+    f->data[at + 1] =
+        (nyr_inst_t){.op = vf == 4 ? NYIR_VEC8_SET1_I64 : NYIR_VEC4_SET1_I64,
+                     .dst = vector_zero,
+                     .a = zero};
+    f->data[at].effects = nyr_inst_effects(&f->data[at]);
+    f->data[at + 1].effects = nyr_inst_effects(&f->data[at + 1]);
+    f->len += 2;
   }
-  memmove(&f->data[at + 2], &f->data[at], (f->len - at) * sizeof(*f->data));
-  f->data[at] = (nyr_inst_t){.op = NYIR_CONST_I64, .dst = zero, .imm = 0};
-  f->data[at + 1] =
-      (nyr_inst_t){.op = vf == 4 ? NYIR_VEC8_SET1_I64 : NYIR_VEC4_SET1_I64,
-                   .dst = vector_zero,
-                   .a = zero};
-  f->data[at].effects = nyr_inst_effects(&f->data[at]);
-  f->data[at + 1].effects = nyr_inst_effects(&f->data[at + 1]);
-  f->len += 2;
   nyr_cfg_free(&cfg);
 
   if (!nyr_cfg_build(f, &cfg))
@@ -1801,6 +2065,77 @@ static bool emit_i64_vector_accumulator(
          (f->data[result_at].op == NYIR_LABEL ||
           f->data[result_at].op == NYIR_PHI))
     ++result_at;
+  if (is_minmax) {
+    /*
+     * Spill vector_phi into a 32-byte alloca and fold all 4 lanes plus
+     * scalar_init using scalar signed compares and selects.
+     */
+    const size_t mm_len = 20;
+    if (!nir_ensure_inst_space(f, mm_len)) {
+      nyr_cfg_free(&cfg);
+      return false;
+    }
+    memmove(&f->data[result_at + mm_len], &f->data[result_at],
+            (f->len - result_at) * sizeof(*f->data));
+    f->len += mm_len;
+    nyr_cmp_t cmp_op =
+        reduction_kind == VEC_RED_SMAX ? NYIR_CMP_GT : NYIR_CMP_LT;
+    int slot = f->next_value++;
+    int l0 = f->next_value++, l1 = f->next_value++, l2 = f->next_value++,
+        l3 = f->next_value++;
+    int o8 = f->next_value++, p1 = f->next_value++;
+    int o16 = f->next_value++, p2 = f->next_value++;
+    int o24 = f->next_value++, p3 = f->next_value++;
+    int c1 = f->next_value++, m01 = f->next_value++;
+    int c2 = f->next_value++, m23 = f->next_value++;
+    int c3 = f->next_value++, mall = f->next_value++;
+    int c4 = f->next_value++;
+    size_t k = 0;
+    f->data[result_at + k++] = lv_make_inst(NYIR_ALLOCA, slot, -1, -1, -1, 32,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] =
+        lv_make_inst(NYIR_VEC8_STORE_I64, -1, slot, vector_phi, -1, 0,
+                     NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+    f->data[result_at + k++] = lv_make_inst(NYIR_LOAD_I64, l0, slot, -1, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_CONST_I64, o8, -1, -1, -1, 8,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_ADD_I64, p1, slot, o8, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_LOAD_I64, l1, p1, -1, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_CONST_I64, o16, -1, -1, -1, 16,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_ADD_I64, p2, slot, o16, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_LOAD_I64, l2, p2, -1, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_CONST_I64, o24, -1, -1, -1, 24,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_ADD_I64, p3, slot, o24, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_LOAD_I64, l3, p3, -1, -1, 0,
+                                            NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_CMP_I64, c1, l1, l0, -1, 0,
+                                            cmp_op, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(
+        NYIR_SELECT_I64, m01, c1, l1, l0, 0, NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_CMP_I64, c2, l3, l2, -1, 0,
+                                            cmp_op, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(
+        NYIR_SELECT_I64, m23, c2, l3, l2, 0, NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(NYIR_CMP_I64, c3, m23, m01, -1, 0,
+                                            cmp_op, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(
+        NYIR_SELECT_I64, mall, c3, m23, m01, 0, NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] = lv_make_inst(
+        NYIR_CMP_I64, c4, mall, scalar_init, -1, 0, cmp_op, NYIR_SCALAR_I64_RAW);
+    f->data[result_at + k++] =
+        lv_make_inst(NYIR_SELECT_I64, scalar_result, c4, mall, scalar_init, 0,
+                     NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    nyr_cfg_free(&cfg);
+    return true;
+  }
   const size_t result_len = invariant_term >= 0 ? 4 : 1;
   if (!nir_ensure_inst_space(f, result_len)) {
     nyr_cfg_free(&cfg);
@@ -1858,6 +2193,168 @@ static bool emit_i64_vector_accumulator(
   f->data[result_at].effects = nyr_inst_effects(&f->data[result_at]);
   nyr_cfg_free(&cfg);
   return true;
+}
+
+static bool value_uses_pure_i64_arith(
+    const nyr_func_t *f, const nyr_cfg_t *cfg, const bool *in_loop,
+    const nyr_use_def_t *uses, size_t val_count, int root_val, size_t skip_idx0,
+    size_t skip_idx1, size_t reduction_update_idx, size_t reduction_cmp_idx) {
+  if (!f || !cfg || !in_loop || !uses || root_val < 0 ||
+      (size_t)root_val >= val_count || (size_t)root_val >= uses->value_count)
+    return false;
+  bool *vis = calloc(val_count, sizeof(*vis));
+  int *queue = malloc(val_count * sizeof(*queue));
+  if (!vis || !queue) {
+    free(vis);
+    free(queue);
+    return false;
+  }
+  size_t qh = 0, qt = 0;
+  vis[root_val] = true;
+  queue[qt++] = root_val;
+  bool saw_arith = false;
+  bool ok = true;
+  while (qh < qt && ok) {
+    int cur = queue[qh++];
+    if (cur < 0 || (size_t)cur >= uses->value_count) {
+      ok = false;
+      break;
+    }
+    for (size_t u = uses->offsets[cur]; u < uses->offsets[cur + 1]; ++u) {
+      size_t user = uses->users[u];
+      if (cur == root_val && (user == skip_idx0 || user == skip_idx1))
+        continue;
+      if (user >= f->len || !in_loop[cfg->inst_block[user]]) {
+        ok = false;
+        break;
+      }
+      if (user == reduction_update_idx || user == reduction_cmp_idx) {
+        saw_arith = true;
+        continue;
+      }
+      const nyr_inst_t *uin = &f->data[user];
+      if (uin->op == NYIR_STORE_I64) {
+        if (uin->c == cur && uin->a != cur && uin->b != cur) {
+          saw_arith = true;
+          continue;
+        }
+        ok = false;
+        break;
+      }
+      if (uin->op == NYIR_COPY || op_is_vec_i64_bin(uin->op) ||
+          uin->op == NYIR_SHL_I64 || uin->op == NYIR_SAR_I64 ||
+          uin->op == NYIR_CMP_I64 || uin->op == NYIR_SELECT_I64) {
+        if ((uin->op == NYIR_SHL_I64 || uin->op == NYIR_SAR_I64) &&
+            uin->a != cur) {
+          ok = false;
+          break;
+        }
+        if (uin->op == NYIR_SELECT_I64 && uin->a == cur) {
+          ok = false;
+          break;
+        }
+        saw_arith = true;
+        if (uin->dst >= 0 && (size_t)uin->dst < val_count && !vis[uin->dst]) {
+          vis[uin->dst] = true;
+          queue[qt++] = uin->dst;
+        }
+        continue;
+      }
+      ok = false;
+      break;
+    }
+  }
+  free(vis);
+  free(queue);
+  return ok && saw_arith;
+}
+
+static bool emit_vec8_iv_init(nyr_func_t *f, size_t at, bool const_init,
+                              int64_t const_init_val, int init_val,
+                              int64_t step, int init_v, int step4_v,
+                              size_t *inserted_out) {
+  if (!f || step == 0 || at > f->len)
+    return false;
+  __int128 s4 = (__int128)4 * step;
+  if (s4 < INT64_MIN || s4 > INT64_MAX)
+    return false;
+  int64_t steps[3] = {0, 0, 0};
+  for (int k = 1; k <= 3; ++k) {
+    __int128 ks = (__int128)k * step;
+    if (ks < INT64_MIN || ks > INT64_MAX)
+      return false;
+    steps[k - 1] = (int64_t)ks;
+  }
+  int64_t cvals[4] = {0, 0, 0, 0};
+  if (const_init) {
+    for (int k = 0; k < 4; ++k) {
+      __int128 v = (__int128)const_init_val + (__int128)k * step;
+      if (v < INT64_MIN || v > INT64_MAX)
+        return false;
+      cvals[k] = (int64_t)v;
+    }
+  } else if (init_val < 0) {
+    return false;
+  }
+  size_t ins_len = const_init ? 18u : 20u;
+  if (!nir_ensure_inst_space(f, ins_len))
+    return false;
+  memmove(&f->data[at + ins_len], &f->data[at],
+          (f->len - at) * sizeof(*f->data));
+  size_t w = 0;
+  int slot = f->next_value++;
+  f->data[at + w++] = lv_make_inst(NYIR_ALLOCA, slot, -1, -1, -1, 32,
+                                   NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+  if (const_init) {
+    int c0 = f->next_value++;
+    f->data[at + w++] = lv_make_inst(NYIR_CONST_I64, c0, -1, -1, -1, cvals[0],
+                                     NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+    f->data[at + w++] = lv_make_inst(NYIR_STORE_I64, -1, slot, -1, c0, 0,
+                                     NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+    for (int k = 1; k <= 3; ++k) {
+      int ok = f->next_value++, pk = f->next_value++, ck = f->next_value++;
+      f->data[at + w++] =
+          lv_make_inst(NYIR_CONST_I64, ok, -1, -1, -1, (int64_t)k * 8,
+                       NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] = lv_make_inst(NYIR_ADD_I64, pk, slot, ok, -1, 0,
+                                       NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] =
+          lv_make_inst(NYIR_CONST_I64, ck, -1, -1, -1, cvals[k], NYIR_CMP_EQ,
+                       NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] = lv_make_inst(NYIR_STORE_I64, -1, pk, -1, ck, 0,
+                                       NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+    }
+  } else {
+    f->data[at + w++] = lv_make_inst(NYIR_STORE_I64, -1, slot, -1, init_val, 0,
+                                     NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+    for (int k = 1; k <= 3; ++k) {
+      int ok = f->next_value++, pk = f->next_value++;
+      int sk = f->next_value++, vk = f->next_value++;
+      f->data[at + w++] =
+          lv_make_inst(NYIR_CONST_I64, ok, -1, -1, -1, (int64_t)k * 8,
+                       NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] = lv_make_inst(NYIR_ADD_I64, pk, slot, ok, -1, 0,
+                                       NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] =
+          lv_make_inst(NYIR_CONST_I64, sk, -1, -1, -1, steps[k - 1],
+                       NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] = lv_make_inst(NYIR_ADD_I64, vk, init_val, sk, -1, 0,
+                                       NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+      f->data[at + w++] = lv_make_inst(NYIR_STORE_I64, -1, pk, -1, vk, 0,
+                                       NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+    }
+  }
+  f->data[at + w++] = lv_make_inst(NYIR_VEC8_LOAD_I64, init_v, slot, -1, -1, 0,
+                                   NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+  int cs4 = f->next_value++;
+  f->data[at + w++] = lv_make_inst(NYIR_CONST_I64, cs4, -1, -1, -1, (int64_t)s4,
+                                   NYIR_CMP_EQ, NYIR_SCALAR_I64_RAW);
+  f->data[at + w++] = lv_make_inst(NYIR_VEC8_SET1_I64, step4_v, cs4, -1, -1, 0,
+                                   NYIR_CMP_EQ, NYIR_SCALAR_UNKNOWN);
+  f->len += ins_len;
+  if (inserted_out)
+    *inserted_out = ins_len;
+  return w == ins_len;
 }
 
 /*
@@ -2590,7 +3087,7 @@ static uint64_t vectorization_cost(size_t loads, size_t stores,
 static bool vectorization_profitable(size_t loads, size_t stores,
                                      size_t vector_ops, int vf,
                                      bool variable_trip, uint64_t trip) {
-  if (vf < NYIR_I64_VF_MIN || loads + stores == 0)
+  if (vf < NYIR_I64_VF_MIN || (loads + stores == 0 && vector_ops < 3))
     return false;
   uint64_t body = (uint64_t)(loads + stores) * 2u + vector_ops;
   if (trip < (uint64_t)vf || body + 2u == 0)
@@ -2858,6 +3355,27 @@ static bool vector_slot_entry_const(const nyr_func_t *f, const int *defs,
   if (found)
     *out = value;
   return found;
+}
+
+/*
+ * Check whether an invariant scalar operand can be materialized in the vector
+ * preheader for splatting. External SSA values are already defined before the
+ * preheader; in-loop literals (introduced by late passes like strength_reduce)
+ * are cloned right before SET1. Other in-loop definitions are rejected so SET1
+ * never uses an out-of-dominance operand.
+ */
+static bool broadcast_operand_hoistable(const nyr_func_t *f, const int *defs,
+                                        const nyr_cfg_t *cfg,
+                                        const bool *in_loop,
+                                        size_t scalar_value_count, int v) {
+  if (v < 0 || (size_t)v >= scalar_value_count)
+    return false;
+  if (!value_defined_in_loop(f, defs, cfg, in_loop, v))
+    return true;
+  if (defs[v] < 0 || (size_t)defs[v] >= f->len)
+    return false;
+  nyr_op_t op = f->data[(size_t)defs[v]].op;
+  return op == NYIR_CONST_I64 || op == NYIR_CONST_F64;
 }
 
 static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
@@ -3187,15 +3705,19 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
      * back into the scalar accumulator.
      */
     bool extra_phi = false;
-    int extra_phi_dst = -1;
-    size_t extra_update_idx = SIZE_MAX;
-    int64_t extra_step = 0;
+    vec_extra_phi_t extra_phis[VEC_MAX_EXTRA_PHIS];
+    memset(extra_phis, 0, sizeof(extra_phis));
+    size_t extra_phi_count = 0;
+    size_t vec_arith_count = 0;
     int reduction_phi_dst = -1;
     int reduction_phi_init = -1;
     int64_t reduction_preheader_label = -1;
     size_t reduction_update_idx = SIZE_MAX;
     int reduction_update_value = -1;
     int reduction_term = -1;
+    int reduction_kind = VEC_RED_NONE;
+    size_t reduction_cmp_idx = SIZE_MAX;
+    int reduction_cmp_dst = -1;
     bool reduction_f64 = false;
     for (size_t i = cfg.block_start[header]; i < cfg.block_end[header]; ++i) {
       if (f->data[i].op != NYIR_PHI || f->data[i].dst == iv)
@@ -3203,13 +3725,16 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       nyr_inst_t *phi = &f->data[i];
       int back_in = -1;
       int pre_in = -1;
+      int64_t pre_lbl = -1;
       for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
         if (phi->phi_incoming[k].predecessor_label == latch_label)
           back_in = phi->phi_incoming[k].value;
-        else
+        else {
           pre_in = phi->phi_incoming[k].value;
+          pre_lbl = phi->phi_incoming[k].predecessor_label;
+        }
       }
-      if (back_in < 0 || defs[back_in] < 0) {
+      if (back_in < 0 || defs[back_in] < 0 || phi->phi_incoming_len != 2) {
         extra_phi = true;
         break;
       }
@@ -3229,6 +3754,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       int back_a = nyr_vectorize_resolve_value(f, defs, back_def->a);
       int back_b = nyr_vectorize_resolve_value(f, defs, back_def->b);
       int term = -1;
+      int this_red_kind = VEC_RED_NONE;
+      size_t this_cmp_idx = SIZE_MAX;
+      int this_cmp_dst = -1;
       bool this_reduction_f64 = false;
       /*
        * The f64 vector reduction extracts and adds lanes in ascending order,
@@ -3241,7 +3769,56 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
           term = back_b;
         else if (back_b == phi->dst)
           term = back_a;
+        if (term >= 0)
+          this_red_kind = VEC_RED_ADD;
         this_reduction_f64 = back_def->op == NYIR_ADD_F64;
+      } else if (back_def->op == NYIR_SELECT_I64) {
+        int cond_v = nyr_vectorize_resolve_value(f, defs, back_def->a);
+        int t_v = back_b;
+        int f_v = nyr_vectorize_resolve_value(f, defs, back_def->c);
+        if (cond_v >= 0 && defs[cond_v] >= 0 &&
+            (size_t)defs[cond_v] < f->len &&
+            in_loop[cfg.inst_block[(size_t)defs[cond_v]]] &&
+            f->data[(size_t)defs[cond_v]].op == NYIR_CMP_I64) {
+          size_t cmp_pc = (size_t)defs[cond_v];
+          const nyr_inst_t *cmp_in = &f->data[cmp_pc];
+          int la = nyr_vectorize_resolve_value(f, defs, cmp_in->a);
+          int lb = nyr_vectorize_resolve_value(f, defs, cmp_in->b);
+          nyr_cmp_t cc = cmp_in->cmp;
+          if (f_v == phi->dst && t_v >= 0 && t_v != phi->dst) {
+            if ((la == t_v && lb == phi->dst &&
+                 (cc == NYIR_CMP_GT || cc == NYIR_CMP_GE)) ||
+                (la == phi->dst && lb == t_v &&
+                 (cc == NYIR_CMP_LT || cc == NYIR_CMP_LE)))
+              this_red_kind = VEC_RED_SMAX;
+            else if ((la == t_v && lb == phi->dst &&
+                      (cc == NYIR_CMP_LT || cc == NYIR_CMP_LE)) ||
+                     (la == phi->dst && lb == t_v &&
+                      (cc == NYIR_CMP_GT || cc == NYIR_CMP_GE)))
+              this_red_kind = VEC_RED_SMIN;
+            if (this_red_kind != VEC_RED_NONE) {
+              term = t_v;
+              this_cmp_idx = cmp_pc;
+              this_cmp_dst = cmp_in->dst;
+            }
+          } else if (t_v == phi->dst && f_v >= 0 && f_v != phi->dst) {
+            if ((la == phi->dst && lb == f_v &&
+                 (cc == NYIR_CMP_GT || cc == NYIR_CMP_GE)) ||
+                (la == f_v && lb == phi->dst &&
+                 (cc == NYIR_CMP_LT || cc == NYIR_CMP_LE)))
+              this_red_kind = VEC_RED_SMAX;
+            else if ((la == phi->dst && lb == f_v &&
+                      (cc == NYIR_CMP_LT || cc == NYIR_CMP_LE)) ||
+                     (la == f_v && lb == phi->dst &&
+                      (cc == NYIR_CMP_GT || cc == NYIR_CMP_GE)))
+              this_red_kind = VEC_RED_SMIN;
+            if (this_red_kind != VEC_RED_NONE) {
+              term = f_v;
+              this_cmp_idx = cmp_pc;
+              this_cmp_dst = cmp_in->dst;
+            }
+          }
+        }
       }
       /*
        * An affine recurrence with a constant stride is an address IV, not a
@@ -3257,13 +3834,25 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       affine_t extra = affine_value(f, defs, &cfg, in_loop, phi->dst, iv, 0);
       bool affine_extra = extra.ok && extra.root < 0 && extra.stride != 0;
       if (affine_extra) {
-        if (extra_phi_dst >= 0) {
+        if (extra_phi_count >= VEC_MAX_EXTRA_PHIS) {
           extra_phi = true;
           break;
         }
-        extra_phi_dst = phi->dst;
-        extra_update_idx = (size_t)defs[back_in];
-        extra_step = extra.stride;
+        int64_t civ = 0;
+        bool has_cinit = nyr_const_i64(f, defs, pre_in, &civ);
+        extra_phis[extra_phi_count++] = (vec_extra_phi_t){
+            .phi_dst = phi->dst,
+            .phi_init = pre_in,
+            .preheader_label = pre_lbl,
+            .phi_idx = i,
+            .update_idx = (size_t)defs[back_in],
+            .step = extra.stride,
+            .update_has_phi_on_left = back_a == phi->dst,
+            .vec_arith = false,
+            .const_init = has_cinit,
+            .const_init_val = civ,
+            .step4_v = -1,
+            .init_v = -1};
         continue;
       }
       /*
@@ -3272,16 +3861,17 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
        * Requiring a literal initializer unnecessarily blocked reductions in
        * nested loops even though the scalar seed is preserved exactly.
        */
-      if (term >= 0 && reduction_phi_dst < 0 && pre_in >= 0) {
+      if (term >= 0 && this_red_kind != VEC_RED_NONE && reduction_phi_dst < 0 &&
+          pre_in >= 0) {
         reduction_phi_dst = phi->dst;
         reduction_phi_init = pre_in;
-        for (size_t k = 0; k < phi->phi_incoming_len; ++k)
-          if (phi->phi_incoming[k].value == pre_in &&
-              phi->phi_incoming[k].predecessor_label != latch_label)
-            reduction_preheader_label = phi->phi_incoming[k].predecessor_label;
+        reduction_preheader_label = pre_lbl;
         reduction_update_idx = (size_t)defs[back_in];
         reduction_update_value = back_in;
         reduction_term = term;
+        reduction_kind = this_red_kind;
+        reduction_cmp_idx = this_cmp_idx;
+        reduction_cmp_dst = this_cmp_dst;
         reduction_f64 = this_reduction_f64;
         continue;
       }
@@ -3305,12 +3895,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     bool *vec = calloc(scalar_value_count * 2 + 1, sizeof(*vec));
     bool *vmask = vec ? vec + scalar_value_count : NULL;
     bool *rewrite = calloc(f->len, sizeof(*rewrite));
+    bool *use_iv_vec = calloc(f->len, sizeof(*use_iv_vec));
     bool *broadcast_value =
         calloc(scalar_value_count, sizeof(*broadcast_value));
     int *broadcast_map = malloc(scalar_value_count * sizeof(*broadcast_map));
-    if (!vec || !rewrite || !broadcast_value || !broadcast_map) {
+    if (!vec || !rewrite || !use_iv_vec || !broadcast_value ||
+        !broadcast_map) {
       free(vec);
       free(rewrite);
+      free(use_iv_vec);
       free(broadcast_value);
       free(broadcast_map);
       free(in_loop);
@@ -3320,12 +3913,46 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     }
     for (size_t v = 0; v < scalar_value_count; ++v)
       broadcast_map[v] = -1;
+    nyr_use_def_t uses = {0};
+    bool bad = !nyr_build_use_def(f, &uses);
+    const char *reject_reason = bad ? "failed to build use-def map" : NULL;
+    size_t reject_pc = head_idx;
+    if (!bad && vf == 4 && supports_vec8_i64_broadcast) {
+      for (size_t e = 0; e < extra_phi_count; ++e) {
+        int initv = extra_phis[e].phi_init;
+        int up_val = f->data[extra_phis[e].update_idx].dst;
+        bool back_private =
+            up_val >= 0 && (size_t)up_val < uses.value_count &&
+            uses.offsets[up_val + 1] == uses.offsets[up_val] + 1 &&
+            uses.users[uses.offsets[up_val]] == extra_phis[e].phi_idx;
+        __int128 s4 = (__int128)4 * extra_phis[e].step;
+        bool step_ok = s4 >= INT64_MIN && s4 <= INT64_MAX;
+        if (step_ok && extra_phis[e].const_init) {
+          __int128 c3 = (__int128)extra_phis[e].const_init_val +
+                        (__int128)3 * extra_phis[e].step;
+          if (c3 < INT64_MIN || c3 > INT64_MAX)
+            step_ok = false;
+        }
+        if (back_private && step_ok && initv >= 0 &&
+            broadcast_operand_hoistable(f, defs, &cfg, in_loop,
+                                        scalar_value_count, initv) &&
+            value_uses_pure_i64_arith(
+                f, &cfg, in_loop, &uses, scalar_value_count,
+                extra_phis[e].phi_dst, extra_phis[e].phi_idx,
+                extra_phis[e].update_idx, reduction_update_idx,
+                reduction_cmp_idx)) {
+          extra_phis[e].vec_arith = true;
+          vec[extra_phis[e].phi_dst] = true;
+          vec_arith_count++;
+        }
+      }
+    }
+    bool need_iv_vec = false;
     size_t vec_loads = 0;
     size_t vec_stores = 0;
     size_t vec_ops = 0;
-    bool bad = false;
-    const char *reject_reason = NULL;
-    size_t reject_pc = head_idx;
+    if (vec_arith_count > 0)
+      is_i64 = true;
     /*
      * Track affine accesses per private root.  Reads at distinct offsets are
      * safe; streams involving a write must match or be disjoint.
@@ -3352,9 +3979,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         continue;
       nyr_inst_t *in = &f->data[i];
       nyr_effect_t effects = (nyr_effect_t)(in->effects | nyr_inst_effects(in));
+      bool is_extra_update = false;
+      for (size_t e = 0; e < extra_phi_count; ++e)
+        if (i == extra_phis[e].update_idx) {
+          is_extra_update = true;
+          break;
+        }
       if (i == phi_idx || i == update_idx || i == reduction_update_idx ||
-          i == cmp_idx || i == control_idx || in->op == NYIR_LABEL ||
-          in->op == NYIR_BR)
+          i == reduction_cmp_idx || is_extra_update || i == cmp_idx ||
+          i == control_idx || in->op == NYIR_LABEL || in->op == NYIR_BR)
         continue;
       if (in->op == NYIR_PHI && cfg.inst_block[i] == header)
         continue;
@@ -3464,6 +4097,28 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
         bool lvc =
             in->c >= 0 && (size_t)in->c < scalar_value_count && vec[in->c];
+        bool iv_lane_ok = vf == 4 && supports_vec8_i64_broadcast && !is_f64 &&
+                          in->dst >= 0 &&
+                          value_uses_pure_i64_arith(
+                              f, &cfg, in_loop, &uses, scalar_value_count,
+                              in->dst, SIZE_MAX, SIZE_MAX, reduction_update_idx,
+                              reduction_cmp_idx);
+        bool lva_iv =
+            !lva && iv_lane_ok && in->a >= 0 &&
+            (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64 ||
+             in->op == NYIR_CMP_I64) &&
+            vec_resolve_copy(f, defs, scalar_value_count, in->a) == iv;
+        bool lvb_iv =
+            !lvb && iv_lane_ok && in->b >= 0 && in->op == NYIR_CMP_I64 &&
+            vec_resolve_copy(f, defs, scalar_value_count, in->b) == iv;
+        if (lva_iv || lvb_iv) {
+          if (lva_iv)
+            lva = true;
+          if (lvb_iv)
+            lvb = true;
+          need_iv_vec = true;
+          use_iv_vec[i] = true;
+        }
         bool lane_shift =
             (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64) && lva;
         bool lane_cmp = in->op == NYIR_CMP_I64 && (lva || lvb);
@@ -3475,11 +4130,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             why = "lane shift/compare/select needs the four-lane AVX2 form";
           int64_t k = -1;
           if (!why && lane_shift &&
-              (vmask[in->a] || !nyr_const_i64(f, defs, in->b, &k) || k < 0 ||
-               k > 63))
+              ((!lva_iv && vmask[in->a]) || !nyr_const_i64(f, defs, in->b, &k) ||
+               k < 0 || k > 63))
             why = "vector shift count is not a constant 0..63";
           if (!why && lane_cmp &&
-              ((lva && vmask[in->a]) || (lvb && vmask[in->b])))
+              ((lva && !lva_iv && vmask[in->a]) ||
+               (lvb && !lvb_iv && vmask[in->b])))
             why = "vector compare of a lane mask";
           if (!why && lane_select && (!lva || !vmask[in->a]))
             why = "select condition is not a vector lane mask";
@@ -3499,7 +4155,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             }
           }
           /*
-           * Non-widened operands must be loop-invariant: they become splats.
+           * Non-widened operands must be preheader-available: they become splats.
            */
           int arms[3] = {lane_cmp || lane_select ? in->a : -1,
                          lane_cmp || lane_select ? in->b : -1,
@@ -3509,10 +4165,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             int v = arms[k2];
             if (v < 0 || arm_vec[k2])
               continue;
-            bool in_loop_v = value_defined_in_loop(f, defs, &cfg, in_loop, v);
-            if ((size_t)v >= scalar_value_count ||
-                (in_loop_v &&
-                 affine_value(f, defs, &cfg, in_loop, v, iv, 0).stride != 0))
+            if (!broadcast_operand_hoistable(f, defs, &cfg, in_loop,
+                                             scalar_value_count, v))
               why = vector_mixed_operand_reason(f, defs, v, "i64");
           }
           if (why) {
@@ -3543,6 +4197,26 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         bool vb =
             in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
         bool ma = va && vmask[in->a], mb = vb && vmask[in->b];
+        if (!ma && !mb && vf == 4 && supports_vec8_i64_broadcast && !is_f64 &&
+            (!va || !vb)) {
+          bool a_iv =
+              !va && in->a >= 0 &&
+              vec_resolve_copy(f, defs, scalar_value_count, in->a) == iv;
+          bool b_iv =
+              !vb && in->b >= 0 &&
+              vec_resolve_copy(f, defs, scalar_value_count, in->b) == iv;
+          if ((a_iv || b_iv) &&
+              value_uses_pure_i64_arith(
+                  f, &cfg, in_loop, &uses, scalar_value_count, in->dst,
+                  SIZE_MAX, SIZE_MAX, reduction_update_idx, reduction_cmp_idx)) {
+            if (a_iv)
+              va = true;
+            if (b_iv)
+              vb = true;
+            need_iv_vec = true;
+            use_iv_vec[i] = true;
+          }
+        }
         bool result_mask = false;
         if (ma || mb) {
           /*
@@ -3577,12 +4251,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             break;
           }
           if (!va) {
-            bool in_loop_a =
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->a);
-            if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
-                (in_loop_a &&
-                 affine_value(f, defs, &cfg, in_loop, in->a, iv, 0).stride !=
-                     0)) {
+            if (!broadcast_operand_hoistable(f, defs, &cfg, in_loop,
+                                             scalar_value_count, in->a)) {
               bad = true;
               reject_reason =
                   vector_mixed_operand_reason(f, defs, in->a, "i64");
@@ -3592,12 +4262,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             broadcast_value[in->a] = true;
           }
           if (!vb) {
-            bool in_loop_b =
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->b);
-            if (in->b < 0 || (size_t)in->b >= scalar_value_count ||
-                (in_loop_b &&
-                 affine_value(f, defs, &cfg, in_loop, in->b, iv, 0).stride !=
-                     0)) {
+            if (!broadcast_operand_hoistable(f, defs, &cfg, in_loop,
+                                             scalar_value_count, in->b)) {
               bad = true;
               reject_reason =
                   vector_mixed_operand_reason(f, defs, in->b, "i64");
@@ -3626,12 +4292,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
         if (va || vb) {
           if (!va) {
-            bool in_loop_a =
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->a);
-            if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
-                (in_loop_a &&
-                 affine_value(f, defs, &cfg, in_loop, in->a, iv, 0).stride !=
-                     0)) {
+            if (!broadcast_operand_hoistable(f, defs, &cfg, in_loop,
+                                             scalar_value_count, in->a)) {
               bad = true;
               reject_reason = "mixed f64 operand is not loop-invariant";
               reject_pc = i;
@@ -3640,12 +4302,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             broadcast_value[in->a] = true;
           }
           if (!vb) {
-            bool in_loop_b =
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->b);
-            if (in->b < 0 || (size_t)in->b >= scalar_value_count ||
-                (in_loop_b &&
-                 affine_value(f, defs, &cfg, in_loop, in->b, iv, 0).stride !=
-                     0)) {
+            if (!broadcast_operand_hoistable(f, defs, &cfg, in_loop,
+                                             scalar_value_count, in->b)) {
               bad = true;
               reject_reason = "mixed f64 operand is not loop-invariant";
               reject_pc = i;
@@ -3660,7 +4318,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         }
         continue;
       }
-      if (in->op == NYIR_STORE_I64 && in->c >= 0 && vec[in->c]) {
+      if (in->op == NYIR_STORE_I64 && in->c >= 0 &&
+          (vec[in->c] ||
+           (vf == 4 && supports_vec8_i64_broadcast && !is_f64 &&
+            in->scalar_class != NYIR_SCALAR_F64 &&
+            vec_resolve_copy(f, defs, scalar_value_count, in->c) == iv))) {
+        if (!vec[in->c]) {
+          need_iv_vec = true;
+          use_iv_vec[i] = true;
+        }
         bool mem_f64 = in->scalar_class == NYIR_SCALAR_F64;
         affine_t a = {0};
         bool dynamic_offset = false;
@@ -3716,6 +4382,18 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         break;
       }
     }
+
+    bool needs_vec8_only = reduction_kind == VEC_RED_SMAX ||
+                           reduction_kind == VEC_RED_SMIN ||
+                           vec_arith_count > 0 || need_iv_vec;
+    if (!bad && needs_vec8_only &&
+        (is_f64 || vf != 4 || !supports_vec8_i64_broadcast)) {
+      bad = true;
+      reject_reason = "min/max or vector-IV requires four-lane AVX2 i64";
+      reject_pc = head_idx;
+    }
+    if (needs_vec8_only)
+      has_i64_mul = true;
 
     if (!bad && is_f64) {
       if (is_i64) {
@@ -3819,40 +4497,39 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       vstore_op = NYIR_VEC4_STORE_I64;
     }
 
-    nyr_use_def_t uses = {0};
-    if (!bad && !nyr_build_use_def(f, &uses))
-      bad = true;
     /*
      * Loop-carried vector accumulators for integer reductions. A scalar tail
      * takes the final horizontal sum instead of observing every chunk.
-     * The vector allocator keeps latch recurrences resident across the
-     * backedge (vector_phi_reads_precede_source, re-checked by
-     * verify_vector_latch_recurrence), which was the reason this stayed off.
-     * NYTRIX_NO_VECTOR_ACCUMULATOR=1 restores the per-chunk reduction.
      */
+    bool is_minmax_red =
+        reduction_kind == VEC_RED_SMAX || reduction_kind == VEC_RED_SMIN;
     bool vector_accumulator_safe = !getenv("NYTRIX_NO_VECTOR_ACCUMULATOR") &&
                                    reduction_phi_dst >= 0 && !reduction_f64;
-    if (vector_accumulator_safe && (is_var_trip || fixed_trip % vf != 0))
+    if (vector_accumulator_safe && is_minmax_red)
+      vector_accumulator_safe = !is_var_trip && fixed_trip >= 4 &&
+                                fixed_trip % 4 == 0 && vf == 4 &&
+                                supports_vec8_i64_broadcast;
+    else if (vector_accumulator_safe && (is_var_trip || fixed_trip % vf != 0))
       vector_accumulator_safe =
           estimated_trip >= (uint64_t)(2 * vf) &&
           (vf == 2 || supports_vec8_i64_broadcast) &&
           !(f->data[reduction_update_idx].flags & NYIR_INST_F_NARROW32);
     /*
      * The reduction update is excluded from the body scan above. This
-     * transformation emits one vector add per chunk in place of one scalar
-     * add per element, so include it in both sides of the cost comparison.
+     * transformation emits one vector add/select per chunk in place of one
+     * scalar op per element, so include it in both sides of the cost comparison.
      */
     if (vector_accumulator_safe)
-      vec_ops++;
+      vec_ops += is_minmax_red ? 2u : 1u;
     if (!vector_accumulator_safe && nyr_vector_trace_enabled())
       ny_trace_line("VECTORIZE",
                     "vector accumulator ineligible: reduction=%d init=%d "
                     "preheader=%lld f64=%s variable=%s trip=%lld vf=%d "
-                    "extra_phi=%d body_is_latch=%s",
+                    "extra_phis=%zu body_is_latch=%s",
                     reduction_phi_dst, reduction_phi_init,
                     (long long)reduction_preheader_label,
                     reduction_f64 ? "yes" : "no", is_var_trip ? "yes" : "no",
-                    (long long)fixed_trip, vf, extra_phi_dst,
+                    (long long)fixed_trip, vf, extra_phi_count,
                     body_target == latch ? "yes" : "no");
     if (!bad && vector_accumulator_safe) {
       size_t exit_block = SIZE_MAX;
@@ -3900,7 +4577,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
            u < uses.offsets[reduction_phi_dst + 1]; ++u) {
         size_t user = uses.users[u];
         if (user >= f->len || !in_loop[cfg.inst_block[user]] ||
-            user == reduction_update_idx)
+            user == reduction_update_idx || user == reduction_cmp_idx)
           continue;
         /*
          * A loop-carried scalar accumulator is also used by its own PHI
@@ -3915,20 +4592,55 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         bool accumulator_copy = false;
         if (copy->op == NYIR_COPY && copy->dst >= 0 &&
             copy->dst < f->next_value && copy->a == reduction_phi_dst) {
-          size_t copy_use_begin = uses.offsets[copy->dst];
-          size_t copy_use_end = uses.offsets[copy->dst + 1];
-          accumulator_copy =
-              copy_use_begin == copy_use_end ||
-              (copy_use_end == copy_use_begin + 1 &&
-               uses.users[copy_use_begin] == reduction_update_idx &&
-               (reduction_update->a == copy->dst ||
-                reduction_update->b == copy->dst));
+          accumulator_copy = true;
+          for (size_t cu = uses.offsets[copy->dst];
+               cu < uses.offsets[copy->dst + 1]; ++cu) {
+            size_t cuser = uses.users[cu];
+            if (cuser == reduction_update_idx &&
+                ((!is_minmax_red && reduction_update->a == copy->dst) ||
+                 reduction_update->b == copy->dst ||
+                 reduction_update->c == copy->dst))
+              continue;
+            if (is_minmax_red && cuser == reduction_cmp_idx)
+              continue;
+            accumulator_copy = false;
+            break;
+          }
         }
         if (accumulator_copy)
           continue;
         vector_accumulator_safe = false;
         break;
       }
+      if (vector_accumulator_safe && is_minmax_red && reduction_cmp_dst >= 0 &&
+          (size_t)reduction_cmp_dst < uses.value_count) {
+        for (size_t u = uses.offsets[reduction_cmp_dst];
+             u < uses.offsets[reduction_cmp_dst + 1]; ++u) {
+          if (uses.users[u] != reduction_update_idx) {
+            vector_accumulator_safe = false;
+            break;
+          }
+        }
+      }
+      if (vector_accumulator_safe && is_minmax_red &&
+          reduction_update_value >= 0 &&
+          (size_t)reduction_update_value < uses.value_count) {
+        for (size_t u = uses.offsets[reduction_update_value];
+             u < uses.offsets[reduction_update_value + 1]; ++u) {
+          size_t user = uses.users[u];
+          if (user >= f->len || f->data[user].op != NYIR_PHI ||
+              f->data[user].dst != reduction_phi_dst) {
+            vector_accumulator_safe = false;
+            break;
+          }
+        }
+      }
+    }
+    if (!bad && is_minmax_red && !vector_accumulator_safe) {
+      bad = true;
+      reject_reason = "min/max reduction requires a vector accumulator";
+      reject_pc = reduction_update_idx != SIZE_MAX ? reduction_update_idx
+                                                   : head_idx;
     }
     if (reduction_phi_dst >= 0 && !vector_accumulator_safe &&
         nyr_vector_trace_enabled())
@@ -3950,16 +4662,29 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       for (int v = 0; v < f->next_value && !bad; ++v) {
         if (!vec[v])
           continue;
-        for (size_t u = uses.offsets[v]; u < uses.offsets[v + 1]; ++u)
+        for (size_t u = uses.offsets[v]; u < uses.offsets[v + 1]; ++u) {
+          size_t user = uses.users[u];
+          bool skip_vec_extra = false;
+          for (size_t e = 0; e < extra_phi_count; ++e)
+            if (extra_phis[e].vec_arith &&
+                ((v == extra_phis[e].phi_dst &&
+                  user == extra_phis[e].update_idx) ||
+                 user == extra_phis[e].phi_idx)) {
+              skip_vec_extra = true;
+              break;
+            }
+          if (skip_vec_extra)
+            continue;
           if (!use_allowed(f, &cfg, in_loop, vec, vmask, rewrite,
-                           broadcast_value, uses.users[u], reduction_update_idx,
-                           reduction_term)) {
+                           broadcast_value, user, reduction_update_idx,
+                           reduction_cmp_idx, reduction_kind, reduction_term)) {
             bad = true;
             reject_reason =
                 "vector value has an unsupported scalar/out-of-loop consumer";
-            reject_pc = uses.users[u];
+            reject_pc = user;
             break;
           }
+        }
       }
     }
     /*
@@ -3967,13 +4692,6 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
      * halving its dynamic execution count would otherwise change observable
      * results even if the memory stream itself vectorizes.
      */
-    if (!bad && reduction_term >= 0 &&
-        (size_t)reduction_term < scalar_value_count && vmask[reduction_term] &&
-        !vector_accumulator_safe) {
-      bad = true;
-      reject_reason = "lane-mask reduction requires a vector accumulator";
-      reject_pc = reduction_update_idx;
-    }
     if (!bad) {
       for (size_t i = head_idx + 1; i < back && !bad; ++i) {
         if (!in_loop[cfg.inst_block[i]])
@@ -3996,8 +4714,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     }
     int invariant_reduction_term = -1;
     size_t drop_reduction_add = SIZE_MAX;
-    if (!bad && vector_accumulator_safe && !is_var_trip &&
-        fixed_trip % vf == 0 && reduction_term >= 0 &&
+    if (!bad && reduction_kind == VEC_RED_ADD && vector_accumulator_safe &&
+        !is_var_trip && fixed_trip % vf == 0 && reduction_term >= 0 &&
         ((size_t)reduction_term >= scalar_value_count ||
          !vmask[reduction_term]) &&
         defs[reduction_term] >= 0 &&
@@ -4032,7 +4750,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       }
     }
     nyr_use_def_free(&uses);
-    if (bad || (vec_stores == 0 && vec_loads == 0) ||
+    bool pure_vec_reduction =
+        vec_stores == 0 && vec_loads == 0 && reduction_kind != VEC_RED_NONE &&
+        vector_accumulator_safe && vec_ops >= 3 &&
+        estimated_trip >= (uint64_t)vf * 4u;
+    if (bad || (vec_stores == 0 && vec_loads == 0 && !pure_vec_reduction) ||
         !vectorization_profitable(vec_loads, vec_stores, vec_ops, vf,
                                   is_var_trip, estimated_trip)) {
       f->vectorize_rejected_loops++;
@@ -4069,6 +4791,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       }
       free(vec);
       free(rewrite);
+      free(use_iv_vec);
       free(broadcast_value);
       free(broadcast_map);
       free(in_loop);
@@ -4100,14 +4823,35 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     size_t broadcast_count = 0;
     for (size_t v = 0; v < scalar_value_count; ++v)
       broadcast_count += broadcast_value[v];
-    if (broadcast_count &&
-        !unique_loop_preheader(&cfg, in_loop, header, &broadcast_preheader)) {
+    if ((broadcast_count || vec_arith_count || need_iv_vec) &&
+        (!unique_loop_preheader(&cfg, in_loop, header, &broadcast_preheader) ||
+         cfg.block_label[broadcast_preheader] < 0)) {
       free(vec);
       free(rewrite);
+      free(use_iv_vec);
       free(broadcast_value);
       free(broadcast_map);
       free(in_loop);
       continue;
+    }
+    if (vec_arith_count || need_iv_vec) {
+      int64_t ph_lbl = cfg.block_label[broadcast_preheader];
+      bool pre_ok = true;
+      for (size_t e = 0; e < extra_phi_count; ++e)
+        if (extra_phis[e].vec_arith && extra_phis[e].preheader_label != ph_lbl)
+          pre_ok = false;
+      if (need_iv_vec && init_unknown &&
+          value_defined_in_loop(f, defs, &cfg, in_loop, init_v))
+        pre_ok = false;
+      if (!pre_ok) {
+        free(vec);
+        free(rewrite);
+        free(use_iv_vec);
+        free(broadcast_value);
+        free(broadcast_map);
+        free(in_loop);
+        continue;
+      }
     }
     /*
      * Save the scalar body before widening it when a runtime tail is needed.
@@ -4126,11 +4870,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     bool vector_accumulator = false;
     bool unroll_reduction = !vector_accumulator_safe && !is_var_trip &&
                             reduction_phi_dst >= 0 && !reduction_f64 &&
+                            reduction_kind == VEC_RED_ADD &&
+                            extra_phi_count == 0 && !need_iv_vec &&
                             reduction_update_idx < update_idx &&
                             fixed_trip >= (int64_t)(4 * vf);
     bool unroll_fixed_body = !is_var_trip && fixed_trip >= (int64_t)(2 * vf) &&
-                             reduction_phi_dst < 0 && extra_phi_dst < 0;
-    bool unroll_accumulator = vector_accumulator_safe && extra_phi_dst < 0 &&
+                             reduction_phi_dst < 0 && extra_phi_count == 0 &&
+                             !need_iv_vec;
+    bool unroll_accumulator = vector_accumulator_safe && extra_phi_count == 0 &&
+                              !need_iv_vec && reduction_kind == VEC_RED_ADD &&
                               reduction_update_idx < update_idx &&
                               fixed_trip >= 8 * vf && vec_ops <= 4;
     if ((unroll_fixed_body || unroll_reduction || unroll_accumulator) &&
@@ -4166,6 +4914,20 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     int vector_step = vector_unroll_factor * vf;
     bool needs_scalar_tail =
         is_var_trip || ((uint64_t)fixed_trip % (uint64_t)vector_step != 0);
+    if (needs_scalar_tail &&
+        (extra_phi_count > 1 || vec_arith_count > 0 || need_iv_vec ||
+         is_minmax_red)) {
+      f->vectorize_rejected_loops++;
+      nyr_vector_trace(f, head_idx, "reject",
+                       "scalar tail unsupported with vector-IV or min/max", vf);
+      free(vec);
+      free(rewrite);
+      free(use_iv_vec);
+      free(broadcast_value);
+      free(broadcast_map);
+      free(in_loop);
+      continue;
+    }
     vector_accumulator = vector_accumulator_safe;
     int vector_acc_phi = -1;
     int vector_acc_update = -1;
@@ -4186,6 +4948,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             "scalar-tail loop needs a unique preheader and fresh labels", vf);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4198,6 +4961,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       if (saved_count < 0) {
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4236,6 +5000,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4253,6 +5018,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
           free(saved_body);
           free(vec);
           free(rewrite);
+          free(use_iv_vec);
           free(broadcast_value);
           free(broadcast_map);
           free(in_loop);
@@ -4273,12 +5039,71 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         continue;
       broadcast_map[v] = f->next_value++;
     }
+    for (size_t e = 0; e < extra_phi_count; ++e) {
+      if (!extra_phis[e].vec_arith)
+        continue;
+      extra_phis[e].init_v = f->next_value++;
+      extra_phis[e].step4_v = f->next_value++;
+    }
+    int iv_vec_phi = -1, iv_vec_next = -1, iv_vec_init = -1, iv_step4_v = -1;
+    if (need_iv_vec) {
+      iv_vec_phi = f->next_value++;
+      iv_vec_next = f->next_value++;
+      iv_vec_init = f->next_value++;
+      iv_step4_v = f->next_value++;
+    }
+
+    bool *sar_logical = calloc(back - head_idx, sizeof(bool));
+    bool *mul_u32 = vf == 4 ? calloc(back - head_idx, sizeof(bool)) : NULL;
+    if (sar_logical || mul_u32) {
+      for (size_t i = head_idx + 1; i < back; ++i) {
+        if (!in_loop[cfg.inst_block[i]] || !rewrite[i])
+          continue;
+        const nyr_inst_t *orig = &f->data[i];
+        if (sar_logical && orig->op == NYIR_SAR_I64 &&
+            vec_value_nonnegative(f, defs, scalar_value_count, orig->a, 0,
+                                  NULL))
+          sar_logical[i - head_idx] = true;
+        if (mul_u32 && orig->op == NYIR_MUL_I64 &&
+            lv_value_is_u32(f, defs, orig->a, 0) &&
+            lv_value_is_u32(f, defs, orig->b, 0))
+          mul_u32[i - head_idx] = true;
+      }
+    }
 
     for (size_t i = head_idx + 1; i < back; ++i) {
       if (!in_loop[cfg.inst_block[i]])
         continue;
       nyr_inst_t *in = &f->data[i];
+      if (i == reduction_cmp_idx && is_minmax_red && vector_accumulator) {
+        int lhs_term = reduction_term;
+        if (use_iv_vec && use_iv_vec[i] && lhs_term >= 0 &&
+            vec_resolve_copy(f, defs, scalar_value_count, lhs_term) == iv)
+          lhs_term = iv_vec_phi;
+        in->op = NYIR_VEC8_CMP_I64;
+        in->cmp =
+            reduction_kind == VEC_RED_SMAX ? NYIR_CMP_GT : NYIR_CMP_LT;
+        in->a = lhs_term;
+        in->b = vector_acc_phi;
+        in->c = in->d = in->e = in->f = -1;
+        in->flags = 0;
+        in->effects = nyr_inst_effects(in);
+        nyr_clear_derived_facts(in);
+        continue;
+      }
       if (i == reduction_update_idx) {
+        if (vector_accumulator && is_minmax_red) {
+          in->op = NYIR_VEC8_SELECT_I64;
+          in->dst = vector_acc_update;
+          in->a = reduction_cmp_dst;
+          in->b = reduction_term;
+          in->c = vector_acc_phi;
+          in->d = in->e = in->f = -1;
+          in->flags = 0;
+          in->effects = nyr_inst_effects(in);
+          nyr_clear_derived_facts(in);
+          continue;
+        }
         if (vector_accumulator) {
           bool mask_term = reduction_term >= 0 &&
                            (size_t)reduction_term < scalar_value_count &&
@@ -4306,11 +5131,38 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         nyr_clear_derived_facts(in);
         continue;
       }
+      bool handled_extra_arith = false;
+      for (size_t e = 0; e < extra_phi_count; ++e) {
+        if (extra_phis[e].vec_arith && i == extra_phis[e].update_idx) {
+          in->op = NYIR_VEC8_ADD_I64;
+          in->a = extra_phis[e].phi_dst;
+          in->b = extra_phis[e].step4_v;
+          in->c = in->d = in->e = in->f = -1;
+          in->flags = 0;
+          in->effects = nyr_inst_effects(in);
+          nyr_clear_derived_facts(in);
+          handled_extra_arith = true;
+          break;
+        }
+      }
+      if (handled_extra_arith)
+        continue;
       if (!rewrite[i])
         continue;
       if (i == drop_reduction_add) {
         nyr_inst_discard(in);
         continue;
+      }
+      if (use_iv_vec && use_iv_vec[i]) {
+        if (in->a >= 0 &&
+            vec_resolve_copy(f, defs, scalar_value_count, in->a) == iv)
+          in->a = iv_vec_phi;
+        if (in->b >= 0 &&
+            vec_resolve_copy(f, defs, scalar_value_count, in->b) == iv)
+          in->b = iv_vec_phi;
+        if (in->op == NYIR_STORE_I64 && in->c >= 0 &&
+            vec_resolve_copy(f, defs, scalar_value_count, in->c) == iv)
+          in->c = iv_vec_phi;
       }
       if (in->op == NYIR_BOUNDS_CHECK) {
         nyr_inst_discard(in);
@@ -4333,7 +5185,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       } else if (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64) {
         int64_t k = 0;
         (void)nyr_const_i64(f, defs, in->b, &k);
-        in->op = in->op == NYIR_SHL_I64 ? NYIR_VEC8_SHL_I64 : NYIR_VEC8_SAR_I64;
+        if (in->op == NYIR_SHL_I64)
+          in->op = NYIR_VEC8_SHL_I64;
+        else if (sar_logical && sar_logical[i - head_idx])
+          in->op = NYIR_VEC8_SHR_I64;
+        else
+          in->op = NYIR_VEC8_SAR_I64;
         in->imm = k;
         in->b = -1;
         in->flags = 0;
@@ -4392,18 +5249,33 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         in->flags = 0;
         in->effects = nyr_inst_effects(in);
         nyr_clear_derived_facts(in);
+        if (in->op == NYIR_VEC8_MUL_I64 && mul_u32 && mul_u32[i - head_idx])
+          in->imm = 1;
       }
     }
+    free(mul_u32);
+    free(sar_logical);
 
     /*
-     * Materialize loop-invariant scalar splats once in the preheader.
+     * Materialize loop-invariant scalar splats once in the preheader, cloning
+     * any in-loop literal first so SET1 never references an un-dominated value.
      */
+    size_t ph_insert_at = SIZE_MAX;
+    if (broadcast_count > 0 || vec_arith_count > 0 || need_iv_vec)
+      ph_insert_at = block_insert_before_terminator(f, &cfg, broadcast_preheader);
     if (broadcast_count > 0) {
-      size_t at = block_insert_before_terminator(f, &cfg, broadcast_preheader);
-      if (!nir_ensure_inst_space(f, broadcast_count)) {
+      size_t extra_consts = 0;
+      for (size_t v = 0; v < scalar_value_count; ++v)
+        if (broadcast_map[v] >= 0 &&
+            value_defined_in_loop(f, defs, &cfg, in_loop, (int)v))
+          ++extra_consts;
+      size_t inserted = broadcast_count + extra_consts;
+      size_t at = ph_insert_at;
+      if (!nir_ensure_inst_space(f, inserted)) {
         free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4411,17 +5283,28 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         nyr_cfg_free(&cfg);
         return -1;
       }
-      memmove(&f->data[at + broadcast_count], &f->data[at],
+      memmove(&f->data[at + inserted], &f->data[at],
               (f->len - at) * sizeof(*f->data));
       size_t w = 0;
       for (size_t v = 0; v < scalar_value_count; ++v) {
         if (broadcast_map[v] < 0)
           continue;
+        int splat_src = (int)v;
+        if (value_defined_in_loop(f, defs, &cfg, in_loop, (int)v)) {
+          size_t def_idx = (size_t)defs[v];
+          if (def_idx >= at)
+            def_idx += inserted;
+          nyr_inst_t c = f->data[def_idx];
+          splat_src = f->next_value++;
+          c.dst = splat_src;
+          c.effects = nyr_inst_effects(&c);
+          f->data[at + w++] = c;
+        }
         f->data[at + w] = (nyr_inst_t){
             .op = is_f64 ? NYIR_VEC4_SET1_F64
                          : (vf == 4 ? NYIR_VEC8_SET1_I64 : NYIR_VEC4_SET1_I64),
             .dst = broadcast_map[v],
-            .a = (int)v,
+            .a = splat_src,
             .b = -1,
             .c = -1,
             .d = -1,
@@ -4430,17 +5313,121 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         f->data[at + w].effects = nyr_inst_effects(&f->data[at + w]);
         ++w;
       }
-      f->len += broadcast_count;
-      if (at <= cmp_idx)
-        cmp_idx += broadcast_count;
-      if (at <= control_idx)
-        control_idx += broadcast_count;
-      if (at <= update_idx)
-        update_idx += broadcast_count;
-      if (extra_update_idx != SIZE_MAX && at <= extra_update_idx)
-        extra_update_idx += broadcast_count;
-      if (needs_scalar_tail && at <= preheader_insert_at)
-        preheader_insert_at += broadcast_count;
+      f->len += inserted;
+      lv_shift_tracked_indices(at, inserted, &cmp_idx, &control_idx,
+                               &update_idx, &phi_idx,
+                               needs_scalar_tail ? &preheader_insert_at : NULL,
+                               extra_phis, extra_phi_count);
+      ph_insert_at += inserted;
+    }
+
+    for (size_t e = 0; e < extra_phi_count; ++e) {
+      if (!extra_phis[e].vec_arith)
+        continue;
+      size_t ins = 0;
+      if (!emit_vec8_iv_init(f, ph_insert_at, extra_phis[e].const_init,
+                             extra_phis[e].const_init_val,
+                             extra_phis[e].phi_init, extra_phis[e].step,
+                             extra_phis[e].init_v, extra_phis[e].step4_v, &ins)) {
+        free(saved_body);
+        free(vec);
+        free(rewrite);
+        free(use_iv_vec);
+        free(broadcast_value);
+        free(broadcast_map);
+        free(in_loop);
+        free(defs);
+        nyr_cfg_free(&cfg);
+        return -1;
+      }
+      lv_shift_tracked_indices(ph_insert_at, ins, &cmp_idx, &control_idx,
+                               &update_idx, &phi_idx,
+                               needs_scalar_tail ? &preheader_insert_at : NULL,
+                               extra_phis, extra_phi_count);
+      ph_insert_at += ins;
+      nyr_inst_t *ephi = &f->data[extra_phis[e].phi_idx];
+      for (size_t k = 0; k < ephi->phi_incoming_len; ++k)
+        if (ephi->phi_incoming[k].predecessor_label != latch_label)
+          ephi->phi_incoming[k].value = extra_phis[e].init_v;
+      nyr_clear_derived_facts(ephi);
+    }
+
+    if (need_iv_vec) {
+      size_t ins = 0;
+      if (!emit_vec8_iv_init(f, ph_insert_at, !init_unknown,
+                             init_unknown ? 0 : init, init_v, 1, iv_vec_init,
+                             iv_step4_v, &ins)) {
+        free(saved_body);
+        free(vec);
+        free(rewrite);
+        free(use_iv_vec);
+        free(broadcast_value);
+        free(broadcast_map);
+        free(in_loop);
+        free(defs);
+        nyr_cfg_free(&cfg);
+        return -1;
+      }
+      lv_shift_tracked_indices(ph_insert_at, ins, &cmp_idx, &control_idx,
+                               &update_idx, &phi_idx,
+                               needs_scalar_tail ? &preheader_insert_at : NULL,
+                               extra_phis, extra_phi_count);
+      ph_insert_at += ins;
+
+      size_t phi_at = phi_idx + 1;
+      nyr_inst_t ivp = {.op = NYIR_PHI, .dst = iv_vec_phi};
+      ivp.phi_incoming = calloc(2, sizeof(*ivp.phi_incoming));
+      if (!ivp.phi_incoming || !nir_ensure_inst_space(f, 1)) {
+        free(ivp.phi_incoming);
+        free(saved_body);
+        free(vec);
+        free(rewrite);
+        free(use_iv_vec);
+        free(broadcast_value);
+        free(broadcast_map);
+        free(in_loop);
+        free(defs);
+        nyr_cfg_free(&cfg);
+        return -1;
+      }
+      ivp.phi_incoming_len = 2;
+      ivp.phi_incoming[0] = (nyr_phi_incoming_t){
+          .predecessor_label = cfg.block_label[broadcast_preheader],
+          .value = iv_vec_init};
+      ivp.phi_incoming[1] = (nyr_phi_incoming_t){
+          .predecessor_label = latch_label, .value = iv_vec_next};
+      memmove(&f->data[phi_at + 1], &f->data[phi_at],
+              (f->len - phi_at) * sizeof(*f->data));
+      f->data[phi_at] = ivp;
+      f->len++;
+      lv_shift_tracked_indices(phi_at, 1, &cmp_idx, &control_idx, &update_idx,
+                               &phi_idx,
+                               needs_scalar_tail ? &preheader_insert_at : NULL,
+                               extra_phis, extra_phi_count);
+
+      size_t upd_at = update_idx;
+      if (!nir_ensure_inst_space(f, 1)) {
+        free(saved_body);
+        free(vec);
+        free(rewrite);
+        free(use_iv_vec);
+        free(broadcast_value);
+        free(broadcast_map);
+        free(in_loop);
+        free(defs);
+        nyr_cfg_free(&cfg);
+        return -1;
+      }
+      memmove(&f->data[upd_at + 1], &f->data[upd_at],
+              (f->len - upd_at) * sizeof(*f->data));
+      f->data[upd_at] = lv_make_inst(NYIR_VEC8_ADD_I64, iv_vec_next, iv_vec_phi,
+                                     iv_step4_v, -1, 0, NYIR_CMP_EQ,
+                                     NYIR_SCALAR_UNKNOWN);
+      f->len++;
+      lv_shift_tracked_indices(upd_at, 1, &cmp_idx, &control_idx, &update_idx,
+                               &phi_idx,
+                               needs_scalar_tail ? &preheader_insert_at : NULL,
+                               extra_phis, extra_phi_count);
     }
 
     size_t vector_clone_count = 0;
@@ -4457,6 +5444,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4477,8 +5465,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
      */
     int two = f->next_value++;
     if (!nir_ensure_inst_space(f, 1)) {
+      free(saved_body);
       free(vec);
       free(rewrite);
+      free(use_iv_vec);
       free(broadcast_value);
       free(broadcast_map);
       free(in_loop);
@@ -4486,10 +5476,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       nyr_cfg_free(&cfg);
       return -1;
     }
-    memmove(&f->data[update_idx + 1], &f->data[update_idx],
-            (f->len - update_idx) * sizeof(*f->data));
+    size_t iv_ins_at = update_idx;
+    memmove(&f->data[iv_ins_at + 1], &f->data[iv_ins_at],
+            (f->len - iv_ins_at) * sizeof(*f->data));
     f->len++;
-    f->data[update_idx] = (nyr_inst_t){.op = NYIR_CONST_I64,
+    f->data[iv_ins_at] = (nyr_inst_t){.op = NYIR_CONST_I64,
                                        .dst = two,
                                        .a = -1,
                                        .b = -1,
@@ -4498,7 +5489,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                                        .e = -1,
                                        .f = -1,
                                        .imm = vector_step};
-    nyr_inst_t *moved_update = &f->data[update_idx + 1];
+    nyr_inst_t *moved_update = &f->data[iv_ins_at + 1];
     /*
      * Recognition accepts copy chains around the induction value.  Mirror
      * that proof when replacing the scalar step: testing the raw operand
@@ -4513,15 +5504,22 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     for (size_t i = 0; i < f->len; ++i)
       if (f->data[i].op == NYIR_PHI && f->data[i].dst == iv)
         nyr_clear_derived_facts(&f->data[i]);
+    lv_shift_tracked_indices(iv_ins_at, 1, &cmp_idx, &control_idx, &update_idx,
+                             &phi_idx,
+                             needs_scalar_tail ? &preheader_insert_at : NULL,
+                             extra_phis, extra_phi_count);
 
-    if (extra_phi_dst >= 0) {
-      if (extra_update_idx >= update_idx)
-        extra_update_idx++;
+    for (size_t e = 0; e < extra_phi_count; ++e) {
+      if (extra_phis[e].vec_arith)
+        continue;
+      size_t eu = extra_phis[e].update_idx;
       int wide_step = f->next_value++;
-      __int128 scaled = (__int128)extra_step * vf;
+      __int128 scaled = (__int128)extra_phis[e].step * vector_step;
       if (scaled < INT64_MIN || scaled > INT64_MAX) {
+        free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4530,8 +5528,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         return -1;
       }
       if (!nir_ensure_inst_space(f, 1)) {
+        free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4539,23 +5539,27 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         nyr_cfg_free(&cfg);
         return -1;
       }
-      memmove(&f->data[extra_update_idx + 1], &f->data[extra_update_idx],
-              (f->len - extra_update_idx) * sizeof(*f->data));
+      memmove(&f->data[eu + 1], &f->data[eu], (f->len - eu) * sizeof(*f->data));
       f->len++;
-      f->data[extra_update_idx] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                               .dst = wide_step,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = (int64_t)scaled};
-      nyr_inst_t *wide_update = &f->data[extra_update_idx + 1];
-      if (wide_update->a == extra_phi_dst)
+      f->data[eu] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                 .dst = wide_step,
+                                 .a = -1,
+                                 .b = -1,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .imm = (int64_t)scaled};
+      nyr_inst_t *wide_update = &f->data[eu + 1];
+      if (extra_phis[e].update_has_phi_on_left)
         wide_update->b = wide_step;
       else
         wide_update->a = wide_step;
+      nyr_clear_derived_facts(wide_update);
+      lv_shift_tracked_indices(eu, 1, &cmp_idx, &control_idx, &update_idx,
+                               &phi_idx,
+                               needs_scalar_tail ? &preheader_insert_at : NULL,
+                               extra_phis, extra_phi_count);
     }
 
     if (needs_scalar_tail) {
@@ -4572,6 +5576,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4580,15 +5585,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         return -1;
       }
       size_t shift = NYIR_VEC_END_PREHEADER_LEN;
-      if (preheader_insert_at <= cmp_idx)
-        cmp_idx += shift;
-      if (preheader_insert_at <= control_idx)
-        control_idx += shift;
-      if (preheader_insert_at <= update_idx)
-        update_idx += shift;
-      if (extra_update_idx != SIZE_MAX &&
-          preheader_insert_at <= extra_update_idx)
-        extra_update_idx += shift;
+      lv_shift_tracked_indices(preheader_insert_at, shift, &cmp_idx,
+                               &control_idx, &update_idx, &phi_idx, NULL,
+                               extra_phis, extra_phi_count);
       f->data[cmp_idx].b = vec_end_v;
       nyr_clear_derived_facts(&f->data[cmp_idx]);
 
@@ -4600,6 +5599,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4644,6 +5644,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         free(saved_body);
         free(vec);
         free(rewrite);
+        free(use_iv_vec);
         free(broadcast_value);
         free(broadcast_map);
         free(in_loop);
@@ -4659,10 +5660,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             f, vf, in_loop, reduction_phi_dst, reduction_phi_init,
             vector_acc_phi, vector_acc_update, vector_acc_result,
             reduction_preheader_label, cfg.block_label[header], latch_label,
-            dispatch_label, invariant_reduction_term, fixed_trip)) {
+            dispatch_label, invariant_reduction_term, fixed_trip,
+            reduction_kind)) {
       free(saved_body);
       free(vec);
       free(rewrite);
+      free(use_iv_vec);
       free(broadcast_value);
       free(broadcast_map);
       free(in_loop);
@@ -4675,6 +5678,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     f->vectorized_loops++;
     free(vec);
     free(rewrite);
+    free(use_iv_vec);
     free(broadcast_value);
     free(broadcast_map);
     free(in_loop);
@@ -5044,68 +6048,24 @@ static nyr_op_t fu_vec_op(nyr_op_t op) {
                               : NYIR_VEC4_MUL_F64;
 }
 
-static bool fu_transform(fu_ctx_t *c) {
-  nyr_func_t *f = c->f;
-  const nyr_cfg_t *cfg = &c->cfg;
-  int64_t base = nyr_fresh_label(f);
-  if (base < 0)
-    return false;
-  const int64_t vp = base, vh = base + 1, vb = base + 2, vx = base + 3,
-                vps = base + 4, vhx = base + 5;
-  const int64_t pre_label = cfg->block_label[c->preheader];
-  const int64_t header_label = cfg->block_label[c->header];
-  int orig_values = f->next_value;
-  int *vmap = malloc((size_t)orig_values * sizeof(*vmap));
-  if (!vmap)
-    return false;
-  for (int v = 0; v < orig_values; ++v)
-    vmap[v] = -1;
-  bool ok = true;
+static int fu_phi3(nyr_func_t *f, int64_t l0, int v0, int64_t l1, int v1,
+                   int64_t l2, int v2) {
+  nyr_phi_incoming_t *inc = malloc(3 * sizeof(*inc));
+  if (!inc)
+    return -1;
+  inc[0] = (nyr_phi_incoming_t){.predecessor_label = l0, .value = v0};
+  inc[1] = (nyr_phi_incoming_t){.predecessor_label = l1, .value = v1};
+  inc[2] = (nyr_phi_incoming_t){.predecessor_label = l2, .value = v2};
+  nyr_inst_t phi = {.op = NYIR_PHI, .dst = -1, .a = -1, .b = -1, .c = -1,
+                    .d = -1, .e = -1, .f = -1, .phi_incoming = inc,
+                    .phi_incoming_len = 3,
+                    .scalar_class = NYIR_SCALAR_I64_RAW};
+  return nyr_ir_emit(f, phi);
+}
 
-  ok = fu_ctl(f, NYIR_LABEL, -1, vp);
-  int n = fu_i64(f, NYIR_SUB_I64, c->hi, c->lo, NYIR_CMP_EQ);
-  int guard = fu_i64(f, NYIR_CMP_I64, n, fu_const_value(f, 3), NYIR_CMP_GT);
-  int store_base = fu_resolve(c, c->store_base);
-  for (size_t k = 0; ok && k < c->load_count; ++k) {
-    int q = fu_resolve(c, c->load_base[k]);
-    if (q == store_base)
-      continue;
-    int d = fu_i64(f, NYIR_SUB_I64, store_base, q, NYIR_CMP_EQ);
-    int same = fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, 0), NYIR_CMP_EQ);
-    int far_up =
-        fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, 31), NYIR_CMP_GT);
-    int far_down =
-        fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, -31), NYIR_CMP_LT);
-    int any = fu_i64(f, NYIR_OR_I64,
-                     fu_i64(f, NYIR_OR_I64, same, far_up, NYIR_CMP_EQ),
-                     far_down, NYIR_CMP_EQ);
-    guard = fu_i64(f, NYIR_AND_I64, guard, any, NYIR_CMP_EQ);
-  }
-  int vend = fu_i64(f, NYIR_ADD_I64, c->lo,
-                    fu_i64(f, NYIR_AND_I64, n, fu_const_value(f, -4),
-                           NYIR_CMP_EQ),
-                    NYIR_CMP_EQ);
-  for (size_t k = 0; ok && k < c->inv_count; ++k) {
-    int v = c->inv[k];
-    if (v >= orig_values)
-      continue;
-    vmap[v] = fu_emit(f, NYIR_VEC4_SET1_F64, v, -1, -1, 0, NYIR_CMP_EQ,
-                      NYIR_SCALAR_UNKNOWN);
-    ok = vmap[v] >= 0;
-  }
-  ok = ok && fu_ctl(f, NYIR_BR_IF, guard, vh) && fu_ctl(f, NYIR_BR, -1, vps);
-  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vps) && fu_ctl(f, NYIR_BR, -1, vx);
-
-  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vh);
-  size_t viv_at = SIZE_MAX;
-  int viv = ok ? fu_phi(f, vp, c->lo, vb, -1, &viv_at) : -1;
-  int vcond = fu_i64(f, NYIR_CMP_I64, viv, vend, NYIR_CMP_LT);
-  ok = ok && viv >= 0 && fu_ctl(f, NYIR_BR_IF, vcond, vb) &&
-       fu_ctl(f, NYIR_BR, -1, vhx);
-  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vhx) && fu_ctl(f, NYIR_BR, -1, vx);
-
-  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vb);
-  int bytes = fu_i64(f, NYIR_SHL_I64, viv, fu_const_value(f, 3), NYIR_CMP_EQ);
+static bool fu_emit_vec4_step(fu_ctx_t *c, nyr_func_t *f, int orig_values,
+                              int *vmap, int bytes) {
+  bool ok = bytes >= 0;
   for (size_t k = 0; ok && k < c->load_count; ++k) {
     int addr = fu_i64(f, NYIR_ADD_I64, c->load_base[k], bytes, NYIR_CMP_EQ);
     vmap[c->load_dst[k]] = fu_emit(f, NYIR_VEC4_LOAD_F64, addr, -1, -1, 0,
@@ -5138,14 +6098,115 @@ static bool fu_transform(fu_ctx_t *c) {
         f->data[f->len - 1].dst = -1;
     }
   }
-  int viv_next = fu_i64(f, NYIR_ADD_I64, viv, fu_const_value(f, 4),
-                        NYIR_CMP_EQ);
-  ok = ok && viv_next >= 0 && fu_ctl(f, NYIR_BR, -1, vh);
+  return ok;
+}
+
+static bool fu_transform(fu_ctx_t *c) {
+  nyr_func_t *f = c->f;
+  const nyr_cfg_t *cfg = &c->cfg;
+  int64_t base = nyr_fresh_label(f);
+  if (base < 0)
+    return false;
+  const int64_t vp = base, vb8 = base + 1, v8x = base + 2, vx = base + 3,
+                vps = base + 4, v4_entry = base + 5, v4_chk = base + 6,
+                v4_skip = base + 7, v4_body = base + 8, vp_ok = base + 9;
+  const int64_t pre_label = cfg->block_label[c->preheader];
+  const int64_t header_label = cfg->block_label[c->header];
+  int orig_values = f->next_value;
+  int *vmap = malloc((size_t)orig_values * sizeof(*vmap));
+  if (!vmap)
+    return false;
+  for (int v = 0; v < orig_values; ++v)
+    vmap[v] = -1;
+  bool ok = true;
+
+  ok = fu_ctl(f, NYIR_LABEL, -1, vp);
+  int n = fu_i64(f, NYIR_SUB_I64, c->hi, c->lo, NYIR_CMP_EQ);
+  int guard = fu_i64(f, NYIR_CMP_I64, n, fu_const_value(f, 3), NYIR_CMP_GT);
+  int store_base = fu_resolve(c, c->store_base);
+  for (size_t k = 0; ok && k < c->load_count; ++k) {
+    int q = fu_resolve(c, c->load_base[k]);
+    if (q == store_base)
+      continue;
+    int d = fu_i64(f, NYIR_SUB_I64, store_base, q, NYIR_CMP_EQ);
+    int same = fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, 0), NYIR_CMP_EQ);
+    int far_up =
+        fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, 31), NYIR_CMP_GT);
+    int far_down =
+        fu_i64(f, NYIR_CMP_I64, d, fu_const_value(f, -31), NYIR_CMP_LT);
+    int any = fu_i64(f, NYIR_OR_I64,
+                     fu_i64(f, NYIR_OR_I64, same, far_up, NYIR_CMP_EQ),
+                     far_down, NYIR_CMP_EQ);
+    guard = fu_i64(f, NYIR_AND_I64, guard, any, NYIR_CMP_EQ);
+  }
+  ok = ok && fu_ctl(f, NYIR_BR_IF, guard, vp_ok) && fu_ctl(f, NYIR_BR, -1, vps);
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vps) && fu_ctl(f, NYIR_BR, -1, vx);
+
+  /*
+   * Emit a rotated 2x-unrolled AVX2 do-while loop (8 f64 lanes per branch)
+   * followed by an optional single 4-lane vector cleanup block before the
+   * scalar remainder. Each 4-lane store completes before the next 4-lane load,
+   * preserving exact |d| >= 32 alias safety.
+   */
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vp_ok);
+  int vend4 = fu_i64(f, NYIR_ADD_I64, c->lo,
+                     fu_i64(f, NYIR_AND_I64, n, fu_const_value(f, -4),
+                            NYIR_CMP_EQ),
+                     NYIR_CMP_EQ);
+  int vend8 = fu_i64(f, NYIR_ADD_I64, c->lo,
+                     fu_i64(f, NYIR_AND_I64, n, fu_const_value(f, -8),
+                            NYIR_CMP_EQ),
+                     NYIR_CMP_EQ);
+  int guard8 = fu_i64(f, NYIR_CMP_I64, n, fu_const_value(f, 7), NYIR_CMP_GT);
+  for (size_t k = 0; ok && k < c->inv_count; ++k) {
+    int v = c->inv[k];
+    if (v >= orig_values)
+      continue;
+    vmap[v] = fu_emit(f, NYIR_VEC4_SET1_F64, v, -1, -1, 0, NYIR_CMP_EQ,
+                      NYIR_SCALAR_UNKNOWN);
+    ok = vmap[v] >= 0;
+  }
+  ok = ok && fu_ctl(f, NYIR_BR_IF, guard8, vb8) &&
+       fu_ctl(f, NYIR_BR, -1, v4_entry);
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, v4_entry) &&
+       fu_ctl(f, NYIR_BR, -1, v4_chk);
+
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, vb8);
+  size_t viv8_at = SIZE_MAX;
+  int viv8 = ok ? fu_phi(f, vp_ok, c->lo, vb8, -1, &viv8_at) : -1;
+  int bytes0 =
+      fu_i64(f, NYIR_SHL_I64, viv8, fu_const_value(f, 3), NYIR_CMP_EQ);
+  ok = ok && viv8 >= 0 && fu_emit_vec4_step(c, f, orig_values, vmap, bytes0);
+  int bytes1 =
+      fu_i64(f, NYIR_ADD_I64, bytes0, fu_const_value(f, 32), NYIR_CMP_EQ);
+  ok = ok && fu_emit_vec4_step(c, f, orig_values, vmap, bytes1);
+  int viv8_next =
+      fu_i64(f, NYIR_ADD_I64, viv8, fu_const_value(f, 8), NYIR_CMP_EQ);
+  int vcond8 = fu_i64(f, NYIR_CMP_I64, viv8_next, vend8, NYIR_CMP_LT);
+  ok = ok && viv8_next >= 0 && vcond8 >= 0 &&
+       fu_ctl(f, NYIR_BR_IF, vcond8, vb8) && fu_ctl(f, NYIR_BR, -1, v8x);
   if (ok)
-    f->data[viv_at].phi_incoming[1].value = viv_next;
+    f->data[viv8_at].phi_incoming[1].value = viv8_next;
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, v8x) && fu_ctl(f, NYIR_BR, -1, v4_chk);
+
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, v4_chk);
+  int v4_iv = ok ? fu_phi(f, v4_entry, c->lo, v8x, viv8_next, NULL) : -1;
+  int has4 = fu_i64(f, NYIR_CMP_I64, v4_iv, vend4, NYIR_CMP_LT);
+  ok = ok && v4_iv >= 0 && has4 >= 0 && fu_ctl(f, NYIR_BR_IF, has4, v4_body) &&
+       fu_ctl(f, NYIR_BR, -1, v4_skip);
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, v4_skip) && fu_ctl(f, NYIR_BR, -1, vx);
+
+  ok = ok && fu_ctl(f, NYIR_LABEL, -1, v4_body);
+  int bytes4 =
+      fu_i64(f, NYIR_SHL_I64, v4_iv, fu_const_value(f, 3), NYIR_CMP_EQ);
+  ok = ok && fu_emit_vec4_step(c, f, orig_values, vmap, bytes4);
+  int v4_next =
+      fu_i64(f, NYIR_ADD_I64, v4_iv, fu_const_value(f, 4), NYIR_CMP_EQ);
+  ok = ok && v4_next >= 0 && fu_ctl(f, NYIR_BR, -1, vx);
 
   ok = ok && fu_ctl(f, NYIR_LABEL, -1, vx);
-  int resume = ok ? fu_phi(f, vps, c->lo, vhx, viv, NULL) : -1;
+  int resume = ok ? fu_phi3(f, vps, c->lo, v4_skip, v4_iv, v4_body, v4_next)
+                  : -1;
   ok = ok && resume >= 0 && fu_ctl(f, NYIR_BR, -1, header_label);
   free(vmap);
   if (!ok)
@@ -5271,11 +6332,8 @@ static bool nyr_loop_vectorize_impl(nyr_func_t *f,
    * local promotion into a JIT compilation failure.  Smaller hot kernels still
    * go through the normal legality and profitability checks below.
    */
-  if (f->len > 640) {
-    if (supports_vec8_i64_broadcast && f->len <= 4096)
-      return nyr_loop_vectorize_f64_update(f);
+  if (f->len > 4096)
     return true;
-  }
   if (nyr_vectorizer_no_lexical_backedge(f))
     return true;
   nyr_func_t work = {0};

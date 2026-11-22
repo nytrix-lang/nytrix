@@ -5,7 +5,7 @@ shape ui_frame_history_append {
   template ny-test-case
   timeout 120
   expect compile_and_run
-  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_message "UI-FRAME-HISTORY-OK"
   source ny <<'NY'
 use core

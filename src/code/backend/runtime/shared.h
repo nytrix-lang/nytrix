@@ -626,10 +626,13 @@ extern _Atomic int g_rt_gc_heap_used;
 #define RT_FC_KIND_DICT 2u
 #define RT_FC_KIND_MANAGED 3u
 #define RT_FC_KIND_SSO 4u
+extern _Atomic(int) g_rt_fc_active;
 extern __thread int g_rt_fc_tracking;
 void rt_fc_track_slow(uintptr_t ptr, uint32_t kind, size_t bytes);
 static inline void rt_fc_track(uintptr_t ptr, uint32_t kind, size_t bytes) {
-  if (__builtin_expect(g_rt_fc_tracking, 0))
+  if (__builtin_expect(
+          atomic_load_explicit(&g_rt_fc_active, memory_order_relaxed), 0) &&
+      g_rt_fc_tracking)
     rt_fc_track_slow(ptr, kind, bytes);
 }
 void rt_fc_thread_enter(void);
@@ -840,7 +843,13 @@ static inline bool is_valid_heap_ptr(int64_t v) {
   if (!(v > 0x1000 && (v & 15) == 0))
     return false;
   uintptr_t p = (uintptr_t)v;
-  return rt_heap_ptr_registry_has(p) || rt_gc_owns_pointer(p);
+  if (__builtin_expect(rt_heap_ptr_registry_has(p), 1))
+    return true;
+  return __builtin_expect(
+             atomic_load_explicit(&g_rt_gc_heap_used, memory_order_acquire) !=
+                 0,
+             0) &&
+         rt_gc_owns_pointer(p);
 }
 
 #define is_heap_ptr(v) is_valid_heap_ptr(v)

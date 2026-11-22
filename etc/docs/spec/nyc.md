@@ -291,6 +291,201 @@ The records below describe specific runs and compiler snapshots. Later
 results supersede older failures only for the cases they actually exercise.
 Paths under `/tmp` identify local run artifacts, not files shipped with NYC.
 
+### Real-mode setup code size
+
+The one-call inlining allowance applies to local definitions. An exported
+definition still needs an out-of-line body, so it must meet the tiny-helper
+limit even when the current translation unit calls it once.
+
+Two NYC binaries built with the same backend objects replayed all 20 Linux
+7.3.5 setup C recipes. The new rule reduced `cpucheck.o` text from 1,886
+to 1,844 bytes through a smaller `check_cpu`. The other 19 text sizes
+were unchanged. Both upstream setup links failed with `_end=0x88d0`.
+The maps are in `/tmp/nyc-setup-size-matrix.b0hdjbqj`.
+
+The i386 setup emitter materializes nonzero signed-byte constants with
+`pushl` and `popl` when reloading a constant into a register. The pair
+preserves flags and saves one byte over a 32-bit immediate move in this
+mode. Across the 20 Linux 7.3.5 setup C recipes, text fell from 25,179 to
+25,116 bytes. The upstream linker still rejects setup. The map in
+`/tmp/nyc-setup-size-matrix.1fjcgstu/setup.map` places the end of
+`.text32` at `0x6604` and `_end` at `0x88d0`.
+
+The setup emitter also substitutes accumulator `xchgl` for register copies
+when the source is a dead caller-saved register. Its size model accounts for
+the one-byte accumulator opcode. This lowered setup C object text from
+25,116 to 25,069 bytes across the same 20 recipes. The upstream linker
+still rejects setup with `.text32` ending at `0x65d5` and `_end` at
+`0x88d0`. The map is in `/tmp/nyc-setup-size-matrix.77abeyyi/setup.map`.
+The separate real-mode QEMU probe emitted the accumulator exchange and
+matched the reference marker `FOLD 149d8d80`.
+
+The setup emitter folds register-indirect accesses with a constant
+displacement into one symbol-relative memory operand when the base register
+is dead after the access. The assembled CPU vendor loads retain
+`R_386_32` relocations with addends of 4 and 8. A real-mode QEMU probe
+executed both loads and matched the reference marker `FOLD 000003dd`.
+Across all 20 setup recipes the change reduced text from 25,069 to 24,895
+bytes. The upstream linker still rejects the result. Its map at
+`/tmp/nyc-setup-size-matrix.xw_v83ep/setup.map` places the end of
+`.text32` at `0x6527`.
+
+The same fold can cross independent moves within a block and can encode
+direct comparisons, tests, and immediate stores. The replay emitted
+symbol-relative comparisons in `video.o` and byte, word, and dword stores
+in the setup objects. Text shrank by 31 bytes to 24,864 bytes. In the
+upstream link map at `/tmp/nyc-setup-size-matrix.to_rpa5u/setup.map`,
+`.text32` ends at `0x6508` and `_end` stays at `0x88d0`.
+
+When an address adjustment's flags are overwritten within the same block,
+the emitter can add the adjustment to the relocation and drop the
+arithmetic instruction. The real-mode QEMU probe performed a read-modify-write
+through the folded address and matched the reference marker `FOLD 7645bbed`.
+The 20 setup recipes fell from 24,864 to 24,830 text bytes. The upstream link
+map at `/tmp/nyc-setup-size-matrix.7a4fu5qq/setup.map` places the end of
+`.text32` at `0x64e6` and `_end` at `0x88d0`.
+
+In setup mode the emitter folds flag tests into a stack slot when the
+loaded register is dead. The 20 setup recipes dropped from 24,830 to
+24,780 text bytes. A real-mode probe linked the actual Linux setup
+`string.o` and verified `simple_strtoull` across hexadecimal, octal,
+decimal, and 64-bit inputs with end-pointer checks. Both builds printed
+`FOLD 0000000f`. The C frontend suite passed. The upstream link still
+fails with `.text32` ending at `0x64b4` and `_end` at `0x88d0`.
+See `/tmp/nyc-setup-size-matrix.a39ou9pk/setup.map`.
+
+Extending the comparison fold from stack slots to ordinary indirect operands
+saved 14 more bytes. The setup objects contain direct comparisons of CPU and
+video data with the same memory width. The upstream link still fails with
+`.text32` ending at `0x64a6`. See
+`/tmp/nyc-setup-size-matrix.ts3d1tr1/setup.map`.
+The real-mode QEMU probe exercised an indirect signed comparison against
+both negative and positive values and matched `FOLD 00001907`.
+
+The C frontend preserves volatile qualification on file-scope integer
+arrays and carries it through indexed loads, stores, and multidimensional
+rows. Before the fix, `-Os` could forward a write into a subsequent volatile
+read and drop discarded-value reads. The `volatile-global-array.c`
+regression checks optimized NYIR in both x86 modes for all expected
+32-bit reads and a single 16-bit store and load. The full C frontend suite
+passed. Replaying the Linux setup recipes with the qualifier fix preserved
+their text sizes.
+
+For real-mode setup at `-Os`, the frontend now allows scalar promotion in
+straight-line functions. Promotion across control flow remains disabled
+because the stack emitter materializes PHI edge copies. With the same
+backend objects, unrestricted promotion grew the 20 setup objects from
+24,768 to 25,452 text bytes. Straight-line promotion reduced them to
+24,680 bytes. The QEMU probe using Linux setup `string.o` still reports
+`FOLD 0000000f`. The upstream linker still rejects setup with
+`.text32` ending at `0x6450`. See
+`/tmp/nyc-setup-size-matrix.ytno6jox/straight.map`.
+
+Setup size builds now promote individual locals when pruned SSA placement
+finds no required PHI for that local, including in branching functions.
+The SSA regression checks both paths through a join and verifies that the
+local needing a PHI stays in memory. The 20 setup objects dropped from
+24,680 to 23,950 text bytes. The `string.o` QEMU probe and C frontend suite
+passed. The upstream setup link still fails with `.text32` ending at
+`0x6176`. See `/tmp/nyc-setup-size-matrix.a0bqofhq/setup.map`.
+
+The compiler was also tested with experimental PHI edge budgets. Selecting
+the smallest assembled object per translation unit landed at 56 sectors
+and `_end=0x78d0` with the original upstream linker script. That diagnostic
+selection used budgets of zero, two, and three. See
+`/tmp/nyc-setup-size-matrix.wqkdqfaw/smallest.map`.
+The resulting setup, packaged with the saved NYC compressed kernel, produced
+a diagnostic `bzImage`. QEMU emitted no serial output or `/init` marker.
+A monitor sample found CPU 0 executing BIOS code in real mode. Image and
+logs are in `/tmp/nyc-mixed-bzimage.XXRa2r`.
+
+With early serial output enabled, the diagnostic image reported an
+undefined normal VGA mode. Sending Space at the BIOS video menu let it
+decompress Linux and enter 64-bit startup. A page fault at
+`__pi___startup_64+0xb5` came from a store through a linked virtual
+address before that address was mapped. The startup recipe forced
+`include/linux/hidden.h`, but NYC discarded its visibility pragma.
+The object used a GOT-relative address that the kernel link relaxed to
+an absolute immediate.
+
+The C preprocessor now tracks nested GCC visibility scopes. SysV x86-64
+addresses of hidden declarations use PC-relative addressing and the
+assembly output carries ELF hidden visibility. The regression checks
+hidden and default declarations in the same object. Exact Kbuild recipe
+replays for `map_kernel.o` and `gdt_idt.o` emitted zero GOT-relative or
+absolute relocations. The corrected `__pgtable_l5_enabled` relocation is
+`R_X86_64_PC32`. Hidden metadata for instruction references is emitted
+with the surviving instruction. Internal-linkage declarations and
+optimized-away references exposed spurious undefined hidden symbols in
+the first two relinks.
+
+A diagnostic relink with those unused symbols removed cleared the early
+page fault. It reached the filesystem initcalls and stopped in
+`xas_load+0x21d` while initializing iomap. The saved `xa_is_sibling`
+used a signed comparison of a tagged address against `0xfe`, admitting
+an address with the top bit set as a sibling index. NYC now lowers
+ordered opaque object-pointer comparisons using unsigned address order.
+The executable parity fixture exercises both operand orders. The boot
+trace is in `/tmp/nyc-hidden-relink.43jslooo/serial.log`.
+
+The usual arithmetic conversions zero-extend both operands of an unsigned
+32-bit comparison. NYC uses their signed 64-bit ordering directly and
+reserves sign-bit bias for full-width unsigned values. The width parity
+fixture covers ordering across `INT_MAX`. With the same backend as the
+previous replay, this moved the stock setup link's `.text32` end from
+`0x6107` to `0x60f1`. The upstream limit is `0x6000`.
+
+The real-mode emitter folds an immediate push, register pop, and
+frame-home store into a push and direct memory pop when the caller-saved
+temporary is dead. A compiler rebuilt with only this fold disabled
+provides the control. The fold saves 46 bytes and moves the end of
+`.text32` from `0x6102` to `0x60d4`.
+The C frontend suite passed and the real-mode QEMU string probe printed
+the same `FOLD 0000000f` marker for both compiler variants.
+
+The i386 backend now compares its register-allocation candidates after
+frame finalization, using the shorter accumulator encodings in its size
+estimate. Real-mode size inlining uses a tighter work budget and keeps
+ordinary calls and register-constrained inline assembly inside the
+helper that contains both. The 20 default setup recipes now link with
+the upstream script. The linked setup uses 56 total sectors,
+`.text32` ends at `0x5fee`, and `_end=0x78d0`. The diagnostic
+bzImage reused the saved kernel payload and reached initramfs unpacking.
+It still stalled during serial IRQ probing.
+
+The saved APIC interrupt object's alternate-stack branch switched the
+stack and called the timer handler, then restored the stack directly.
+The inline assembly matched both the IRQ wrapper and plain stack-call
+shapes. NYC selected the plain form, which dropped `irq_enter_rcu` and
+`irq_exit_rcu`. The frontend now chooses the IRQ wrapper when both calls
+are present and diagnoses an incomplete pair. The C regression checks
+the ordered calls in both shapes. Replayed `apic.o` and `irq.o` carry
+both IRQ boundary call relocations on their alternate-stack branches.
+
+That relink ran the serial IRQ probe to completion, then exposed a
+workqueue fault. The worker pool pointer was 16 slots past the
+per-CPU array base because `bool highpri = wq->flags & WQ_HIGHPRI`
+retained the mask value `16`. Automatic scalar `_Bool` initialization
+and assignment now use truth conversion before narrowing. The
+workqueue replay emits a compare and `setne` before computing the pool
+address. The C parity regression covers a masked array index,
+a high-bit assignment, a compound assignment, and floating inputs.
+
+With the corrected IRQ and workqueue objects and the default setup
+objects, the focused protected bzImage ran the initramfs `/init`. The
+serial log contains `NYC_KERNEL_INIT_REACHED` at the end of the boot.
+The run used a Space key to continue through the BIOS video prompt and
+reused other kernel objects. See
+`/tmp/nyc-hidden-relink.y4m9fybn/serial.log`.
+
+An assembler size comparison forced each of the nine existing i386 register
+allocation variants across all 20 setup C recipes. The smallest measured
+variant per function would save only nine bytes over the current selector.
+Scoring after frame finalization saved five bytes in a separate trial. The
+selector is retained. Further setup reductions need smaller emitted
+instruction sequences. The assembled variants are in
+`/tmp/nyc-setup-size-matrix.vihb2r5k`.
+
 ### C frontend harness: artifact freshness
 
 The common executable regressions in `src/code/test/lang/run.cmake` remove
@@ -313,6 +508,29 @@ modes. The forced-include and preprocessing checks require fresh dependency
 files. Fault injection rejected missing or empty assembly, invalid assembly,
 link failure, stale executables, wrong output or status, a crash, a timeout,
 and silently bypassed machine output.
+
+The cross-target C frontend checks now require fresh nonempty AArch64,
+Win64, COFF, and Mach-O artifacts. The unsupported-input cases require
+exit status 1, the case-specific diagnostic on stderr, and no object.
+Previously the runner ignored the expected diagnostic field and could accept
+an unrelated rejection. `ctest --test-dir build/release -R '^nyr-c-frontend$'
+--output-on-failure` passed with the existing release compiler. Repeating
+the runner with fault-injecting tools rejected a stale AArch64 object, a
+stale COFF executable, an unrelated diagnostic, and a crash that printed
+the expected diagnostic. Logs are in
+`/tmp/nyc-cross-target-faults.6bm28mpw`.
+
+`bench-gcc` now requires a successful exit and exactly one checksum from
+each executable before it measures instructions. Fixture paths identify
+build outputs, so cases with the same basename cannot overwrite each
+other's inputs or binaries. Fault injection verified nonzero command
+status for two missing checksums, matching nonzero exits, a signal,
+missing object or executable output, a checksum mismatch, an unavailable
+instruction count, and an unknown fixture. Two passing fixtures with the
+same basename were both reported. The benchmark function passed
+`memory/bitcount` for NYC and NYR with the existing release binaries. The
+normal command's rebuild stopped at compile errors in the pending
+`loop_vectorize.c` changes.
 
 The two parity programs and six retained frontend stress programs were run
 with GCC 16.2.1, Clang 23.1.5, and three NYC routes at `-O0`, `-O1`, `-O2`,

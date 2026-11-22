@@ -5651,7 +5651,7 @@ bool nyr_inline_general(nyr_func_t *f) {
       break;
     free(loop_depths);
     loop_depths = NULL;
-    (void)nyr_inline_compute_loop_depths(f, &loop_depths);
+    bool loop_depths_ready = false;
     bool saw_symbol_call = false;
     if (ny_trace_enabled("NY_TRACE_LOWER") && ny_dbg_function_selected(NULL))
       if (ny_dbg_verbosity() >= 6)
@@ -5688,6 +5688,10 @@ bool nyr_inline_general(nyr_func_t *f) {
         nyr_inline_trace(f, i, call->symbol, "reject",
                          "call-site effects exceed cloned body summary");
         continue;
+      }
+      if (!loop_depths_ready) {
+        (void)nyr_inline_compute_loop_depths(f, &loop_depths);
+        loop_depths_ready = true;
       }
       /*
        * Expansion ancestry is needed only for calls with a registered body
@@ -6971,16 +6975,71 @@ static bool nyr_tbuf_offset_guarded_before(const nyr_func_t *f, size_t at,
   return false;
 }
 
-static bool nyr_tbuf_access_fits(const nyr_func_t *f, int address, int root,
-                                 size_t bytes) {
+static bool nyr_tbuf_access_fits_ex(const nyr_func_t *f,
+                                    const nyr_value_fact_t *facts,
+                                    nir_range_query_cache_t *range_cache,
+                                    size_t at, int address, int root,
+                                    size_t bytes, size_t width) {
+  if (!f || width == 0 || bytes < width)
+    return false;
   int64_t offset = 0;
-  return bytes >= sizeof(int64_t) &&
-         nyr_tbuf_eval_const_offset(f, address, root, &offset, 0) &&
-         offset >= 0 && (uint64_t)offset <= bytes - sizeof(int64_t);
+  if (nyr_tbuf_eval_const_offset(f, address, root, &offset, 0))
+    return offset >= 0 && (uint64_t)offset <= bytes - width;
+  /*
+   * Non-constant offset (e.g., `buf[limb]`): accept when the address is
+   * `base + off` with `base` at a constant offset from `root` and `off`
+   * proven inside `[0, bytes - width - base_off]` via value ranges or
+   * an in-bounds address tag.
+   */
+  int cur = address;
+  for (unsigned hops = 0; hops < 16 && cur >= 0; ++hops) {
+    size_t def_idx = SIZE_MAX;
+    for (size_t k = at; k > 0; --k) {
+      if (f->data[k - 1u].dst == cur) {
+        def_idx = k - 1u;
+        break;
+      }
+    }
+    if (def_idx == SIZE_MAX)
+      break;
+    const nyr_inst_t *def = &f->data[def_idx];
+    if (def->op == NYIR_COPY && def->a >= 0) {
+      cur = def->a;
+      continue;
+    }
+    if (def->op != NYIR_ADD_I64)
+      break;
+    for (int side = 0; side < 2; ++side) {
+      int base_v = side == 0 ? def->a : def->b;
+      int off_v = side == 0 ? def->b : def->a;
+      int64_t base_off = 0;
+      if (base_v < 0 || off_v < 0 ||
+          !nyr_tbuf_eval_const_offset(f, base_v, root, &base_off, 0) ||
+          base_off < 0 || (uint64_t)base_off > bytes - width)
+        continue;
+      if (width <= sizeof(int64_t) && base_off == 0 &&
+          (def->flags & NYIR_INST_F_IN_BOUNDS_ADDR))
+        return true;
+      if (facts) {
+        nyr_range_t r = {0};
+        if (!nir_value_range_at_cached(f, facts, off_v, at, &r, range_cache) ||
+            !r.has_min || !r.has_max)
+          nir_value_range_at_cached(f, facts, off_v, def_idx, &r, range_cache);
+        if (r.has_min && r.has_max && r.min >= 0 &&
+            (uint64_t)r.max <= (bytes - width) - (uint64_t)base_off)
+          return true;
+      }
+    }
+    break;
+  }
+  return false;
 }
 
 static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
-                                      int root, size_t bytes) {
+                                      int root, size_t bytes,
+                                      bool *is_i64_only) {
+  if (is_i64_only)
+    *is_i64_only = false;
   if (!f || root < 0 || root >= f->next_value)
     return false;
   size_t value_count = (size_t)f->next_value;
@@ -6997,6 +7056,7 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
   }
   if (!nyr_analyze_values(f, facts, value_count, NULL, 0))
     memset(facts, 0, value_count * sizeof(*facts));
+  nir_range_query_cache_t range_cache = {.manual_invalidation = true};
   derived[root] = true;
 
   bool changed = true;
@@ -7037,8 +7097,8 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
           safe_offset = true;
         if (!safe_offset && in->b >= 0 && bytes >= sizeof(int64_t)) {
           nyr_range_t r = {0};
-          if (nir_value_range_at(f, facts, in->b, i, &r) && r.has_min &&
-              r.has_max && r.min >= 0 &&
+          if (nir_value_range_at_cached(f, facts, in->b, i, &r, &range_cache) &&
+              r.has_min && r.has_max && r.min >= 0 &&
               (uint64_t)r.max <= (uint64_t)(bytes - sizeof(int64_t)))
             safe_offset = true;
         }
@@ -7055,6 +7115,7 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
   }
 
   bool safe = true;
+  bool i64_only = true;
   for (size_t i = 0; safe && i < f->len; ++i) {
     if (i == alloc_idx)
       continue;
@@ -7119,8 +7180,8 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
         safe_offset = true;
       if (!safe_offset && in->b >= 0 && bytes >= sizeof(int64_t)) {
         nyr_range_t r = {0};
-        if (nir_value_range_at(f, facts, in->b, i, &r) && r.has_min &&
-            r.has_max && r.min >= 0 &&
+        if (nir_value_range_at_cached(f, facts, in->b, i, &r, &range_cache) &&
+            r.has_min && r.has_max && r.min >= 0 &&
             (uint64_t)r.max <= (uint64_t)(bytes - sizeof(int64_t)))
           safe_offset = true;
       }
@@ -7128,22 +7189,69 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
              safe_offset && (in->op == NYIR_ADD_I64 || (const_off && off == 0));
       break;
     }
-    case NYIR_LOAD_I64:
+    case NYIR_LOAD_I64: {
+      size_t width = sizeof(int64_t);
+      if (in->flags & NYIR_INST_F_MEM_BYTE)
+        width = 1;
+      else if (in->flags & NYIR_INST_F_MEM_U16)
+        width = 2;
+      else if (in->flags & NYIR_INST_F_MEM_I32)
+        width = 4;
+      if (width != sizeof(int64_t) ||
+          in->scalar_class == NYIR_SCALAR_F64 ||
+          in->scalar_class == NYIR_SCALAR_F32)
+        i64_only = false;
       safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
-             nyr_tbuf_access_fits(f, in->a, root, bytes);
+             nyr_tbuf_access_fits_ex(f, facts, &range_cache, i, in->a, root,
+                                     bytes, width);
       break;
+    }
     case NYIR_BOUNDS_CHECK:
       /*
        * The payload base is observational only; offset/length stay scalar.
        */
       safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
       break;
-    case NYIR_STORE_I64:
+    case NYIR_STORE_I64: {
       /*
        * a is address, c is value; never allow publishing the pointer.
        */
+      size_t width = sizeof(int64_t);
+      if (in->flags & NYIR_INST_F_MEM_BYTE)
+        width = 1;
+      else if (in->flags & NYIR_INST_F_MEM_U16)
+        width = 2;
+      else if (in->flags & NYIR_INST_F_MEM_I32)
+        width = 4;
+      if (width != sizeof(int64_t) ||
+          in->scalar_class == NYIR_SCALAR_F64 ||
+          in->scalar_class == NYIR_SCALAR_F32)
+        i64_only = false;
       safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
-             nyr_tbuf_access_fits(f, in->a, root, bytes);
+             nyr_tbuf_access_fits_ex(f, facts, &range_cache, i, in->a, root,
+                                     bytes, width);
+      break;
+    }
+    case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC4_STORE_I64:
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
+             nyr_tbuf_access_fits_ex(f, facts, &range_cache, i, in->a, root,
+                                     bytes, 32u);
+      break;
+    case NYIR_VEC8_LOAD_I64:
+    case NYIR_VEC8_STORE_I64:
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
+             nyr_tbuf_access_fits_ex(f, facts, &range_cache, i, in->a, root,
+                                     bytes, 64u);
+      break;
+    case NYIR_VEC4_LOAD_F64:
+    case NYIR_VEC4_STORE_F64:
+    case NYIR_VEC8_LOAD_F32:
+    case NYIR_VEC8_STORE_F32:
+      i64_only = false;
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
+             nyr_tbuf_access_fits_ex(f, facts, &range_cache, i, in->a, root,
+                                     bytes, 32u);
       break;
     case NYIR_STORE_LOCAL:
     case NYIR_LOAD_LOCAL:
@@ -7175,9 +7283,12 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
               i, nyr_op_name(in->op), da, db, dc, dd, de, df, extra, phi);
   }
 
+  nir_range_query_cache_free(&range_cache);
   free(derived);
   free(slots);
   free(facts);
+  if (is_i64_only)
+    *is_i64_only = safe && i64_only;
   return safe;
 }
 
@@ -7209,20 +7320,20 @@ bool nyr_tbuf_promote_alloca(nyr_func_t *f) {
      */
     if (bytes == 0 || bytes > 16u * 1024u || bytes > (size_t)INT64_MAX)
       continue;
-    if (!nyr_tbuf_alloca_safe_uses(f, i, in->dst, bytes)) {
+    bool is_i64_only = false;
+    if (!nyr_tbuf_alloca_safe_uses(f, i, in->dst, bytes, &is_i64_only)) {
       if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
         fprintf(stderr, "[tbuf-alloca] reject pc=%zu unsafe uses bytes=%zu\n",
                 i, bytes);
       continue;
     }
     if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
-      fprintf(stderr, "[tbuf-alloca] promote pc=%zu bytes=%zu\n", i, bytes);
-    if (f->next_value > INT_MAX - 2)
+      fprintf(stderr, "[tbuf-alloca] promote pc=%zu bytes=%zu i64=%d\n", i,
+              bytes, (int)is_i64_only);
+    if (f->next_value > INT_MAX - 32)
       return false;
 
     int root = in->dst;
-    int zero_v = f->next_value++;
-    int bytes_v = f->next_value++;
     nyr_debug_loc_t debug = in->debug;
     nyr_scalar_class_t scalar_class = in->scalar_class;
     uint8_t semantic_ownership = in->semantic_ownership;
@@ -7249,41 +7360,110 @@ bool nyr_tbuf_promote_alloca(nyr_func_t *f) {
                               .debug = debug};
     f->data[i].effects = nyr_inst_effects(&f->data[i]);
 
-    if (!nyr_ensure_insert(f, i + 1u, 3u))
-      return false;
-    f->data[i + 1u] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                   .dst = zero_v,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = 0};
-    f->data[i + 2u] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                   .dst = bytes_v,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = (int64_t)bytes};
-    f->data[i + 3u] = (nyr_inst_t){.op = NYIR_CALL,
-                                   .dst = -1,
-                                   .a = root,
-                                   .b = zero_v,
-                                   .c = bytes_v,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = 3,
-                                   .flags = NYIR_INST_F_EXTERN,
-                                   .symbol = "rt_memset"};
-    f->has_symbol_calls = true;
-    for (size_t k = i + 1u; k <= i + 3u; ++k)
-      f->data[k].effects = nyr_inst_effects(&f->data[k]);
-    i += 3u;
+    if (elem_size == 8 && bytes <= 64u && (bytes % 8u) == 0 && is_i64_only) {
+      /*
+       * Inline zero-initialization for small 64-bit integer buffers so the
+       * allocation has no rt_memset call use and scalar-replacement (SROA)
+       * can immediately promote its elements into SSA values.
+       */
+      size_t words = bytes / 8u;
+      size_t ins_count = 3u * words - 1u;
+      if (!nyr_ensure_insert(f, i + 1u, ins_count))
+        return false;
+      int zero_v = f->next_value++;
+      size_t p = i + 1u;
+      f->data[p++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                  .dst = zero_v,
+                                  .a = -1,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = 0,
+                                  .scalar_class = NYIR_SCALAR_I64_RAW,
+                                  .debug = debug};
+      for (size_t w = 0; w < words; ++w) {
+        int addr_v = root;
+        if (w > 0) {
+          int off_v = f->next_value++;
+          int ptr_v = f->next_value++;
+          f->data[p++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                      .dst = off_v,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = (int64_t)(w * 8u),
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = debug};
+          f->data[p++] = (nyr_inst_t){.op = NYIR_ADD_I64,
+                                      .dst = ptr_v,
+                                      .a = root,
+                                      .b = off_v,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .debug = debug};
+          addr_v = ptr_v;
+        }
+        f->data[p++] = (nyr_inst_t){.op = NYIR_STORE_I64,
+                                    .dst = -1,
+                                    .a = addr_v,
+                                    .b = -1,
+                                    .c = zero_v,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = 0,
+                                    .scalar_class = NYIR_SCALAR_I64_RAW,
+                                    .debug = debug};
+      }
+      for (size_t k = i + 1u; k < p; ++k)
+        f->data[k].effects = nyr_inst_effects(&f->data[k]);
+      i += ins_count;
+    } else {
+      int zero_v = f->next_value++;
+      int bytes_v = f->next_value++;
+      if (!nyr_ensure_insert(f, i + 1u, 3u))
+        return false;
+      f->data[i + 1u] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                     .dst = zero_v,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = 0};
+      f->data[i + 2u] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                     .dst = bytes_v,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = (int64_t)bytes};
+      f->data[i + 3u] = (nyr_inst_t){.op = NYIR_CALL,
+                                     .dst = -1,
+                                     .a = root,
+                                     .b = zero_v,
+                                     .c = bytes_v,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = 3,
+                                     .flags = NYIR_INST_F_EXTERN,
+                                     .symbol = "rt_memset"};
+      f->has_symbol_calls = true;
+      for (size_t k = i + 1u; k <= i + 3u; ++k)
+        f->data[k].effects = nyr_inst_effects(&f->data[k]);
+      i += 3u;
+    }
   }
   return true;
 }
@@ -7726,8 +7906,138 @@ bool nyr_store_sink(nyr_func_t *f) { return nyr_sroa_unified(f); }
  */
 bool nyr_points_to_sroa(nyr_func_t *f) { return nyr_sroa_unified(f); }
 
-static void nyr_polyhedral_descending_ranges(nyr_func_t *f) {
-  if (!f || f->len < 8)
+static bool nyr_polyhedral_is_header_exit_cmp(const nyr_func_t *f,
+                                              const nyr_cfg_t *cfg,
+                                              size_t phi_idx, size_t cmp_idx,
+                                              int back_op) {
+  if (!f || !cfg || phi_idx >= f->len || cmp_idx >= f->len ||
+      cfg->inst_block[phi_idx] != cfg->inst_block[cmp_idx])
+    return false;
+  size_t header = cfg->inst_block[phi_idx];
+  const nyr_inst_t *phi = &f->data[phi_idx];
+  const nyr_inst_t *cmp = &f->data[cmp_idx];
+  if (phi->op != NYIR_PHI || cmp->dst < 0 || !phi->phi_incoming)
+    return false;
+
+  size_t latch = SIZE_MAX;
+  for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+    if (phi->phi_incoming[k].value != back_op)
+      continue;
+    int64_t plbl = phi->phi_incoming[k].predecessor_label;
+    for (size_t b = 0; b < cfg->block_count; ++b) {
+      if (cfg->block_label[b] == plbl) {
+        latch = b;
+        break;
+      }
+    }
+    break;
+  }
+  if (latch >= cfg->block_count || !nyr_cfg_dominates(cfg, header, latch))
+    return false;
+
+  /*
+   * Find the header's conditional branch and verify that it tests `cmp`
+   * (directly or through same-block copies) with its true edge entering the
+   * natural loop and its false edge leaving the natural loop.
+   */
+  size_t bstart = cfg->block_start[header];
+  size_t bend = cfg->block_end[header];
+  const nyr_inst_t *br_if = NULL;
+  size_t br_if_idx = SIZE_MAX;
+  for (size_t k = cmp_idx + 1; k < bend; ++k) {
+    if (f->data[k].op == NYIR_BR_IF) {
+      br_if = &f->data[k];
+      br_if_idx = k;
+      break;
+    }
+  }
+  if (!br_if || br_if->a < 0)
+    return false;
+  int cond = br_if->a;
+  for (unsigned hops = 0; hops < 8 && cond != cmp->dst; ++hops) {
+    bool stepped = false;
+    for (size_t k = cmp_idx; k < br_if_idx; ++k) {
+      if (f->data[k].dst == cond && f->data[k].op == NYIR_COPY &&
+          f->data[k].a >= 0) {
+        cond = f->data[k].a;
+        stepped = true;
+        break;
+      }
+    }
+    if (!stepped)
+      break;
+  }
+  if (cond != cmp->dst)
+    return false;
+
+  size_t true_block = SIZE_MAX;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (cfg->block_label[b] == br_if->imm) {
+      true_block = b;
+      break;
+    }
+  }
+  size_t false_block = header + 1 < cfg->block_count ? header + 1 : SIZE_MAX;
+  for (size_t k = br_if_idx + 1; k < bend; ++k) {
+    if (f->data[k].op == NYIR_BR) {
+      false_block = SIZE_MAX;
+      for (size_t b = 0; b < cfg->block_count; ++b) {
+        if (cfg->block_label[b] == f->data[k].imm) {
+          false_block = b;
+          break;
+        }
+      }
+      break;
+    }
+  }
+  if (true_block >= cfg->block_count || true_block == false_block ||
+      !nyr_cfg_dominates(cfg, true_block, latch))
+    return false;
+
+  /*
+   * Verify `false_block` cannot reach `latch` without re-entering `header`
+   * (i.e., `false_block` is outside the natural loop of `(header, latch)`), so
+   * every backedge execution must have passed through `true_block` with `cmp`
+   * holding true.
+   */
+  if (false_block < cfg->block_count) {
+    unsigned char *in_loop = calloc(cfg->block_count, sizeof(*in_loop));
+    size_t *stack = malloc(cfg->block_count * sizeof(*stack));
+    if (!in_loop || !stack) {
+      free(in_loop);
+      free(stack);
+      return false;
+    }
+    size_t sp = 0;
+    in_loop[header] = 1;
+    if (!in_loop[latch]) {
+      in_loop[latch] = 1;
+      stack[sp++] = latch;
+    }
+    while (sp > 0) {
+      size_t cur = stack[--sp];
+      for (size_t p = cfg->pred_offsets[cur]; p < cfg->pred_offsets[cur + 1];
+           ++p) {
+        size_t pred = cfg->pred_blocks[p];
+        if (pred < cfg->block_count && !in_loop[pred]) {
+          in_loop[pred] = 1;
+          stack[sp++] = pred;
+        }
+      }
+    }
+    bool false_in_loop = in_loop[false_block] != 0;
+    free(in_loop);
+    free(stack);
+    if (false_in_loop)
+      return false;
+  }
+  (void)bstart;
+  return true;
+}
+
+static void nyr_polyhedral_descending_ranges(nyr_func_t *f,
+                                             const nyr_cfg_t *cfg) {
+  if (!f || !cfg || f->len < 8)
     return;
   for (size_t cmp_i = 0; cmp_i < f->len; ++cmp_i) {
     nyr_inst_t *cmp = &f->data[cmp_i];
@@ -7750,11 +8060,13 @@ static void nyr_polyhedral_descending_ranges(nyr_func_t *f) {
     int back_value = -1;
     int64_t entry = 0;
     bool entry_known = false;
+    size_t phi_idx = SIZE_MAX;
     for (size_t j = 0; j < cmp_i; ++j) {
       nyr_inst_t *phi = &f->data[j];
       if (phi->op != NYIR_PHI || phi->dst != iv || phi->phi_incoming_len != 2 ||
           !phi->phi_incoming)
         continue;
+      phi_idx = j;
       for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
         int v = phi->phi_incoming[k].value;
         bool is_const = false;
@@ -7777,7 +8089,9 @@ static void nyr_polyhedral_descending_ranges(nyr_func_t *f) {
       }
       break;
     }
-    if (!entry_known || back_value < 0 || entry <= limit)
+    if (!entry_known || back_value < 0 || entry <= limit ||
+        phi_idx == SIZE_MAX ||
+        !nyr_polyhedral_is_header_exit_cmp(f, cfg, phi_idx, cmp_i, back_value))
       continue;
 
     int64_t step = 0;
@@ -7843,9 +8157,16 @@ static void nyr_polyhedral_descending_ranges(nyr_func_t *f) {
  * affine add/mul on IVs — mark outer IV range so unroll can fire).
  */
 bool nyr_polyhedral_nest(nyr_func_t *f) {
-  nyr_polyhedral_descending_ranges(f);
-  if (!f || f->len < 12)
+  if (!f || f->len < 8)
     return true;
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg))
+    return true;
+  nyr_polyhedral_descending_ranges(f, &cfg);
+  if (f->len < 12) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
   for (size_t i = 0; i < f->len; ++i) {
     if (f->data[i].op != NYIR_CMP_I64 || f->data[i].cmp != NYIR_CMP_LT)
       continue;
@@ -7866,39 +8187,25 @@ bool nyr_polyhedral_nest(nyr_func_t *f) {
     f->data[i].range.min = 0;
     f->data[i].range.max = 1;
     /*
-     * Tag the IV defs only for a canonical +1-step induction with a proven
-     * non-negative entry value.  The header phi legitimately reaches `trip`
-     * on the exit-check iteration (`i == lim` fails `i < lim`), so the sound
-     * max is `trip`, never `trip - 1`: a too-low max lets peephole's range
-     * fold prove the exit test `i >= lim` always false and delete the loop
-     * guard (infinite loop / skipped loop after inlining clones the ranges).
-     * Tag the IV defs only for a canonical +1-step induction with a proven
-     * non-negative constant start.  The header phi legitimately reaches
-     * `trip` on the exit-check iteration (`i == lim` fails `i < lim`), so the
-     * sound max is `trip`, never `trip - 1`: a too-low max lets peephole's
-     * range fold prove the exit test `i >= lim` always false and delete the
-     * loop guard (infinite loop / skipped loop once inlining clones the
-     * ranges into the caller).
-     *
-     * The step add lives in the loop body, AFTER the header's CMP in linear
-     * IR order, so the whole function is scanned for the phi's backedge
-     * operand instead of only scanning before the CMP.
+     * Tag the IV defs only for a canonical positive-step induction with a
+     * proven non-negative constant start when `f->data[i]` is the actual loop
+     * header exit guard for that PHI (never an inner body branch like
+     * `if (i < 16)` inside `while (i < 64)`!). The header phi legitimately
+     * reaches `trip` on the exit-check iteration (`i == lim` fails `i < lim`),
+     * so the sound max is `entry + ceil((trip - entry) / step) * step`.
      */
     int64_t entry_imm = 0;
     bool entry_known = false;
     int64_t step_imm = 0;
     bool positive_step = false;
     int back_op = -1;
-    /*
-     * Modern NYIR PHIs carry predecessor/value pairs exclusively in
-     * phi_incoming; a/b are normalized to -1.  Reading a/b here made IV range
-     * discovery silently fail for every SSA-built loop.
-     */
+    size_t phi_idx = SIZE_MAX;
     for (size_t j = 0; j < i; ++j) {
       nyr_inst_t *phi = &f->data[j];
       if (phi->dst != iv || phi->op != NYIR_PHI || phi->phi_incoming_len != 2 ||
           !phi->phi_incoming)
         continue;
+      phi_idx = j;
       for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
         int op = phi->phi_incoming[k].value;
         if (op < 0 || op >= f->next_value)
@@ -7941,13 +8248,8 @@ bool nyr_polyhedral_nest(nyr_func_t *f) {
       }
       break;
     }
-    /*
-     * For iv = entry + k*step with iv < limit, the header PHI can reach one
-     * failing value at/above the limit.  Compute that exact aligned value
-     * rather than assuming unit stride, and attach the same range to the
-     * backedge update so derived affine expressions inherit it.
-     */
-    if (entry_known && positive_step) {
+    if (entry_known && positive_step && phi_idx != SIZE_MAX &&
+        nyr_polyhedral_is_header_exit_cmp(f, &cfg, phi_idx, i, back_op)) {
       int64_t iv_max = entry_imm;
       if (entry_imm < trip) {
         uint64_t span = (uint64_t)trip - (uint64_t)entry_imm;
@@ -8016,6 +8318,7 @@ bool nyr_polyhedral_nest(nyr_func_t *f) {
         ny_native_profile_set_runtime(ny_profile_edges + 20, 3000);
     }
   }
+  nyr_cfg_free(&cfg);
   return true;
 }
 

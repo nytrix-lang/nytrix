@@ -11,6 +11,122 @@
 #include "code/backend/core/nyr.h"
 #include "code/backend/passes/util.h"
 
+static unsigned rle_mem_width(unsigned flags) {
+  return (flags & NYIR_INST_F_MEM_BYTE)  ? 1u
+         : (flags & NYIR_INST_F_MEM_U16) ? 2u
+         : (flags & NYIR_INST_F_MEM_I32) ? 4u
+                                         : 8u;
+}
+
+static bool rle_is_fresh_alloc(const nyr_inst_t *in) {
+  if (!in)
+    return false;
+  if (in->op == NYIR_ALLOCA || in->op == NYIR_ADDR_SYMBOL)
+    return true;
+  if (in->op == NYIR_CALL && in->symbol &&
+      (strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0 ||
+       strcmp(in->symbol, "rt_tbuf_new_raw") == 0 ||
+       strcmp(in->symbol, "malloc") == 0 ||
+       strcmp(in->symbol, "calloc") == 0))
+    return true;
+  return false;
+}
+
+static bool rle_const_value(const nyr_func_t *f, const int *definition, int v,
+                            int64_t *out, unsigned depth) {
+  if (!f || !definition || v < 0 || v >= f->next_value || depth > 16)
+    return false;
+  int di = definition[v];
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyr_inst_t *in = &f->data[di];
+  if (in->op == NYIR_CONST_I64) {
+    *out = in->imm;
+    return true;
+  }
+  if (in->op == NYIR_COPY)
+    return rle_const_value(f, definition, in->a, out, depth + 1);
+  return false;
+}
+
+/*
+ * Decompose an address expression into `(base_vreg, byte_offset)` across COPY
+ * and constant ADD/SUB chains. When `is_root` is set, `base_vreg` is a proven
+ * fresh allocation (`ALLOCA`, `rt_tbuf_new_*`, `malloc`/`calloc`, or global
+ * `ADDR_SYMBOL`), enabling exact distinct-object and distinct-offset proofs.
+ */
+static void rle_addr_base_off(const nyr_func_t *f, const int *definition,
+                              int addr, int *base_out, int64_t *off_out,
+                              bool *is_root_out) {
+  int cur = addr;
+  int64_t off = 0;
+  for (unsigned depth = 0; depth < 32 && cur >= 0 && cur < f->next_value;
+       ++depth) {
+    int di = definition[cur];
+    if (di < 0 || (size_t)di >= f->len)
+      break;
+    const nyr_inst_t *in = &f->data[di];
+    if (in->op == NYIR_COPY && in->a >= 0) {
+      cur = in->a;
+      continue;
+    }
+    if (in->op == NYIR_ADD_I64) {
+      int64_t c = 0;
+      if (rle_const_value(f, definition, in->b, &c, 0)) {
+        off += c;
+        cur = in->a;
+        continue;
+      }
+      if (rle_const_value(f, definition, in->a, &c, 0)) {
+        off += c;
+        cur = in->b;
+        continue;
+      }
+    } else if (in->op == NYIR_SUB_I64) {
+      int64_t c = 0;
+      if (rle_const_value(f, definition, in->b, &c, 0)) {
+        off -= c;
+        cur = in->a;
+        continue;
+      }
+    }
+    break;
+  }
+  *base_out = cur;
+  *off_out = off;
+  bool root = false;
+  if (cur >= 0 && cur < f->next_value && definition[cur] >= 0)
+    root = rle_is_fresh_alloc(&f->data[definition[cur]]);
+  *is_root_out = root;
+}
+
+static bool rle_addrs_disjoint(const nyr_func_t *f, const int *definition,
+                               int a1, unsigned flags1, int a2,
+                               unsigned flags2) {
+  if (!f || !definition || a1 < 0 || a2 < 0)
+    return false;
+  int b1 = -1, b2 = -1;
+  int64_t o1 = 0, o2 = 0;
+  bool r1 = false, r2 = false;
+  rle_addr_base_off(f, definition, a1, &b1, &o1, &r1);
+  rle_addr_base_off(f, definition, a2, &b2, &o2, &r2);
+  if (b1 < 0 || b2 < 0)
+    return false;
+  if (b1 == b2) {
+    int64_t w1 = (int64_t)rle_mem_width(flags1);
+    int64_t w2 = (int64_t)rle_mem_width(flags2);
+    return (o1 + w1 <= o2) || (o2 + w2 <= o1);
+  }
+  if (r1 && r2) {
+    const nyr_inst_t *d1 = &f->data[definition[b1]];
+    const nyr_inst_t *d2 = &f->data[definition[b2]];
+    if (d1->op == NYIR_ADDR_SYMBOL && d2->op == NYIR_ADDR_SYMBOL)
+      return d1->symbol && d2->symbol && strcmp(d1->symbol, d2->symbol) != 0;
+    return true;
+  }
+  return false;
+}
+
 static bool rle_same_address(const nyr_func_t *f, const int *definition,
                              int lhs, int rhs, unsigned depth,
                              unsigned *budget) {
@@ -20,6 +136,15 @@ static bool rle_same_address(const nyr_func_t *f, const int *definition,
       depth >= 32 ||
       lhs >= f->next_value || rhs >= f->next_value)
     return false;
+  if (depth == 0) {
+    int b1 = -1, b2 = -1;
+    int64_t o1 = 0, o2 = 0;
+    bool r1 = false, r2 = false;
+    rle_addr_base_off(f, definition, lhs, &b1, &o1, &r1);
+    rle_addr_base_off(f, definition, rhs, &b2, &o2, &r2);
+    if (b1 >= 0 && b1 == b2 && o1 == o2)
+      return true;
+  }
   --*budget;
   int li = definition[lhs];
   int ri = definition[rhs];
@@ -41,6 +166,8 @@ static bool rle_same_address(const nyr_func_t *f, const int *definition,
   }
   if (l->op == NYIR_CONST_I64)
     return l->imm == r->imm;
+  if (l->op == NYIR_ADDR_SYMBOL)
+    return l->symbol && r->symbol && strcmp(l->symbol, r->symbol) == 0;
   if (l->op == NYIR_COPY)
     return rle_same_address(f, definition, l->a, r->a, depth + 1, budget);
   switch (l->op) {
@@ -303,7 +430,10 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
           addr >= 0 && addr < f->next_value ? value_alias[addr] : 0;
       bool stored_entry = false;
       for (size_t m = 0; m < mem_avail_count; ++m) {
-        if (addr >= 0 && val >= 0 && mem_avail[m].addr == addr &&
+        if (addr >= 0 && val >= 0 &&
+            (mem_avail[m].addr == addr ||
+             rle_same_address(f, definition, addr, mem_avail[m].addr, 0,
+                              &(unsigned){128})) &&
             mem_avail[m].flags == flags &&
             mem_avail[m].scalar_class == in->scalar_class) {
           mem_avail[w].addr = addr;
@@ -318,7 +448,9 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
             mem_avail[m].addr >= 0 && mem_avail[m].addr < f->next_value
                 ? value_alias[mem_avail[m].addr]
                 : 0;
-        if (store_alias && cached_alias && store_alias != cached_alias)
+        if ((store_alias && cached_alias && store_alias != cached_alias) ||
+            rle_addrs_disjoint(f, definition, addr, flags, mem_avail[m].addr,
+                               mem_avail[m].flags))
           mem_avail[w++] = mem_avail[m];
       }
       mem_avail_count = w;

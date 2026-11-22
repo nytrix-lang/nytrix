@@ -3318,7 +3318,9 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
   if (value.value >= 0 && c_type_is_float(local->type) &&
       (c_type_is_integer(value.type) || c_type_is_float(value.type)))
     value = convert_numeric_float(p, value, local->type);
-  if (value.value >= 0 && local->is_bool && c_type_is_pointer(value.type)) {
+  if (value.value >= 0 && simple && local->is_bool &&
+      (c_type_is_integer(value.type) || c_type_is_float(value.type) ||
+       c_type_is_pointer(value.type))) {
     value.value = lower_boolean_value(p, value);
     if (value.value < 0)
       return false;
@@ -3407,7 +3409,11 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
     if (value.value < 0)
       return false;
   }
-  if (c_type_is_integer(local->type)) {
+  if (!simple && local->is_bool) {
+    value.value = lower_boolean_value(p, value);
+    if (value.value < 0)
+      return false;
+  } else if (c_type_is_integer(local->type)) {
     value.value = normalize_integer(p, local->type, value.value);
     if (value.value < 0)
       return false;

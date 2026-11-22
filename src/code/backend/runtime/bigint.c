@@ -80,6 +80,28 @@ static inline uint64_t _bi_div_u128_u64(uint64_t high, uint64_t low,
 #endif
 }
 
+/*
+ * Möller-Granlund Algorithm 4 (udiv_qrnnd_preinv): exact 2-by-1 limb division
+ * for normalized d >= 2^63, u1 < d, and v = floor((2^128 - 1) / d) - 2^64.
+ */
+static inline uint64_t _bi_mg_div2by1(uint64_t u1, uint64_t u0, uint64_t d,
+                                      uint64_t v, uint64_t *rem_out) {
+  __uint128_t q = (__uint128_t)v * u1 + (((__uint128_t)u1 << 64) | u0);
+  uint64_t q1 = (uint64_t)(q >> 64) + 1u;
+  uint64_t q0 = (uint64_t)q;
+  uint64_t r = u0 - q1 * d;
+  if (r > q0) {
+    --q1;
+    r += d;
+  }
+  if (__builtin_expect(r >= d, 0)) {
+    ++q1;
+    r -= d;
+  }
+  *rem_out = r;
+  return q1;
+}
+
 static inline bool _bi_tag_size(size_t n, int64_t *tagged) {
   if (!tagged || n > (size_t)NY_SMALL_INT_MAX)
     return false;
@@ -514,13 +536,16 @@ static void _bn_words_square(uint64_t *r, const uint64_t *a, size_t n) {
 
 static void _bn_words_mul(uint64_t *r, const uint64_t *a, size_t an,
                           const uint64_t *b, size_t bn, uint64_t *work) {
-  size_t n = an + bn;
-  memset(r, 0, n * sizeof(*r));
+  size_t orig_n = an + bn;
   an = _bn_words_trim(a, an);
   bn = _bn_words_trim(b, bn);
-  n = an + bn;
-  if (!an || !bn)
+  size_t n = an + bn;
+  if (!an || !bn) {
+    memset(r, 0, orig_n * sizeof(*r));
     return;
+  }
+  if (n < orig_n)
+    memset(r + n, 0, (orig_n - n) * sizeof(*r));
   size_t max = an > bn ? an : bn;
   size_t k = max / 2;
   if (an <= KARATSUBA_THRESHOLD || bn <= KARATSUBA_THRESHOLD || an <= k ||
@@ -529,6 +554,7 @@ static void _bn_words_mul(uint64_t *r, const uint64_t *a, size_t an,
     (defined(__GNUC__) || defined(__clang__))
     if (_bn_has_adx()) {
       if (a == b && an == bn) {
+        memset(r, 0, n * sizeof(*r));
         for (size_t i = 0; i + 1 < an; ++i)
           r[i + an] =
               _bn_addmul_adx(r + 2 * i + 1, a + i + 1, an - i - 1, a[i]);
@@ -554,16 +580,33 @@ static void _bn_words_mul(uint64_t *r, const uint64_t *a, size_t an,
         }
         return;
       }
-      for (size_t i = 0; i < an; ++i)
+      uint64_t a0 = a[0], carry = 0;
+      for (size_t j = 0; j < bn; ++j) {
+        __uint128_t v = (__uint128_t)a0 * b[j] + carry;
+        r[j] = (uint64_t)v;
+        carry = (uint64_t)(v >> 64);
+      }
+      r[bn] = carry;
+      for (size_t i = 1; i < an; ++i)
         r[i + bn] = _bn_addmul_adx(r + i, b, bn, a[i]);
       return;
     }
 #endif
     if (a == b && an == bn) {
+      memset(r, 0, n * sizeof(*r));
       _bn_words_square(r, a, an);
       return;
     }
-    for (size_t i = 0; i < an; ++i) {
+    {
+      uint64_t a0 = a[0], carry = 0;
+      for (size_t j = 0; j < bn; ++j) {
+        __uint128_t v = (__uint128_t)a0 * b[j] + carry;
+        r[j] = (uint64_t)v;
+        carry = (uint64_t)(v >> 64);
+      }
+      r[bn] = carry;
+    }
+    for (size_t i = 1; i < an; ++i) {
       uint64_t carry = 0;
       for (size_t j = 0; j < bn; ++j) {
         __uint128_t v = (__uint128_t)a[i] * b[j] + r[i + j] + carry;
@@ -574,6 +617,7 @@ static void _bn_words_mul(uint64_t *r, const uint64_t *a, size_t an,
     }
     return;
   }
+  memset(r, 0, n * sizeof(*r));
   size_t ah = an - k, bh = bn - k;
   size_t sa_cap = (k > ah ? k : ah) + 1;
   size_t sb_cap = (k > bh ? k : bh) + 1;
@@ -836,11 +880,14 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
   bool direct_division = false;
 #if defined(__x86_64__) && !defined(_WIN32) &&                                 \
     (defined(__GNUC__) || defined(__clang__))
-  direct_division = m < 4;
+  direct_division = m < 2;
   bool use_adx = _bn_has_adx();
 #endif
-  uint64_t inverse =
-      direct_division ? 0 : (uint64_t)((~(__uint128_t)0) / divisor);
+  uint64_t inverse = 0;
+  if (!direct_division) {
+    uint64_t inv_rem = 0;
+    inverse = _bi_div_u128_u64(~divisor, UINT64_MAX, divisor, &inv_rem);
+  }
   for (size_t jj = m + 1; jj-- > 0;) {
     size_t j = jj;
     uint64_t qhat, rhat;
@@ -862,21 +909,7 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
        */
       qhat = _bi_div_u128_u64(un[j + n], un[j + n - 1], divisor, &rhat);
     } else {
-      uint64_t high = un[j + n], low = un[j + n - 1];
-      /*
-       * With B=2^64 and R=floor((B^2-1)/d),
-       * floor((high*R+low)/B) underestimates (high*B+low)/d
-       * by at most two when B/2 <= d < B and high < d.
-       */
-      __uint128_t estimate = (__uint128_t)high * inverse + low;
-      qhat = high + (uint64_t)(estimate >> 64);
-      __uint128_t rem =
-          (((__uint128_t)high << 64) | low) - (__uint128_t)qhat * divisor;
-      while (rem >= divisor) {
-        ++qhat;
-        rem -= divisor;
-      }
-      rhat = (uint64_t)rem;
+      qhat = _bi_mg_div2by1(un[j + n], un[j + n - 1], divisor, inverse, &rhat);
     }
     if (!rhat_carried) {
       while ((__uint128_t)qhat * vn[n - 2] >
@@ -1823,6 +1856,13 @@ static void _bi_val_to_native(int64_t v, _bn_t *out) {
   }
   int64_t tag = *(int64_t *)(uintptr_t)((char *)v - 8);
   if (tag != TAG_BIGINT) {
+    if (is_v_str(v)) {
+      int64_t parsed = rt_bigint_from_str(v);
+      if (parsed && parsed != v) {
+        _bi_val_to_native(parsed, out);
+        return;
+      }
+    }
     _bn_set_zero(out);
     return;
   }
@@ -3744,26 +3784,38 @@ static inline bool _bi_try_submul_i64_limb2(int64_t a, int64_t q_raw, int64_t b,
  * Public API
  */
 
+static __attribute__((noinline)) int64_t _bi_coerce_fallback(int64_t v) {
+  if (is_v_str(v))
+    return rt_bigint_from_str(v);
+  return rt_tag_v(0);
+}
+
+static __attribute__((noinline)) int64_t _bi_add_slow(int64_t a, int64_t b,
+                                                      int sub_b) {
+  _bn_t na, nb, nr;
+  _bn_init(&na);
+  _bn_init(&nb);
+  _bn_init(&nr);
+  _bi_val_to_native(a, &na);
+  _bi_val_to_native(b, &nb);
+  if (sub_b)
+    _bn_sub(&nr, &na, &nb);
+  else
+    _bn_add(&nr, &na, &nb);
+  int64_t r = _bi_from_native(&nr);
+  _bn_clear(&na);
+  _bn_clear(&nb);
+  _bn_clear(&nr);
+  return r;
+}
+
 int64_t rt_bigint_add(int64_t a, int64_t b) {
   int64_t fast = 0;
   if (_bi_try_small_add_alloc(a, b, 0, &fast))
     return fast;
   if (_bi_try_add_heap(a, b, 0, &fast))
     return fast;
-  _bn_t na, nb, nr;
-  _bn_init(&na);
-  _bn_init(&nb);
-  _bn_init(&nr);
-  uint64_t small_a[1], small_b[1];
-  const uint64_t *al = NULL, *bl = NULL;
-  (void)_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a);
-  (void)_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b);
-  na.d = (uint64_t *)al;
-  nb.d = (uint64_t *)bl;
-  _bn_add(&nr, &na, &nb);
-  int64_t r = _bi_from_native(&nr);
-  _bn_clear(&nr);
-  return r;
+  return _bi_add_slow(a, b, 0);
 }
 
 int64_t rt_bigint_sub(int64_t a, int64_t b) {
@@ -3772,35 +3824,23 @@ int64_t rt_bigint_sub(int64_t a, int64_t b) {
     return fast;
   if (_bi_try_add_heap(a, b, 1, &fast))
     return fast;
-  _bn_t na, nb, nr;
-  _bn_init(&na);
-  _bn_init(&nb);
-  _bn_init(&nr);
-  uint64_t small_a[1], small_b[1];
-  const uint64_t *al = NULL, *bl = NULL;
-  (void)_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a);
-  (void)_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b);
-  na.d = (uint64_t *)al;
-  nb.d = (uint64_t *)bl;
-  _bn_sub(&nr, &na, &nb);
-  int64_t r = _bi_from_native(&nr);
-  _bn_clear(&nr);
-  return r;
+  return _bi_add_slow(a, b, 1);
 }
 
-int64_t rt_bigint_mul(int64_t a, int64_t b) {
-  int64_t fast = 0;
-  if (_bi_try_small_mul_alloc(a, b, &fast))
-    return fast;
-  if (_bi_try_mul_small_heap(a, b, &fast))
-    return fast;
+static __attribute__((noinline)) int64_t _bi_mul_large(int64_t a, int64_t b) {
   _bn_t na, nb;
   _bn_init(&na);
   _bn_init(&nb);
   uint64_t small_a[1], small_b[1];
   const uint64_t *al = NULL, *bl = NULL;
-  (void)_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a);
-  (void)_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b);
+  if (!_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a)) {
+    a = _bi_coerce_fallback(a);
+    (void)_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a);
+  }
+  if (!_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b)) {
+    b = _bi_coerce_fallback(b);
+    (void)_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b);
+  }
   na.d = (uint64_t *)al;
   nb.d = (uint64_t *)bl;
   size_t words = na.count + nb.count;
@@ -3825,6 +3865,15 @@ int64_t rt_bigint_mul(int64_t a, int64_t b) {
       rt_tag_v(words ? (na.sign == nb.sign ? 1 : -1) : 0);
   *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
   return result;
+}
+
+int64_t rt_bigint_mul(int64_t a, int64_t b) {
+  int64_t fast = 0;
+  if (_bi_try_small_mul_alloc(a, b, &fast))
+    return fast;
+  if (_bi_try_mul_small_heap(a, b, &fast))
+    return fast;
+  return _bi_mul_large(a, b);
 }
 
 static int64_t _bi_submul_owned_result(int64_t value) {
@@ -3939,75 +3988,177 @@ int64_t rt_bigint_row_submul_auto(int64_t row_k, int64_t row_j, int64_t q) {
   return rt_bigint_row_submul(row_k, row_j, q, rt_tag_v(limit));
 }
 
-int64_t rt_bigint_div(int64_t a, int64_t b) {
-  _bn_t na, nb, nq, nr;
-  _bn_init(&na);
-  _bn_init(&nb);
+static __attribute__((noinline)) int64_t _bi_div_large(const _bn_t *na,
+                                                       const _bn_t *nb) {
+  _bn_t nq, nr;
   _bn_init(&nq);
   _bn_init(&nr);
-  /*
-   * The quotient engine never mutates its operands. Keep validated limb
-   * views alive through division rather than allocating two input copies.
-   */
+  if (nb->count >= 128 && na->count >= nb->count + BURNIKEL_ZIEGLER_THRESHOLD)
+    _bn_tdiv_qr(&nq, &nr, na, nb);
+  else
+    _bn_divmod_knuth_impl(&nq, &nr, na, nb, false);
+  if (!_bn_is_zero(&nq))
+    nq.sign = na->sign == nb->sign ? 1 : -1;
+  int64_t r = _bi_from_native(&nq);
+  _bn_clear(&nq);
+  _bn_clear(&nr);
+  return r;
+}
+
+/*
+ * Direct-to-heap Knuth division for short multi-limb operands (n <= 8,
+ * an <= 16). Avoids the 3 KiB stack scratch and intermediate _bn_t copy.
+ */
+static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
+                                  const uint64_t *bl, size_t n) {
+  size_t m = an - n;
+  uint64_t vn[8], un[17];
+  unsigned shift = (unsigned)__builtin_clzll(bl[n - 1]);
+  if (shift == 0) {
+    memcpy(vn, bl, n * sizeof(*vn));
+    memcpy(un, al, an * sizeof(*un));
+    un[an] = 0;
+  } else {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < n; ++i) {
+      uint64_t x = bl[i];
+      vn[i] = (x << shift) | carry;
+      carry = x >> (64u - shift);
+    }
+    carry = 0;
+    for (size_t i = 0; i < an; ++i) {
+      uint64_t x = al[i];
+      un[i] = (x << shift) | carry;
+      carry = x >> (64u - shift);
+    }
+    un[an] = carry;
+  }
+
+  int64_t result = _bi_alloc(m + 1);
+  if (!result)
+    return 0;
+  uint64_t *qd = (uint64_t *)(uintptr_t)(result + 16);
+  uint64_t divisor = vn[n - 1];
+  bool use_preinv = m >= 2u;
+  uint64_t inverse = 0;
+  if (use_preinv) {
+    uint64_t inv_rem = 0;
+    inverse = _bi_div_u128_u64(~divisor, UINT64_MAX, divisor, &inv_rem);
+  }
+#if defined(__x86_64__) && !defined(_WIN32) &&                                 \
+    (defined(__GNUC__) || defined(__clang__))
+  bool use_adx = _bn_has_adx();
+#endif
+  for (size_t jj = m + 1; jj-- > 0;) {
+    size_t j = jj;
+    uint64_t qhat, rhat;
+    bool rhat_carried = false;
+    if (un[j + n] == divisor) {
+      qhat = UINT64_MAX;
+      rhat = un[j + n - 1] + divisor;
+      rhat_carried = rhat < divisor;
+    } else if (use_preinv) {
+      qhat = _bi_mg_div2by1(un[j + n], un[j + n - 1], divisor, inverse, &rhat);
+    } else {
+      qhat = _bi_div_u128_u64(un[j + n], un[j + n - 1], divisor, &rhat);
+    }
+    if (!rhat_carried) {
+      while ((__uint128_t)qhat * vn[n - 2] >
+             ((__uint128_t)rhat << 64) + un[j + n - 2]) {
+        --qhat;
+        uint64_t old = rhat;
+        rhat += divisor;
+        if (rhat < old)
+          break;
+      }
+    }
+    if (qhat) {
+      uint64_t borrow = 0;
+#if defined(__x86_64__) && !defined(_WIN32) &&                                 \
+    (defined(__GNUC__) || defined(__clang__))
+      if (use_adx) {
+        borrow = _bn_submul_adx(un + j, vn, n, qhat);
+      } else
+#endif
+        for (size_t i = 0; i < n; ++i) {
+          __uint128_t product = (__uint128_t)qhat * vn[i] + borrow;
+          uint64_t low = (uint64_t)product;
+          uint64_t old = un[j + i];
+          un[j + i] = old - low;
+          borrow = (uint64_t)(product >> 64) + (old < low);
+        }
+      bool neg = un[j + n] < borrow;
+      un[j + n] -= borrow;
+      if (neg) {
+        --qhat;
+        uint64_t carry = 0;
+        for (size_t i = 0; i < n; ++i) {
+          __uint128_t sum = (__uint128_t)un[j + i] + vn[i] + carry;
+          un[j + i] = (uint64_t)sum;
+          carry = (uint64_t)(sum >> 64);
+        }
+        un[j + n] += carry;
+      }
+    }
+    qd[j] = qhat;
+  }
+  size_t words = _bi_norm_words(qd, m + 1);
+  *(int64_t *)(uintptr_t)result =
+      rt_tag_v(words ? (as == bs ? 1 : -1) : 0);
+  *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
+  return result;
+}
+
+int64_t rt_bigint_div(int64_t a, int64_t b) {
+  int na_sign = 0, nb_sign = 0;
+  size_t na_count = 0, nb_count = 0;
   uint64_t small_a[1], small_b[1];
   const uint64_t *limbs_a = NULL, *limbs_b = NULL;
-  (void)_bi_read_heap_limbs(b, &nb.sign, &limbs_b, &nb.count, small_b);
+  if (__builtin_expect(
+          !_bi_read_heap_limbs(b, &nb_sign, &limbs_b, &nb_count, small_b), 0)) {
+    b = _bi_coerce_fallback(b);
+    (void)_bi_read_heap_limbs(b, &nb_sign, &limbs_b, &nb_count, small_b);
+  }
   int64_t fast = 0;
-  if (_bi_try_div_small_limbs(a, nb.sign, limbs_b, nb.count, 0, &fast))
+  if (_bi_try_div_small_limbs(a, nb_sign, limbs_b, nb_count, 0, &fast))
     return fast;
-  (void)_bi_read_heap_limbs(a, &na.sign, &limbs_a, &na.count, small_a);
-  na.d = (uint64_t *)limbs_a;
-  nb.d = (uint64_t *)limbs_b;
-  /*
-   * Most runtime BigInts fit in a handful of limbs. The quotient is copied
-   * once into its managed result below, so keep its temporary limbs on the
-   * stack instead of malloc/realloc/free for every division. The Knuth path
-   * writes every quotient limb before reading it, and its bounded operand
-   * scratch is stack-backed as well.
-   */
-  uint64_t quotient_stack[8];
-  bool stack_quotient =
-      na.count <= sizeof(quotient_stack) / sizeof(quotient_stack[0]);
-  if (stack_quotient) {
-    nq.d = quotient_stack;
-    nq.count = na.count;
+  if (__builtin_expect(
+          !_bi_read_heap_limbs(a, &na_sign, &limbs_a, &na_count, small_a), 0)) {
+    a = _bi_coerce_fallback(a);
+    if (_bi_try_div_small_limbs(a, nb_sign, limbs_b, nb_count, 0, &fast))
+      return fast;
+    (void)_bi_read_heap_limbs(a, &na_sign, &limbs_a, &na_count, small_a);
   }
-  if (_bn_is_zero(&nb)) {
+  if (nb_sign == 0 || nb_count == 0)
     return rt_division_by_zero();
-  }
-  int magnitude_cmp = _bn_cmp_mag(&na, &nb);
+  int magnitude_cmp = _bi_cmp_mag(limbs_a, na_count, limbs_b, nb_count);
   if (magnitude_cmp < 0)
     return _bi_from_i64(0);
   /*
    * A quotient of magnitude one needs no normalized division or remainder.
    */
-  size_t half_words = na.count;
-  if (half_words && na.d[half_words - 1] == 1)
+  size_t half_words = na_count;
+  if (half_words && limbs_a[half_words - 1] == 1)
     --half_words;
-  int half_cmp = half_words > nb.count ? 1 : half_words < nb.count ? -1 : 0;
+  int half_cmp = half_words > nb_count ? 1 : half_words < nb_count ? -1 : 0;
   if (!half_cmp) {
     for (size_t i = half_words; i-- > 0;) {
       uint64_t half =
-          (na.d[i] >> 1) | (i + 1 < na.count ? na.d[i + 1] << 63 : 0);
-      if (half != nb.d[i]) {
-        half_cmp = half > nb.d[i] ? 1 : -1;
+          (limbs_a[i] >> 1) | (i + 1 < na_count ? limbs_a[i + 1] << 63 : 0);
+      if (half != limbs_b[i]) {
+        half_cmp = half > limbs_b[i] ? 1 : -1;
         break;
       }
     }
   }
   if (half_cmp < 0)
-    return _bi_from_i64(na.sign == nb.sign ? 1 : -1);
-  if (nb.count >= 128 && na.count >= nb.count + BURNIKEL_ZIEGLER_THRESHOLD)
-    _bn_tdiv_qr(&nq, &nr, &na, &nb);
-  else
-    _bn_divmod_knuth_impl(&nq, &nr, &na, &nb, false);
-  if (!_bn_is_zero(&nq))
-    nq.sign = na.sign == nb.sign ? 1 : -1;
-  int64_t r = _bi_from_native(&nq);
-  if (!stack_quotient)
-    _bn_clear(&nq);
-  _bn_clear(&nr);
-  return r;
+    return _bi_from_i64(na_sign == nb_sign ? 1 : -1);
+  if (__builtin_expect(nb_count >= 2 && nb_count <= 8 && na_count <= 16, 1))
+    return _bi_div_short_heap(na_sign, limbs_a, na_count, nb_sign, limbs_b,
+                              nb_count);
+  _bn_t na = {.d = (uint64_t *)limbs_a, .count = na_count, .sign = na_sign};
+  _bn_t nb = {.d = (uint64_t *)limbs_b, .count = nb_count, .sign = nb_sign};
+  return _bi_div_large(&na, &nb);
 }
 
 int64_t rt_bigint_mul_div_small(int64_t a, int64_t multiplier,

@@ -474,21 +474,27 @@ static bool licm_load_in_bounds(const nyr_func_t *f, const int *defs,
       continue;
     const nyr_inst_t *alloc = &f->data[defs[base]];
     int64_t total_bytes = 0;
-    if (alloc->op != NYIR_CALL || !alloc->symbol)
-      continue;
-    if (strcmp(alloc->symbol, "rt_tbuf_new_typed_raw") == 0 ||
-        strcmp(alloc->symbol, "calloc") == 0) {
-      int64_t count = 0, size = 0;
-      if (!licm_const_value(f, defs, alloc->a, &count) ||
-          !licm_const_value(f, defs, alloc->b, &size) || count <= 0 ||
-          size <= 0 || count > (INT64_C(1) << 31) / size)
+    if (alloc->op == NYIR_ALLOCA) {
+      if (alloc->imm < 8 || alloc->imm > (INT64_C(1) << 31))
         continue;
-      total_bytes = count * size;
-    } else if (strcmp(alloc->symbol, "malloc") == 0 ||
-               strcmp(alloc->symbol, "rt_tbuf_new_raw") == 0) {
-      if (!licm_const_value(f, defs, alloc->a, &total_bytes) ||
-          total_bytes < 8 || total_bytes > (INT64_C(1) << 31))
+      total_bytes = alloc->imm;
+    } else if (alloc->op == NYIR_CALL && alloc->symbol) {
+      if (strcmp(alloc->symbol, "rt_tbuf_new_typed_raw") == 0 ||
+          strcmp(alloc->symbol, "calloc") == 0) {
+        int64_t count = 0, size = 0;
+        if (!licm_const_value(f, defs, alloc->a, &count) ||
+            !licm_const_value(f, defs, alloc->b, &size) || count <= 0 ||
+            size <= 0 || count > (INT64_C(1) << 31) / size)
+          continue;
+        total_bytes = count * size;
+      } else if (strcmp(alloc->symbol, "malloc") == 0 ||
+                 strcmp(alloc->symbol, "rt_tbuf_new_raw") == 0) {
+        if (!licm_const_value(f, defs, alloc->a, &total_bytes) ||
+            total_bytes < 8 || total_bytes > (INT64_C(1) << 31))
+          continue;
+      } else {
         continue;
+      }
     } else {
       continue;
     }
@@ -514,6 +520,36 @@ static bool licm_load_in_bounds(const nyr_func_t *f, const int *defs,
       return true;
   }
   return false;
+}
+
+static bool licm_only_feeds_direct_loads(const nyr_func_t *f,
+                                         const nyr_use_def_t *uses, int dst,
+                                         unsigned depth) {
+  if (!f || !uses || dst < 0 || (size_t)dst >= uses->value_count || depth > 8)
+    return false;
+  bool saw_load = false;
+  for (size_t use = uses->offsets[dst]; use < uses->offsets[dst + 1]; ++use) {
+    size_t ui = uses->users[use];
+    if (ui >= f->len)
+      return false;
+    const nyr_inst_t *user = &f->data[ui];
+    if (user->op == NYIR_COPY && user->a == dst && user->b != dst &&
+        user->c != dst && user->d != dst && user->e != dst &&
+        user->f != dst) {
+      if (!licm_only_feeds_direct_loads(f, uses, user->dst, depth + 1))
+        return false;
+      saw_load = true;
+      continue;
+    }
+    if (user->op == NYIR_LOAD_I64 && user->a == dst && user->b != dst &&
+        user->c != dst && user->d != dst && user->e != dst &&
+        user->f != dst) {
+      saw_load = true;
+      continue;
+    }
+    return false;
+  }
+  return saw_load;
 }
 
 static bool licm_candidate(
@@ -630,6 +666,7 @@ static bool licm_candidate(
   if (!licm_allow_address_hoist &&
       ((in->op == NYIR_ADD_I64 && in->dst >= 0 &&
         licm_memory_address_component(f, in->dst, 0) &&
+        !licm_only_feeds_direct_loads(f, uses, in->dst, 0) &&
         !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)) ||
        (in->op == NYIR_SHL_I64 && in->dst >= 0 &&
         licm_float_memory_address_component(f, in->dst, 0) &&

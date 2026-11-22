@@ -96,6 +96,7 @@ typedef struct ny_tp_ctx_t {
   const char *source_name;
   bool include_std;
   bool collect_semantic_artifact_facts;
+  bool lazy_std_inference;
   ny_tp_func_fact_list funcs;
   ny_tp_diag_list diagnostics;
   ny_tp_fallback_list fallbacks;
@@ -1285,141 +1286,120 @@ static bool tp_module_alias_member_exists(codegen_t *cg,
          (lookup_fun(cg, resolved, 0) || lookup_global(cg, resolved));
 }
 
-static const char *tp_lookup_use_alias_stmt(stmt_t *s, const char *alias) {
-  if (!s || !alias || !*alias)
-    return NULL;
+typedef struct tp_use_alias_index_slot_t {
+  uint64_t hash;
+  const char *alias;
+  const char *module;
+} tp_use_alias_index_slot_t;
+
+static _Thread_local struct {
+  const codegen_t *cg;
+  const program_t *prog;
+  const void *extra_data;
+  size_t extra_len;
+  tp_use_alias_index_slot_t *slots;
+  size_t cap;
+  size_t len;
+} g_tp_use_alias_index;
+
+static void tp_use_alias_index_put(const char *alias, const char *module) {
+  if (!alias || !*alias || !module || !*module)
+    return;
+  if ((g_tp_use_alias_index.len + 1u) * 10u >= g_tp_use_alias_index.cap * 7u) {
+    size_t ncap =
+        g_tp_use_alias_index.cap ? g_tp_use_alias_index.cap * 2u : 256u;
+    tp_use_alias_index_slot_t *t = calloc(ncap, sizeof(*t));
+    if (!t)
+      return;
+    size_t nmask = ncap - 1u;
+    for (size_t i = 0; i < g_tp_use_alias_index.cap; ++i) {
+      if (!g_tp_use_alias_index.slots[i].hash)
+        continue;
+      size_t pos = (size_t)g_tp_use_alias_index.slots[i].hash & nmask;
+      while (t[pos].hash)
+        pos = (pos + 1u) & nmask;
+      t[pos] = g_tp_use_alias_index.slots[i];
+    }
+    free(g_tp_use_alias_index.slots);
+    g_tp_use_alias_index.slots = t;
+    g_tp_use_alias_index.cap = ncap;
+  }
+  uint64_t h = ny_hash_name(alias, strlen(alias));
+  if (!h)
+    h = 1u;
+  size_t mask = g_tp_use_alias_index.cap - 1u;
+  size_t pos = (size_t)h & mask;
+  while (g_tp_use_alias_index.slots[pos].hash) {
+    if (g_tp_use_alias_index.slots[pos].hash == h &&
+        strcmp(g_tp_use_alias_index.slots[pos].alias, alias) == 0)
+      return; /* first match wins, preserving AST order */
+    pos = (pos + 1u) & mask;
+  }
+  g_tp_use_alias_index.slots[pos] =
+      (tp_use_alias_index_slot_t){.hash = h, .alias = alias, .module = module};
+  g_tp_use_alias_index.len++;
+}
+
+static void tp_use_alias_index_collect_stmt(stmt_t *s) {
+  if (!s)
+    return;
   switch (s->kind) {
   case NY_S_USE:
     if (!s->as.use.import_all && s->as.use.imports.len == 0 &&
-        s->as.use.alias && strcmp(s->as.use.alias, alias) == 0)
-      return s->as.use.module;
-    return NULL;
+        s->as.use.alias && *s->as.use.alias && s->as.use.module &&
+        *s->as.use.module)
+      tp_use_alias_index_put(s->as.use.alias, s->as.use.module);
+    return;
   case NY_S_BLOCK:
-    for (size_t i = 0; i < s->as.block.body.len; ++i) {
-      const char *found =
-          tp_lookup_use_alias_stmt(s->as.block.body.data[i], alias);
-      if (found)
-        return found;
-    }
-    return NULL;
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      tp_use_alias_index_collect_stmt(s->as.block.body.data[i]);
+    return;
   case NY_S_MODULE:
-    for (size_t i = 0; i < s->as.module.body.len; ++i) {
-      const char *found =
-          tp_lookup_use_alias_stmt(s->as.module.body.data[i], alias);
-      if (found)
-        return found;
-    }
-    return NULL;
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      tp_use_alias_index_collect_stmt(s->as.module.body.data[i]);
+    return;
   default:
-    return NULL;
-  }
-}
-
-static bool tp_use_alias_cacheable_name(const char *alias, size_t *len_out) {
-  if (!alias || !*alias)
-    return false;
-  size_t len = strlen(alias);
-  if (len == 0 || len >= NY_TP_USE_ALIAS_KEY_MAX || len > UINT16_MAX)
-    return false;
-  if (len_out)
-    *len_out = len;
-  return true;
-}
-
-static ny_tp_use_alias_cache_t *tp_use_alias_cache(codegen_t *cg) {
-  if (!cg)
-    return NULL;
-  if (!cg->use_alias_lookup_cache)
-    cg->use_alias_lookup_cache = calloc(1, sizeof(ny_tp_use_alias_cache_t));
-  return (ny_tp_use_alias_cache_t *)cg->use_alias_lookup_cache;
-}
-
-static int tp_use_alias_cache_get(codegen_t *cg, const char *alias,
-                                  size_t alias_len, uint64_t hash,
-                                  const char **out) {
-  if (!cg || !alias || alias_len == 0 || alias_len >= NY_TP_USE_ALIAS_KEY_MAX)
-    return -1;
-  ny_tp_use_alias_cache_t *cache = tp_use_alias_cache(cg);
-  if (!cache)
-    return -1;
-  ny_tp_use_alias_cache_entry_t *e =
-      &cache->entries[hash & (NY_TP_USE_ALIAS_CACHE_SLOTS - 1u)];
-  if (!e->state || e->cg != cg || e->prog != cg->prog ||
-      e->extra_data != cg->extra_progs.data ||
-      e->extra_len != cg->extra_progs.len || e->hash != hash ||
-      e->len != (uint16_t)alias_len || memcmp(e->key, alias, alias_len) != 0 ||
-      e->key[alias_len] != '\0')
-    return -1;
-  if (e->state == 2u) {
-    *out = e->value;
-    return 1;
-  }
-  return 0;
-}
-
-static void tp_use_alias_cache_put(codegen_t *cg, const char *alias,
-                                   size_t alias_len, uint64_t hash,
-                                   const char *value) {
-  if (!cg || !alias || alias_len == 0 || alias_len >= NY_TP_USE_ALIAS_KEY_MAX)
     return;
-  ny_tp_use_alias_cache_t *cache = tp_use_alias_cache(cg);
-  if (!cache)
-    return;
-  ny_tp_use_alias_cache_entry_t *e =
-      &cache->entries[hash & (NY_TP_USE_ALIAS_CACHE_SLOTS - 1u)];
-  e->cg = cg;
-  e->prog = cg->prog;
-  e->extra_data = cg->extra_progs.data;
-  e->extra_len = cg->extra_progs.len;
-  e->hash = hash;
-  e->len = (uint16_t)alias_len;
-  memcpy(e->key, alias, alias_len);
-  e->key[alias_len] = '\0';
-  e->value = value;
-  e->state = value ? 2u : 1u;
+  }
 }
 
 static const char *tp_lookup_program_use_alias(codegen_t *cg,
                                                const char *alias) {
   if (!cg || !alias || !*alias)
     return NULL;
-  size_t alias_len = 0;
-  bool cacheable = tp_use_alias_cacheable_name(alias, &alias_len);
-  uint64_t hash = cacheable ? ny_hash_name(alias, alias_len) : 0;
-  if (cacheable) {
-    const char *cached = NULL;
-    int hit = tp_use_alias_cache_get(cg, alias, alias_len, hash, &cached);
-    if (hit == 1)
-      return cached;
-    if (hit == 0)
-      return NULL;
-  }
-  if (cg->prog) {
-    for (size_t i = 0; i < cg->prog->body.len; ++i) {
-      const char *found =
-          tp_lookup_use_alias_stmt(cg->prog->body.data[i], alias);
-      if (found && *found) {
-        if (cacheable)
-          tp_use_alias_cache_put(cg, alias, alias_len, hash, found);
-        return found;
-      }
+  if (g_tp_use_alias_index.cg != cg || g_tp_use_alias_index.prog != cg->prog ||
+      g_tp_use_alias_index.extra_data != cg->extra_progs.data ||
+      g_tp_use_alias_index.extra_len != cg->extra_progs.len) {
+    free(g_tp_use_alias_index.slots);
+    memset(&g_tp_use_alias_index, 0, sizeof(g_tp_use_alias_index));
+    g_tp_use_alias_index.cg = cg;
+    g_tp_use_alias_index.prog = cg->prog;
+    g_tp_use_alias_index.extra_data = cg->extra_progs.data;
+    g_tp_use_alias_index.extra_len = cg->extra_progs.len;
+    if (cg->prog) {
+      for (size_t i = 0; i < cg->prog->body.len; ++i)
+        tp_use_alias_index_collect_stmt(cg->prog->body.data[i]);
+    }
+    for (size_t p = 0; p < cg->extra_progs.len; ++p) {
+      program_t *prog = cg->extra_progs.data[p];
+      if (!prog)
+        continue;
+      for (size_t i = 0; i < prog->body.len; ++i)
+        tp_use_alias_index_collect_stmt(prog->body.data[i]);
     }
   }
-  for (size_t p = 0; p < cg->extra_progs.len; ++p) {
-    program_t *prog = cg->extra_progs.data[p];
-    if (!prog)
-      continue;
-    for (size_t i = 0; i < prog->body.len; ++i) {
-      const char *found = tp_lookup_use_alias_stmt(prog->body.data[i], alias);
-      if (found && *found) {
-        if (cacheable)
-          tp_use_alias_cache_put(cg, alias, alias_len, hash, found);
-        return found;
-      }
-    }
+  if (!g_tp_use_alias_index.slots || !g_tp_use_alias_index.cap)
+    return NULL;
+  uint64_t h = ny_hash_name(alias, strlen(alias));
+  if (!h)
+    h = 1u;
+  size_t mask = g_tp_use_alias_index.cap - 1u;
+  size_t pos = (size_t)h & mask;
+  for (; g_tp_use_alias_index.slots[pos].hash; pos = (pos + 1u) & mask) {
+    if (g_tp_use_alias_index.slots[pos].hash == h &&
+        strcmp(g_tp_use_alias_index.slots[pos].alias, alias) == 0)
+      return g_tp_use_alias_index.slots[pos].module;
   }
-  if (cacheable)
-    tp_use_alias_cache_put(cg, alias, alias_len, hash, NULL);
   return NULL;
 }
 
@@ -3113,6 +3093,15 @@ typedef struct ny_hm_state_t {
   ny_hm_scheme_list schemes;
   ny_hm_scheme_index_entry_t *scheme_index;
   size_t scheme_index_cap;
+  /* Demand-driven stdlib HM worklist (populated when ctx->lazy_std_inference). */
+  const stmt_t **scheme_stmt_keys;
+  size_t *scheme_stmt_vals;
+  size_t scheme_stmt_cap;
+  uint8_t *scheme_queued;
+  size_t *scheme_worklist;
+  size_t scheme_worklist_len;
+  size_t scheme_worklist_cap;
+  bool track_needed_schemes;
   uint64_t next_env_generation;
   ny_hm_env_lookup_cache_entry_t env_lookup_cache[128];
   ny_hm_expr_type_fact_list expr_type_facts;

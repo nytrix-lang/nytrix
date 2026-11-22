@@ -209,11 +209,12 @@ static bool slp_f64_broadcastable(const nyr_func_t *f, const int *defs, int v) {
 
 static addr_form_t slp_addr(const nyr_func_t *f, const int *defs, int value,
                             size_t block_start, unsigned depth) {
+  (void)block_start;
   addr_form_t bad = {0};
   if (!f || !defs || value < 0 || value >= f->next_value || depth > 16)
     return bad;
   int di = defs[value];
-  if (di < 0 || (size_t)di < block_start)
+  if (di < 0 || (size_t)di >= f->len)
     return (addr_form_t){.ok = true, .root = value, .offset = 0};
   const nyr_inst_t *in = &f->data[(size_t)di];
   if (in->op == NYIR_ADDR_LOCAL || in->op == NYIR_ADDR_SYMBOL ||
@@ -235,7 +236,7 @@ static addr_form_t slp_addr(const nyr_func_t *f, const int *defs, int value,
     } else if (!subtract && nyr_const_i64(f, defs, in->a, &k)) {
       base = in->b;
     } else {
-      return bad;
+      return (addr_form_t){.ok = true, .root = value, .offset = 0};
     }
     addr_form_t a = slp_addr(f, defs, base, block_start, depth + 1);
     if (!a.ok || (__int128)a.offset + k < INT64_MIN ||
@@ -751,9 +752,318 @@ static bool slp_try_store_pair(nyr_func_t *f, size_t s0, size_t s1,
  * across such instructions; any memory, trap, call, volatile, or control
  * effect terminates the search unless alias metadata proves disjointness.
  */
-static size_t slp_next_store_in_block(const nyr_func_t *f, size_t at,
+static int slp_alloc_root(const nyr_func_t *f, const int *defs, int v,
+                          int active_phi, unsigned depth) {
+  if (!f || !defs || depth > 16 || v < 0 || v >= f->next_value)
+    return -1;
+  if (v == active_phi)
+    return -2;
+  int di = defs[v];
+  if (di < 0 || (size_t)di >= f->len)
+    return -1;
+  const nyr_inst_t *in = &f->data[(size_t)di];
+  if (in->op == NYIR_ALLOCA || in->op == NYIR_ADDR_LOCAL)
+    return di;
+  if (in->op == NYIR_CALL && in->symbol &&
+      (strcmp(in->symbol, "malloc") == 0 || strcmp(in->symbol, "calloc") == 0 ||
+       strcmp(in->symbol, "rt_malloc_i64") == 0 ||
+       strcmp(in->symbol, "rt_calloc_i64") == 0 ||
+       strcmp(in->symbol, "f64buf_new") == 0 ||
+       strcmp(in->symbol, "i64buf_new") == 0))
+    return di;
+  if (in->op == NYIR_COPY || in->op == NYIR_SUB_I64)
+    return slp_alloc_root(f, defs, in->a, active_phi, depth + 1);
+  if (in->op == NYIR_ADD_I64) {
+    int ra = slp_alloc_root(f, defs, in->a, active_phi, depth + 1);
+    int rb = slp_alloc_root(f, defs, in->b, active_phi, depth + 1);
+    if (ra == -2 && rb == -1)
+      return -2;
+    if (rb == -2 && ra == -1)
+      return -2;
+    if (ra >= 0 && rb == -1)
+      return ra;
+    if (rb >= 0 && ra == -1)
+      return rb;
+    return -1;
+  }
+  if (in->op == NYIR_PHI && active_phi < 0 && in->phi_incoming &&
+      in->phi_incoming_len > 0) {
+    int root = -1;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+      int rk =
+          slp_alloc_root(f, defs, in->phi_incoming[k].value, v, depth + 1);
+      if (rk == -2)
+        continue;
+      if (rk < 0)
+        return -1;
+      if (root < 0)
+        root = rk;
+      else if (root != rk)
+        return -1;
+    }
+    return root;
+  }
+  return -1;
+}
+
+static bool slp_addrs_disjoint(const nyr_func_t *f, const int *defs,
+                               size_t st_pc, size_t ld_pc, size_t block_start) {
+  if (!f || !defs || st_pc >= f->len || ld_pc >= f->len)
+    return false;
+  const nyr_inst_t *st = &f->data[st_pc];
+  const nyr_inst_t *ld = &f->data[ld_pc];
+  if (st->alias_class != 0 && ld->alias_class != 0 &&
+      st->alias_class != ld->alias_class)
+    return true;
+  unsigned narrow =
+      NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32;
+  if ((st->flags & narrow) || (ld->flags & narrow))
+    return false;
+  addr_form_t sa = slp_addr(f, defs, st->a, block_start, 0);
+  addr_form_t la = slp_addr(f, defs, ld->a, block_start, 0);
+  if (!sa.ok || !la.ok)
+    return false;
+  if (sa.root == la.root) {
+    __int128 d = (__int128)sa.offset - (__int128)la.offset;
+    return d >= 8 || d <= -8;
+  }
+  int sr = slp_alloc_root(f, defs, sa.root, -1, 0);
+  int lr = slp_alloc_root(f, defs, la.root, -1, 0);
+  return sr >= 0 && lr >= 0 && sr != lr;
+}
+
+static bool slp_pack_quad_f64(nyr_func_t *f, const int *defs,
+                              const nyr_use_def_t *uses, const int val[4],
+                              const size_t expected[4], const size_t stores[4],
+                              size_t block_start, unsigned depth, int *out_vec,
+                              size_t *out_pos) {
+  if (!f || !defs || !uses || !out_vec || !out_pos || depth > 8)
+    return false;
+  size_t at[4];
+  nyr_op_t op = NYIR_NOP;
+  size_t lo = SIZE_MAX, hi = 0;
+  for (size_t lane = 0; lane < 4; ++lane) {
+    if (val[lane] < 0 || val[lane] >= f->next_value || defs[val[lane]] < 0 ||
+        !slp_value_only_used_at(uses, val[lane], expected[lane]))
+      return false;
+    at[lane] = (size_t)defs[val[lane]];
+    if (at[lane] < block_start || at[lane] >= f->len)
+      return false;
+    const nyr_inst_t *in = &f->data[at[lane]];
+    if (lane == 0)
+      op = in->op;
+    else if (in->op != op)
+      return false;
+    if (at[lane] < lo)
+      lo = at[lane];
+    if (at[lane] > hi)
+      hi = at[lane];
+  }
+  if (op == NYIR_LOAD_I64) {
+    int addr[4];
+    unsigned narrow =
+        NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32;
+    for (size_t lane = 0; lane < 4; ++lane) {
+      const nyr_inst_t *ld = &f->data[at[lane]];
+      if (ld->scalar_class != NYIR_SCALAR_F64 || (ld->flags & narrow) ||
+          (ld->effects & NYIR_EFFECT_VOLATILE))
+        return false;
+      addr[lane] = ld->a;
+    }
+    if (!slp_contiguous4(f, defs, addr, block_start))
+      return false;
+    for (size_t k = lo; k <= hi; ++k) {
+      bool is_self = false;
+      for (size_t lane = 0; lane < 4; ++lane)
+        if (k == at[lane] || k == stores[lane]) {
+          is_self = true;
+          break;
+        }
+      if (is_self || f->data[k].op == NYIR_NOP ||
+          f->data[k].op == NYIR_LOAD_I64 ||
+          f->data[k].op == NYIR_VEC4_LOAD_F64)
+        continue;
+      unsigned eff = f->data[k].effects | nyr_inst_effects(&f->data[k]);
+      if (eff != NYIR_EFFECT_NONE || f->data[k].op == NYIR_BR ||
+          f->data[k].op == NYIR_BR_IF || f->data[k].op == NYIR_RET)
+        return false;
+    }
+    size_t keep = at[0];
+    if (defs[addr[0]] >= 0 && (size_t)defs[addr[0]] >= keep)
+      return false;
+    nyr_inst_t l0 = f->data[at[0]];
+    for (size_t lane = 1; lane < 4; ++lane)
+      slp_discard(f, at[lane]);
+    slp_assign(
+        f, keep,
+        (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
+                     .dst = val[0],
+                     .a = addr[0],
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .alias_class = l0.alias_class,
+                     .debug = l0.debug,
+                     .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP});
+    *out_vec = val[0];
+    *out_pos = keep;
+    return true;
+  }
+  if (!slp_binop(op, true))
+    return false;
+  int lhs[4], rhs[4];
+  for (size_t lane = 0; lane < 4; ++lane) {
+    const nyr_inst_t *in = &f->data[at[lane]];
+    if (in->a < 0 || in->b < 0)
+      return false;
+    lhs[lane] = in->a;
+    rhs[lane] = in->b;
+  }
+  bool shared_lhs =
+      lhs[0] == lhs[1] && lhs[0] == lhs[2] && lhs[0] == lhs[3] &&
+      (defs[lhs[0]] < 0 || (size_t)defs[lhs[0]] < block_start ||
+       (f->data[(size_t)defs[lhs[0]]].op == NYIR_CONST_F64 &&
+        (size_t)defs[lhs[0]] < lo));
+  bool shared_rhs =
+      rhs[0] == rhs[1] && rhs[0] == rhs[2] && rhs[0] == rhs[3] &&
+      (defs[rhs[0]] < 0 || (size_t)defs[rhs[0]] < block_start ||
+       (f->data[(size_t)defs[rhs[0]]].op == NYIR_CONST_F64 &&
+        (size_t)defs[rhs[0]] < lo));
+  if (shared_lhs && shared_rhs)
+    return false;
+  int va = -1, vb = -1;
+  size_t pos_a = 0, pos_b = 0;
+  size_t bc_slot = SIZE_MAX;
+  int bc_src = -1;
+  if (shared_lhs) {
+    if (lo >= hi)
+      return false;
+    va = f->next_value++;
+    bc_slot = lo;
+    bc_src = lhs[0];
+    pos_a = lo;
+    if (!slp_pack_quad_f64(f, defs, uses, rhs, at, stores, block_start,
+                           depth + 1, &vb, &pos_b))
+      return false;
+  } else if (shared_rhs) {
+    if (lo >= hi)
+      return false;
+    if (!slp_pack_quad_f64(f, defs, uses, lhs, at, stores, block_start,
+                           depth + 1, &va, &pos_a))
+      return false;
+    vb = f->next_value++;
+    bc_slot = lo;
+    bc_src = rhs[0];
+    pos_b = lo;
+  } else {
+    if (!slp_pack_quad_f64(f, defs, uses, lhs, at, stores, block_start,
+                           depth + 1, &va, &pos_a))
+      return false;
+    bool same_ops = lhs[0] == rhs[0] && lhs[1] == rhs[1] && lhs[2] == rhs[2] &&
+                    lhs[3] == rhs[3];
+    if (same_ops) {
+      vb = va;
+      pos_b = pos_a;
+    } else if (!slp_pack_quad_f64(f, defs, uses, rhs, at, stores, block_start,
+                                  depth + 1, &vb, &pos_b)) {
+      return false;
+    }
+  }
+  if (pos_a >= hi || pos_b >= hi)
+    return false;
+  nyr_debug_loc_t dbg = f->data[lo].debug;
+  for (size_t lane = 0; lane < 4; ++lane) {
+    if (at[lane] == hi)
+      continue;
+    if (at[lane] == bc_slot)
+      continue;
+    slp_discard(f, at[lane]);
+  }
+  if (bc_slot != SIZE_MAX) {
+    slp_assign(f, bc_slot,
+               (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
+                            .dst = shared_lhs ? va : vb,
+                            .a = bc_src,
+                            .b = -1,
+                            .c = -1,
+                            .d = -1,
+                            .e = -1,
+                            .f = -1,
+                            .debug = dbg,
+                            .effects = NYIR_EFFECT_NONE});
+  }
+  slp_assign(f, hi,
+             (nyr_inst_t){.op = slp_vec_binop(op),
+                          .dst = val[0],
+                          .a = va,
+                          .b = vb,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .debug = dbg,
+                          .effects = NYIR_EFFECT_NONE});
+  *out_vec = val[0];
+  *out_pos = hi;
+  return true;
+}
+
+static bool slp_try_store_quad_f64(nyr_func_t *f, const size_t store[4],
+                                   size_t block_start, const int *defs,
+                                   const nyr_use_def_t *uses) {
+  if (!f || !defs || !uses)
+    return false;
+  int store_addr[4], store_val[4];
+  unsigned narrow =
+      NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32;
+  for (size_t lane = 0; lane < 4; ++lane) {
+    if (store[lane] >= f->len)
+      return false;
+    const nyr_inst_t *st = &f->data[store[lane]];
+    if (st->op != NYIR_STORE_I64 || st->scalar_class != NYIR_SCALAR_F64 ||
+        st->c < 0 || (st->flags & narrow) ||
+        (st->effects & NYIR_EFFECT_VOLATILE))
+      return false;
+    store_addr[lane] = st->a;
+    store_val[lane] = st->c;
+  }
+  if (!slp_contiguous4(f, defs, store_addr, block_start))
+    return false;
+  if (defs[store_addr[0]] >= 0 && (size_t)defs[store_addr[0]] >= store[3])
+    return false;
+  nyr_inst_t s0 = f->data[store[0]];
+  int packed = -1;
+  size_t packed_pos = 0;
+  if (!slp_pack_quad_f64(f, defs, uses, store_val, store, store, block_start, 0,
+                         &packed, &packed_pos))
+    return false;
+  if (packed_pos >= store[3])
+    return false;
+  for (size_t lane = 0; lane < 3; ++lane)
+    slp_discard(f, store[lane]);
+  slp_assign(f, store[3],
+             (nyr_inst_t){.op = NYIR_VEC4_STORE_F64,
+                          .dst = -1,
+                          .a = store_addr[0],
+                          .b = packed,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .alias_class = s0.alias_class,
+                          .debug = s0.debug,
+                          .effects =
+                              NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP});
+  return true;
+}
+
+static size_t slp_next_store_in_block(const nyr_func_t *f, const int *defs,
+                                      size_t block_start,
+                                      const size_t *prior_stores,
+                                      size_t prior_count, size_t at,
                                       size_t end) {
-  uint32_t st_alias = (f && at < f->len) ? f->data[at].alias_class : 0;
   for (++at; at < end; ++at) {
     const nyr_inst_t *in = &f->data[at];
     if (in->op == NYIR_NOP)
@@ -761,7 +1071,11 @@ static size_t slp_next_store_in_block(const nyr_func_t *f, size_t at,
     if (in->op == NYIR_STORE_I64)
       return at;
     if (in->op == NYIR_LOAD_I64) {
-      if (st_alias != 0 && in->alias_class != 0 && in->alias_class != st_alias)
+      bool disjoint_all = prior_count > 0;
+      for (size_t p = 0; disjoint_all && p < prior_count; ++p)
+        disjoint_all =
+            slp_addrs_disjoint(f, defs, prior_stores[p], at, block_start);
+      if (disjoint_all)
         continue;
       return end;
     }
@@ -828,7 +1142,8 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
            * The helper advances before inspecting; pass the previous store
            * itself so an immediately adjacent store remains a candidate.
            */
-          stores[lane] = slp_next_store_in_block(&work, stores[lane - 1], end);
+          stores[lane] = slp_next_store_in_block(
+              &work, defs, start, stores, lane, stores[lane - 1], end);
           if (stores[lane] >= end ||
               work.data[stores[lane]].op != NYIR_STORE_I64)
             break;
@@ -843,13 +1158,17 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
               slp_contiguous(&work, defs, prev->a, next->a, start);
         }
         if (quad_contiguous) {
+          bool quad_f64 = work.data[stores[0]].scalar_class == NYIR_SCALAR_F64;
           ny_dbg_heuristic_event("SLP",
                                  "candidate kind=quad block=%zu "
-                                 "stores=%zu,%zu,%zu,%zu lanes=4 type=i64",
-                                 b, stores[0], stores[1], stores[2], stores[3]);
+                                 "stores=%zu,%zu,%zu,%zu lanes=4 type=%s",
+                                 b, stores[0], stores[1], stores[2], stores[3],
+                                 quad_f64 ? "f64" : "i64");
           slp_journal_begin(&journal, &work);
           bool quad_ok =
-              slp_try_store_quad_i64(&work, stores, start, defs, &uses);
+              quad_f64
+                  ? slp_try_store_quad_f64(&work, stores, start, defs, &uses)
+                  : slp_try_store_quad_i64(&work, stores, start, defs, &uses);
           if (journal.failed) {
             slp_journal = NULL;
             free(journal.items);
@@ -890,7 +1209,7 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
           }
           slp_journal_rollback(&journal, &work);
         }
-        size_t j = slp_next_store_in_block(&work, i, end);
+        size_t j = slp_next_store_in_block(&work, defs, start, stores, 1, i, end);
         if (j >= end || work.data[j].op != NYIR_STORE_I64)
           continue;
         if (work.data[i].scalar_class != work.data[j].scalar_class ||

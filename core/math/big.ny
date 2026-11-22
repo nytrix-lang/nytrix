@@ -211,17 +211,13 @@ fn _big_sub_abs(any a, any b) any {
 @inline
 fn bigint_add(any a, any b) bigint {
    "Adds two BigInts together."
-   def lhs = _big_runtime_operand(a)
-   def rhs = _big_runtime_operand(b)
-   __bigint_add(lhs, rhs)
+   __bigint_add(a, b)
 }
 
 @inline
 fn bigint_sub(any a, any b) bigint {
    "Subtracts BigInt `b` from BigInt `a`."
-   def lhs = _big_runtime_operand(a)
-   def rhs = _big_runtime_operand(b)
-   __bigint_sub(lhs, rhs)
+   __bigint_sub(a, b)
 }
 
 fn _big_mul_abs(any a, any b) any {
@@ -265,12 +261,7 @@ fn _big_mul_abs(any a, any b) any {
 @inline
 fn bigint_mul(any a, any b) bigint {
    "Multiplies two BigInts."
-   ;; The runtime arithmetic accepts tagged integers directly. Preserve that
-   ;; representation instead of allocating a temporary BigInt for a scalar
-   ;; factor (common in fixed-point and limb algorithms).
-   def lhs = is_int(a) ? a : bigint(a)
-   def rhs = is_int(b) ? b : bigint(b)
-   __bigint_mul(lhs, rhs)
+   __bigint_mul(a, b)
 }
 
 @inline
@@ -371,25 +362,19 @@ fn _big_divmod_abs(any a, any b) list {
 @inline
 fn bigint_div(any a, any b) bigint {
    "Integer division of BigInts."
-   ;; Small integer divisors have a dedicated runtime path and need no heap
-   ;; BigInt wrapper.
-   def aa = is_int(a) ? a : bigint(a)
-   def bb = is_int(b) ? b : bigint(b)
-   if __bigint_cmp(bb, 0) == 0 { panic("bigint division by zero") }
-   __bigint_div(aa, bb)
+   __bigint_div(a, b)
 }
 
+@inline
 fn bigint_mod(any a, any b) bigint {
    "Modulo of BigInts."
-   def aa = is_int(a) ? a : bigint(a)
-   def bb = is_int(b) ? b : bigint(b)
-   if __bigint_cmp(bb, 0) == 0 { panic("bigint division by zero") }
-   __bigint_mod(aa, bb)
+   __bigint_mod(a, b)
 }
 
+@inline
 fn bigint_cmp(any a, any b) int {
    "Compares two BigInts. Returns -1 if a < b, 1 if a > b, 0 if equal."
-   __bigint_cmp(bigint(a), bigint(b))
+   __bigint_cmp(a, b)
 }
 
 fn bigint_eq(any a, any b) bool {
@@ -656,32 +641,45 @@ fn bf_to_str(any x) str { "Formats a native BigFloat." __bigfloat_to_str(x) }
 
 fn bf_precision(any x) int { "Returns the binary precision of x." __bigfloat_precision(x) }
 
+@inline
 fn bf_add(any a, any b) any { "Returns a + b." __bigfloat_add(a, b) }
 
+@inline
 fn bf_sub(any a, any b) any { "Returns a - b." __bigfloat_sub(a, b) }
 
+@inline
 fn bf_mul(any a, any b) any { "Returns a * b." __bigfloat_mul(a, b) }
 
+@inline
 fn bf_div(any a, any b) any { "Returns a / b, or zero when b is zero." __bigfloat_div(a, b) }
 
+@inline
 fn bf_neg(any a) any { "Returns -a." __bigfloat_neg(a) }
 
+@inline
 fn bf_abs(any a) any { "Returns |a|." __bigfloat_abs(a) }
 
 fn bf_sign(any a) int { "Returns -1, 0, or 1." __bigfloat_cmp(a, bf_zero()) }
 
+@inline
 fn bf_eq(any a, any b) bool { "Returns true if a == b." __bigfloat_cmp(a, b) == 0 }
 
+@inline
 fn bf_lt(any a, any b) bool { "Returns true if a < b." __bigfloat_cmp(a, b) < 0 }
 
+@inline
 fn bf_gt(any a, any b) bool { "Returns true if a > b." __bigfloat_cmp(a, b) > 0 }
 
+@inline
 fn bf_le(any a, any b) bool { "Returns true if a <= b." __bigfloat_cmp(a, b) <= 0 }
 
+@inline
 fn bf_ge(any a, any b) bool { "Returns true if a >= b." __bigfloat_cmp(a, b) >= 0 }
 
+@inline
 fn bf_sqrt(any a) any { "Returns sqrt(a)." __bigfloat_sqrt(a) }
 
+@inline
 fn bf_pow_int(any a, int n) any { "Returns a^n for an integer exponent." __bigfloat_pow_int(a, n) }
 
 #main {

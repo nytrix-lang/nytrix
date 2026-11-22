@@ -88,76 +88,306 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
    */
   if (!f || !func_name || !func_name[0] || f->param_count != 1 ||
       !f->param_types || f->param_types[0] != NYIR_PARAM_I64 ||
-      f->return_aggregate_size != 0)
+      f->return_aggregate_size != 0 || f->next_value <= 0 ||
+      f->next_value > 256)
     return true;
 
-  size_t ix[18], count = 0;
+  size_t live_count = 0;
   for (size_t i = 0; i < f->len; ++i) {
-    if (f->data[i].op == NYIR_NOP)
-      continue;
-    if (count == sizeof(ix) / sizeof(ix[0]))
-      return true;
-    ix[count++] = i;
+    if (f->data[i].op != NYIR_NOP)
+      ++live_count;
   }
-  if (count != 16 && count != 17)
-    return true;
-  const nyr_inst_t *in[18];
-  nyr_inst_t implicit_entry = {.op = NYIR_LABEL, .imm = -1};
-  size_t offset = count == 16 ? 1 : 0;
-  if (offset)
-    in[0] = &implicit_entry;
-  for (size_t i = 0; i < count; ++i)
-    in[i + offset] = &f->data[ix[i]];
-
-  size_t n2_load_i = 12;
-  bool has_n2_reload = in[n2_load_i]->op == NYIR_LOAD_LOCAL;
-  size_t two2_i = has_n2_reload ? 13 : 12;
-  size_t sub2_i = has_n2_reload ? 14 : 13;
-  size_t call2_i = has_n2_reload ? 15 : 14;
-  size_t add_i = has_n2_reload ? 16 : 15;
-  size_t ret_i = has_n2_reload ? 17 : 16;
-  if (in[0]->op != NYIR_LABEL || in[1]->op != NYIR_LOAD_LOCAL ||
-      in[1]->imm != 0 || in[2]->op != NYIR_CONST_I64 || in[2]->imm != 2 ||
-      in[3]->op != NYIR_CMP_I64 || in[3]->cmp != NYIR_CMP_LT ||
-      in[3]->a != in[1]->dst || in[3]->b != in[2]->dst ||
-      in[4]->op != NYIR_BR_IF || in[4]->a != in[3]->dst ||
-      in[5]->op != NYIR_BR || in[6]->op != NYIR_LABEL ||
-      in[4]->imm != in[6]->imm || in[7]->op != NYIR_RET ||
-      in[7]->a != in[1]->dst || in[8]->op != NYIR_LABEL ||
-      in[5]->imm != in[8]->imm || in[9]->op != NYIR_CONST_I64 ||
-      in[9]->imm != 1 || in[10]->op != NYIR_SUB_I64 ||
-      in[10]->a != in[1]->dst || in[10]->b != in[9]->dst ||
-      in[11]->op != NYIR_CALL || in[11]->dst < 0 || !in[11]->symbol ||
-      strcmp(in[11]->symbol, func_name) != 0 ||
-      (has_n2_reload && in[n2_load_i]->imm != 0) ||
-      (!has_n2_reload && in[n2_load_i]->op != NYIR_CONST_I64) ||
-      in[two2_i]->op != NYIR_CONST_I64 || in[two2_i]->imm != 2 ||
-      in[sub2_i]->op != NYIR_SUB_I64 ||
-      in[sub2_i]->a != (has_n2_reload ? in[n2_load_i]->dst : in[1]->dst) ||
-      in[sub2_i]->b != in[two2_i]->dst || in[call2_i]->op != NYIR_CALL ||
-      in[call2_i]->dst < 0 || !in[call2_i]->symbol ||
-      strcmp(in[call2_i]->symbol, func_name) != 0 ||
-      in[add_i]->op != NYIR_ADD_I64 || in[ret_i]->op != NYIR_RET ||
-      in[ret_i]->a != in[add_i]->dst)
+  if (live_count < 10 || live_count > 24)
     return true;
 
-  int call1_args[NYIR_CALL_MAX_ARGS], call2_args[NYIR_CALL_MAX_ARGS];
-  int call1_arity = 0, call2_arity = 0;
-  if (!nyr_call_args(in[11], f->next_value, call1_args,
-                     NYIR_CALL_MAX_ARGS, &call1_arity, NULL, 0) ||
-      !nyr_call_args(in[call2_i], f->next_value, call2_args,
-                     NYIR_CALL_MAX_ARGS, &call2_arity, NULL, 0) ||
-      call1_arity != 1 || call2_arity != 1 ||
-      call1_args[0] != in[10]->dst || call2_args[0] != in[sub2_i]->dst ||
-      !((in[add_i]->a == in[11]->dst &&
-         in[add_i]->b == in[call2_i]->dst) ||
-        (in[add_i]->b == in[11]->dst &&
-         in[add_i]->a == in[call2_i]->dst)))
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg))
+    return false;
+
+  if (cfg.block_count < 3 || !cfg.reachable[0] ||
+      cfg.succ_offsets[1] - cfg.succ_offsets[0] != 2) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+  size_t reachable_blocks = 0;
+  for (size_t b = 0; b < cfg.block_count; ++b)
+    if (cfg.reachable[b])
+      ++reachable_blocks;
+  if (reachable_blocks != 3) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+
+  enum {
+    FIB_TAG_NONE = 0,
+    FIB_TAG_N,
+    FIB_TAG_CONST,
+    FIB_TAG_NM1,
+    FIB_TAG_NM2,
+    FIB_TAG_CALL1,
+    FIB_TAG_CALL2,
+    FIB_TAG_SUM
+  };
+  uint8_t tag[256] = {0};
+  int64_t kval[256] = {0};
+  const nyr_inst_t *cmp_inst = NULL;
+  const nyr_inst_t *br_if_inst = NULL;
+  int n_val = -1;
+  nyr_scalar_class_t n_sc = NYIR_SCALAR_UNKNOWN;
+  nyr_debug_loc_t entry_loc = f->data[cfg.block_start[0]].debug;
+
+  /* Validate entry block (block 0): pure param load + compare against 2 + br.if. */
+  for (size_t i = cfg.block_start[0]; i < cfg.block_end[0]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_NOP:
+    case NYIR_LABEL:
+    case NYIR_BR:
+      break;
+    case NYIR_LOAD_LOCAL:
+      if (in->imm != 0 || in->dst < 0 || in->dst >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      tag[in->dst] = FIB_TAG_N;
+      if (n_val < 0) {
+        n_val = in->dst;
+        n_sc = in->scalar_class;
+      }
+      break;
+    case NYIR_CONST_I64:
+      if (in->dst < 0 || in->dst >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      tag[in->dst] = FIB_TAG_CONST;
+      kval[in->dst] = in->imm;
+      break;
+    case NYIR_CMP_I64:
+      if (cmp_inst || in->dst < 0 || in->dst >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      cmp_inst = in;
+      break;
+    case NYIR_BR_IF:
+      if (br_if_inst) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      br_if_inst = in;
+      break;
+    default:
+      nyr_cfg_free(&cfg);
+      return true;
+    }
+  }
+  if (n_val < 0 || !cmp_inst || !br_if_inst || br_if_inst->a != cmp_inst->dst ||
+      cmp_inst->a < 0 || cmp_inst->a >= 256 || cmp_inst->b < 0 ||
+      cmp_inst->b >= 256) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+
+  bool a_is_n = tag[cmp_inst->a] == FIB_TAG_N;
+  bool b_is_n = tag[cmp_inst->b] == FIB_TAG_N;
+  bool a_is_k = tag[cmp_inst->a] == FIB_TAG_CONST;
+  bool b_is_k = tag[cmp_inst->b] == FIB_TAG_CONST;
+  bool branch_on_base =
+      (a_is_n && b_is_k && cmp_inst->cmp == NYIR_CMP_LT &&
+       kval[cmp_inst->b] == 2) ||
+      (a_is_n && b_is_k && cmp_inst->cmp == NYIR_CMP_LE &&
+       kval[cmp_inst->b] == 1) ||
+      (b_is_n && a_is_k && cmp_inst->cmp == NYIR_CMP_GT &&
+       kval[cmp_inst->a] == 2) ||
+      (b_is_n && a_is_k && cmp_inst->cmp == NYIR_CMP_GE &&
+       kval[cmp_inst->a] == 1);
+  bool branch_on_rec =
+      (a_is_n && b_is_k && cmp_inst->cmp == NYIR_CMP_GE &&
+       kval[cmp_inst->b] == 2) ||
+      (a_is_n && b_is_k && cmp_inst->cmp == NYIR_CMP_GT &&
+       kval[cmp_inst->b] == 1) ||
+      (b_is_n && a_is_k && cmp_inst->cmp == NYIR_CMP_LE &&
+       kval[cmp_inst->a] == 2) ||
+      (b_is_n && a_is_k && cmp_inst->cmp == NYIR_CMP_LT &&
+       kval[cmp_inst->a] == 1);
+  if (!branch_on_base && !branch_on_rec) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+
+  size_t s_a = cfg.succ_blocks[cfg.succ_offsets[0]];
+  size_t s_b = cfg.succ_blocks[cfg.succ_offsets[0] + 1];
+  if (s_a == s_b || s_a == 0 || s_b == 0) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+  size_t true_bb = SIZE_MAX, false_bb = SIZE_MAX;
+  if (cfg.block_label[s_a] == br_if_inst->imm) {
+    true_bb = s_a;
+    false_bb = s_b;
+  } else if (cfg.block_label[s_b] == br_if_inst->imm) {
+    true_bb = s_b;
+    false_bb = s_a;
+  } else {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+  size_t base_bb = branch_on_base ? true_bb : false_bb;
+  size_t rec_bb = branch_on_base ? false_bb : true_bb;
+  if (cfg.succ_offsets[base_bb + 1] != cfg.succ_offsets[base_bb] ||
+      cfg.succ_offsets[rec_bb + 1] != cfg.succ_offsets[rec_bb]) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+
+  /* Validate base block: pure `return n`. */
+  bool base_ret_ok = false;
+  nyr_debug_loc_t base_lbl_loc = f->data[cfg.block_start[base_bb]].debug;
+  nyr_debug_loc_t base_ret_loc = base_lbl_loc;
+  for (size_t i = cfg.block_start[base_bb]; i < cfg.block_end[base_bb]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_NOP:
+    case NYIR_LABEL:
+      break;
+    case NYIR_LOAD_LOCAL:
+      if (in->imm != 0 || in->dst < 0 || in->dst >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      tag[in->dst] = FIB_TAG_N;
+      break;
+    case NYIR_RET:
+      if (base_ret_ok || in->a < 0 || in->a >= 256 || tag[in->a] != FIB_TAG_N) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      base_ret_ok = true;
+      base_ret_loc = in->debug;
+      break;
+    default:
+      nyr_cfg_free(&cfg);
+      return true;
+    }
+  }
+  if (!base_ret_ok) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+
+  /* Validate recursive block: pure `return f(n - 1) + f(n - 2)`. */
+  size_t call1_seen = 0, call2_seen = 0;
+  bool rec_ret_ok = false;
+  nyr_debug_loc_t rec_lbl_loc = f->data[cfg.block_start[rec_bb]].debug;
+  nyr_debug_loc_t rec_loc = rec_lbl_loc;
+  for (size_t i = cfg.block_start[rec_bb]; i < cfg.block_end[rec_bb]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_NOP:
+    case NYIR_LABEL:
+      break;
+    case NYIR_LOAD_LOCAL:
+      if (in->imm != 0 || in->dst < 0 || in->dst >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      tag[in->dst] = FIB_TAG_N;
+      break;
+    case NYIR_CONST_I64:
+      if (in->dst < 0 || in->dst >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      tag[in->dst] = FIB_TAG_CONST;
+      kval[in->dst] = in->imm;
+      break;
+    case NYIR_SUB_I64:
+      if (in->dst < 0 || in->dst >= 256 || in->a < 0 || in->a >= 256 ||
+          in->b < 0 || in->b >= 256 || tag[in->a] != FIB_TAG_N ||
+          tag[in->b] != FIB_TAG_CONST) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      if (kval[in->b] == 1)
+        tag[in->dst] = FIB_TAG_NM1;
+      else if (kval[in->b] == 2)
+        tag[in->dst] = FIB_TAG_NM2;
+      else {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      break;
+    case NYIR_ADD_I64:
+      if (in->dst < 0 || in->dst >= 256 || in->a < 0 || in->a >= 256 ||
+          in->b < 0 || in->b >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      if ((tag[in->a] == FIB_TAG_N && tag[in->b] == FIB_TAG_CONST &&
+           kval[in->b] == -1) ||
+          (tag[in->b] == FIB_TAG_N && tag[in->a] == FIB_TAG_CONST &&
+           kval[in->a] == -1)) {
+        tag[in->dst] = FIB_TAG_NM1;
+      } else if ((tag[in->a] == FIB_TAG_N && tag[in->b] == FIB_TAG_CONST &&
+                  kval[in->b] == -2) ||
+                 (tag[in->b] == FIB_TAG_N && tag[in->a] == FIB_TAG_CONST &&
+                  kval[in->a] == -2)) {
+        tag[in->dst] = FIB_TAG_NM2;
+      } else if ((tag[in->a] == FIB_TAG_CALL1 && tag[in->b] == FIB_TAG_CALL2) ||
+                 (tag[in->a] == FIB_TAG_CALL2 && tag[in->b] == FIB_TAG_CALL1)) {
+        tag[in->dst] = FIB_TAG_SUM;
+      } else {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      break;
+    case NYIR_CALL: {
+      int cargs[NYIR_CALL_MAX_ARGS];
+      int carity = 0;
+      if (in->dst < 0 || in->dst >= 256 || !in->symbol ||
+          strcmp(in->symbol, func_name) != 0 ||
+          (in->flags & NYIR_INST_F_SRET) != 0 ||
+          !nyr_call_args(in, f->next_value, cargs, NYIR_CALL_MAX_ARGS, &carity,
+                         NULL, 0) ||
+          carity != 1 || cargs[0] < 0 || cargs[0] >= 256) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      if (tag[cargs[0]] == FIB_TAG_NM1) {
+        tag[in->dst] = FIB_TAG_CALL1;
+        ++call1_seen;
+        rec_loc = in->debug;
+      } else if (tag[cargs[0]] == FIB_TAG_NM2) {
+        tag[in->dst] = FIB_TAG_CALL2;
+        ++call2_seen;
+      } else {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      break;
+    }
+    case NYIR_RET:
+      if (rec_ret_ok || in->a < 0 || in->a >= 256 ||
+          tag[in->a] != FIB_TAG_SUM) {
+        nyr_cfg_free(&cfg);
+        return true;
+      }
+      rec_ret_ok = true;
+      break;
+    default:
+      nyr_cfg_free(&cfg);
+      return true;
+    }
+  }
+  nyr_cfg_free(&cfg);
+  if (!rec_ret_ok || call1_seen != 1 || call2_seen != 1)
     return true;
 
   int64_t first_label = nyr_fresh_label(f);
-  if (first_label < 0 || first_label > INT64_MAX - 3)
+  if (first_label < 0 || first_label > INT64_MAX - 5)
     return true;
+  nyr_tco_trace(f, 0, "optimize", "recursive add to loop");
   const int64_t entry_label = first_label;
   const int64_t loop_label = first_label + 1;
   const int64_t base_label = first_label + 2;
@@ -177,15 +407,14 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
   int loop_cond = value++;
   int next = value++;
   int i_next = value++;
-  int n = in[1]->dst;
+  int n = n_val;
 
   nyr_inst_t *out = calloc(27, sizeof(*out));
   if (!out)
     return false;
   size_t len = 0;
 #define EMIT(inst_) (out[len++] = (inst_))
-  const nyr_debug_loc_t loc = in[0]->debug;
-  const nyr_debug_loc_t rec_loc = in[11]->debug;
+  const nyr_debug_loc_t loc = entry_loc;
   nyr_phi_incoming_t *i_incoming = calloc(2, sizeof(*i_incoming));
   nyr_phi_incoming_t *a_incoming = calloc(2, sizeof(*a_incoming));
   nyr_phi_incoming_t *b_incoming = calloc(2, sizeof(*b_incoming));
@@ -213,17 +442,19 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
                       .imm = entry_label, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = n, .a = -1,
                       .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = 0, .effects = NYIR_EFFECT_READ_LOCAL,
+                      .imm = 0, .scalar_class = n_sc,
+                      .effects = NYIR_EFFECT_READ_LOCAL,
                       .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CONST_I64, .dst = two, .a = -1,
                       .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = 2, .debug = loc}));
+                      .imm = 2, .scalar_class = n_sc, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CONST_I64, .dst = one, .a = -1,
                       .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = 1, .debug = loc}));
+                      .imm = 1, .scalar_class = n_sc, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CMP_I64, .dst = base_cond, .a = n,
                       .b = two, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .cmp = NYIR_CMP_LT, .debug = loc}));
+                      .cmp = NYIR_CMP_LT, .scalar_class = n_sc,
+                      .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_BR_IF, .dst = -1, .a = base_cond, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
                       .imm = base_label, .effects = NYIR_EFFECT_CONTROL,
@@ -234,23 +465,23 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
                       .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = base_label, .debug = in[6]->debug}));
+                      .imm = base_label, .debug = base_lbl_loc}));
   EMIT(((nyr_inst_t){.op = NYIR_RET, .dst = -1, .a = n, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
                       .effects = NYIR_EFFECT_CONTROL,
-                      .debug = in[7]->debug}));
+                      .debug = base_ret_loc}));
   EMIT(((nyr_inst_t){.op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
                       .imm = pre_label, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CONST_I64, .dst = a_init, .a = -1,
                       .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = 0, .debug = loc}));
+                      .imm = 0, .scalar_class = n_sc, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CONST_I64, .dst = b_init, .a = -1,
                       .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = 1, .debug = loc}));
+                      .imm = 1, .scalar_class = n_sc, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CONST_I64, .dst = i_init, .a = -1,
                       .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = 2, .debug = loc}));
+                      .imm = 2, .scalar_class = n_sc, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_BR, .dst = -1, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
                       .imm = loop_label, .effects = NYIR_EFFECT_CONTROL,
@@ -260,19 +491,23 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
                       .imm = loop_label, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_PHI, .dst = i_phi, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
+                      .scalar_class = n_sc,
                       .phi_incoming = i_incoming,
                       .phi_incoming_len = 2, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_PHI, .dst = a_phi, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
+                      .scalar_class = n_sc,
                       .phi_incoming = a_incoming,
                       .phi_incoming_len = 2, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_PHI, .dst = b_phi, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
+                      .scalar_class = n_sc,
                       .phi_incoming = b_incoming,
                       .phi_incoming_len = 2, .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_CMP_I64, .dst = loop_cond, .a = i_phi,
                       .b = n, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .cmp = NYIR_CMP_LE, .debug = loc}));
+                      .cmp = NYIR_CMP_LE, .scalar_class = n_sc,
+                      .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_BR_IF, .dst = -1, .a = loop_cond, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
                       .imm = body_label, .effects = NYIR_EFFECT_CONTROL,
@@ -283,13 +518,15 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
                       .debug = loc}));
   EMIT(((nyr_inst_t){.op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = body_label, .debug = in[8]->debug}));
+                      .imm = body_label, .debug = rec_lbl_loc}));
   EMIT(((nyr_inst_t){.op = NYIR_ADD_I64, .dst = next,
                       .a = a_phi, .b = b_phi, .c = -1, .d = -1,
-                      .e = -1, .f = -1, .debug = rec_loc}));
+                      .e = -1, .f = -1, .scalar_class = n_sc,
+                      .debug = rec_loc}));
   EMIT(((nyr_inst_t){.op = NYIR_ADD_I64, .dst = i_next,
                       .a = i_phi, .b = one, .c = -1, .d = -1,
-                      .e = -1, .f = -1, .debug = rec_loc}));
+                      .e = -1, .f = -1, .scalar_class = n_sc,
+                      .debug = rec_loc}));
   EMIT(((nyr_inst_t){.op = NYIR_BR, .dst = -1, .a = -1, .b = -1,
                       .c = -1, .d = -1, .e = -1, .f = -1,
                       .imm = loop_label, .effects = NYIR_EFFECT_CONTROL,

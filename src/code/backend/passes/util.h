@@ -91,6 +91,10 @@ bool nir_recover_load_local_range(const nyr_func_t *f,
                                   size_t at, nyr_range_t *out);
 bool nir_value_range_at(const nyr_func_t *f, const nyr_value_fact_t *facts,
                         int value, size_t at, nyr_range_t *out);
+bool nir_value_range_at_with_cfg(const nyr_func_t *f,
+                                 const nyr_value_fact_t *facts,
+                                 const nyr_cfg_t *cfg, const int *defs,
+                                 int value, size_t at, nyr_range_t *out);
 /* Zero-initialize and free at the end of a query scope. Reuse across queries;
  * cached snapshots detect arbitrary in-place mutations. Hot ordered passes may
  * opt into manual invalidation and notify the cache after each rewrite. */
@@ -102,6 +106,7 @@ typedef struct {
   int next_value;
   nyr_cfg_t cfg;
   int *defs;
+  bool has_addr_local;
   bool manual_invalidation;
 } nir_range_query_cache_t;
 void nir_range_query_cache_free(nir_range_query_cache_t *cache);

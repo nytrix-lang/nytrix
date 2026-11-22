@@ -96,7 +96,68 @@ static const size_t g_pool_sizes[] = {32,   48,   64,   80,   96,   112,  128,
 typedef struct mem_pool_node {
   struct mem_pool_node *next;
 } mem_pool_node_t;
-_Thread_local mem_pool_node_t *g_mem_pools[NUM_POOLS] = {0};
+#define RT_BLOCK_CHUNK_BYTES ((size_t)1 << 20)
+#define RT_BLOCK_CHUNK_MAX 2048u
+typedef struct rt_block_chunk {
+  uintptr_t start;
+  uintptr_t end;
+  _Atomic(uint8_t) *live;
+} rt_block_chunk_t;
+static rt_block_chunk_t g_rt_block_chunks[RT_BLOCK_CHUNK_MAX];
+static _Atomic size_t g_rt_block_chunk_n;
+static atomic_flag g_rt_block_chunk_lock = ATOMIC_FLAG_INIT;
+/*
+ * Pack per-thread bump-allocator state and segregated pool heads into one TLS
+ * block so PIC shared-library builds pay at most one TLS lookup per alloc.
+ */
+typedef struct rt_alloc_tls {
+  unsigned char *block_bump;
+  size_t block_left;
+  const rt_block_chunk_t *block_cur_chunk;
+  const rt_block_chunk_t *block_last_chunk;
+  uint32_t block_chunks_made;
+  mem_pool_node_t *pools[NUM_POOLS];
+} rt_alloc_tls_t;
+static _Thread_local rt_alloc_tls_t g_rt_alloc_tls;
+#if defined(__linux__) && defined(__x86_64__) &&                               \
+    (defined(__GNUC__) || defined(__clang__))
+static rt_alloc_tls_t g_rt_main_alloc_tls;
+static _Atomic(uintptr_t) g_rt_main_alloc_tp;
+
+static __attribute__((noinline)) rt_alloc_tls_t *
+rt_alloc_tls_slow(uintptr_t tp) {
+  uintptr_t expected = 0;
+  if (tp && atomic_compare_exchange_strong_explicit(
+                &g_rt_main_alloc_tp, &expected, tp, memory_order_acq_rel,
+                memory_order_acquire))
+    return &g_rt_main_alloc_tls;
+  return &g_rt_alloc_tls;
+}
+
+static inline rt_alloc_tls_t *rt_alloc_tls_get(void) {
+  uintptr_t tp = 0;
+  __asm__("movq %%fs:0, %0" : "=r"(tp));
+  uintptr_t owner =
+      atomic_load_explicit(&g_rt_main_alloc_tp, memory_order_relaxed);
+  if (__builtin_expect(tp == owner && tp != 0, 1))
+    return &g_rt_main_alloc_tls;
+  return rt_alloc_tls_slow(tp);
+}
+#else
+static inline rt_alloc_tls_t *rt_alloc_tls_get(void) { return &g_rt_alloc_tls; }
+#endif
+
+static inline bool rt_block_chunk_live_get(const rt_block_chunk_t *c,
+                                           uintptr_t value) {
+  return atomic_load_explicit(&c->live[(value - c->start) >> 4],
+                              memory_order_acquire) != 0;
+}
+
+static inline void rt_block_chunk_live_set(const rt_block_chunk_t *c,
+                                           uintptr_t value, uint8_t state) {
+  atomic_store_explicit(&c->live[(value - c->start) >> 4], state,
+                        memory_order_release);
+}
 
 /*
  * Exact provenance for objects returned by the managed allocator.  GC objects
@@ -142,9 +203,16 @@ static inline size_t rt_managed_ptr_cache_slot(uintptr_t value) {
 static inline void rt_managed_ptr_cache_invalidate(uintptr_t value) {
   _Atomic(uint32_t) *gen =
       &rt_managed_ptr_cache_gen[rt_managed_ptr_cache_slot(value)];
-  uint32_t next = atomic_load_explicit(gen, memory_order_relaxed) + 1u;
-  atomic_store_explicit(gen, next, memory_order_release);
+  atomic_fetch_add_explicit(gen, 1u, memory_order_release);
 }
+
+static void rt_managed_ptr_cache_invalidate_all(void) {
+  for (size_t i = 0; i < RT_MANAGED_PTR_CACHE_SIZE; ++i)
+    atomic_fetch_add_explicit(&rt_managed_ptr_cache_gen[i], 1u,
+                              memory_order_release);
+}
+
+static const rt_block_chunk_t *rt_block_chunk_find(uintptr_t p);
 
 static size_t rt_managed_ptr_slot(uintptr_t value) {
   /*
@@ -241,6 +309,14 @@ static void rt_managed_ptr_register(uintptr_t value) {
 static void rt_managed_ptr_unregister(uintptr_t value) {
   if (!value || value == RT_MANAGED_PTR_TOMBSTONE)
     return;
+  const rt_block_chunk_t *chunk = rt_block_chunk_find(value);
+  if (chunk) {
+    if ((value & 15u) == 0) {
+      rt_block_chunk_live_set(chunk, value, 0u);
+      rt_managed_ptr_cache_invalidate(value);
+    }
+    return;
+  }
   size_t start = rt_managed_ptr_slot(value);
   rt_managed_ptr_writer_lock();
   for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
@@ -284,24 +360,40 @@ bool rt_heap_ptr_registry_has(uintptr_t value) {
   if (value < atomic_load_explicit(&rt_managed_ptr_lo, memory_order_acquire) ||
       value > atomic_load_explicit(&rt_managed_ptr_hi, memory_order_acquire))
     return false;
+  size_t cn = atomic_load_explicit(&g_rt_block_chunk_n, memory_order_acquire);
+  if (__builtin_expect(cn > 0, 1)) {
+    const rt_block_chunk_t *c = &g_rt_block_chunks[cn - 1];
+    if (value >= c->start && value < c->end)
+      return ((value & 15u) == 0) && rt_block_chunk_live_get(c, value);
+    if (cn > 1) {
+      c = &g_rt_block_chunks[0];
+      if (value >= c->start && value < c->end)
+        return ((value & 15u) == 0) && rt_block_chunk_live_get(c, value);
+    }
+  }
   size_t cache_slot = rt_managed_ptr_cache_slot(value);
   uint32_t gen = atomic_load_explicit(&rt_managed_ptr_cache_gen[cache_slot],
                                       memory_order_acquire);
   rt_managed_ptr_cache_entry_t *cached = &rt_managed_ptr_cache[cache_slot];
   if (cached->value == value && cached->gen == gen)
     return cached->has != 0;
-  size_t start = rt_managed_ptr_slot(value);
   bool has = false;
-  for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
-    uintptr_t seen = atomic_load_explicit(
-        &rt_managed_ptr_table[(start + probe) & RT_MANAGED_PTR_TABLE_MASK],
-        memory_order_acquire);
-    if (seen == value) {
-      has = true;
-      break;
+  const rt_block_chunk_t *chunk = rt_block_chunk_find(value);
+  if (chunk) {
+    has = ((value & 15u) == 0) && rt_block_chunk_live_get(chunk, value);
+  } else {
+    size_t start = rt_managed_ptr_slot(value);
+    for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
+      uintptr_t seen = atomic_load_explicit(
+          &rt_managed_ptr_table[(start + probe) & RT_MANAGED_PTR_TABLE_MASK],
+          memory_order_acquire);
+      if (seen == value) {
+        has = true;
+        break;
+      }
+      if (!seen)
+        break;
     }
-    if (!seen)
-      break;
   }
   /*
    * `gen` was read before the table: a change since then left a newer
@@ -409,7 +501,9 @@ static inline int ny_mem_pool_slot(size_t total) {
    */
   if (NY_WITH_ASAN)
     return -1;
-  for (int i = 0; i < (int)NUM_POOLS; i++) {
+  if (__builtin_expect(total <= 128, 1))
+    return total <= 32 ? 0 : (int)((total - 17) >> 4);
+  for (int i = 7; i < (int)NUM_POOLS; i++) {
     if (total <= g_pool_sizes[i])
       return i;
   }
@@ -934,20 +1028,25 @@ static int64_t sh_traced_alloc(size_t body_in) {
  * pool teardown never hands an interior pointer to free(); each chunk is
  * registered with the map oracle once, covering every block it contains.
  */
-#define RT_BLOCK_CHUNK_BYTES ((size_t)1 << 20)
-#define RT_BLOCK_CHUNK_MAX 2048u
-typedef struct rt_block_chunk {
-  uintptr_t start;
-  uintptr_t end;
-} rt_block_chunk_t;
-static rt_block_chunk_t g_rt_block_chunks[RT_BLOCK_CHUNK_MAX];
-static _Atomic size_t g_rt_block_chunk_n;
-static atomic_flag g_rt_block_chunk_lock = ATOMIC_FLAG_INIT;
-static _Thread_local unsigned char *g_rt_block_bump;
-static _Thread_local size_t g_rt_block_left;
+static const rt_block_chunk_t *rt_block_chunk_find(uintptr_t p) {
+  rt_alloc_tls_t *tls = rt_alloc_tls_get();
+  const rt_block_chunk_t *last = tls->block_last_chunk;
+  if (last && p >= last->start && p < last->end)
+    return last;
+  size_t n = atomic_load_explicit(&g_rt_block_chunk_n, memory_order_acquire);
+  for (size_t i = n; i-- > 0;) {
+    const rt_block_chunk_t *c = &g_rt_block_chunks[i];
+    if (p >= c->start && p < c->end) {
+      tls->block_last_chunk = c;
+      return c;
+    }
+  }
+  return NULL;
+}
 
-static bool rt_block_chunk_register(uintptr_t start, size_t bytes) {
-  bool ok = false;
+static const rt_block_chunk_t *
+rt_block_chunk_register(uintptr_t start, size_t bytes, _Atomic(uint8_t) *live) {
+  const rt_block_chunk_t *reg = NULL;
   while (atomic_flag_test_and_set_explicit(&g_rt_block_chunk_lock,
                                            memory_order_acquire)) {
   }
@@ -955,46 +1054,99 @@ static bool rt_block_chunk_register(uintptr_t start, size_t bytes) {
   if (n < RT_BLOCK_CHUNK_MAX) {
     g_rt_block_chunks[n].start = start;
     g_rt_block_chunks[n].end = start + bytes;
+    g_rt_block_chunks[n].live = live;
     atomic_store_explicit(&g_rt_block_chunk_n, n + 1, memory_order_release);
-    ok = true;
+    reg = &g_rt_block_chunks[n];
   }
   atomic_flag_clear_explicit(&g_rt_block_chunk_lock, memory_order_release);
-  return ok;
+  if (reg) {
+    uintptr_t lo = start;
+    uintptr_t hi = start + bytes;
+    rt_managed_ptr_writer_lock();
+    if (lo < atomic_load_explicit(&rt_managed_ptr_lo, memory_order_relaxed))
+      atomic_store_explicit(&rt_managed_ptr_lo, lo, memory_order_release);
+    if (hi > atomic_load_explicit(&rt_managed_ptr_hi, memory_order_relaxed))
+      atomic_store_explicit(&rt_managed_ptr_hi, hi, memory_order_release);
+    rt_managed_ptr_writer_unlock();
+    rt_managed_ptr_cache_invalidate_all();
+  }
+  return reg;
 }
 
 static bool rt_block_chunk_owns(uintptr_t p) {
-  size_t n = atomic_load_explicit(&g_rt_block_chunk_n, memory_order_acquire);
-  for (size_t i = 0; i < n; ++i)
-    if (p >= g_rt_block_chunks[i].start && p < g_rt_block_chunks[i].end)
-      return true;
-  return false;
+  return rt_block_chunk_find(p) != NULL;
 }
 
-static void *rt_block_bump_alloc(size_t bytes) {
-  bytes = (bytes + 15u) & ~(size_t)15u;
-  if (bytes == 0)
-    return NULL;
-  if (g_rt_block_left < bytes) {
-    size_t chunk = RT_BLOCK_CHUNK_BYTES;
-    if (chunk < bytes) {
-      if (bytes > SIZE_MAX - (RT_BLOCK_CHUNK_BYTES - 1))
-        return NULL;
-      chunk = (bytes + RT_BLOCK_CHUNK_BYTES - 1) & ~(RT_BLOCK_CHUNK_BYTES - 1);
-    }
-    unsigned char *fresh = (unsigned char *)ny_aligned_alloc(16, chunk);
-    if (!fresh)
+static __attribute__((noinline)) void *
+rt_block_bump_refill(rt_alloc_tls_t *tls, size_t bytes) {
+  /*
+   * Start each thread with a compact 256 KiB chunk so small programs keep
+   * low RSS; once a thread allocates past that, step up to 4 MiB mmap chunks
+   * so THP can back the interior with 2 MiB hugepages and cut page faults.
+   */
+  size_t chunk =
+      tls->block_chunks_made >= 1u ? (RT_BLOCK_CHUNK_BYTES * 4u)
+                                   : ((size_t)256 << 10);
+  if (chunk < bytes) {
+    if (bytes > SIZE_MAX - (RT_BLOCK_CHUNK_BYTES - 1))
       return NULL;
-    if (!rt_block_chunk_register((uintptr_t)fresh, chunk)) {
-      ny_aligned_free(fresh);
-      return NULL;
-    }
-    rt_map_oracle_add((uintptr_t)fresh, chunk);
-    g_rt_block_bump = fresh;
-    g_rt_block_left = chunk;
+    chunk = (bytes + RT_BLOCK_CHUNK_BYTES - 1) & ~(RT_BLOCK_CHUNK_BYTES - 1);
   }
-  unsigned char *p = g_rt_block_bump;
-  g_rt_block_bump += bytes;
-  g_rt_block_left -= bytes;
+  size_t live_bytes = chunk >> 4;
+  if (live_bytes > SIZE_MAX - chunk)
+    return NULL;
+  size_t total_map = live_bytes + chunk;
+  unsigned char *raw = NULL;
+  bool mapped = false;
+#if !defined(_WIN32) && defined(MAP_ANONYMOUS)
+  void *m = mmap(NULL, total_map, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (m != MAP_FAILED) {
+    raw = (unsigned char *)m;
+    mapped = true;
+#if defined(MADV_HUGEPAGE)
+    if (chunk >= ((size_t)2 << 20))
+      (void)madvise(raw, total_map, MADV_HUGEPAGE);
+#endif
+  }
+#endif
+  if (!raw) {
+    raw = (unsigned char *)ny_aligned_alloc(16, total_map);
+    if (!raw)
+      return NULL;
+    memset(raw, 0, live_bytes);
+  }
+  unsigned char *fresh = raw + live_bytes;
+  const rt_block_chunk_t *reg = rt_block_chunk_register(
+      (uintptr_t)fresh, chunk, (_Atomic(uint8_t) *)raw);
+  if (!reg) {
+#if !defined(_WIN32) && defined(MAP_ANONYMOUS)
+    if (mapped)
+      munmap(raw, total_map);
+    else
+#endif
+      ny_aligned_free(raw);
+    return NULL;
+  }
+  rt_map_oracle_add((uintptr_t)fresh, chunk);
+  tls->block_bump = fresh + bytes;
+  tls->block_left = chunk - bytes;
+  tls->block_cur_chunk = reg;
+  tls->block_last_chunk = reg;
+  if (tls->block_chunks_made < UINT32_MAX)
+    tls->block_chunks_made++;
+  return fresh;
+}
+
+static inline void *rt_block_bump_alloc_tls(rt_alloc_tls_t *tls, size_t bytes) {
+  bytes = (bytes + 15u) & ~(size_t)15u;
+  if (__builtin_expect(bytes == 0, 0))
+    return NULL;
+  if (__builtin_expect(tls->block_left < bytes, 0))
+    return rt_block_bump_refill(tls, bytes);
+  unsigned char *p = tls->block_bump;
+  tls->block_bump = p + bytes;
+  tls->block_left -= bytes;
   return p;
 }
 
@@ -1017,7 +1169,7 @@ static void *rt_block_bump_alloc(size_t bytes) {
  */
 static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
   int64_t n = is_int(size) ? (size >> 1) : size;
-  if (n < 0)
+  if (__builtin_expect(n < 0, 0))
     return 0;
   size_t body = (size_t)n;
   body = (body + 15) & ~15ULL;
@@ -1025,19 +1177,31 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
 
   int slot = ny_mem_pool_slot(total);
   size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
+  rt_alloc_tls_t *tls = rt_alloc_tls_get();
   void *p = NULL;
   bool bump = false;
-  if (slot >= 0 && g_mem_pools[slot]) {
-    p = g_mem_pools[slot];
-    g_mem_pools[slot] = g_mem_pools[slot]->next;
+  if (slot >= 0 && tls->pools[slot]) {
+    p = tls->pools[slot];
+    tls->pools[slot] = tls->pools[slot]->next;
   } else {
-    p = slot >= 0 ? rt_fc_block_alloc(fill_size) : NULL;
+    if (__builtin_expect(
+            atomic_load_explicit(&g_rt_fc_active, memory_order_relaxed), 0) &&
+        slot >= 0)
+      p = rt_fc_block_alloc(fill_size);
     if (!p && slot >= 0) {
-      p = rt_block_bump_alloc(fill_size);
+      p = rt_block_bump_alloc_tls(tls, fill_size);
       bump = p != NULL;
     }
-    if (!p)
+    if (__builtin_expect(!p, 0)) {
       p = ny_aligned_alloc(16, fill_size);
+#if !defined(_WIN32) && defined(MADV_HUGEPAGE)
+      if (p && fill_size >= ((size_t)2 << 20)) {
+        uintptr_t base = (uintptr_t)p & ~(uintptr_t)4095u;
+        size_t span = fill_size + ((uintptr_t)p - base);
+        (void)madvise((void *)base, span, MADV_HUGEPAGE);
+      }
+#endif
+    }
   }
 
   if (__builtin_expect(!p, 0))
@@ -1058,12 +1222,22 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
   atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
-  if (!bump)
-    rt_map_oracle_add((uintptr_t)p, (size_t)total);
-  rt_managed_ptr_register((uintptr_t)res);
-  rt_rc_adopt_new(res);
+  if (__builtin_expect(bump, 1)) {
+    rt_block_chunk_live_set(tls->block_cur_chunk, (uintptr_t)res, 1u);
+  } else {
+    const rt_block_chunk_t *chunk = rt_block_chunk_find((uintptr_t)res);
+    if (chunk) {
+      rt_block_chunk_live_set(chunk, (uintptr_t)res, 1u);
+      rt_managed_ptr_cache_invalidate((uintptr_t)res);
+    } else {
+      rt_map_oracle_add((uintptr_t)p, (size_t)total);
+      rt_managed_ptr_register((uintptr_t)res);
+    }
+  }
+  if (__builtin_expect(g_rc_enabled != 0, 0))
+    rt_rc_adopt_new(res);
   rt_fc_track((uintptr_t)res, RT_FC_KIND_MANAGED, total);
-  if (mem_trace_enabled() && total > 1024 * 1024) {
+  if (__builtin_expect(total > 1024 * 1024 && mem_trace_enabled(), 0)) {
     fprintf(stderr, "[mem] large alloc %p (body=%zu, total=%zu)\n",
             (void *)(uintptr_t)res, body, total);
   }
@@ -1075,11 +1249,11 @@ int64_t rt_malloc(int64_t size) { return rt_malloc_impl(size, 1); }
 int64_t rt_malloc_uninit(int64_t size) { return rt_malloc_impl(size, 0); }
 
 int64_t rt_malloc_i64(int64_t size) {
-  if (size < 0)
+  if (__builtin_expect(size < 0, 0))
     return 0;
   if (__builtin_expect(rt_oom_inject(), 0))
     return 0;
-  if (sh_enabled())
+  if (__builtin_expect(sh_enabled(), 0))
     return sh_traced_alloc((size_t)size);
   size_t body = (size_t)size;
   body = (body + 15) & ~15ULL;
@@ -1087,19 +1261,31 @@ int64_t rt_malloc_i64(int64_t size) {
 
   int slot = ny_mem_pool_slot(total);
   size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
+  rt_alloc_tls_t *tls = rt_alloc_tls_get();
   void *p = NULL;
   bool bump = false;
-  if (slot >= 0 && g_mem_pools[slot]) {
-    p = g_mem_pools[slot];
-    g_mem_pools[slot] = g_mem_pools[slot]->next;
+  if (slot >= 0 && tls->pools[slot]) {
+    p = tls->pools[slot];
+    tls->pools[slot] = tls->pools[slot]->next;
   } else {
-    p = slot >= 0 ? rt_fc_block_alloc(fill_size) : NULL;
+    if (__builtin_expect(
+            atomic_load_explicit(&g_rt_fc_active, memory_order_relaxed), 0) &&
+        slot >= 0)
+      p = rt_fc_block_alloc(fill_size);
     if (!p && slot >= 0) {
-      p = rt_block_bump_alloc(fill_size);
+      p = rt_block_bump_alloc_tls(tls, fill_size);
       bump = p != NULL;
     }
-    if (!p)
+    if (__builtin_expect(!p, 0)) {
       p = ny_aligned_alloc(16, fill_size);
+#if !defined(_WIN32) && defined(MADV_HUGEPAGE)
+      if (p && fill_size >= ((size_t)2 << 20)) {
+        uintptr_t base = (uintptr_t)p & ~(uintptr_t)4095u;
+        size_t span = fill_size + ((uintptr_t)p - base);
+        (void)madvise((void *)base, span, MADV_HUGEPAGE);
+      }
+#endif
+    }
   }
 
   if (__builtin_expect(!p, 0))
@@ -1120,11 +1306,21 @@ int64_t rt_malloc_i64(int64_t size) {
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
   atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
-  if (!bump)
-    rt_map_oracle_add((uintptr_t)p, (size_t)total);
-  rt_managed_ptr_register((uintptr_t)res);
-  rt_rc_adopt_new(res);
-  if (mem_trace_enabled() && total > 1024 * 1024) {
+  if (__builtin_expect(bump, 1)) {
+    rt_block_chunk_live_set(tls->block_cur_chunk, (uintptr_t)res, 1u);
+  } else {
+    const rt_block_chunk_t *chunk = rt_block_chunk_find((uintptr_t)res);
+    if (chunk) {
+      rt_block_chunk_live_set(chunk, (uintptr_t)res, 1u);
+      rt_managed_ptr_cache_invalidate((uintptr_t)res);
+    } else {
+      rt_map_oracle_add((uintptr_t)p, (size_t)total);
+      rt_managed_ptr_register((uintptr_t)res);
+    }
+  }
+  if (__builtin_expect(g_rc_enabled != 0, 0))
+    rt_rc_adopt_new(res);
+  if (__builtin_expect(total > 1024 * 1024 && mem_trace_enabled(), 0)) {
     fprintf(stderr, "[mem] large alloc %p (body=%zu, total=%zu)\n",
             (void *)(uintptr_t)res, body, total);
   }
@@ -1526,8 +1722,9 @@ static int64_t rt_free_direct(int64_t ptr) {
     int slot = ny_mem_pool_slot(total);
     if (slot >= 0) {
       mem_pool_node_t *node = (mem_pool_node_t *)base;
-      node->next = g_mem_pools[slot];
-      g_mem_pools[slot] = node;
+      rt_alloc_tls_t *tls = rt_alloc_tls_get();
+      node->next = tls->pools[slot];
+      tls->pools[slot] = node;
       return 1;
     }
 #ifndef _WIN32
@@ -1732,9 +1929,10 @@ int64_t rt_drop_owned_slot(int64_t slot_ptr) {
 
 int64_t rt_pool_release(void) {
   int64_t freed_count = 0;
+  rt_alloc_tls_t *tls = rt_alloc_tls_get();
   for (size_t i = 0; i < NUM_POOLS; i++) {
-    mem_pool_node_t *node = g_mem_pools[i];
-    g_mem_pools[i] = NULL;
+    mem_pool_node_t *node = tls->pools[i];
+    tls->pools[i] = NULL;
     while (node) {
       mem_pool_node_t *next = node->next;
       if (rt_block_chunk_owns((uintptr_t)node))
@@ -2529,6 +2727,7 @@ int64_t rt_atomic_cas64(int64_t addr, int64_t idx, int64_t expected,
  * Platforms without this machinery never start recording and behave as
  * before.
  */
+_Atomic(int) g_rt_fc_active = 0;
 __thread int g_rt_fc_tracking = 0;
 
 #if defined(__linux__) && defined(__GLIBC__) && !NY_WITH_ASAN
@@ -4006,6 +4205,14 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
     fc_add_exclude((uintptr_t)rt_managed_ptr_cache,
                    (uintptr_t)rt_managed_ptr_cache +
                        sizeof(rt_managed_ptr_cache));
+    fc_add_exclude((uintptr_t)g_rt_block_chunks,
+                   (uintptr_t)g_rt_block_chunks + sizeof(g_rt_block_chunks));
+#if defined(__linux__) && defined(__x86_64__) &&                               \
+    (defined(__GNUC__) || defined(__clang__))
+    fc_add_exclude((uintptr_t)&g_rt_main_alloc_tls,
+                   (uintptr_t)&g_rt_main_alloc_tls +
+                       sizeof(g_rt_main_alloc_tls));
+#endif
     /*
      * Everything below the caller's frame on this stack is dead: frames
      * that already returned (full of stale references to this frame's
@@ -4238,6 +4445,7 @@ static bool fc_start(void) {
     pthread_attr_destroy(&attr);
   }
   fc_state = 1;
+  atomic_store_explicit(&g_rt_fc_active, 1, memory_order_release);
   g_rt_fc_tracking = 1;
   return true;
 }

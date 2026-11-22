@@ -4,7 +4,7 @@ shape gui-window-state {
   features ["ny", "render", "gui", "window"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 180
   expect_stdout "GUI-WINDOW-STATE-OK"
   source ny <<'NY'

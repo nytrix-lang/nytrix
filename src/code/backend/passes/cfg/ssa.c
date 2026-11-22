@@ -113,31 +113,9 @@ static bool cfg_add_successor(size_t *successors, size_t *counts, size_t from,
   return true;
 }
 
-static bool cfg_dominates_bit(const nyr_cfg_t *cfg, size_t block,
-                              size_t dominator) {
-  if (!cfg || block >= cfg->block_count || dominator >= cfg->block_count ||
-      !cfg->dominators || cfg->dominator_words == 0)
-    return false;
-  return (cfg->dominators[block * cfg->dominator_words + dominator / 64] &
-          (UINT64_C(1) << (dominator % 64))) != 0;
-}
-
-static bool cfg_bit_get(const uint64_t *bits, size_t words, size_t row,
-                        size_t column) {
-  return bits && words &&
-         (bits[row * words + column / 64] & (UINT64_C(1) << (column % 64))) !=
-             0;
-}
-
 static void cfg_bit_set(uint64_t *bits, size_t words, size_t row,
                         size_t column) {
   bits[row * words + column / 64] |= UINT64_C(1) << (column % 64);
-}
-
-static void cfg_set_dominates_bit(nyr_cfg_t *cfg, size_t block,
-                                  size_t dominator) {
-  cfg->dominators[block * cfg->dominator_words + dominator / 64] |=
-      UINT64_C(1) << (dominator % 64);
 }
 
 void nyr_cfg_free(nyr_cfg_t *cfg) {
@@ -156,27 +134,33 @@ void nyr_cfg_free(nyr_cfg_t *cfg) {
   free(cfg->dominators);
   free(cfg->frontiers);
   free(cfg->idom);
+  free(cfg->dom_tin);
+  free(cfg->dom_tout);
   *cfg = (nyr_cfg_t){0};
 }
 
-bool nyr_cfg_reverse_postorder(const nyr_cfg_t *cfg, size_t **out_blocks,
-                               size_t *out_len) {
-  if (!out_blocks || !out_len)
-    return false;
-  *out_blocks = NULL;
-  *out_len = 0;
-  if (!cfg || cfg->block_count == 0)
-    return true;
+static bool nyr_cfg_reverse_postorder_into(const nyr_cfg_t *cfg,
+                                           size_t *rpo_out, size_t *out_len) {
   size_t count = cfg->block_count;
-  bool *seen = ny_calloc_array(count, sizeof(*seen));
-  size_t *stack = ny_malloc_array(count, sizeof(*stack));
-  size_t *next_succ = ny_calloc_array(count, sizeof(*next_succ));
-  size_t *post = ny_malloc_array(count, sizeof(*post));
+  bool seen_s[256];
+  size_t stack_s[256], next_succ_s[256], post_s[256];
+  bool heap = count > 256;
+  bool *seen = heap ? ny_calloc_array(count, sizeof(*seen)) : seen_s;
+  size_t *stack = heap ? ny_malloc_array(count, sizeof(*stack)) : stack_s;
+  size_t *next_succ =
+      heap ? ny_calloc_array(count, sizeof(*next_succ)) : next_succ_s;
+  size_t *post = heap ? ny_malloc_array(count, sizeof(*post)) : post_s;
+  if (!heap) {
+    memset(seen_s, 0, count * sizeof(*seen_s));
+    memset(next_succ_s, 0, count * sizeof(*next_succ_s));
+  }
   if (!seen || !stack || !next_succ || !post) {
-    free(seen);
-    free(stack);
-    free(next_succ);
-    free(post);
+    if (heap) {
+      free(seen);
+      free(stack);
+      free(next_succ);
+      free(post);
+    }
     return false;
   }
   size_t depth = 0;
@@ -201,20 +185,34 @@ bool nyr_cfg_reverse_postorder(const nyr_cfg_t *cfg, size_t **out_blocks,
     post[post_len++] = block;
     --depth;
   }
-  size_t *rpo = ny_malloc_array(post_len, sizeof(*rpo));
-  if (!rpo) {
+  for (size_t i = 0; i < post_len; ++i)
+    rpo_out[i] = post[post_len - 1 - i];
+  if (heap) {
     free(seen);
     free(stack);
     free(next_succ);
     free(post);
+  }
+  *out_len = post_len;
+  return true;
+}
+
+bool nyr_cfg_reverse_postorder(const nyr_cfg_t *cfg, size_t **out_blocks,
+                               size_t *out_len) {
+  if (!out_blocks || !out_len)
+    return false;
+  *out_blocks = NULL;
+  *out_len = 0;
+  if (!cfg || cfg->block_count == 0)
+    return true;
+  size_t *rpo = ny_malloc_array(cfg->block_count, sizeof(*rpo));
+  if (!rpo)
+    return false;
+  size_t post_len = 0;
+  if (!nyr_cfg_reverse_postorder_into(cfg, rpo, &post_len)) {
+    free(rpo);
     return false;
   }
-  for (size_t i = 0; i < post_len; ++i)
-    rpo[i] = post[post_len - 1 - i];
-  free(seen);
-  free(stack);
-  free(next_succ);
-  free(post);
   *out_blocks = rpo;
   *out_len = post_len;
   return true;
@@ -226,9 +224,14 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     return false;
   nyr_cfg_free(cfg);
   size_t n = f->len;
-  bool *boundary = ny_calloc_array(n + 1, sizeof(*boundary));
+  bool boundary_s[2049];
+  bool boundary_heap = n + 1 > sizeof(boundary_s);
+  bool *boundary =
+      boundary_heap ? ny_calloc_array(n + 1, sizeof(*boundary)) : boundary_s;
   if (!boundary)
     return false;
+  if (!boundary_heap)
+    memset(boundary_s, 0, (n + 1) * sizeof(*boundary_s));
   boundary[0] = true;
   for (size_t i = 0; i < n; ++i) {
     if (f->data[i].op == NYIR_LABEL)
@@ -246,14 +249,16 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     if (boundary[i])
       ++blocks;
   if (blocks == 0) {
-    free(boundary);
+    if (boundary_heap)
+      free(boundary);
     return true;
   }
   /*
    * CFG topology is bounded by two outgoing edges per block.
    */
   if (blocks > SIZE_MAX - 63 || blocks > SIZE_MAX / 2) {
-    free(boundary);
+    if (boundary_heap)
+      free(boundary);
     return false;
   }
   cfg->block_count = blocks;
@@ -264,7 +269,8 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
   cfg->reachable = ny_calloc_array(blocks, sizeof(*cfg->reachable));
   if (!cfg->block_start || !cfg->block_end || !cfg->block_label ||
       (n && !cfg->inst_block) || !cfg->reachable) {
-    free(boundary);
+    if (boundary_heap)
+      free(boundary);
     nyr_cfg_free(cfg);
     return false;
   }
@@ -280,7 +286,8 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i)
       cfg->inst_block[i] = b;
   }
-  free(boundary);
+  if (boundary_heap)
+    free(boundary);
   nyr_label_map_t labels = {0};
   if (!cfg_label_map_init(&labels, blocks)) {
     nyr_cfg_free(cfg);
@@ -300,11 +307,23 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     nyr_cfg_free(cfg);
     return false;
   }
-  size_t *successors = ny_calloc_array(successor_cap, sizeof(*successors));
-  size_t *successor_counts = ny_calloc_array(blocks, sizeof(*successor_counts));
+  size_t successors_s[512], successor_counts_s[256];
+  bool succ_heap = blocks > 256;
+  size_t *successors =
+      succ_heap ? ny_calloc_array(successor_cap, sizeof(*successors))
+                : successors_s;
+  size_t *successor_counts =
+      succ_heap ? ny_calloc_array(blocks, sizeof(*successor_counts))
+                : successor_counts_s;
+  if (!succ_heap) {
+    memset(successors_s, 0, successor_cap * sizeof(*successors_s));
+    memset(successor_counts_s, 0, blocks * sizeof(*successor_counts_s));
+  }
   if (!successors || !successor_counts) {
-    free(successors);
-    free(successor_counts);
+    if (succ_heap) {
+      free(successors);
+      free(successor_counts);
+    }
     cfg_label_map_free(&labels);
     nyr_cfg_free(cfg);
     return false;
@@ -321,8 +340,10 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       int to = cfg_label_map_find(&labels, target_label);
       if (to >= 0 &&
           !cfg_add_successor(successors, successor_counts, b, (size_t)to)) {
-        free(successors);
-        free(successor_counts);
+        if (succ_heap) {
+          free(successors);
+          free(successor_counts);
+        }
         cfg_label_map_free(&labels);
         nyr_cfg_free(cfg);
         return false;
@@ -331,8 +352,10 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     if (!term || (term->op != NYIR_BR && term->op != NYIR_RET)) {
       if (b + 1 < blocks &&
           !cfg_add_successor(successors, successor_counts, b, b + 1)) {
-        free(successors);
-        free(successor_counts);
+        if (succ_heap) {
+          free(successors);
+          free(successor_counts);
+        }
         cfg_label_map_free(&labels);
         nyr_cfg_free(cfg);
         return false;
@@ -343,8 +366,10 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
   cfg->succ_offsets = ny_calloc_array(blocks + 1, sizeof(*cfg->succ_offsets));
   cfg->pred_offsets = ny_calloc_array(blocks + 1, sizeof(*cfg->pred_offsets));
   if (!cfg->succ_offsets || !cfg->pred_offsets) {
-    free(successors);
-    free(successor_counts);
+    if (succ_heap) {
+      free(successors);
+      free(successor_counts);
+    }
     nyr_cfg_free(cfg);
     return false;
   }
@@ -365,15 +390,21 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       edge_count ? ny_calloc_array(edge_count, sizeof(*cfg->pred_blocks))
                  : NULL;
   if (edge_count && (!cfg->succ_blocks || !cfg->pred_blocks)) {
-    free(successors);
-    free(successor_counts);
+    if (succ_heap) {
+      free(successors);
+      free(successor_counts);
+    }
     nyr_cfg_free(cfg);
     return false;
   }
-  size_t *pred_next = ny_malloc_array(blocks, sizeof(*pred_next));
+  size_t pred_next_s[256];
+  size_t *pred_next =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*pred_next)) : pred_next_s;
   if (!pred_next) {
-    free(successors);
-    free(successor_counts);
+    if (succ_heap) {
+      free(successors);
+      free(successor_counts);
+    }
     nyr_cfg_free(cfg);
     return false;
   }
@@ -384,10 +415,14 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       cfg->succ_blocks[cfg->succ_offsets[from] + i] = to;
       cfg->pred_blocks[pred_next[to]++] = from;
     }
-  free(successors);
-  free(successor_counts);
-  free(pred_next);
-  size_t *reach_work = ny_malloc_array(blocks, sizeof(*reach_work));
+  if (succ_heap) {
+    free(successors);
+    free(successor_counts);
+    free(pred_next);
+  }
+  size_t reach_work_s[256];
+  size_t *reach_work =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*reach_work)) : reach_work_s;
   if (!reach_work) {
     nyr_cfg_free(cfg);
     return false;
@@ -406,48 +441,47 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       }
     }
   }
-  free(reach_work);
+  if (succ_heap)
+    free(reach_work);
   if (!need_dominance)
     return true;
-  cfg->dominator_words = (blocks + 63) / 64;
-  cfg->frontier_words = cfg->dominator_words;
-  if (cfg->dominator_words > SIZE_MAX / blocks) {
-    nyr_cfg_free(cfg);
-    return false;
-  }
-  cfg->dominators =
-      ny_calloc_array(blocks * cfg->dominator_words, sizeof(*cfg->dominators));
-  cfg->frontiers =
-      ny_calloc_array(blocks * cfg->frontier_words, sizeof(*cfg->frontiers));
   cfg->idom = ny_malloc_array(blocks, sizeof(*cfg->idom));
+  cfg->dom_tin = ny_calloc_array(blocks, sizeof(*cfg->dom_tin));
+  cfg->dom_tout = ny_calloc_array(blocks, sizeof(*cfg->dom_tout));
   cfg->backedge_edges =
       edge_count ? ny_calloc_array(edge_count, sizeof(*cfg->backedge_edges))
                  : NULL;
-  if (!cfg->dominators || !cfg->frontiers || !cfg->idom ||
+  if (!cfg->idom || !cfg->dom_tin || !cfg->dom_tout ||
       (edge_count && !cfg->backedge_edges)) {
     nyr_cfg_free(cfg);
     return false;
   }
   if (blocks == 1) {
     cfg->idom[0] = -1;
-    cfg_set_dominates_bit(cfg, 0, 0);
+    cfg->dom_tin[0] = 1;
+    cfg->dom_tout[0] = 1;
     return true;
   }
   /*
    * Solve immediate dominators in reverse postorder by intersecting ancestor
-   * chains (Cooper-Harvey-Kennedy). This avoids repeatedly intersecting whole
-   * bitset rows and then enumerating every strict dominator to recover idom.
-   * Materialize the public bitsets once, from the completed dominator tree.
+   * chains (Cooper-Harvey-Kennedy), then compute O(B) Euler-tour timestamps
+   * (dom_tin / dom_tout) on the dominator tree for O(1) dominance queries
+   * without allocating O(B^2) bitset matrices. Dominance frontiers are built
+   * lazily only when mem2reg actually inserts PHIs.
    */
-  size_t *rpo_blocks = NULL;
+  size_t rpo_blocks_s[256], rpo_position_s[256];
+  size_t *rpo_blocks =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*rpo_blocks)) : rpo_blocks_s;
+  size_t *rpo_position = succ_heap
+                             ? ny_malloc_array(blocks, sizeof(*rpo_position))
+                             : rpo_position_s;
   size_t rpo_len = 0;
-  if (!nyr_cfg_reverse_postorder(cfg, &rpo_blocks, &rpo_len)) {
-    nyr_cfg_free(cfg);
-    return false;
-  }
-  size_t *rpo_position = ny_malloc_array(blocks, sizeof(*rpo_position));
-  if (!rpo_position) {
-    free(rpo_blocks);
+  if (!rpo_blocks || !rpo_position ||
+      !nyr_cfg_reverse_postorder_into(cfg, rpo_blocks, &rpo_len)) {
+    if (succ_heap) {
+      free(rpo_position);
+      free(rpo_blocks);
+    }
     nyr_cfg_free(cfg);
     return false;
   }
@@ -455,9 +489,6 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     cfg->idom[b] = -1;
   for (size_t order = 0; order < rpo_len; ++order)
     rpo_position[rpo_blocks[order]] = order;
-  /*
-   * The entry is its own temporary root, so chain intersection terminates.
-   */
   cfg->idom[0] = 0;
   bool changed;
   do {
@@ -468,9 +499,6 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       for (size_t edge = cfg->pred_offsets[b]; edge < cfg->pred_offsets[b + 1];
            ++edge) {
         size_t p = cfg->pred_blocks[edge];
-        /*
-         * Ignore unreachable and not-yet-visited predecessors.
-         */
         if (cfg->idom[p] < 0)
           continue;
         if (dominator < 0) {
@@ -492,30 +520,91 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       }
     }
   } while (changed);
-  free(rpo_position);
-  /*
-   * Unreachable blocks retain self-only rows and idom=-1.
-   */
-  for (b = 0; b < blocks; ++b)
-    if (!cfg->reachable[b])
-      cfg_set_dominates_bit(cfg, b, b);
-  cfg_set_dominates_bit(cfg, 0, 0);
-  for (size_t order = 1; order < rpo_len; ++order) {
-    b = rpo_blocks[order];
-    memcpy(&cfg->dominators[b * cfg->dominator_words],
-           &cfg->dominators[(size_t)cfg->idom[b] * cfg->dominator_words],
-           cfg->dominator_words * sizeof(*cfg->dominators));
-    cfg_set_dominates_bit(cfg, b, b);
+  if (succ_heap) {
+    free(rpo_position);
+    free(rpo_blocks);
   }
   cfg->idom[0] = -1;
-  free(rpo_blocks);
+
+  int first_child_s[256], next_sib_s[256], stk_node_s[256], stk_child_s[256];
+  int *first_child =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*first_child)) : first_child_s;
+  int *next_sib =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*next_sib)) : next_sib_s;
+  int *stk_node =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*stk_node)) : stk_node_s;
+  int *stk_child =
+      succ_heap ? ny_malloc_array(blocks, sizeof(*stk_child)) : stk_child_s;
+  if (!first_child || !next_sib || !stk_node || !stk_child) {
+    if (succ_heap) {
+      free(first_child);
+      free(next_sib);
+      free(stk_node);
+      free(stk_child);
+    }
+    nyr_cfg_free(cfg);
+    return false;
+  }
+  for (b = 0; b < blocks; ++b) {
+    first_child[b] = -1;
+    next_sib[b] = -1;
+  }
+  for (b = 1; b < blocks; ++b) {
+    int p = cfg->idom[b];
+    if (cfg->reachable[b] && p >= 0 && (size_t)p < blocks) {
+      next_sib[b] = first_child[p];
+      first_child[p] = (int)b;
+    }
+  }
+  uint32_t timer = 0;
+  size_t sp = 0;
+  cfg->dom_tin[0] = ++timer;
+  stk_node[sp] = 0;
+  stk_child[sp] = first_child[0];
+  ++sp;
+  while (sp > 0) {
+    int c = stk_child[sp - 1];
+    if (c >= 0) {
+      stk_child[sp - 1] = next_sib[c];
+      cfg->dom_tin[c] = ++timer;
+      stk_node[sp] = c;
+      stk_child[sp] = first_child[c];
+      ++sp;
+    } else {
+      cfg->dom_tout[stk_node[sp - 1]] = timer;
+      --sp;
+    }
+  }
+  if (succ_heap) {
+    free(first_child);
+    free(next_sib);
+    free(stk_node);
+    free(stk_child);
+  }
+
   for (size_t pred = 0; pred < blocks; ++pred)
     for (size_t edge = cfg->succ_offsets[pred];
          edge < cfg->succ_offsets[pred + 1]; ++edge) {
       size_t succ = cfg->succ_blocks[edge];
-      cfg->backedge_edges[edge] = cfg_dominates_bit(cfg, pred, succ);
+      cfg->backedge_edges[edge] = nyr_cfg_dominates(cfg, succ, pred);
     }
-  for (b = 0; b < blocks; ++b) {
+  return true;
+}
+
+static bool nyr_cfg_build_frontiers(nyr_cfg_t *cfg) {
+  if (!cfg || cfg->block_count == 0)
+    return true;
+  if (cfg->frontiers)
+    return true;
+  size_t blocks = cfg->block_count;
+  cfg->frontier_words = (blocks + 63) / 64;
+  if (cfg->frontier_words > SIZE_MAX / blocks)
+    return false;
+  cfg->frontiers =
+      ny_calloc_array(blocks * cfg->frontier_words, sizeof(*cfg->frontiers));
+  if (!cfg->frontiers)
+    return false;
+  for (size_t b = 0; b < blocks; ++b) {
     size_t pred_count = cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
     if (pred_count < 2)
       continue;
@@ -601,7 +690,16 @@ bool nyr_prune_phis(nyr_func_t *f) {
 }
 
 bool nyr_cfg_dominates(const nyr_cfg_t *cfg, size_t dominator, size_t block) {
-  return cfg_dominates_bit(cfg, block, dominator);
+  if (!cfg || dominator >= cfg->block_count || block >= cfg->block_count ||
+      !cfg->dom_tin || !cfg->dom_tout)
+    return false;
+  if (dominator == block)
+    return true;
+  uint32_t d_in = cfg->dom_tin[dominator];
+  uint32_t b_in = cfg->dom_tin[block];
+  if (!d_in || !b_in)
+    return false;
+  return d_in <= b_in && cfg->dom_tout[block] <= cfg->dom_tout[dominator];
 }
 
 bool nyr_cfg_is_backedge(const nyr_cfg_t *cfg, size_t predecessor,
@@ -907,6 +1005,12 @@ static bool nyr_mem2reg_rollback(nyr_func_t *f, nyr_func_t *backup) {
   return false;
 }
 
+static _Thread_local bool nyr_mem2reg_phi_enabled = true;
+
+void nyr_set_mem2reg_phi_enabled(bool enable) {
+  nyr_mem2reg_phi_enabled = enable;
+}
+
 bool nyr_mem2reg(nyr_func_t *f) {
   if (!f)
     return false;
@@ -1138,9 +1242,13 @@ bool nyr_mem2reg(nyr_func_t *f) {
     if (!nyr_cfg_build(f, &cfg))
       goto oom;
   }
+  if (!nyr_cfg_build_frontiers(&cfg))
+    goto oom;
   /*
    * Pruned Cytron SSA: only place a PHI at a dominance frontier where this
    * local is live-in. This avoids join values that cannot be observed.
+   * Inserting PHIs at block heads only shifts instruction offsets; update
+   * block_start/block_end in place instead of rebuilding the CFG per local.
    */
   for (size_t l = 0; l < locals; ++l)
     if (promote[l]) {
@@ -1195,14 +1303,20 @@ bool nyr_mem2reg(nyr_func_t *f) {
         for (size_t x = 0; x < n; ++x)
           if (work[x]) {
             work[x] = false;
-            for (size_t y = 0; y < n; ++y)
-              if (cfg_bit_get(cfg.frontiers, cfg.frontier_words, x, y) &&
-                  live_in[y] && !placed[y]) {
-                placed[y] = true;
-                if (!defs[y])
-                  work[y] = true;
-                more = true;
+            const uint64_t *frow = cfg.frontiers + x * cfg.frontier_words;
+            for (size_t wi = 0; wi < cfg.frontier_words; ++wi) {
+              uint64_t bits = frow[wi];
+              while (bits) {
+                size_t y = wi * 64 + (size_t)__builtin_ctzll(bits);
+                bits &= bits - 1;
+                if (y < n && live_in[y] && !placed[y]) {
+                  placed[y] = true;
+                  if (!defs[y])
+                    work[y] = true;
+                  more = true;
+                }
               }
+            }
           }
       } while (more);
       for (size_t b = n; b-- > 0;)
@@ -1216,6 +1330,11 @@ bool nyr_mem2reg(nyr_func_t *f) {
            */
           if (pred_count == 0)
             continue;
+          if (!nyr_mem2reg_phi_enabled) {
+            promote[l] = false;
+            --requested_promotions;
+            break;
+          }
           size_t at = cfg.block_start[b];
           if (f->data[at].op == NYIR_LABEL)
             ++at;
@@ -1267,6 +1386,11 @@ bool nyr_mem2reg(nyr_func_t *f) {
             free(work);
             goto oom;
           }
+          cfg.block_end[b]++;
+          for (size_t k = b + 1; k < n; ++k) {
+            cfg.block_start[k]++;
+            cfg.block_end[k]++;
+          }
         }
       free(defs);
       free(uses);
@@ -1274,13 +1398,6 @@ bool nyr_mem2reg(nyr_func_t *f) {
       free(live_out);
       free(placed);
       free(work);
-      /*
-       * Insertions shift instruction indices; rebuild before considering the
-       * next local rather than reusing stale block boundaries.
-       */
-      nyr_cfg_free(&cfg);
-      if (!nyr_cfg_build(f, &cfg))
-        goto oom;
     }
   nyr_cfg_free(&cfg);
   if (!nyr_cfg_build(f, &cfg))

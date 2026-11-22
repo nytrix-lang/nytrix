@@ -101,6 +101,21 @@ static unsigned nyr_target_mach_avx2_cap(nyr_backend_target_t target) {
 #endif
 }
 
+static unsigned nyr_target_mach_bmi2_cap(nyr_backend_target_t target) {
+#if defined(__x86_64__) || defined(__i386__)
+  (void)target;
+#if defined(__GNUC__) || defined(__clang__)
+  __builtin_cpu_init();
+  if (__builtin_cpu_supports("bmi2"))
+    return NY_NATIVE_CAP_MACH_BMI2;
+#endif
+  return 0;
+#else
+  (void)target;
+  return 0;
+#endif
+}
+
 static void nyr_target_trace(const nyr_target_request_t *request,
                              const ny_native_target_info_t *info,
                              const char *decision) {
@@ -291,6 +306,7 @@ bool nyr_target_info_init(ny_native_target_info_t *info,
                  NY_NATIVE_CAP_MACH_SCALED_LEA |
                  nyr_target_mach_avx_cap(info->target) |
                  nyr_target_mach_avx2_cap(info->target) |
+                 nyr_target_mach_bmi2_cap(info->target) |
                  nyr_target_mach_fma_cap(info->target);
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;
@@ -318,6 +334,7 @@ bool nyr_target_info_init(ny_native_target_info_t *info,
                  NY_NATIVE_CAP_MACH_SCALED_LEA |
                  nyr_target_mach_avx_cap(info->target) |
                  nyr_target_mach_avx2_cap(info->target) |
+                 nyr_target_mach_bmi2_cap(info->target) |
                  nyr_target_mach_fma_cap(info->target);
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;

@@ -4647,6 +4647,33 @@ static void hm_scheme_index_put(ny_hm_state_t *hm, const char *name,
   hm->scheme_index[slot].scheme_plus_one = scheme_index + 1;
 }
 
+static void hm_note_scheme_index_needed(ny_hm_state_t *hm, size_t idx) {
+  if (!hm || !hm->track_needed_schemes || !hm->scheme_queued ||
+      !hm->scheme_worklist || idx >= hm->schemes.len)
+    return;
+  if (hm->scheme_queued[idx])
+    return;
+  hm->scheme_queued[idx] = 1;
+  if (hm->scheme_worklist_len < hm->scheme_worklist_cap)
+    hm->scheme_worklist[hm->scheme_worklist_len++] = idx;
+}
+
+static void hm_note_stmt_needed(ny_hm_state_t *hm, const stmt_t *stmt) {
+  if (!hm || !hm->track_needed_schemes || !stmt || !hm->scheme_stmt_keys ||
+      !hm->scheme_stmt_cap)
+    return;
+  size_t mask = hm->scheme_stmt_cap - 1u;
+  size_t pos = (((uintptr_t)stmt >> 4) * UINT64_C(0x9E3779B97F4A7C15) >> 32) &
+               mask;
+  while (hm->scheme_stmt_keys[pos]) {
+    if (hm->scheme_stmt_keys[pos] == stmt) {
+      hm_note_scheme_index_needed(hm, hm->scheme_stmt_vals[pos]);
+      return;
+    }
+    pos = (pos + 1u) & mask;
+  }
+}
+
 static ny_hm_scheme_t *hm_find_scheme(ny_hm_state_t *hm, const char *name) {
   if (!hm || !name)
     return NULL;
@@ -4656,7 +4683,11 @@ static ny_hm_scheme_t *hm_find_scheme(ny_hm_state_t *hm, const char *name) {
     while (hm->scheme_index[slot].name) {
       if (strcmp(hm->scheme_index[slot].name, name) == 0) {
         size_t index = hm->scheme_index[slot].scheme_plus_one - 1;
-        return index < hm->schemes.len ? &hm->schemes.data[index] : NULL;
+        if (index < hm->schemes.len) {
+          hm_note_scheme_index_needed(hm, index);
+          return &hm->schemes.data[index];
+        }
+        return NULL;
       }
       slot = (slot + 1) & mask;
     }
@@ -4665,8 +4696,10 @@ static ny_hm_scheme_t *hm_find_scheme(ny_hm_state_t *hm, const char *name) {
   for (size_t i = hm->schemes.len; i > 0; --i) {
     ny_hm_scheme_t *s = &hm->schemes.data[i - 1];
     if ((s->full_name && strcmp(s->full_name, name) == 0) ||
-        (s->name && strcmp(s->name, name) == 0))
+        (s->name && strcmp(s->name, name) == 0)) {
+      hm_note_scheme_index_needed(hm, i - 1);
       return s;
+    }
   }
   return NULL;
 }
@@ -8199,6 +8232,7 @@ static void hm_persist_named_call_target(ny_hm_state_t *hm, expr_t *call,
     return;
   call->semantic.canonical_callee = ny_intern_get(ny_intern_cstr(sig->name));
   call->semantic.canonical_callee_stmt = sig->stmt_t;
+  hm_note_stmt_needed(hm, sig->stmt_t);
 }
 
 static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -9574,6 +9608,73 @@ static bool hm_stmt_declares_nominal_type(const stmt_t *stmt,
  * impls; use the compiler's function-owner records as the evidence that this
  * name is an impl receiver rather than guessing from its spelling.
  */
+typedef struct hm_sem_rep_cache_slot_t {
+  uint64_t hash;
+  char *owner;
+  ny_sem_rep_t rep;
+} hm_sem_rep_cache_slot_t;
+
+static _Thread_local struct {
+  const ny_hm_state_t *hm;
+  const program_t *prog;
+  size_t funcs_len;
+  hm_sem_rep_cache_slot_t *slots;
+  size_t cap;
+  size_t len;
+  /* Pre-indexed set of impl owner names from hm->ctx->funcs. */
+  const char **impl_owners;
+  uint64_t *impl_owner_hashes;
+  size_t impl_owner_cap;
+} g_hm_sem_rep_cache;
+
+static void hm_sem_rep_cache_reset(const ny_hm_state_t *hm) {
+  if (g_hm_sem_rep_cache.slots) {
+    for (size_t i = 0; i < g_hm_sem_rep_cache.cap; ++i)
+      free(g_hm_sem_rep_cache.slots[i].owner);
+    free(g_hm_sem_rep_cache.slots);
+  }
+  free(g_hm_sem_rep_cache.impl_owners);
+  free(g_hm_sem_rep_cache.impl_owner_hashes);
+  memset(&g_hm_sem_rep_cache, 0, sizeof(g_hm_sem_rep_cache));
+  g_hm_sem_rep_cache.hm = hm;
+  g_hm_sem_rep_cache.prog = hm && hm->ctx ? hm->ctx->prog : NULL;
+  g_hm_sem_rep_cache.funcs_len = hm && hm->ctx ? hm->ctx->funcs.len : 0;
+  if (!hm || !hm->ctx || hm->ctx->funcs.len == 0)
+    return;
+  size_t cap = 256u;
+  while (cap < hm->ctx->funcs.len * 2u)
+    cap <<= 1u;
+  const char **owners = calloc(cap, sizeof(*owners));
+  uint64_t *hashes = calloc(cap, sizeof(*hashes));
+  if (!owners || !hashes) {
+    free(owners);
+    free(hashes);
+    return;
+  }
+  size_t mask = cap - 1u;
+  for (size_t i = 0; i < hm->ctx->funcs.len; ++i) {
+    const char *ow = hm->ctx->funcs.data[i].owner;
+    if (!ow || !*ow)
+      continue;
+    uint64_t h = ny_hash_name(ow, strlen(ow));
+    if (!h)
+      h = 1u;
+    size_t pos = (size_t)h & mask;
+    while (owners[pos]) {
+      if (hashes[pos] == h && strcmp(owners[pos], ow) == 0)
+        break;
+      pos = (pos + 1u) & mask;
+    }
+    if (!owners[pos]) {
+      owners[pos] = ow;
+      hashes[pos] = h;
+    }
+  }
+  g_hm_sem_rep_cache.impl_owners = owners;
+  g_hm_sem_rep_cache.impl_owner_hashes = hashes;
+  g_hm_sem_rep_cache.impl_owner_cap = cap;
+}
+
 static ny_sem_rep_t hm_semantic_rep_in_context(ny_hm_state_t *hm,
                                                const char *type_name) {
   ny_sem_rep_t rep = hm_semantic_rep(type_name);
@@ -9583,20 +9684,86 @@ static ny_sem_rep_t hm_semantic_rep_in_context(ny_hm_state_t *hm,
   const char *owner = type_name;
   while (*owner == '?')
     ++owner;
-  bool has_impl_owner = false;
-  for (size_t i = 0; i < hm->ctx->funcs.len; ++i) {
-    const ny_tp_func_fact_t *fact = &hm->ctx->funcs.data[i];
-    if (fact->owner && strcmp(fact->owner, owner) == 0) {
-      has_impl_owner = true;
-      break;
+  if (g_hm_sem_rep_cache.hm != hm ||
+      g_hm_sem_rep_cache.prog != hm->ctx->prog ||
+      g_hm_sem_rep_cache.funcs_len != hm->ctx->funcs.len)
+    hm_sem_rep_cache_reset(hm);
+  uint64_t h = ny_hash_name(owner, strlen(owner));
+  if (!h)
+    h = 1u;
+  if (g_hm_sem_rep_cache.slots && g_hm_sem_rep_cache.cap) {
+    size_t mask = g_hm_sem_rep_cache.cap - 1u;
+    size_t pos = (size_t)h & mask;
+    for (; g_hm_sem_rep_cache.slots[pos].hash; pos = (pos + 1u) & mask) {
+      if (g_hm_sem_rep_cache.slots[pos].hash == h &&
+          strcmp(g_hm_sem_rep_cache.slots[pos].owner, owner) == 0)
+        return g_hm_sem_rep_cache.slots[pos].rep;
     }
   }
-  if (!has_impl_owner)
-    return rep;
-  for (size_t i = 0; i < hm->ctx->prog->body.len; ++i)
-    if (hm_stmt_declares_nominal_type(hm->ctx->prog->body.data[i], owner, NULL))
-      return rep;
-  return NY_SEM_REP_OBJECT;
+  bool has_impl_owner = false;
+  if (g_hm_sem_rep_cache.impl_owners && g_hm_sem_rep_cache.impl_owner_cap) {
+    size_t mask = g_hm_sem_rep_cache.impl_owner_cap - 1u;
+    size_t pos = (size_t)h & mask;
+    while (g_hm_sem_rep_cache.impl_owners[pos]) {
+      if (g_hm_sem_rep_cache.impl_owner_hashes[pos] == h &&
+          strcmp(g_hm_sem_rep_cache.impl_owners[pos], owner) == 0) {
+        has_impl_owner = true;
+        break;
+      }
+      pos = (pos + 1u) & mask;
+    }
+  } else {
+    for (size_t i = 0; i < hm->ctx->funcs.len; ++i) {
+      const ny_tp_func_fact_t *fact = &hm->ctx->funcs.data[i];
+      if (fact->owner && strcmp(fact->owner, owner) == 0) {
+        has_impl_owner = true;
+        break;
+      }
+    }
+  }
+  ny_sem_rep_t out = rep;
+  if (has_impl_owner) {
+    out = NY_SEM_REP_OBJECT;
+    for (size_t i = 0; i < hm->ctx->prog->body.len; ++i) {
+      if (hm_stmt_declares_nominal_type(hm->ctx->prog->body.data[i], owner,
+                                        NULL)) {
+        out = rep;
+        break;
+      }
+    }
+  }
+  if ((g_hm_sem_rep_cache.len + 1u) * 10u >= g_hm_sem_rep_cache.cap * 7u) {
+    size_t ncap =
+        g_hm_sem_rep_cache.cap ? g_hm_sem_rep_cache.cap * 2u : 256u;
+    hm_sem_rep_cache_slot_t *nslots = calloc(ncap, sizeof(*nslots));
+    if (nslots) {
+      size_t nmask = ncap - 1u;
+      for (size_t i = 0; i < g_hm_sem_rep_cache.cap; ++i) {
+        if (!g_hm_sem_rep_cache.slots[i].hash)
+          continue;
+        size_t pos = (size_t)g_hm_sem_rep_cache.slots[i].hash & nmask;
+        while (nslots[pos].hash)
+          pos = (pos + 1u) & nmask;
+        nslots[pos] = g_hm_sem_rep_cache.slots[i];
+      }
+      free(g_hm_sem_rep_cache.slots);
+      g_hm_sem_rep_cache.slots = nslots;
+      g_hm_sem_rep_cache.cap = ncap;
+    }
+  }
+  if (g_hm_sem_rep_cache.slots && g_hm_sem_rep_cache.cap) {
+    size_t mask = g_hm_sem_rep_cache.cap - 1u;
+    size_t pos = (size_t)h & mask;
+    while (g_hm_sem_rep_cache.slots[pos].hash)
+      pos = (pos + 1u) & mask;
+    char *dup = ny_strdup(owner);
+    if (dup) {
+      g_hm_sem_rep_cache.slots[pos] =
+          (hm_sem_rep_cache_slot_t){.hash = h, .owner = dup, .rep = out};
+      g_hm_sem_rep_cache.len++;
+    }
+  }
+  return out;
 }
 
 /*
@@ -9815,6 +9982,7 @@ static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
     e->semantic.canonical_callee = ny_intern_get(
         ny_intern_cstr(sig ? sig->name : scheme->stmt->as.fn.name));
     e->semantic.canonical_callee_stmt = sig ? sig->stmt_t : scheme->stmt;
+    hm_note_stmt_needed(hm, e->semantic.canonical_callee_stmt);
     e->semantic.ownership =
         sig && sig->returns_owned
             ? NY_SEM_OWN_OWNED
@@ -11340,6 +11508,38 @@ static void hm_collect_function_schemes(ny_hm_state_t *hm) {
       hm_scheme_index_put(hm, hm->schemes.data[i].full_name, i);
     }
   }
+  if (hm->ctx && hm->ctx->lazy_std_inference && hm->schemes.len > 0) {
+    size_t scap = 16;
+    while (scap < hm->schemes.len * 2)
+      scap *= 2;
+    hm->scheme_stmt_keys = calloc(scap, sizeof(*hm->scheme_stmt_keys));
+    hm->scheme_stmt_vals = calloc(scap, sizeof(*hm->scheme_stmt_vals));
+    if (hm->scheme_stmt_keys && hm->scheme_stmt_vals) {
+      hm->scheme_stmt_cap = scap;
+      size_t smask = scap - 1u;
+      for (size_t i = 0; i < hm->schemes.len; ++i) {
+        const stmt_t *st = hm->schemes.data[i].stmt;
+        if (!st)
+          continue;
+        size_t pos =
+            (((uintptr_t)st >> 4) * UINT64_C(0x9E3779B97F4A7C15) >> 32) & smask;
+        while (hm->scheme_stmt_keys[pos]) {
+          if (hm->scheme_stmt_keys[pos] == st)
+            break;
+          pos = (pos + 1u) & smask;
+        }
+        if (!hm->scheme_stmt_keys[pos]) {
+          hm->scheme_stmt_keys[pos] = st;
+          hm->scheme_stmt_vals[pos] = i;
+        }
+      }
+    } else {
+      free(hm->scheme_stmt_keys);
+      free(hm->scheme_stmt_vals);
+      hm->scheme_stmt_keys = NULL;
+      hm->scheme_stmt_vals = NULL;
+    }
+  }
 }
 
 typedef struct {
@@ -11657,12 +11857,31 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
   vec_init(&hm->schemes);
   hm_collect_function_schemes(hm);
   NY_HM_STAGE_TIMED("scheme-collection");
+  bool lazy_std = ctx && ctx->lazy_std_inference &&
+                  !ctx->collect_semantic_artifact_facts &&
+                  hm->schemes.len > 0;
+  if (lazy_std) {
+    hm->scheme_queued = calloc(hm->schemes.len, sizeof(*hm->scheme_queued));
+    hm->scheme_worklist =
+        malloc(hm->schemes.len * sizeof(*hm->scheme_worklist));
+    if (hm->scheme_queued && hm->scheme_worklist) {
+      hm->scheme_worklist_cap = hm->schemes.len;
+      hm->scheme_worklist_len = 0;
+    } else {
+      free(hm->scheme_queued);
+      free(hm->scheme_worklist);
+      hm->scheme_queued = NULL;
+      hm->scheme_worklist = NULL;
+      lazy_std = false;
+    }
+  }
   ny_hm_env_list env;
   hm_env_init(hm, &env);
   ny_hm_env_list function_env_scratch = {0};
   size_t first_pass_function_inferences = 0;
   for (size_t i = 0; ctx && ctx->prog && i < ctx->prog->body.len; ++i) {
     stmt_t *s = ctx->prog->body.data[i];
+    hm->track_needed_schemes = lazy_std && s && !ny_is_stdlib_tok(s->tok);
     if (s && s->kind == NY_S_FUNC) {
       ny_hm_scheme_t *scheme = hm_find_scheme(hm, s->as.fn.name);
       if (scheme) {
@@ -11675,9 +11894,28 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
     }
   }
   NY_HM_STAGE_TIMED("top-level-sweep");
-  for (size_t i = 0; i < hm->schemes.len; ++i)
-    hm_infer_function_scheme(hm, &hm->schemes.data[i], &env,
-                             &function_env_scratch);
+  size_t inferred_schemes = 0;
+  if (lazy_std) {
+    hm->track_needed_schemes = true;
+    for (size_t i = 0; i < hm->schemes.len; ++i) {
+      stmt_t *fn = hm->schemes.data[i].stmt;
+      if (fn && !ny_is_stdlib_tok(fn->tok))
+        hm_note_scheme_index_needed(hm, i);
+    }
+    for (size_t wl = 0; wl < hm->scheme_worklist_len; ++wl) {
+      size_t idx = hm->scheme_worklist[wl];
+      hm_infer_function_scheme(hm, &hm->schemes.data[idx], &env,
+                               &function_env_scratch);
+      inferred_schemes++;
+    }
+    hm->track_needed_schemes = false;
+  } else {
+    for (size_t i = 0; i < hm->schemes.len; ++i) {
+      hm_infer_function_scheme(hm, &hm->schemes.data[i], &env,
+                               &function_env_scratch);
+      inferred_schemes++;
+    }
+  }
   NY_HM_STAGE_TIMED("all-scheme-inference");
 
   /*
@@ -11698,8 +11936,12 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
       .visit_stmt_pre = hm_completion_visitor_stmt_pre,
       .visit_stmt_post = hm_completion_visitor_stmt_post};
   for (size_t i = 0; ctx && ctx->prog && i < ctx->prog->body.len; ++i) {
+    stmt_t *top = ctx->prog->body.data[i];
+    if (lazy_std && top && ny_is_stdlib_tok(top->tok) &&
+        top->kind != NY_S_VAR)
+      continue;
     hm_completion_scope_mark(&completion);
-    hm_visit_semantic_completion(&completion_visitor, ctx->prog->body.data[i]);
+    hm_visit_semantic_completion(&completion_visitor, top);
     hm_completion_scope_pop(&completion);
   }
   NY_HM_STAGE_TIMED("semantic-completion");
@@ -11709,8 +11951,9 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
   NY_HM_STAGE_TIMED("expression-fact-finalization");
   if (trace_timing)
     fprintf(stderr,
-            "[type-hm-timing] functions=%zu first-pass-inferences=%zu\n",
-            hm->schemes.len, first_pass_function_inferences);
+            "[type-hm-timing] functions=%zu inferred=%zu "
+            "first-pass-inferences=%zu\n",
+            hm->schemes.len, inferred_schemes, first_pass_function_inferences);
   vec_free(&function_env_scratch);
   vec_free(&env);
   hm_report_holes(hm);
@@ -11871,6 +12114,10 @@ static void hm_dispose(ny_hm_state_t *hm) {
   vec_free(&hm->schemes);
   vec_free(&hm->expr_type_facts);
   free(hm->scheme_index);
+  free(hm->scheme_stmt_keys);
+  free(hm->scheme_stmt_vals);
+  free(hm->scheme_queued);
+  free(hm->scheme_worklist);
   arena_free(&hm->arena);
   memset(hm, 0, sizeof(*hm));
 }

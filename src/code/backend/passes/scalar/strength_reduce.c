@@ -342,6 +342,20 @@ static bool nyr_strength_combine_scaled_add(nyr_func_t *f) {
  * already have CONST_I64 as operand b.
  */
 
+static nyr_inst_t sr_make_inst(nyr_op_t op, int dst, int a, int b, int64_t imm) {
+  nyr_inst_t out = {.op = op,
+                    .dst = dst,
+                    .a = a,
+                    .b = b,
+                    .c = -1,
+                    .d = -1,
+                    .e = -1,
+                    .f = -1,
+                    .imm = imm};
+  out.effects = nyr_inst_effects(&out);
+  return out;
+}
+
 bool nyr_strength_reduce(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -577,7 +591,107 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         continue;
       }
     }
+    bool is_udiv_asm = in->op == NYIR_INLINE_ASM && in->symbol &&
+                       in->imm == -21 &&
+                       strcmp(in->symbol, "unsigned-div") == 0;
+    bool is_umod_asm = in->op == NYIR_INLINE_ASM && in->symbol &&
+                       in->imm == -22 &&
+                       strcmp(in->symbol, "unsigned-div") == 0;
+    if (is_udiv_asm || is_umod_asm) {
+      if (in->a < 0 || in->a >= fact_count || in->b < 0 || in->b >= fact_count)
+        continue;
+      int64_t divisor = 0;
+      if (!nyr_strength_recover_const(f, facts, fact_count, in->b, &divisor) ||
+          divisor <= 0)
+        continue;
+      if (divisor == 1) {
+        if (is_udiv_asm) {
+          in->op = NYIR_COPY;
+          in->b = -1;
+          in->imm = 0;
+          in->symbol = NULL;
+          in->effects = NYIR_EFFECT_NONE;
+        } else {
+          in->op = NYIR_CONST_I64;
+          in->a = -1;
+          in->b = -1;
+          in->imm = 0;
+          in->symbol = NULL;
+          in->effects = NYIR_EFFECT_NONE;
+        }
+        nyr_clear_derived_facts(in);
+        continue;
+      }
+      if ((divisor & (divisor - 1)) == 0) {
+        int shift = 0;
+        for (int64_t v = divisor; v > 1; v >>= 1)
+          ++shift;
+        int saved_dst = in->dst;
+        int saved_a = in->a;
+        nyr_strength_result_metadata_t metadata =
+            nyr_strength_result_metadata(in);
+        int imm_value = f->next_value++;
+        if (!nir_ensure_inst_space(f, 1)) {
+          free(facts);
+          free(uses);
+          return false;
+        }
+        memmove(&f->data[i + 1], &f->data[i], (f->len - i) * sizeof(*f->data));
+        ++f->len;
+        f->data[i] = sr_make_inst(NYIR_CONST_I64, imm_value, -1, -1,
+                                  is_umod_asm ? (divisor - 1) : shift);
+        if (is_umod_asm) {
+          f->data[i + 1] =
+              sr_make_inst(NYIR_AND_I64, saved_dst, saved_a, imm_value, 0);
+        } else {
+          f->data[i + 1] = (nyr_inst_t){
+              .op = NYIR_INLINE_ASM,
+              .dst = saved_dst,
+              .a = saved_a,
+              .b = imm_value,
+              .c = -1,
+              .d = -1,
+              .e = -1,
+              .f = -1,
+              .imm = -23,
+              .symbol = nyr_func_own_symbol_copy(f, "unsigned-shift-right"),
+              .effects = NYIR_EFFECT_NONE};
+        }
+        nyr_strength_apply_result_metadata(&f->data[i + 1], metadata);
+        ++i;
+        continue;
+      }
+      int64_t a_const = 0;
+      if (nyr_strength_recover_const(f, facts, fact_count, in->a, &a_const))
+        continue;
+      const nyr_range_t *dr = &facts[in->a].range;
+      bool nonneg = dr->has_min && dr->min >= 0;
+      if (!nonneg) {
+        for (size_t j = i; j > 0; --j) {
+          const nyr_inst_t *def = &f->data[j - 1];
+          if (def->dst != in->a)
+            continue;
+          if (def->op == NYIR_AND_I64) {
+            int64_t m = 0;
+            if ((nyr_strength_recover_const(f, facts, fact_count, def->b, &m) &&
+                 m >= 0) ||
+                (nyr_strength_recover_const(f, facts, fact_count, def->a, &m) &&
+                 m >= 0))
+              nonneg = true;
+          }
+          break;
+        }
+      }
+      if (!nonneg)
+        continue;
+      in->op = is_udiv_asm ? NYIR_DIV_I64 : NYIR_MOD_I64;
+      in->symbol = NULL;
+      in->imm = 0;
+      in->effects = nyr_inst_effects(in);
+    }
     if (in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) {
+      if (in->a < 0 || in->a >= fact_count || in->b < 0 || in->b >= fact_count)
+        continue;
       const nyr_range_t *dividend_range = &facts[in->a].range;
       /*
        * Loads intentionally do not carry an immutable range in NYIR. For a
@@ -593,7 +707,7 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         for (size_t k = j - 1; k > 0; --k) {
           const nyr_inst_t *store = &f->data[k - 1];
           if (store->op == NYIR_STORE_LOCAL && store->imm == def->imm) {
-            if (store->a >= 0 && store->a < f->next_value)
+            if (store->a >= 0 && store->a < fact_count)
               dividend_range = &facts[store->a].range;
             break;
           }
@@ -610,12 +724,53 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         continue;
       bool power_of_two = divisor > 1 && (divisor & (divisor - 1)) == 0;
       if (!dividend_nonnegative && in->op == NYIR_MOD_I64 && power_of_two) {
+        int shift = 0;
+        for (int64_t v = divisor; v > 1; v >>= 1)
+          ++shift;
+        if (shift >= 1 && shift <= 30) {
+          int saved_dst = in->dst;
+          int saved_a = in->a;
+          nyr_strength_result_metadata_t metadata =
+              nyr_strength_result_metadata(in);
+          int64_t mask = divisor - 1;
+          int c63_v = f->next_value++;
+          int sign_v = f->next_value++;
+          int cmask_v = f->next_value++;
+          int adj_v = f->next_value++;
+          int biased_v = f->next_value++;
+          int cnot_v = f->next_value++;
+          int qmul_v = f->next_value++;
+          if (!nir_ensure_inst_space(f, 7)) {
+            free(facts);
+            free(uses);
+            return false;
+          }
+          memmove(&f->data[i + 7], &f->data[i],
+                  (f->len - i) * sizeof(*f->data));
+          f->len += 7;
+          f->data[i] = sr_make_inst(NYIR_CONST_I64, c63_v, -1, -1, 63);
+          f->data[i + 1] = sr_make_inst(NYIR_SAR_I64, sign_v, saved_a, c63_v, 0);
+          f->data[i + 2] = sr_make_inst(NYIR_CONST_I64, cmask_v, -1, -1, mask);
+          f->data[i + 3] = sr_make_inst(NYIR_AND_I64, adj_v, sign_v, cmask_v, 0);
+          f->data[i + 4] = sr_make_inst(NYIR_ADD_I64, biased_v, saved_a, adj_v, 0);
+          f->data[i + 5] = sr_make_inst(NYIR_CONST_I64, cnot_v, -1, -1, ~mask);
+          f->data[i + 6] = sr_make_inst(NYIR_AND_I64, qmul_v, biased_v, cnot_v, 0);
+          f->data[i + 7] = sr_make_inst(NYIR_SUB_I64, saved_dst, saved_a, qmul_v, 0);
+          nyr_strength_apply_result_metadata(&f->data[i + 7], metadata);
+          if (nyr_strength_trace_enabled())
+            ny_dbg_heuristic_event(
+                "STRENGTH_REDUCE",
+                "accept signed mod @%zu dst=v%d: divisor=%lld; overflow-free "
+                "mask remainder",
+                i, saved_dst, (long long)divisor);
+          i += 7;
+          continue;
+        }
         if (nyr_strength_trace_enabled())
           ny_dbg_heuristic_event(
               "STRENGTH_REDUCE",
-              "reject %s @%zu: divisor=%lld is power-of-two but no "
-              "nonnegative dividend proof; modulo mask would change signed "
-              "semantics",
+              "reject %s @%zu: divisor=%lld is power-of-two but shift out of "
+              "range",
               in->op == NYIR_DIV_I64 ? "div" : "mod", i, (long long)divisor);
         continue;
       }
@@ -736,28 +891,94 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         nyr_strength_apply_result_metadata(&f->data[i + 1], metadata);
         ++i;
       } else if (divisor > 1) {
-        /*
-         * Non-power-of-two constant divisors are left as DIV/MOD for now.
-         *
-         * A Granlund-Montgomery magic-number rewrite for this case needs
-         * (a) the high half of a 128-bit product (no NYIR mulhi opcode yet),
-         * (b) a LOGICAL shift of the product (NYIR_SAR_I64 sign-extends, and
-         *     the unsigned magic product may set the sign bit), and
-         * (c) the "add" indicator: for divisors such as 7 the canonical
-         *     magicu() result requires (x + 1) * m >> s, not x * m >> s.
-         * An earlier attempt at this rewrite used the low 64 bits of the
-         * product, SAR, and a naive 2*r1 update whose overflow zeroed r1 and
-         * made the search loop spin forever on real IR (repro: gcbench's
-         * rt_main at --nyr-dump with PHIs preserved, divisor 3).  It never
-         * emitted correct code for any divisor, so it is removed rather than
-         * patched; revisit with NYIR_SHR_I64 + NYIR_MULHI_I64 in place.
-         */
-        if (nyr_strength_trace_enabled())
+        bool reduced = false;
+        if (dividend_nonnegative && dividend_range->has_max &&
+            dividend_range->max >= 0 && dividend_range->max <= (1LL << 28)) {
+          uint64_t umax = (uint64_t)dividend_range->max;
+          uint64_t ud = (uint64_t)divisor;
+          int chosen_s = -1;
+          uint64_t chosen_m = 0;
+          for (int s = 16; s <= 34; ++s) {
+            uint64_t pow2s = UINT64_C(1) << s;
+            uint64_t m = (pow2s + ud - 1ULL) / ud;
+            uint64_t err = m * ud - pow2s;
+            if ((unsigned __int128)umax * (unsigned __int128)m <=
+                    (unsigned __int128)INT64_MAX &&
+                (unsigned __int128)err * (unsigned __int128)umax <
+                    (unsigned __int128)pow2s) {
+              chosen_s = s;
+              chosen_m = m;
+              break;
+            }
+          }
+          if (chosen_s > 0) {
+            bool is_div = in->op == NYIR_DIV_I64;
+            int saved_dst = in->dst;
+            int saved_a = in->a;
+            nyr_strength_result_metadata_t metadata =
+                nyr_strength_result_metadata(in);
+            metadata.range = (nyr_range_t){
+                .has_min = true,
+                .has_max = true,
+                .min = 0,
+                .max = is_div ? (int64_t)(umax / ud) : divisor - 1};
+            size_t extra = is_div ? 3u : 6u;
+            int cm_v = f->next_value++;
+            int prod_v = f->next_value++;
+            int cs_v = f->next_value++;
+            int q_v = is_div ? saved_dst : f->next_value++;
+            if (!nir_ensure_inst_space(f, extra)) {
+              free(facts);
+              free(uses);
+              return false;
+            }
+            memmove(&f->data[i + extra], &f->data[i],
+                    (f->len - i) * sizeof(*f->data));
+            f->len += extra;
+            f->data[i] =
+                sr_make_inst(NYIR_CONST_I64, cm_v, -1, -1, (int64_t)chosen_m);
+            f->data[i + 1] = sr_make_inst(NYIR_MUL_I64, prod_v, saved_a, cm_v, 0);
+            f->data[i + 1].range = (nyr_range_t){
+                .has_min = true,
+                .has_max = true,
+                .min = 0,
+                .max = (int64_t)(umax * chosen_m)};
+            f->data[i + 2] =
+                sr_make_inst(NYIR_CONST_I64, cs_v, -1, -1, chosen_s);
+            f->data[i + 3] = sr_make_inst(NYIR_SAR_I64, q_v, prod_v, cs_v, 0);
+            f->data[i + 3].range = (nyr_range_t){
+                .has_min = true,
+                .has_max = true,
+                .min = 0,
+                .max = (int64_t)(umax / ud)};
+            if (is_div) {
+              nyr_strength_apply_result_metadata(&f->data[i + 3], metadata);
+            } else {
+              int cd_v = f->next_value++;
+              int qd_v = f->next_value++;
+              f->data[i + 4] =
+                  sr_make_inst(NYIR_CONST_I64, cd_v, -1, -1, divisor);
+              f->data[i + 5] = sr_make_inst(NYIR_MUL_I64, qd_v, q_v, cd_v, 0);
+              f->data[i + 6] =
+                  sr_make_inst(NYIR_SUB_I64, saved_dst, saved_a, qd_v, 0);
+              nyr_strength_apply_result_metadata(&f->data[i + 6], metadata);
+            }
+            if (nyr_strength_trace_enabled())
+              ny_dbg_heuristic_event(
+                  "STRENGTH_REDUCE",
+                  "accept bounded %s @%zu dst=v%d: umax=%llu div=%lld M=%llu "
+                  "S=%d",
+                  is_div ? "div" : "mod", i, saved_dst,
+                  (unsigned long long)umax, (long long)divisor,
+                  (unsigned long long)chosen_m, chosen_s);
+            i += extra;
+            reduced = true;
+          }
+        }
+        if (!reduced && nyr_strength_trace_enabled())
           ny_dbg_heuristic_event(
               "STRENGTH_REDUCE",
-              "keep %s @%zu: divisor=%lld is not a power of two; constant-"
-              "divisor lowering needs logical shift and high-half multiply "
-              "NYIR ops",
+              "keep %s @%zu: divisor=%lld is not a power of two",
               in->op == NYIR_DIV_I64 ? "div" : "mod", i, (long long)divisor);
       }
     }

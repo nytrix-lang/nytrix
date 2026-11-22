@@ -38,8 +38,8 @@
 #define PATH_MAX 4096
 #endif
 
-#define NY_MAKE_TEST_WORKER_MEMORY_GIB 2.5
-#define NY_MAKE_TEST_MAX_AUTO_JOBS 4
+#define NY_MAKE_TEST_WORKER_MEMORY_GIB 0.75
+#define NY_MAKE_TEST_MAX_AUTO_JOBS 48
 
 typedef struct {
   const char *cmds[64];
@@ -1067,14 +1067,15 @@ static int resolve_test_jobs(int cli_jobs) {
   if (logical <= 0)
     logical = 1;
   /*
-   * Keep automatic fixture parallelism modest on interactive machines.
+   * Scale automatic test workers across available cores while reserving host
+   * headroom for interactive responsiveness and memory safety.
    */
-  int jobs = (int)(logical * 0.5);
+  int jobs = (int)(logical * 0.6);
   if (jobs < 1)
     jobs = 1;
   double mem_gib = linux_mem_available_gib();
   if (mem_gib > 0.0) {
-    int mem_cap = (int)((mem_gib - 8.0) / NY_MAKE_TEST_WORKER_MEMORY_GIB);
+    int mem_cap = (int)((mem_gib - 10.0) / NY_MAKE_TEST_WORKER_MEMORY_GIB);
     if (mem_cap < 1)
       mem_cap = 1;
     if (jobs > mem_cap)
@@ -1231,8 +1232,9 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
   } else if (strcmp(cmd, "test") == 0 || strcmp(cmd, "optcheck") == 0 ||
              strcmp(cmd, "asan") == 0 || strcmp(cmd, "ubsan") == 0) {
     const char *shared_std_env = getenv("NYTRIX_TEST_USE_STD_BC");
-    bool use_shared_std = strcmp(cmd, "test") == 0 && shared_std_env &&
-                          nyt_env_truthy("NYTRIX_TEST_USE_STD_BC");
+    bool use_shared_std =
+        strcmp(cmd, "test") == 0 && shared_std_env &&
+        nyt_env_truthy("NYTRIX_TEST_USE_STD_BC");
     for (int i = 0; use_shared_std && i < unknown_count; i++) {
       if (strcmp(unknown[i], "--no-stdlib") == 0 ||
           strcmp(unknown[i], "--core-bc") == 0 ||
@@ -1474,20 +1476,6 @@ int ny_make_main(int argc, char **argv) {
   int jobs = 0;
   char jobs_note[256];
   resolve_jobs(a.jobs, &jobs, jobs_note, sizeof(jobs_note));
-  int has_test_command = 0;
-  for (int i = 0; i < a.cmd_count; ++i) {
-    if (strcmp(a.cmds[i], "test") == 0) {
-      has_test_command = 1;
-      break;
-    }
-  }
-  if (has_test_command && a.jobs <= 0 && jobs > 4 &&
-      !(getenv("NYTRIX_BUILD_JOBS") && *getenv("NYTRIX_BUILD_JOBS"))) {
-    jobs = 4;
-    snprintf(jobs_note, sizeof(jobs_note),
-             "test build jobs=4 automatically; override with -j or "
-             "NYTRIX_BUILD_JOBS");
-  }
   if (jobs_note[0])
     nyt_msg("HOST", NYT_MAGENTA, "%s", jobs_note);
 

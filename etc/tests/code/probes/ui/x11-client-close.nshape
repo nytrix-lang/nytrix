@@ -4,7 +4,7 @@ shape x11_client_close {
   features ["ny", "window", "x11", "native-events"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "1\n15\ntrue\nX11-CLIENT-CLOSE-OK"
   source ny <<'NY'
 use core

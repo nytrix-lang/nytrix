@@ -3,7 +3,7 @@ shape ui_w_profiler_phases {
   generator "regression"
   features [ny render ui profiler]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-W-PROFILER-PHASES-OK"
   source ny <<'NY'
 use core

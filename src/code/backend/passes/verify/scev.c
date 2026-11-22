@@ -211,9 +211,11 @@ static void compute_range_bounds(const nyr_func_t *f,
   if (!lim_inv || !init_inv)
     return;
   nyr_range_t ir = {0}, lr = {0};
-  bool ir_ok = nir_value_range_at(f, facts, l->init_value, at, &ir) &&
-               ir.has_min && ir.has_max;
-  bool lr_ok = nir_value_range_at(f, facts, l->limit_value, at, &lr) &&
+  bool ir_ok =
+      nir_value_range_at_with_cfg(f, facts, cfg, defs, l->init_value, at, &ir) &&
+      ir.has_min && ir.has_max;
+  bool lr_ok = nir_value_range_at_with_cfg(f, facts, cfg, defs, l->limit_value,
+                                           at, &lr) &&
                lr.has_min && lr.has_max;
   if (!ir_ok)
     ir_ok = scev_call_nonnegative_range(f, defs, l->init_value, &ir);
@@ -361,9 +363,11 @@ static bool compute_trip_expr(const nyr_func_t *f,
       !scev_value_invariant_in_loop(f, cfg, in_loop, defs, l->limit_value, l))
     return false;
   nyr_range_t ir = {0}, lr = {0};
-  bool ir_ok = nir_value_range_at(f, facts, l->init_value, at, &ir) &&
-               ir.has_min && ir.has_max;
-  bool lr_ok = nir_value_range_at(f, facts, l->limit_value, at, &lr) &&
+  bool ir_ok =
+      nir_value_range_at_with_cfg(f, facts, cfg, defs, l->init_value, at, &ir) &&
+      ir.has_min && ir.has_max;
+  bool lr_ok = nir_value_range_at_with_cfg(f, facts, cfg, defs, l->limit_value,
+                                           at, &lr) &&
                lr.has_min && lr.has_max;
   if (!ir_ok)
     ir_ok = scev_call_nonnegative_range(f, defs, l->init_value, &ir);
@@ -518,6 +522,21 @@ static bool append_loop(nyr_scev_info_t *out, const nyr_scev_loop_t *loop) {
   return true;
 }
 
+static bool scev_sext32_safe(const nyr_scev_loop_t *l) {
+  if (!l || l->step == 0)
+    return false;
+  if (l->iv_bounds_known && l->iv_min >= INT32_MIN && l->iv_max <= INT32_MAX)
+    return true;
+  if (l->trip_count_known && l->init_is_const && l->init >= INT32_MIN &&
+      l->init <= INT32_MAX && l->trip_count <= (uint64_t)UINT32_MAX + 2ULL &&
+      l->step >= INT32_MIN && l->step <= INT32_MAX) {
+    __int128 exit_val =
+        (__int128)l->init + (__int128)l->trip_count * (__int128)l->step;
+    return exit_val >= INT32_MIN && exit_val <= INT32_MAX;
+  }
+  return false;
+}
+
 bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
   if (!out)
     return false;
@@ -610,6 +629,22 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
           if (ni < 0)
             continue;
           const nyr_inst_t *inc = &f->data[ni];
+          bool wrapped_sext32 = false;
+          if (inc->op == NYIR_SAR_I64) {
+            int64_t sh_r = 0, sh_l = 0;
+            int shl_v = root_copy(f, defs, inc->a);
+            int shl_di = def_index(f, defs, shl_v);
+            if (const_value(f, defs, inc->b, &sh_r) && sh_r == 32 &&
+                shl_di >= 0 && f->data[shl_di].op == NYIR_SHL_I64 &&
+                const_value(f, defs, f->data[shl_di].b, &sh_l) && sh_l == 32) {
+              int raw_v = root_copy(f, defs, f->data[shl_di].a);
+              int raw_di = def_index(f, defs, raw_v);
+              if (raw_di >= 0) {
+                inc = &f->data[raw_di];
+                wrapped_sext32 = true;
+              }
+            }
+          }
           int stepv = -1;
           int64_t sign = 1;
           if (inc->op == NYIR_ADD_I64 && root_copy(f, defs, inc->a) == phi->dst)
@@ -654,7 +689,8 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
                                       .predicate = cmp->cmp};
               loop.limit_is_const = const_value(f, defs, cmp->b, &loop.limit);
               compute_trip(&loop);
-              if (loop.trip_count_known) {
+              if (loop.trip_count_known &&
+                  (!wrapped_sext32 || scev_sext32_safe(&loop))) {
                 trip_known = true;
                 trip_count = loop.trip_count;
               }
@@ -708,6 +744,8 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
               loop.trip_count_known = true;
               loop.trip_count = trip_count;
             }
+            if (wrapped_sext32 && !scev_sext32_safe(&loop))
+              continue;
             if (!append_loop(out, &loop)) {
               free(in_loop);
               nyr_scev_free(out);

@@ -386,7 +386,7 @@ static bool nyGcHeaderForObject(int64_t obj, nyGcHeader_t **out) {
 
 _Atomic int g_rt_gc_heap_used = 0;
 
-bool rt_gc_owns_pointer(uintptr_t value) {
+__attribute__((noinline)) bool rt_gc_owns_pointer(uintptr_t value) {
   /*
    * No object yet: nothing to look up, and no lock to take on every
    * is_heap_ptr of a program that never uses this heap.

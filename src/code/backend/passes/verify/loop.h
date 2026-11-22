@@ -118,6 +118,7 @@ bool nyr_softpipe_rewrite(nyr_func_t *f);
 bool nyr_loop_predication(nyr_func_t *f);
 bool nyr_loop_unswitch(nyr_func_t *f);
 bool nyr_loop_unroll_ssa(nyr_func_t *f);
+bool nyr_loop_unroll_partial(nyr_func_t *f);
 bool nyr_loop_vectorize(nyr_func_t *f);
 
 /*

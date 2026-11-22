@@ -2931,15 +2931,17 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                                         &constant_value) &&
                 constant_pos == p->pos && constant_value == 0;
           }
-          bool pointer_to_bool =
-              local->is_bool && c_type_is_pointer(initial.type);
+          bool convert_to_bool =
+              local->is_bool &&
+              (c_type_is_integer(initial.type) ||
+               c_type_is_float(initial.type) || c_type_is_pointer(initial.type));
           if (initial.value < 0 ||
               !(initial.type == type ||
                 c_pointer_compatible(initial.type, type) ||
                 (c_type_is_integer(initial.type) && c_type_is_integer(type)) ||
                 (c_type_is_integer(initial.type) && c_type_is_float(type)) ||
                 (c_type_is_float(initial.type) && c_type_is_float(type)) ||
-                pointer_to_bool ||
+                convert_to_bool ||
                 (c_type_is_pointer(type) &&
                  p->last_value_null_pointer_constant) ||
                 (getenv("NYC_KERNEL_COMPAT") &&
@@ -2960,7 +2962,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             declaration_ok = false;
             break;
           }
-          if (pointer_to_bool) {
+          if (convert_to_bool) {
             initial.value = lower_boolean_value(p, initial);
             if (initial.value < 0) {
               declaration_ok = false;
@@ -3340,7 +3342,9 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         if (!indexed_ok)
           break;
         c_value_t element = {element_address,
-                             c_array_pointer_type(indexed_global->type), NULL};
+                             c_array_pointer_type(indexed_global->type),
+                             c_pointee_marker(indexed_global->is_const,
+                                              indexed_global->is_volatile, 0)};
         if (!lower_pointer_store(p, element, indexed_global->is_const, false,
                                  0))
           break;
@@ -3386,6 +3390,9 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                            indexed_global && indexed_global->type == C_AGG_PTR
                                ? indexed_global->agg
                                : NULL};
+      if (!local && !global_pointer && !indexed_global->is_pointer_array &&
+          indexed_global->is_volatile && c_type_is_integer(indexed_global->type))
+        pointer.agg = c_pointee_marker(indexed_global->is_const, true, 0);
       if (!lower_pointer_store(
               p, pointer,
               local ? ((local->is_const && !pointer_local) ||

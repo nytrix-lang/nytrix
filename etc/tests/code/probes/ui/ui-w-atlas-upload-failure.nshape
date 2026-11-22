@@ -3,7 +3,7 @@ shape ui_w_atlas_upload_failure {
   generator "regression"
   features [ny render atlas]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-W-ATLAS-UPLOAD-FAILURE-OK"
   source ny <<'NY'
 use core

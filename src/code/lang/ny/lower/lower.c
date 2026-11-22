@@ -4234,6 +4234,11 @@ typedef struct {
 
 typedef struct ny_native_fn_index_t ny_native_fn_index_t;
 
+typedef struct {
+  size_t begin_pc;
+  size_t end_pc;
+} nyr_stdlib_init_span_t;
+
 struct nyr_builder_impl_t {
   nyr_func_t nyir;
   nyr_local_t *locals;
@@ -4296,6 +4301,9 @@ struct nyr_builder_impl_t {
   const char *profile_name;
   const char *current_fn_name;
   bool initializing_stdlib_globals;
+  nyr_stdlib_init_span_t *stdlib_init_spans;
+  size_t stdlib_init_spans_len;
+  size_t stdlib_init_spans_cap;
   const char *source_file;
   const char *source_main_file;
   const char *module_name;
@@ -5000,6 +5008,10 @@ static void ny_native_fn_index_free(ny_native_fn_index_t *index);
 static void nyr_builder_dispose(nyr_builder_impl_t *b) {
   if (!b)
     return;
+  free(b->stdlib_init_spans);
+  b->stdlib_init_spans = NULL;
+  b->stdlib_init_spans_len = 0;
+  b->stdlib_init_spans_cap = 0;
   free(b->fold_memo);
   b->fold_memo = NULL;
   if (b->resolve_alias_stats_enabled && b->cache_owner == b)
@@ -12613,6 +12625,16 @@ struct ny_native_fn_index_t {
   ny_sym_id *impl_names;
   bool impl_names_built;
   bool impl_names_complete;
+  const stmt_t **refine_stmts;
+  size_t refine_stmt_count;
+  size_t refine_stmt_cap;
+  const program_t *refine_stmts_prog;
+  bool refine_stmts_built;
+  const stmt_t **impl_stmts;
+  size_t impl_stmt_count;
+  size_t impl_stmt_cap;
+  const program_t *impl_stmts_prog;
+  bool impl_stmts_built;
   ny_native_enum_member_entry_t *enum_members;
   ny_native_enum_lookup_entry_t *enum_lookup;
   size_t enum_lookup_len;
@@ -12725,6 +12747,8 @@ static void ny_native_fn_index_free(ny_native_fn_index_t *index) {
   free(index->source_values);
   free(index->imported_fns);
   free(index->impl_names);
+  free(index->refine_stmts);
+  free(index->impl_stmts);
   free(index->enum_lookup);
   if (index->trace_lookup_stats)
     fprintf(stderr,
@@ -13315,6 +13339,12 @@ static void ny_native_fn_cache_build(ny_native_fn_index_t *index,
            NY_IMPL_PROBE_SIZE * sizeof(*index->impl_names));
   index->impl_names_built = false;
   index->impl_names_complete = false;
+  index->refine_stmt_count = 0;
+  index->refine_stmts_prog = NULL;
+  index->refine_stmts_built = false;
+  index->impl_stmt_count = 0;
+  index->impl_stmts_prog = NULL;
+  index->impl_stmts_built = false;
   if (index->source_values)
     memset(index->source_values, 0,
            NY_SOURCE_VALUE_CACHE_SIZE * sizeof(*index->source_values));
@@ -14603,6 +14633,36 @@ static const stmt_t *nyr_find_user_function_exact(const stmt_t *s,
                                                   unsigned depth) {
   if (depth != 0 || !index || !s || !name)
     return nyr_find_user_function_exact_impl(s, name, opt, index, depth);
+  /*
+   * Fast-reject before walking the module/scope AST: every NY_S_FUNC in the
+   * program is already indexed by exact name in index->fn_exact_next. If no
+   * function anywhere in the program has this exact name, the walk cannot find
+   * one.
+   */
+  if (index->fn_exact_next && index->functions.prog) {
+    uint32_t fslot = ny_fn_name_hash(name) & (NY_FN_BUCKET_SIZE - 1);
+    bool exists = false;
+    for (int32_t i = index->fn_exact_user_buckets[fslot]; i >= 0;
+         i = index->fn_exact_next[i]) {
+      const stmt_t *fn = index->functions.funcs[i];
+      if (fn && fn->as.fn.name && strcmp(fn->as.fn.name, name) == 0) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      for (int32_t i = index->fn_exact_stdlib_buckets[fslot]; i >= 0;
+           i = index->fn_exact_next[i]) {
+        const stmt_t *fn = index->functions.funcs[i];
+        if (fn && fn->as.fn.name && strcmp(fn->as.fn.name, name) == 0) {
+          exists = true;
+          break;
+        }
+      }
+    }
+    if (!exists)
+      return NULL;
+  }
   if (!index->exact_fns)
     index->exact_fns =
         calloc(NY_EXACT_FN_CACHE_SIZE, sizeof(*index->exact_fns));
@@ -16659,6 +16719,124 @@ static const expr_t *nyr_find_module_member_in_uncached(const stmt_t *mod,
   return NULL;
 }
 
+typedef struct nyr_mod_var_slot_t {
+  uint64_t hash;
+  const stmt_t *mod;
+  const char *key;
+  const expr_t *expr;
+} nyr_mod_var_slot_t;
+
+static _Thread_local struct {
+  const program_t *prog;
+  size_t prog_body_len;
+  nyr_mod_var_slot_t *slots;
+  size_t cap;
+  size_t len;
+} g_mod_var_index;
+
+static uint64_t nyr_mod_var_hash(const stmt_t *mod, const char *key) {
+  uint64_t h = UINT64_C(1469598103934665603) ^ (uint64_t)(uintptr_t)mod;
+  for (const unsigned char *p = (const unsigned char *)key; *p; ++p)
+    h = (h ^ *p) * UINT64_C(1099511628211);
+  return h ? h : 1u;
+}
+
+static void nyr_mod_var_index_put(const stmt_t *mod, const char *key,
+                                  const expr_t *expr) {
+  if (!mod || !key || !*key || !expr)
+    return;
+  if ((g_mod_var_index.len + 1u) * 10u >= g_mod_var_index.cap * 7u) {
+    size_t ncap = g_mod_var_index.cap ? g_mod_var_index.cap * 2u : 1024u;
+    nyr_mod_var_slot_t *t = calloc(ncap, sizeof(*t));
+    if (!t)
+      return;
+    size_t nmask = ncap - 1u;
+    for (size_t i = 0; i < g_mod_var_index.cap; ++i) {
+      if (!g_mod_var_index.slots[i].hash)
+        continue;
+      size_t pos = (size_t)g_mod_var_index.slots[i].hash & nmask;
+      while (t[pos].hash)
+        pos = (pos + 1u) & nmask;
+      t[pos] = g_mod_var_index.slots[i];
+    }
+    free(g_mod_var_index.slots);
+    g_mod_var_index.slots = t;
+    g_mod_var_index.cap = ncap;
+  }
+  uint64_t h = nyr_mod_var_hash(mod, key);
+  size_t mask = g_mod_var_index.cap - 1u;
+  size_t pos = (size_t)h & mask;
+  while (g_mod_var_index.slots[pos].hash) {
+    if (g_mod_var_index.slots[pos].hash == h &&
+        g_mod_var_index.slots[pos].mod == mod &&
+        strcmp(g_mod_var_index.slots[pos].key, key) == 0)
+      return; /* preserve first-declaration wins */
+    pos = (pos + 1u) & mask;
+  }
+  g_mod_var_index.slots[pos] =
+      (nyr_mod_var_slot_t){.hash = h, .mod = mod, .key = key, .expr = expr};
+  g_mod_var_index.len++;
+}
+
+static void nyr_mod_var_index_collect_into(const stmt_t *root_mod,
+                                           const stmt_t *s, unsigned depth) {
+  if (!s || depth > 64)
+    return;
+  if (s->kind == NY_S_VAR) {
+    for (size_t i = 0; i < s->as.var.names.len && i < s->as.var.exprs.len;
+         ++i) {
+      const char *vn = s->as.var.names.data[i];
+      const expr_t *ve = s->as.var.exprs.data[i];
+      if (!vn || !*vn || !ve)
+        continue;
+      nyr_mod_var_index_put(root_mod, vn, ve);
+      const char *dot = strrchr(vn, '.');
+      if (dot && dot[1])
+        nyr_mod_var_index_put(root_mod, dot + 1, ve);
+    }
+    return;
+  }
+  if (s->kind == NY_S_MODULE) {
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      nyr_mod_var_index_collect_into(root_mod, s->as.module.body.data[i],
+                                     depth + 1);
+    if (s != root_mod) {
+      for (size_t i = 0; i < s->as.module.body.len; ++i)
+        nyr_mod_var_index_collect_into(s, s->as.module.body.data[i], 1);
+    }
+    return;
+  }
+  if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      nyr_mod_var_index_collect_into(root_mod, s->as.block.body.data[i],
+                                     depth + 1);
+  }
+}
+
+static void nyr_mod_var_index_ensure(const program_t *prog) {
+  if (!prog)
+    return;
+  if (g_mod_var_index.prog == prog &&
+      g_mod_var_index.prog_body_len == prog->body.len)
+    return;
+  free(g_mod_var_index.slots);
+  memset(&g_mod_var_index, 0, sizeof(g_mod_var_index));
+  g_mod_var_index.prog = prog;
+  g_mod_var_index.prog_body_len = prog->body.len;
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    const stmt_t *s = prog->body.data[i];
+    if (s && s->kind == NY_S_MODULE)
+      nyr_mod_var_index_collect_into(s, s, 0);
+    else if (s && s->kind == NY_S_BLOCK) {
+      for (size_t j = 0; j < s->as.block.body.len; ++j) {
+        const stmt_t *c = s->as.block.body.data[j];
+        if (c && c->kind == NY_S_MODULE)
+          nyr_mod_var_index_collect_into(c, c, 0);
+      }
+    }
+  }
+}
+
 /*
  * Module trees are immutable during one whole-program lowering operation.
  * Imported-value and member resolution often ask for the same leaf many
@@ -16671,6 +16849,21 @@ static const expr_t *nyr_find_module_member_in(const nyr_builder_impl_t *b,
                                                unsigned depth) {
   if (!mod || !member || depth > 64)
     return NULL;
+  if (depth == 0 && b && b->prog && mod->kind == NY_S_MODULE) {
+    nyr_mod_var_index_ensure(b->prog);
+    if (g_mod_var_index.slots && g_mod_var_index.cap) {
+      uint64_t h = nyr_mod_var_hash(mod, member);
+      size_t mask = g_mod_var_index.cap - 1u;
+      size_t pos = (size_t)h & mask;
+      for (; g_mod_var_index.slots[pos].hash; pos = (pos + 1u) & mask) {
+        if (g_mod_var_index.slots[pos].hash == h &&
+            g_mod_var_index.slots[pos].mod == mod &&
+            strcmp(g_mod_var_index.slots[pos].key, member) == 0)
+          return g_mod_var_index.slots[pos].expr;
+      }
+      return NULL;
+    }
+  }
   ny_native_fn_index_t *index = ny_native_fn_index_for(b);
   bool cacheable =
       depth == 0 && index && b->prog && index->functions.prog == b->prog;
@@ -17419,14 +17612,26 @@ static const expr_t *nyr_resolve_member_expr(const nyr_builder_impl_t *b,
     mlen += (size_t)n;
   }
 
-  for (size_t i = 0; i < b->prog->body.len; ++i) {
-    const stmt_t *mod =
-        nyr_find_module_in_root_cached(b, b->prog->body.data[i], module);
-    const expr_t *v = nyr_find_module_member_in(b, mod, path[0], 0);
-    if (!v)
-      v = nyr_find_imported_module_member(b, mod, path[0], 0);
-    if (v)
-      return v;
+  ny_native_fn_index_t *mod_index = ny_native_fn_index_for(b);
+  if (mod_index && mod_index->modules.prog == b->prog) {
+    const stmt_t *mod = nyr_find_module_in_prog(mod_index, b->prog, module);
+    if (mod) {
+      const expr_t *v = nyr_find_module_member_in(b, mod, path[0], 0);
+      if (!v)
+        v = nyr_find_imported_module_member(b, mod, path[0], 0);
+      if (v)
+        return v;
+    }
+  } else {
+    for (size_t i = 0; i < b->prog->body.len; ++i) {
+      const stmt_t *mod =
+          nyr_find_module_in_root_cached(b, b->prog->body.data[i], module);
+      const expr_t *v = nyr_find_module_member_in(b, mod, path[0], 0);
+      if (!v)
+        v = nyr_find_imported_module_member(b, mod, path[0], 0);
+      if (v)
+        return v;
+    }
   }
 
   char qualified[1024];
@@ -17447,6 +17652,9 @@ static const expr_t *nyr_resolve_member_expr(const nyr_builder_impl_t *b,
 static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
   if (!b || !e)
     return false;
+  if (e->kind == NY_E_TERNARY)
+    return nyr_expr_is_list(b, e->as.ternary.true_expr) &&
+           nyr_expr_is_list(b, e->as.ternary.false_expr);
   if (e->kind == NY_E_COMPTIME && e->as.comptime_expr.body) {
     const stmt_t *body = e->as.comptime_expr.body;
     if (body->kind == NY_S_BLOCK) {
@@ -20963,15 +21171,87 @@ static const stmt_t *nyr_find_layout_in_prog(const nyr_builder_impl_t *b,
   return res;
 }
 
+static bool ny_native_refine_index_collect(ny_native_fn_index_t *index,
+                                           const stmt_t *s, unsigned depth) {
+  if (!index || !s || depth > 64)
+    return true;
+  if (s->kind == NY_S_REFINE) {
+    if (index->refine_stmt_count == index->refine_stmt_cap) {
+      size_t next = index->refine_stmt_cap ? index->refine_stmt_cap * 2 : 16;
+      if (next < index->refine_stmt_cap ||
+          next > SIZE_MAX / sizeof(*index->refine_stmts))
+        return false;
+      const stmt_t **grown =
+          realloc(index->refine_stmts, next * sizeof(*grown));
+      if (!grown)
+        return false;
+      index->refine_stmts = grown;
+      index->refine_stmt_cap = next;
+    }
+    index->refine_stmts[index->refine_stmt_count++] = s;
+    return true;
+  }
+  const ny_stmt_list *body = s->kind == NY_S_MODULE  ? &s->as.module.body
+                             : s->kind == NY_S_BLOCK ? &s->as.block.body
+                                                     : NULL;
+  if (body) {
+    for (size_t i = 0; i < body->len; ++i)
+      if (!ny_native_refine_index_collect(index, body->data[i], depth + 1))
+        return false;
+    return true;
+  }
+  if (s->kind == NY_S_IF) {
+    if (!ny_native_refine_index_collect(index, s->as.iff.conseq, depth + 1))
+      return false;
+    return ny_native_refine_index_collect(index, s->as.iff.alt, depth + 1);
+  }
+  return true;
+}
+
+static bool ny_native_refine_index_ensure(ny_native_fn_index_t *index,
+                                          const program_t *prog) {
+  if (!index || !prog)
+    return false;
+  if (index->refine_stmts_built && index->refine_stmts_prog == prog)
+    return true;
+  index->refine_stmt_count = 0;
+  index->refine_stmts_prog = prog;
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    if (!ny_native_refine_index_collect(index, prog->body.data[i], 0)) {
+      index->refine_stmts_built = false;
+      index->refine_stmts_prog = NULL;
+      index->refine_stmt_count = 0;
+      return false;
+    }
+  }
+  index->refine_stmts_built = true;
+  return true;
+}
+
 static const stmt_t *nyr_find_refine_in_prog(const nyr_builder_impl_t *b,
                                              const program_t *prog,
                                              const char *name) {
+  if (!prog || !name)
+    return NULL;
+  ny_native_fn_index_t *index = ny_native_fn_index_for(b);
+  bool indexed = ny_native_refine_index_ensure(index, prog);
+  if (indexed && index->refine_stmt_count == 0)
+    return NULL;
   ny_prog_query_entry_t *hit =
       ny_native_prog_query_slot(b, prog, name, 1, NULL);
   if (hit)
     return hit->result;
   const stmt_t *res = NULL;
-  if (prog && name) {
+  if (indexed) {
+    for (size_t i = 0; i < index->refine_stmt_count; ++i) {
+      const stmt_t *s = index->refine_stmts[i];
+      if (s && s->as.refine.name &&
+          ny_native_name_matches(s->as.refine.name, name)) {
+        res = s;
+        break;
+      }
+    }
+  } else {
     for (size_t i = 0; i < prog->body.len && !res; ++i)
       res = nyr_find_refine_stmt(b, prog->body.data[i], name);
   }
@@ -20988,10 +21268,14 @@ static const stmt_t *nyr_find_module_walk_in_prog(const nyr_builder_impl_t *b,
     return hit->result;
   const stmt_t *res = NULL;
   if (prog && name) {
-    if (b && prog == b->prog)
-      res = nyr_find_module_in_prog(ny_native_fn_index_for(b), prog, name);
-    for (size_t i = 0; i < prog->body.len && !res; ++i)
-      res = nyr_find_module(prog->body.data[i], name, 0);
+    ny_native_fn_index_t *idx =
+        (b && prog == b->prog) ? ny_native_fn_index_for(b) : NULL;
+    if (idx && idx->modules.prog == prog) {
+      res = nyr_find_module_in_prog(idx, prog, name);
+    } else {
+      for (size_t i = 0; i < prog->body.len && !res; ++i)
+        res = nyr_find_module(prog->body.data[i], name, 0);
+    }
   }
   ny_native_prog_query_store(b, prog, name, 2, NULL, res);
   return res;
@@ -22051,6 +22335,59 @@ static bool ny_native_operator_walk_mark_module(ny_native_operator_walk_t *walk,
     walk->cap = cap;
   }
   walk->modules[walk->len++] = module;
+  return true;
+}
+
+static bool ny_native_impl_index_collect(ny_native_fn_index_t *index,
+                                         const stmt_t *s,
+                                         ny_native_operator_walk_t *walk) {
+  if (!index || !s)
+    return true;
+  if (s->kind == NY_S_IMPL) {
+    if (index->impl_stmt_count == index->impl_stmt_cap) {
+      size_t next = index->impl_stmt_cap ? index->impl_stmt_cap * 2 : 64;
+      if (next < index->impl_stmt_cap ||
+          next > SIZE_MAX / sizeof(*index->impl_stmts))
+        return false;
+      const stmt_t **grown = realloc(index->impl_stmts, next * sizeof(*grown));
+      if (!grown)
+        return false;
+      index->impl_stmts = grown;
+      index->impl_stmt_cap = next;
+    }
+    index->impl_stmts[index->impl_stmt_count++] = s;
+    return true;
+  }
+  if (s->kind == NY_S_MODULE) {
+    if (!ny_native_operator_walk_mark_module(walk, s))
+      return !walk->allocation_failed;
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      if (!ny_native_impl_index_collect(index, s->as.module.body.data[i], walk))
+        return false;
+  }
+  return true;
+}
+
+static bool ny_native_impl_index_ensure(ny_native_fn_index_t *index,
+                                        const program_t *prog) {
+  if (!index || !prog)
+    return false;
+  if (index->impl_stmts_built && index->impl_stmts_prog == prog)
+    return true;
+  index->impl_stmt_count = 0;
+  index->impl_stmts_prog = prog;
+  ny_native_operator_walk_t walk = {0};
+  bool ok = true;
+  for (size_t i = 0; i < prog->body.len && ok; ++i)
+    ok = ny_native_impl_index_collect(index, prog->body.data[i], &walk);
+  free(walk.modules);
+  if (!ok || walk.allocation_failed) {
+    index->impl_stmts_built = false;
+    index->impl_stmts_prog = NULL;
+    index->impl_stmt_count = 0;
+    return false;
+  }
+  index->impl_stmts_built = true;
   return true;
 }
 
@@ -23196,18 +23533,24 @@ static const stmt_t *nyr_find_operator(const nyr_builder_impl_t *b,
     }
   }
   const stmt_t *found = NULL;
-  ny_native_operator_walk_t walk = {0};
+  ny_native_fn_index_t *fn_index = ny_native_fn_index_for(b);
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     ny_dbg_heuristic_event("native-opresolve", "mw=%zu", b->prog->body.len);
-  for (size_t i = 0; i < b->prog->body.len && !found; ++i)
-    found = ny_native_find_impl_operator_in_stmt(b->prog->body.data[i], owner,
-                                                 op, right, &walk);
-  free(walk.modules);
-
-  if (walk.allocation_failed) {
-    nyr_fail((nyr_builder_t *)b, "native NYIR: operator lookup exhausted "
-                                 "memory while walking modules");
-    return NULL;
+  if (ny_native_impl_index_ensure(fn_index, b->prog)) {
+    for (size_t i = 0; i < fn_index->impl_stmt_count && !found; ++i)
+      found = ny_native_find_impl_operator_in_stmt(fn_index->impl_stmts[i],
+                                                   owner, op, right, NULL);
+  } else {
+    ny_native_operator_walk_t walk = {0};
+    for (size_t i = 0; i < b->prog->body.len && !found; ++i)
+      found = ny_native_find_impl_operator_in_stmt(b->prog->body.data[i], owner,
+                                                   op, right, &walk);
+    free(walk.modules);
+    if (walk.allocation_failed) {
+      nyr_fail((nyr_builder_t *)b, "native NYIR: operator lookup exhausted "
+                                   "memory while walking modules");
+      return NULL;
+    }
   }
   if (ny_trace_enabled("NY_TRACE_OPRESOLVE"))
     ny_trace_line(
@@ -23456,6 +23799,13 @@ static const char *nyr_expr_source_module(const nyr_builder_impl_t *b,
     base[n] = '\0';
     name = base;
   }
+  ny_native_fn_index_t *mod_index = ny_native_fn_index_for(b);
+  if (mod_index && mod_index->modules.prog == b->prog) {
+    const stmt_t *module = nyr_find_module_in_prog(mod_index, b->prog, name);
+    if (module && module->as.module.name)
+      return module->as.module.name;
+    return NULL;
+  }
   for (size_t i = 0; i < b->prog->body.len; ++i) {
     const stmt_t *module =
         nyr_find_module_in_root_cached(b, b->prog->body.data[i], name);
@@ -23528,15 +23878,27 @@ static const stmt_t *nyr_find_attached_method_impl(const nyr_builder_impl_t *b,
        * The declarations may keep the short nominal owner inside their own
        * module; restrict the program scan to that module instead.
        */
-      for (size_t i = 0; i < b->prog->body.len; ++i) {
-        const stmt_t *module = nyr_find_module_in_root_cached(
-            b, b->prog->body.data[i], source_module);
-        if (!module)
-          continue;
-        const stmt_t *found =
-            ny_native_find_attached_method_in_stmt(module, owner, method);
-        if (found)
-          return found;
+      ny_native_fn_index_t *mod_index = ny_native_fn_index_for(b);
+      if (mod_index && mod_index->modules.prog == b->prog) {
+        const stmt_t *module =
+            nyr_find_module_in_prog(mod_index, b->prog, source_module);
+        if (module) {
+          const stmt_t *found =
+              ny_native_find_attached_method_in_stmt(module, owner, method);
+          if (found)
+            return found;
+        }
+      } else {
+        for (size_t i = 0; i < b->prog->body.len; ++i) {
+          const stmt_t *module = nyr_find_module_in_root_cached(
+              b, b->prog->body.data[i], source_module);
+          if (!module)
+            continue;
+          const stmt_t *found =
+              ny_native_find_attached_method_in_stmt(module, owner, method);
+          if (found)
+            return found;
+        }
       }
     }
   }

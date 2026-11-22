@@ -3,7 +3,7 @@ shape editor_keymap_profiles {
   generator "regression"
   features [ui editor keymap emacs help]
   template ny-test-case
-  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 420
   expect compile_and_run
   expect_message "commands ok"

@@ -5,7 +5,7 @@ shape renderer_color_carriers {
   template ny-test-case
   expect compile_and_run
   expect_message "RENDERER-COLOR-CARRIERS-OK"
-  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   source ny <<'NY'
 use core
 use core.os.ui.render as gfx

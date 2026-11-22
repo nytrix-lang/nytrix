@@ -42,10 +42,7 @@ static bool lsi_const(const nyr_func_t *f, const int *defs, int v,
 }
 
 static bool lsi_dominates(const nyr_cfg_t *cfg, size_t a, size_t b) {
-  if (!cfg->dominators || a >= cfg->block_count || b >= cfg->block_count)
-    return false;
-  const uint64_t *row = cfg->dominators + b * cfg->dominator_words;
-  return (row[a / 64] >> (a % 64)) & 1u;
+  return nyr_cfg_dominates(cfg, a, b);
 }
 
 static bool lsi_plain_i64(const nyr_inst_t *in) {

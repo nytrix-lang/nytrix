@@ -190,6 +190,58 @@ static bool nir_simplify_boolean_compare(nyr_func_t *f, const int *defs,
   for (unsigned depth = 0; masked && masked->op == NYIR_COPY && depth < 16;
        ++depth)
     masked = nir_def_inst(f, defs, masked->a);
+  /*
+   * Unwrap Nytrix tagged-boolean encoding:
+   *   t = add(mul(and(b, 1), C_nz), C_base)   (e.g. (b & 1) * 6 + 2)
+   * Comparing `t != C_base` or `t == C_base + C_nz` tests the raw low bit.
+   */
+  if (masked && masked->op == NYIR_ADD_I64) {
+    int mul_v = -1;
+    int64_t c_base = 0;
+    const nyr_inst_t *aa = nir_def_inst(f, defs, masked->a);
+    const nyr_inst_t *ab = nir_def_inst(f, defs, masked->b);
+    if (ab && ab->op == NYIR_CONST_I64) {
+      mul_v = masked->a;
+      c_base = ab->imm;
+    } else if (aa && aa->op == NYIR_CONST_I64) {
+      mul_v = masked->b;
+      c_base = aa->imm;
+    }
+    const nyr_inst_t *mul_in = nir_def_inst(f, defs, mul_v);
+    for (unsigned d = 0; mul_in && mul_in->op == NYIR_COPY && d < 16; ++d)
+      mul_in = nir_def_inst(f, defs, mul_in->a);
+    if (mul_in && mul_in->op == NYIR_MUL_I64) {
+      int and_v = -1;
+      int64_t c_nz = 0;
+      const nyr_inst_t *ma = nir_def_inst(f, defs, mul_in->a);
+      const nyr_inst_t *mb = nir_def_inst(f, defs, mul_in->b);
+      if (mb && mb->op == NYIR_CONST_I64 && mb->imm != 0) {
+        and_v = mul_in->a;
+        c_nz = mb->imm;
+      } else if (ma && ma->op == NYIR_CONST_I64 && ma->imm != 0) {
+        and_v = mul_in->b;
+        c_nz = ma->imm;
+      }
+      const nyr_inst_t *and_in = nir_def_inst(f, defs, and_v);
+      for (unsigned d = 0; and_in && and_in->op == NYIR_COPY && d < 16; ++d)
+        and_in = nir_def_inst(f, defs, and_in->a);
+      int raw_bit = -1;
+      if (and_in && and_in->op == NYIR_AND_I64) {
+        if (nir_is_const_value(f, defs, and_in->b, 1))
+          raw_bit = and_in->a;
+        else if (nir_is_const_value(f, defs, and_in->a, 1))
+          raw_bit = and_in->b;
+      }
+      if (raw_bit >= 0 &&
+          ((in->cmp == NYIR_CMP_NE && constant == c_base) ||
+           (in->cmp == NYIR_CMP_EQ &&
+            (__int128)c_base + (__int128)c_nz == (__int128)constant))) {
+        int repl = nir_boolean_value(f, defs, raw_bit, 0) ? raw_bit : and_v;
+        nir_make_copy(in, repl);
+        return true;
+      }
+    }
+  }
   if (masked && masked->op == NYIR_AND_I64 &&
       (nir_is_const_value(f, defs, masked->a, 1) ||
        nir_is_const_value(f, defs, masked->b, 1)) &&
@@ -219,6 +271,43 @@ static bool nir_simplify_boolean_compare(nyr_func_t *f, const int *defs,
    * caused a wrong checksum in the optimized native PBKDF2 fixture.
    */
   return false;
+}
+
+static uint32_t *nir_count_value_uses(const nyr_func_t *f) {
+  if (!f || f->next_value <= 0)
+    return NULL;
+  uint32_t *counts = calloc((size_t)f->next_value, sizeof(*counts));
+  if (!counts)
+    return NULL;
+  int nv = f->next_value;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_NOP)
+      continue;
+    if (in->a >= 0 && in->a < nv)
+      counts[in->a]++;
+    if (in->b >= 0 && in->b < nv)
+      counts[in->b]++;
+    if (in->c >= 0 && in->c < nv)
+      counts[in->c]++;
+    if (in->d >= 0 && in->d < nv)
+      counts[in->d]++;
+    if (in->e >= 0 && in->e < nv)
+      counts[in->e]++;
+    if (in->f >= 0 && in->f < nv)
+      counts[in->f]++;
+    for (size_t n = 0; n < in->extra_args_len; ++n) {
+      int v = in->extra_args[n];
+      if (v >= 0 && v < nv)
+        counts[v]++;
+    }
+    for (size_t n = 0; n < in->phi_incoming_len; ++n) {
+      int v = in->phi_incoming[n].value;
+      if (v >= 0 && v < nv)
+        counts[v]++;
+    }
+  }
+  return counts;
 }
 
 static bool nir_value_single_user(const nyr_func_t *f, int value,
@@ -385,6 +474,32 @@ static bool nir_simplify_mod_parity_compare(nyr_func_t *f, const int *defs,
     value = cmp->a;
   if (value < 0)
     return false;
+
+  /*
+   * Pre-verify the COPY chain actually terminates at `x % (+/-2)` before doing
+   * any whole-function single-user scans. Virtually every `!= 0` comparison on
+   * a COPY exits here in O(1).
+   */
+  {
+    int probe = value;
+    bool reaches_mod2 = false;
+    for (unsigned depth = 0; depth < 16; ++depth) {
+      const nyr_inst_t *def = nir_def_inst(f, defs, probe);
+      if (!def)
+        break;
+      if (def->op == NYIR_COPY) {
+        probe = def->a;
+        continue;
+      }
+      if (def->op == NYIR_MOD_I64 && def->a >= 0 && def->b >= 0 &&
+          (nir_is_const_value(f, defs, def->b, 2) ||
+           nir_is_const_value(f, defs, def->b, -2)))
+        reaches_mod2 = true;
+      break;
+    }
+    if (!reaches_mod2)
+      return false;
+  }
 
   size_t mod_idx = SIZE_MAX;
   size_t expected_user = cmp_idx;
@@ -1244,23 +1359,50 @@ bool nyr_peephole(nyr_func_t *f) {
         nir_make_const(in, 0);
       else if (in->op == NYIR_SAR_I64 && bk && bv > 0 && bv < 64) {
         const nyr_inst_t *left = nir_def_inst(f, defs, in->a);
-        if (!left || left->op != NYIR_SHL_I64 ||
-            !nir_is_const_value(f, defs, left->b, bv))
-          break;
-        const nyr_inst_t *inner = nir_def_inst(f, defs, left->a);
-        if (!inner || inner->op != NYIR_SAR_I64)
-          break;
-        const nyr_inst_t *count = nir_def_inst(f, defs, inner->b);
-        const nyr_inst_t *inner_left = nir_def_inst(f, defs, inner->a);
-        /*
-         * Sign extending an already sign-extended value to the same or a
-         * wider width is an identity. A narrower outer width must still
-         * truncate, including when the input's high bits are nonzero.
-         */
-        if (count && count->op == NYIR_CONST_I64 && count->imm >= bv &&
-            count->imm < 64 && inner_left && inner_left->op == NYIR_SHL_I64 &&
-            nir_is_const_value(f, defs, inner_left->b, count->imm))
-          nir_make_copy(in, left->a);
+        if (left && left->op == NYIR_SHL_I64 &&
+            nir_is_const_value(f, defs, left->b, bv)) {
+          bool folded = false;
+          if (bv == 32 && left->a >= 0 && left->a < f->next_value) {
+            bool fits32 = known[left->a] && kind[left->a] == 1 &&
+                          value[left->a] >= INT32_MIN &&
+                          value[left->a] <= INT32_MAX;
+            if (!fits32) {
+              const nyr_inst_t *src = nir_def_inst(f, defs, left->a);
+              if (src && src->range.has_min && src->range.has_max &&
+                  src->range.min >= INT32_MIN && src->range.max <= INT32_MAX) {
+                fits32 = true;
+              } else {
+                nyr_range_t rr = {0};
+                if (nir_value_range_at_cached(f, facts, left->a, i, &rr,
+                                              &range_cache) &&
+                    rr.has_min && rr.has_max && rr.min >= INT32_MIN &&
+                    rr.max <= INT32_MAX)
+                  fits32 = true;
+              }
+            }
+            if (fits32) {
+              nir_make_copy(in, left->a);
+              folded = true;
+            }
+          }
+          if (!folded) {
+            const nyr_inst_t *inner = nir_def_inst(f, defs, left->a);
+            if (!inner || inner->op != NYIR_SAR_I64)
+              break;
+            const nyr_inst_t *count = nir_def_inst(f, defs, inner->b);
+            const nyr_inst_t *inner_left = nir_def_inst(f, defs, inner->a);
+            /*
+             * Sign extending an already sign-extended value to the same or a
+             * wider width is an identity. A narrower outer width must still
+             * truncate, including when the input's high bits are nonzero.
+             */
+            if (count && count->op == NYIR_CONST_I64 && count->imm >= bv &&
+                count->imm < 64 && inner_left &&
+                inner_left->op == NYIR_SHL_I64 &&
+                nir_is_const_value(f, defs, inner_left->b, count->imm))
+              nir_make_copy(in, left->a);
+          }
+        }
       }
       break;
     case NYIR_SELECT_I64:
@@ -1399,12 +1541,11 @@ bool nyr_peephole(nyr_func_t *f) {
       break;
     }
     /*
-     * The range cache is valid only while its definitions and branch
-     * predicates are unchanged. This ordered walk can invalidate once at a
-     * rewritten instruction instead of comparing the whole function on every
-     * query. Insertions are detected by the cache's data/length key.
+     * This loop only rewrites instructions in-place (preserving CFG topology
+     * and destinations; inserting helpers change f->len which the cache key
+     * already detects). Only invalidate if an instruction's dst changed.
      */
-    if (memcmp(&before, in, sizeof(before)) != 0)
+    if (in->dst != before.dst)
       nir_range_query_cache_invalidate(&range_cache);
   }
   nir_range_query_cache_free(&range_cache);
@@ -1517,6 +1658,380 @@ bool nyr_peephole(nyr_func_t *f) {
       }
 
       bb_start = bb_end;
+    }
+  }
+  /*
+   * Bitwise distributive & mux reductions (in-place, same basic block):
+   *   (a & b) ^ (a & c)          ->  a & (b ^ c)
+   *   (a & b) | (a & c)          ->  a & (b | c)
+   *   (e & f) ^ ((~e) & g)       ->  ((f ^ g) & e) ^ g
+   *   (e & f) | ((~e) & g)       ->  ((f ^ g) & e) ^ g
+   * Cuts instruction count and live temporary pressure in SHA-256 Ch/Maj.
+   */
+  if (f->len >= 3) {
+    int *bdefs = nyr_build_defs(f);
+    uint32_t *buse = bdefs ? nir_count_value_uses(f) : NULL;
+    if (bdefs) {
+      int bdefs_len = f->next_value;
+      size_t bb_start = 0;
+      for (size_t i = 0; i < f->len; ++i) {
+        nyr_inst_t *in = &f->data[i];
+        if (in->op == NYIR_LABEL) {
+          bb_start = i;
+          continue;
+        }
+        if (in->op == NYIR_BR || in->op == NYIR_BR_IF || in->op == NYIR_RET) {
+          bb_start = i + 1;
+          continue;
+        }
+        if ((in->op != NYIR_XOR_I64 && in->op != NYIR_OR_I64) || in->dst < 0 ||
+            in->a < 0 || in->b < 0 || in->a >= bdefs_len || in->b >= bdefs_len)
+          continue;
+        int dpa = bdefs[in->a], dpb = bdefs[in->b];
+        if (dpa < 0 || dpb < 0 || (size_t)dpa < bb_start ||
+            (size_t)dpb < bb_start || (size_t)dpa >= i || (size_t)dpb >= i ||
+            dpa == dpb)
+          continue;
+        size_t pa = (size_t)dpa, pb = (size_t)dpb;
+        nyr_inst_t *ia = &f->data[pa], *ib = &f->data[pb];
+        if (ia->op != NYIR_AND_I64 || ib->op != NYIR_AND_I64 || ia->a < 0 ||
+            ia->b < 0 || ib->a < 0 || ib->b < 0)
+          continue;
+        if (buse ? (buse[in->a] != 1 || buse[in->b] != 1)
+                 : (!nir_value_single_user(f, in->a, NULL) ||
+                    !nir_value_single_user(f, in->b, NULL)))
+          continue;
+        /* Case 1: (common & x) op (common & y) -> common & (x op y) */
+        int common = -1, x = -1, y = -1;
+        if (ia->a == ib->a) {
+          common = ia->a;
+          x = ia->b;
+          y = ib->b;
+        } else if (ia->a == ib->b) {
+          common = ia->a;
+          x = ia->b;
+          y = ib->a;
+        } else if (ia->b == ib->a) {
+          common = ia->b;
+          x = ia->a;
+          y = ib->b;
+        } else if (ia->b == ib->b) {
+          common = ia->b;
+          x = ia->a;
+          y = ib->a;
+        }
+        if (common >= 0 && x >= 0 && y >= 0) {
+          size_t slot_hi = pa > pb ? pa : pb;
+          size_t slot_lo = pa > pb ? pb : pa;
+          nyr_op_t combine_op = in->op;
+          int t_dst = f->data[slot_hi].dst;
+          nyr_debug_loc_t dbg = f->data[slot_hi].debug;
+          nyr_scalar_class_t sc = f->data[slot_hi].scalar_class;
+          if (buse) {
+            if (common < bdefs_len && buse[common] > 0)
+              buse[common]--;
+            buse[in->a] = 0;
+            buse[in->b] = 0;
+            if (t_dst >= 0 && t_dst < bdefs_len)
+              buse[t_dst] = 1;
+          }
+          f->data[slot_lo] = (nyr_inst_t){.op = NYIR_NOP,
+                                          .dst = -1,
+                                          .a = -1,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1};
+          f->data[slot_hi] = (nyr_inst_t){.op = combine_op,
+                                          .dst = t_dst,
+                                          .a = x,
+                                          .b = y,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .scalar_class = sc,
+                                          .debug = dbg,
+                                          .effects = NYIR_EFFECT_NONE};
+          in->op = NYIR_AND_I64;
+          in->a = common;
+          in->b = t_dst;
+          nyr_clear_derived_facts(in);
+          in->effects = NYIR_EFFECT_NONE;
+          continue;
+        }
+        /* Case 2: (e & f) ^/| ((~e) & g) -> ((f ^ g) & e) ^ g */
+        int e_v = -1, f_v = -1, g_v = -1;
+        size_t pc_not = SIZE_MAX;
+        for (int side = 0; side < 2 && pc_not == SIZE_MAX; ++side) {
+          nyr_inst_t *cand = side == 0 ? ia : ib;
+          nyr_inst_t *other = side == 0 ? ib : ia;
+          for (int k = 0; k < 2 && pc_not == SIZE_MAX; ++k) {
+            int nv = k == 0 ? cand->a : cand->b;
+            int gv = k == 0 ? cand->b : cand->a;
+            if (nv < 0 || nv >= bdefs_len || bdefs[nv] < 0)
+              continue;
+            size_t np = (size_t)bdefs[nv];
+            if (np < bb_start || np >= i)
+              continue;
+            nyr_inst_t *ni = &f->data[np];
+            if (ni->op != NYIR_XOR_I64 || ni->a < 0 || ni->b < 0)
+              continue;
+            int ev = -1;
+            if (nir_is_const_value(f, bdefs, ni->b, -1))
+              ev = ni->a;
+            else if (nir_is_const_value(f, bdefs, ni->a, -1))
+              ev = ni->b;
+            if (ev < 0)
+              continue;
+            int fv = -1;
+            if (other->a == ev)
+              fv = other->b;
+            else if (other->b == ev)
+              fv = other->a;
+            if (fv < 0)
+              continue;
+            if (buse ? (buse[nv] != 1) : !nir_value_single_user(f, nv, NULL))
+              continue;
+            e_v = ev;
+            f_v = fv;
+            g_v = gv;
+            pc_not = np;
+          }
+        }
+        if (pc_not != SIZE_MAX && e_v >= 0 && f_v >= 0 && g_v >= 0) {
+          size_t s[3] = {pa, pb, pc_not};
+          if (s[0] > s[1]) {
+            size_t t = s[0];
+            s[0] = s[1];
+            s[1] = t;
+          }
+          if (s[1] > s[2]) {
+            size_t t = s[1];
+            s[1] = s[2];
+            s[2] = t;
+          }
+          if (s[0] > s[1]) {
+            size_t t = s[0];
+            s[0] = s[1];
+            s[1] = t;
+          }
+          if (s[0] < s[1] && s[1] < s[2] && s[2] < i &&
+              (f_v >= bdefs_len || bdefs[f_v] < (int)s[1]) &&
+              (g_v >= bdefs_len || bdefs[g_v] < (int)s[1]) &&
+              (e_v >= bdefs_len || bdefs[e_v] < (int)s[2])) {
+            int v_mid = f->data[s[1]].dst;
+            int v_hi = f->data[s[2]].dst;
+            nyr_debug_loc_t dbg = in->debug;
+            nyr_scalar_class_t sc = in->scalar_class;
+            if (buse) {
+              int nv_dead = f->data[pc_not].dst;
+              if (nv_dead >= 0 && nv_dead < bdefs_len)
+                buse[nv_dead] = 0;
+              buse[in->a] = 0;
+              buse[in->b] = 0;
+              if (e_v < bdefs_len && buse[e_v] > 0)
+                buse[e_v]--;
+              if (g_v < bdefs_len)
+                buse[g_v]++;
+              if (v_mid >= 0 && v_mid < bdefs_len)
+                buse[v_mid] = 1;
+              if (v_hi >= 0 && v_hi < bdefs_len)
+                buse[v_hi] = 1;
+            }
+            f->data[s[0]] = (nyr_inst_t){.op = NYIR_NOP,
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1};
+            f->data[s[1]] = (nyr_inst_t){.op = NYIR_XOR_I64,
+                                         .dst = v_mid,
+                                         .a = f_v,
+                                         .b = g_v,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .scalar_class = sc,
+                                         .debug = dbg,
+                                         .effects = NYIR_EFFECT_NONE};
+            f->data[s[2]] = (nyr_inst_t){.op = NYIR_AND_I64,
+                                         .dst = v_hi,
+                                         .a = v_mid,
+                                         .b = e_v,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .scalar_class = sc,
+                                         .debug = dbg,
+                                         .effects = NYIR_EFFECT_NONE};
+            in->op = NYIR_XOR_I64;
+            in->a = v_hi;
+            in->b = g_v;
+            nyr_clear_derived_facts(in);
+            in->effects = NYIR_EFFECT_NONE;
+          }
+        }
+      }
+      free(buse);
+      free(bdefs);
+    }
+  }
+  /*
+   * Exact signed divisibility test for odd constant divisor d >= 3:
+   *   (x % d == 0)  <==>  (int64_t)(x * inv(d) + (INT64_MIN + q)) <= (INT64_MIN + 2*q)
+   * where inv(d) * d == 1 (mod 2^64) and q = INT64_MAX / d.
+   * Eliminates 128-bit mul+shift+sub+mul remainder sequences on hot modulo tests.
+   */
+  if (f->len >= 2 && !getenv("NYTRIX_NO_MOD_ODD_ZERO")) {
+    int *mdefs = nyr_build_defs(f);
+    uint32_t *muse = mdefs ? nir_count_value_uses(f) : NULL;
+    if (mdefs) {
+      int mdefs_len = f->next_value;
+      for (size_t i = 0; i < f->len; ++i) {
+        nyr_inst_t *in = &f->data[i];
+        if (in->op != NYIR_CMP_I64 ||
+            (in->cmp != NYIR_CMP_EQ && in->cmp != NYIR_CMP_NE) ||
+            in->dst < 0 || in->a < 0 || in->b < 0 || in->a >= mdefs_len ||
+            in->b >= mdefs_len)
+          continue;
+        int other = -1;
+        if (nir_is_const_value(f, mdefs, in->b, 0))
+          other = in->a;
+        else if (nir_is_const_value(f, mdefs, in->a, 0))
+          other = in->b;
+        else
+          continue;
+        if (other < 0 || other >= mdefs_len || mdefs[other] < 0)
+          continue;
+        size_t mod_pc = (size_t)mdefs[other];
+        if (mod_pc >= f->len || f->data[mod_pc].op != NYIR_MOD_I64)
+          continue;
+        const nyr_inst_t *mod_in = &f->data[mod_pc];
+        if (mod_in->a < 0 || mod_in->b < 0 || mod_in->b >= mdefs_len ||
+            mdefs[mod_in->b] < 0)
+          continue;
+        const nyr_inst_t *div_in = &f->data[(size_t)mdefs[mod_in->b]];
+        if (div_in->op != NYIR_CONST_I64 || div_in->imm < 3 ||
+            (div_in->imm & 1) == 0)
+          continue;
+        if (muse ? (muse[other] != 1) : !nir_value_single_user(f, other, NULL))
+          continue;
+        uint64_t d = (uint64_t)div_in->imm;
+        uint64_t inv = 1;
+        for (int iter = 0; iter < 6; ++iter)
+          inv *= 2ULL - d * inv;
+        uint64_t q = (uint64_t)INT64_MAX / d;
+        int64_t bias = (int64_t)((uint64_t)INT64_MIN + q);
+        int64_t limit = (int64_t)((uint64_t)INT64_MIN + 2ULL * q);
+        int x_val = mod_in->a;
+        nyr_cmp_t new_cmp =
+            in->cmp == NYIR_CMP_EQ ? NYIR_CMP_LE : NYIR_CMP_GT;
+        nyr_debug_loc_t dbg = in->debug;
+        int cmp_dst = in->dst;
+        nyr_inst_discard(&f->data[mod_pc]);
+        if (muse)
+          muse[other] = 0;
+        if (!nir_ensure_inst_space(f, 5)) {
+          free(muse);
+          free(mdefs);
+          return false;
+        }
+        int v_inv = f->next_value++;
+        int v_prod = f->next_value++;
+        int v_bias = f->next_value++;
+        int v_shift = f->next_value++;
+        int v_lim = f->next_value++;
+        memmove(&f->data[i + 5], &f->data[i], (f->len - i) * sizeof(*f->data));
+        f->len += 5;
+        f->data[i] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                  .dst = v_inv,
+                                  .a = -1,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = (int64_t)inv,
+                                  .scalar_class = NYIR_SCALAR_I64_RAW,
+                                  .debug = dbg};
+        f->data[i + 1] = (nyr_inst_t){.op = NYIR_MUL_I64,
+                                      .dst = v_prod,
+                                      .a = x_val,
+                                      .b = v_inv,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = dbg};
+        f->data[i + 2] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                      .dst = v_bias,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = bias,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = dbg};
+        f->data[i + 3] = (nyr_inst_t){.op = NYIR_ADD_I64,
+                                      .dst = v_shift,
+                                      .a = v_prod,
+                                      .b = v_bias,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = dbg};
+        f->data[i + 4] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                      .dst = v_lim,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = limit,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = dbg};
+        f->data[i + 5] = (nyr_inst_t){.op = NYIR_CMP_I64,
+                                      .dst = cmp_dst,
+                                      .a = v_shift,
+                                      .b = v_lim,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .cmp = new_cmp,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                                      .debug = dbg};
+        for (size_t k = 0; k < 6; ++k)
+          f->data[i + k].effects = nyr_inst_effects(&f->data[i + k]);
+        /*
+         * Indices after i shifted by +5; rebuild defs lazily only if more
+         * instructions remain after i + 5.
+         */
+        i += 5;
+        free(muse);
+        free(mdefs);
+        mdefs = nyr_build_defs(f);
+        if (!mdefs) {
+          muse = NULL;
+          break;
+        }
+        muse = nir_count_value_uses(f);
+        mdefs_len = f->next_value;
+      }
+      free(muse);
+      free(mdefs);
     }
   }
   return true;

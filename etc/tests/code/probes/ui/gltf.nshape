@@ -3,7 +3,7 @@ shape gltf_embedded_buffer {
   generator "embedded"
   features [gltf base64 binary renderer]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
   expect compile_and_run
   expect_message "GLTF-EMBEDDED-BUFFER-OK"
   source ny <<'NY'
@@ -81,7 +81,7 @@ shape gltf_triangle_bounds {
   generator "embedded"
   features [gltf scene bounds]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
   expect compile_and_run
   expect_message "GLTF-TRIANGLE-BOUNDS-OK"
   source ny <<'NY'
@@ -104,7 +104,7 @@ shape gltf_morph_instances {
   generator "embedded"
   features [gltf scene morph instances]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
   expect compile_and_run
   expect_message "GLTF-MORPH-INSTANCES-OK"
   source ny <<'NY'

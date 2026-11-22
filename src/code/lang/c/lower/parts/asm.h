@@ -3352,15 +3352,19 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
         NULL);
   }
 
-  bool irq_stack_switch_template =
-      !asm_goto && INLINE_ASM_HAS("movq\t%%rsp, (%[tos])") &&
-      INLINE_ASM_HAS("call irq_enter_rcu") &&
-      INLINE_ASM_HAS("call irq_exit_rcu") && INLINE_ASM_HAS("popq\t%%rsp");
   bool call_on_stack_template =
       !asm_goto && INLINE_ASM_HAS("movq\t%%rsp, (%[tos])") &&
       INLINE_ASM_HAS("movq\t%[tos], %%rsp") &&
       INLINE_ASM_HAS("call %c[__func]") && INLINE_ASM_HAS("popq\t%%rsp");
-  if (irq_stack_switch_template || call_on_stack_template) {
+  if (call_on_stack_template) {
+    bool enters_irq = INLINE_ASM_HAS("call irq_enter_rcu");
+    bool exits_irq = INLINE_ASM_HAS("call irq_exit_rcu");
+    if (enters_irq != exits_irq) {
+      free(assembly);
+      fail(p, "IRQ stack switch requires both IRQ boundary calls");
+      return false;
+    }
+    bool irq_stack_switch = enters_irq;
     ny_ctok_t tos_output, stack_pointer_output;
     if (!expect(p, ":") || !inline_asm_string_sequence_is(p, "+r", &p->pos) ||
         !expect(p, "(") || !parse_name(p, &tos_output) || !expect(p, ")") ||
@@ -3409,7 +3413,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     size_t argument_count = 0;
     while (accept(p, ",")) {
       ny_ctok_t argument_name;
-      size_t max_arguments = call_on_stack_template ? 3 : 2;
+      size_t max_arguments = irq_stack_switch ? 2 : 3;
       if (argument_count == max_arguments ||
           !parse_named_inline_asm_operand(p, &argument_name) ||
           !inline_asm_string_sequence_is(p, "r", &p->pos) || !expect(p, "(")) {
@@ -3437,7 +3441,8 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
       return false;
     }
     p->pos = clobber_end;
-    if (!expect(p, ")") || !expect(p, ";") || !function_name.start ||
+    if (!expect(p, ")") || !expect(p, ";") ||
+        (irq_stack_switch && argument_count == 0) || !function_name.start ||
         function_name.len == 0 || function_name.len >= 256 ||
         (!c_type_is_pointer(tos_value.type) &&
          !c_type_is_integer(tos_value.type))) {
@@ -3458,12 +3463,10 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                      .a = tos_value.value,
                      .b = argument_count ? argument_values[0] : -1,
                      .c = argument_count > 1 ? argument_values[1] : -1,
-                     .d = call_on_stack_template && argument_count > 2
-                              ? argument_values[2]
-                              : -1,
+                     .d = argument_count > 2 ? argument_values[2] : -1,
                      .e = -1,
                      .f = -1,
-                     .imm = call_on_stack_template ? -153 : -111,
+                     .imm = irq_stack_switch ? -111 : -153,
                      .symbol = target,
                      .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                                 NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_CONTROL |

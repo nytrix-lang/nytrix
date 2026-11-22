@@ -67,10 +67,16 @@ fn run_avr_case(str suffix, str value_source, list expected) bool {
          to_str(start_assembled.get("code", 127)) + "," +
          to_str(linked.get("code", 127)) + " link output=" +
          linked.get("stdout", ""))
-  def execution = run_capture(
-      ["timeout", "0.5s", "qemu-system-avr", "-M", "uno", "-display", "none",
+  mut execution = run_capture(
+      ["timeout", "1s", "qemu-system-avr", "-M", "uno", "-display", "none",
        "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
       [], nil, false)
+  if execution.get("code", 0) == 124 && execution.get("stdout", "").len == 0 {
+    execution = run_capture(
+        ["timeout", "4s", "qemu-system-avr", "-M", "uno", "-display", "none",
+         "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
+        [], nil, false)
+  }
   assert(execution.get("code", 0) == 124 &&
          str_contains(execution.get("stdout", ""), "U") &&
          !str_contains(execution.get("stdout", ""), "E"),

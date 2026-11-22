@@ -694,7 +694,8 @@ static int lower_load_u8_field(c_parser_t *p, int address, bool is_volatile) {
 
 static int lower_load_u16_field_seg(c_parser_t *p, int address, c_type_t type,
                                     bool is_volatile, unsigned seg_flags) {
-  if (p->abi == NYC_ABI_I386) {
+  if (p->abi == NYC_ABI_I386 ||
+      (is_volatile && p->abi == NYC_ABI_SYSV_X86_64)) {
     int loaded = emit_value(
         p,
         (nyr_inst_t){.op = NYIR_LOAD_I64,
@@ -785,7 +786,8 @@ static bool lower_store_u16_field_seg(c_parser_t *p, int address, int value,
   value = normalize_u16(p, value);
   if (type == C_I16)
     value = normalize_i16(p, value);
-  if (p->abi == NYC_ABI_I386) {
+  if (p->abi == NYC_ABI_I386 ||
+      (is_volatile && p->abi == NYC_ABI_SYSV_X86_64)) {
     if (value < 0)
       return false;
     return emit(p,
@@ -796,7 +798,8 @@ static bool lower_store_u16_field_seg(c_parser_t *p, int address, int value,
                     .c = value,
                     .effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
                                (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                    .flags = NYIR_INST_F_MEM_U16 | seg_flags,
+                    .flags = NYIR_INST_F_MEM_U16 | seg_flags |
+                             (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                     .scalar_class = NYIR_SCALAR_I64_RAW},
                 NULL);
   }

@@ -722,6 +722,78 @@ static bool ny_ffi_function_return_tokens_bool(CXCursor cursor,
   return seen_bool;
 }
 
+typedef struct ny_ffi_file_lines_t {
+  char *path;
+  char *buf;
+  size_t *line_offs;
+  size_t line_count;
+} ny_ffi_file_lines_t;
+
+#define NY_FFI_FILE_LINE_CACHE_CAP 16
+
+static _Thread_local ny_ffi_file_lines_t
+    g_ffi_file_lines[NY_FFI_FILE_LINE_CACHE_CAP];
+static _Thread_local unsigned g_ffi_file_lines_next = 0;
+
+static const ny_ffi_file_lines_t *ny_ffi_get_file_lines(const char *path) {
+  if (!path || !*path)
+    return NULL;
+  for (unsigned i = 0; i < NY_FFI_FILE_LINE_CACHE_CAP; ++i) {
+    if (g_ffi_file_lines[i].path && strcmp(g_ffi_file_lines[i].path, path) == 0)
+      return &g_ffi_file_lines[i];
+  }
+  FILE *f = fopen(path, "rb");
+  if (!f)
+    return NULL;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  long sz = ftell(f);
+  if (sz < 0 || sz > (32L << 20) || fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  char *buf = malloc((size_t)sz + 1u);
+  if (!buf) {
+    fclose(f);
+    return NULL;
+  }
+  size_t nread = fread(buf, 1, (size_t)sz, f);
+  fclose(f);
+  buf[nread] = '\0';
+  size_t lines = 1;
+  for (size_t i = 0; i < nread; ++i)
+    if (buf[i] == '\n')
+      lines++;
+  size_t *offs = malloc((lines + 1u) * sizeof(*offs));
+  char *dup_path = strdup(path);
+  if (!offs || !dup_path) {
+    free(buf);
+    free(offs);
+    free(dup_path);
+    return NULL;
+  }
+  size_t li = 0;
+  offs[li++] = 0;
+  for (size_t i = 0; i < nread; ++i) {
+    if (buf[i] == '\n') {
+      buf[i] = '\0';
+      offs[li++] = i + 1u;
+    }
+  }
+  offs[li] = nread;
+  unsigned slot = g_ffi_file_lines_next++ % NY_FFI_FILE_LINE_CACHE_CAP;
+  free(g_ffi_file_lines[slot].path);
+  free(g_ffi_file_lines[slot].buf);
+  free(g_ffi_file_lines[slot].line_offs);
+  g_ffi_file_lines[slot].path = dup_path;
+  g_ffi_file_lines[slot].buf = buf;
+  g_ffi_file_lines[slot].line_offs = offs;
+  g_ffi_file_lines[slot].line_count = li;
+  return &g_ffi_file_lines[slot];
+}
+
 static bool ny_ffi_function_return_line_bool(CXCursor cursor,
                                              const char *c_name) {
   if (!c_name || !*c_name)
@@ -738,22 +810,14 @@ static bool ny_ffi_function_return_line_bool(CXCursor cursor,
     clang_disposeString(file_cx);
     return false;
   }
-  FILE *f = fopen(file, "r");
-  if (!f) {
-    clang_disposeString(file_cx);
-    return false;
-  }
-  char buf[4096];
+  const ny_ffi_file_lines_t *fl = ny_ffi_get_file_lines(file);
   bool ok = false;
-  for (unsigned cur = 1; fgets(buf, sizeof(buf), f); cur++) {
-    if (cur != line)
-      continue;
-    char *name = strstr(buf, c_name);
+  if (fl && (size_t)line <= fl->line_count) {
+    const char *line_text = fl->buf + fl->line_offs[line - 1u];
+    const char *name = strstr(line_text, c_name);
     if (name)
-      ok = ny_ffi_text_has_bool_token(buf, (size_t)(name - buf));
-    break;
+      ok = ny_ffi_text_has_bool_token(line_text, (size_t)(name - line_text));
   }
-  fclose(f);
   clang_disposeString(file_cx);
   return ok;
 }

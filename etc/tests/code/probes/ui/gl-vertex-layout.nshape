@@ -4,7 +4,7 @@ shape gl-vertex-layout {
   features ["ny", "render", "opengl", "vertex"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "GL-VERTEX-LAYOUT-OK"
   source ny <<'SOURCE'
 use core

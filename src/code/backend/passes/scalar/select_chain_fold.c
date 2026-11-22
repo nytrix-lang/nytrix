@@ -186,7 +186,11 @@ static void scf_meet(nyr_range_t *r, const nyr_range_t *add) {
 static bool scf_range(scf_t *s, int v, size_t at, nyr_range_t *r) {
   *r = (nyr_range_t){0};
   nyr_range_t part = {0};
-  if (s->facts && nir_value_range_at(s->f, s->facts, v, at, &part))
+  if (s->facts &&
+      (s->cfg_ok && s->defs
+           ? nir_value_range_at_with_cfg(s->f, s->facts, &s->cfg, s->defs, v,
+                                         at, &part)
+           : nir_value_range_at(s->f, s->facts, v, at, &part)))
     scf_meet(r, &part);
   if (s->scev_ok && s->defs && !(r->has_min && r->has_max)) {
     nyr_scev_affine_t aff;
@@ -567,6 +571,8 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
   }
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
+    if (in->dst >= 0 && in->dst < f->next_value && s.uses[in->dst] == 0)
+      continue;
     if (in->op == NYIR_SELECT_I64) {
       int v = -1;
       int64_t k = 0;

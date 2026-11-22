@@ -799,6 +799,15 @@ struct codegen_t {
       size_t refine_stmt_index_extra_progs_len;
     };
   };
+  /* Lazy O(1) hash indexes synced incrementally with layouts/fun_sigs. */
+  void *layout_index_slots;
+  size_t layout_index_cap;
+  size_t layout_index_len;
+  size_t layout_index_synced;
+  void *attached_method_slots;
+  size_t attached_method_cap;
+  size_t attached_method_len;
+  size_t attached_method_synced;
 };
 
 void codegen_init(codegen_t *cg, program_t *prog, arena_t *arena,

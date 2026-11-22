@@ -966,7 +966,7 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
         continue;
     }
     int reg = sm_i386_spill_register(reg_text);
-    if (reg < 0 || strcmp(reg_text, sm_i386_gpr[reg]))
+    if (reg < 0 || reg >= 6 || strcmp(reg_text, sm_i386_gpr[reg]))
       continue;
     unsigned reg_bit = 1u << reg;
     unsigned reg_out = (!cmp->terminal || cmp->removed) && i + 1 < count
@@ -1069,13 +1069,19 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       lines[first_load_at].removed = true;
     narrowed_compare = true;
   }
-  /* Compare stack-home values in memory when the load's register dies at the
-   * compare. This keeps operand order and lets x86 read the home directly. */
+  /* Read memory directly when the loaded register dies at the comparison.
+   * A zero test can use CMP $0 on the same full-width operand. */
   for (size_t i = 1; !registers_only && i < count &&
                      !getenv("NYC_DISABLE_I386_HOME_CMP_FOLD");
        ++i) {
-    sm_i386_spill_line_t *cmp = &lines[i], *load = &lines[i - 1];
-    if (cmp->removed || strcmp(cmp->op, "cmpl") || !cmp->args ||
+    sm_i386_spill_line_t *cmp = &lines[i];
+    bool test = code16_low_stack && !strcmp(cmp->op, "testl");
+    size_t previous = i - 1;
+    while (code16_low_stack && previous && lines[previous].removed &&
+           !lines[previous].label)
+      --previous;
+    sm_i386_spill_line_t *load = &lines[previous];
+    if (cmp->removed || (!test && strcmp(cmp->op, "cmpl")) || !cmp->args ||
         load->removed || strcmp(load->op, "movl") || load->label)
       continue;
     char lhs[192], rhs[192], source[192], destination[192];
@@ -1084,7 +1090,9 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       continue;
     int slot = sm_i386_spill_slot(source, bytes);
     int reg = sm_i386_spill_register(destination);
-    if (slot < 0 || reg < 0 || strcmp(destination, sm_i386_gpr[reg]))
+    if ((slot < 0 && !(code16_low_stack && strchr(source, '('))) ||
+        reg < 0 || reg >= 6 ||
+        strcmp(destination, sm_i386_gpr[reg]))
       continue;
     unsigned reg_bit = 1u << reg;
     unsigned reg_out = i + 1 < count ? lines[i + 1].reg_live : 0;
@@ -1094,14 +1102,21 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       continue;
     bool lhs_value = !strcmp(lhs, destination),
          rhs_value = !strcmp(rhs, destination);
-    if (lhs_value == rhs_value)
+    bool zero_test = test && lhs_value && rhs_value;
+    if (!zero_test && lhs_value == rhs_value)
       continue;
-    const char *new_lhs = lhs_value ? source : lhs;
+    const char *new_lhs = zero_test ? "$0" : lhs_value ? source : lhs;
     const char *new_rhs = rhs_value ? source : rhs;
     if (strchr(new_lhs, '(') && strchr(new_rhs, '('))
       continue;
+    if (test && !zero_test && lhs_value) {
+      /* TEST is commutative and encodes its memory operand last. */
+      new_lhs = rhs;
+      new_rhs = source;
+    }
+    const char *opcode = zero_test ? "cmpl" : cmp->op;
     nyr_writer_t replacement = {0};
-    if (!nyr_printf(&replacement, "\tcmpl\t%s, %s", new_lhs, new_rhs)) {
+    if (!nyr_printf(&replacement, "\t%s\t%s, %s", opcode, new_lhs, new_rhs)) {
       free(replacement.data);
       ok = false;
       goto done;
@@ -1109,8 +1124,17 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
     free(cmp->replacement);
     cmp->replacement = replacement.data;
     cmp->args = cmp->replacement + strlen("\tcmpl\t");
-    cmp->reads = 1;
-    cmp->read[0] = slot;
+    if (zero_test)
+      strcpy(cmp->op, "cmpl");
+    if (code16_low_stack)
+      cmp->reg_read = (unsigned char)sm_i386_spill_register_mask(cmp->args);
+    if (slot >= 0) {
+      cmp->reads = 1;
+      cmp->read[0] = slot;
+    } else {
+      cmp->reads = load->reads;
+      memcpy(cmp->read, load->read, sizeof(cmp->read));
+    }
     load->removed = true;
   }
   if (narrowed_compare) {
@@ -1443,48 +1467,188 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       lines[i].removed = true;
   if (code16_low_stack && !getenv("NYC_DISABLE_I386_ABSOLUTE_MEMORY_FOLD")) {
     for (size_t i = 0; i + 1 < count; ++i) {
-      sm_i386_spill_line_t *address = &lines[i], *access = &lines[i + 1];
+      sm_i386_spill_line_t *address = &lines[i];
       char symbol[192], reg[192], src[192], dst[192];
       static const char letters[] =
           "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.";
-      if (address->removed || access->removed || strcmp(address->op, "movl") ||
+      if (address->removed || strcmp(address->op, "movl") ||
           !sm_i386_spill_split(address, symbol, reg) || symbol[0] != '$' ||
           !symbol[1] || !strchr(letters, symbol[1]) ||
           symbol[1 + strspn(symbol + 1, "abcdefghijklmnopqrstuvwxyz"
                                         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                        "_0123456789.$+-")] ||
-          !sm_i386_spill_split(access, src, dst))
+                                        "_0123456789.$+-")])
         continue;
       int r = sm_i386_spill_register(reg);
       if (r < 0 || r >= 6 || strcmp(reg, sm_i386_gpr[r]))
         continue;
+      sm_i386_spill_line_t *adjust = &lines[i + 1];
+      if (!adjust->removed &&
+          (!strcmp(adjust->op, "addl") || !strcmp(adjust->op, "subl")) &&
+          sm_i386_spill_split(adjust, src, dst) && src[0] == '$' &&
+          !strcmp(reg, dst)) {
+        char *end;
+        long long immediate = strtoll(src + 1, &end, 0);
+        bool flags_dead = false;
+        for (size_t k = i + 2; k < count && k - i <= 8; ++k) {
+          const sm_i386_spill_line_t *next = &lines[k];
+          if (next->removed)
+            continue;
+          if (next->label || next->replacement)
+            break;
+          const char *op = next->op;
+          if (!strncmp(op, "mov", 3) || !strcmp(op, "leal") ||
+              !strcmp(op, "pushl") || !strcmp(op, "popl"))
+            continue;
+          /* INC and DEC retain carry and shifts can preserve all flags. */
+          flags_dead = !strcmp(op, "cmpl") || !strcmp(op, "cmpw") ||
+                       !strcmp(op, "cmpb") || !strcmp(op, "testl") ||
+                       !strcmp(op, "testw") || !strcmp(op, "testb") ||
+                       !strcmp(op, "addl") || !strcmp(op, "subl") ||
+                       !strcmp(op, "andl") || !strcmp(op, "orl") ||
+                       !strcmp(op, "xorl") || !strcmp(op, "negl");
+          break;
+        }
+        if (flags_dead && end != src + 1 && !*end && immediate >= INT32_MIN &&
+            immediate <= UINT32_MAX) {
+          int64_t offset = (int32_t)(uint32_t)immediate;
+          if (!strcmp(adjust->op, "subl"))
+            offset = -offset;
+          nyr_writer_t replacement = {0};
+          if (!nyr_printf(&replacement, "\tmovl\t%s%+" PRId64 ", %s",
+                          symbol, offset, reg)) {
+            free(replacement.data);
+            ok = false;
+            goto done;
+          }
+          free(address->replacement);
+          address->replacement = replacement.data;
+          address->args = replacement.data + strlen("\tmovl\t");
+          adjust->removed = true;
+          if (!sm_i386_spill_split(address, symbol, reg))
+            continue;
+        }
+      }
+      unsigned mask = 1u << r;
+      size_t at = i + 1;
+      /* A value load often separates an address from its store. Stay in
+       * the same block and cross only moves independent of the base. */
+      for (; at < count && at - i <= 4; ++at) {
+        const sm_i386_spill_line_t *next = &lines[at];
+        if (next->label ||
+            (!next->removed &&
+             (strncmp(next->op, "mov", 3) ||
+              ((next->reg_read | next->reg_write) & mask))))
+          break;
+      }
+      if (at == count || at - i > 4)
+        continue;
+      sm_i386_spill_line_t *access = &lines[at];
+      if (access->removed || !sm_i386_spill_split(access, src, dst))
+        continue;
       char indirect[8];
       snprintf(indirect, sizeof(indirect), "(%s)", sm_i386_gpr[r]);
-      bool load = !strcmp(src, indirect) && sm_i386_spill_register(dst) >= 0;
-      bool store = !strcmp(dst, indirect) && sm_i386_spill_register(src) >= 0 &&
+      const char *memory = strchr(src, '(') ? src : dst;
+      const char *base = strchr(memory, '(');
+      if (!base || strcmp(base, indirect))
+        continue;
+      char *end;
+      long displacement = strtol(memory, &end, 10);
+      if (end != base || displacement < INT32_MIN || displacement > INT32_MAX)
+        continue;
+      bool load = memory == src && sm_i386_spill_register(dst) >= 0;
+      bool store = memory == dst && sm_i386_spill_register(src) >= 0 &&
                    sm_i386_spill_register(src) != r;
       bool move = !strcmp(access->op, "movl") || !strcmp(access->op, "movw") ||
                   !strcmp(access->op, "movb");
       bool extending =
           !strcmp(access->op, "movzbl") || !strcmp(access->op, "movzwl") ||
           !strcmp(access->op, "movsbl") || !strcmp(access->op, "movswl");
-      if ((!(load && (move || extending)) && !(store && move)) ||
-          ((i + 2 < count && (lines[i + 2].reg_live & (1u << r))) &&
-           !(load && !strcmp(reg, dst))))
+      bool compare = !strcmp(access->op, "cmpl") ||
+                     !strcmp(access->op, "cmpw") ||
+                     !strcmp(access->op, "cmpb") ||
+                     !strcmp(access->op, "testl") ||
+                     !strcmp(access->op, "testw") ||
+                     !strcmp(access->op, "testb");
+      bool memory_source = load &&
+                           (move || extending ||
+                            (compare && sm_i386_spill_register(dst) != r));
+      bool memory_destination =
+          (memory == dst && src[0] == '$' && (move || compare)) ||
+          (store && (move || compare));
+      bool overwrites_base = load && !strcmp(reg, dst) &&
+                             (extending || !strcmp(access->op, "movl"));
+      if ((!memory_source && !memory_destination) ||
+          ((at + 1 < count && (lines[at + 1].reg_live & mask)) &&
+           !overwrites_base))
         continue;
       /* An explicit address-size prefix retains the 32-bit relocation and
        * uses the same DS base as the discarded register-indirect access. */
+      char absolute[208];
+      snprintf(absolute, sizeof(absolute), "%s%+ld", symbol + 1, displacement);
       nyr_writer_t replacement = {0};
       if (!nyr_printf(&replacement, "\taddr32 %s\t%s, %s", access->op,
-                      load ? symbol + 1 : src, store ? symbol + 1 : dst)) {
+                      memory_source ? absolute : src,
+                      memory_destination ? absolute : dst)) {
         free(replacement.data);
         ok = false;
         goto done;
       }
       free(access->replacement);
       access->replacement = replacement.data;
-      access->reg_read &= (unsigned char)~(1u << r);
+      access->reg_read &= (unsigned char)~mask;
       address->removed = true;
+    }
+  }
+  if (code16_low_stack) {
+    sm_i386_spill_reg_live(lines, count);
+    /* Keep the constant push and pop directly into the frame home. */
+    for (size_t i = 2; i + 1 < count; ++i) {
+      const sm_i386_spill_line_t *push = &lines[i - 2];
+      sm_i386_spill_line_t *pop = &lines[i - 1];
+      sm_i386_spill_line_t *move = &lines[i];
+      char src[192], dst[192];
+      if (push->removed || push->replacement || strcmp(push->op, "pushl") ||
+          push->args[0] != '$' ||
+          pop->removed || pop->replacement || strcmp(pop->op, "popl") ||
+          move->removed || move->replacement || strcmp(move->op, "movl") ||
+          !sm_i386_spill_split(move, src, dst) || strcmp(src, pop->args) ||
+          sm_i386_spill_slot(dst, bytes) < 0)
+        continue;
+      int reg = sm_i386_spill_register(src);
+      if (reg < 0 || reg >= 3 || strcmp(src, sm_i386_gpr[reg]) ||
+          (lines[i + 1].reg_live & (1u << reg)))
+        continue;
+      nyr_writer_t replacement = {0};
+      if (!nyr_printf(&replacement, "\tpopl\t%s", dst)) {
+        free(replacement.data);
+        ok = false;
+        goto done;
+      }
+      move->replacement = replacement.data;
+      pop->removed = true;
+    }
+    for (size_t i = 0; i + 1 < count; ++i) {
+      sm_i386_spill_line_t *move = &lines[i];
+      char src[192], dst[192];
+      if (move->removed || move->replacement || strcmp(move->op, "movl") ||
+          !sm_i386_spill_split(move, src, dst))
+        continue;
+      int from = sm_i386_spill_register(src);
+      int to = sm_i386_spill_register(dst);
+      /* The accumulator exchange saves one byte. Only exchange away a
+       * dead caller-saved register so the function still preserves its ABI. */
+      if (from < 0 || from >= 3 || to < 0 || to >= 6 || from == to ||
+          (from != 0 && to != 0) || strcmp(src, sm_i386_gpr[from]) ||
+          strcmp(dst, sm_i386_gpr[to]) ||
+          (lines[i + 1].reg_live & (1u << from)))
+        continue;
+      nyr_writer_t replacement = {0};
+      if (!nyr_printf(&replacement, "\txchgl\t%s, %s", src, dst)) {
+        free(replacement.data);
+        ok = false;
+        goto done;
+      }
+      move->replacement = replacement.data;
     }
   }
   for (size_t i = 0; i + 2 < count; ++i) {

@@ -899,9 +899,436 @@ static bool nir_loop_bit_assembly(nyr_func_t *f) {
  * bumping cfg.block_end per insertion left the block ranges of every later
  * block stale and silently skipped MULs near block ends).
  */
+/*
+ * Fold a single-block unit-step counted recurrence of the form
+ *
+ *   for (i = start; i < start + N; i++)
+ *     x = (x == i) ? (x + 1) : (x + 2);
+ *
+ * When x0 is within the safe arithmetic headroom so neither arm nor the exit
+ * value can wrap/overflow (proven in 32-bit when sext32 wraps the update, or
+ * half-range 64-bit otherwise):
+ *   - If start - (N - 1) <= x0 <= start, x catches up to i and stays locked
+ *     with x == i through the final iteration, yielding start + N.
+ *   - Otherwise x never meets i on any iteration, yielding x0 + 2 * N.
+ */
+static int idiom_unwrap_sext32(const nyr_func_t *f, const int *defs, int value,
+                               bool *had_sext32) {
+  int v = idiom_root_copy(f, defs, value);
+  if (v < 0 || v >= f->next_value || defs[v] < 0)
+    return v;
+  const nyr_inst_t *in = &f->data[defs[v]];
+  int64_t sh_r = 0, sh_l = 0;
+  if (in->op == NYIR_SAR_I64 && const_i64_val(f, defs, in->b, &sh_r) &&
+      sh_r == 32) {
+    int sv = idiom_root_copy(f, defs, in->a);
+    if (sv >= 0 && sv < f->next_value && defs[sv] >= 0) {
+      const nyr_inst_t *shl = &f->data[defs[sv]];
+      if (shl->op == NYIR_SHL_I64 &&
+          const_i64_val(f, defs, shl->b, &sh_l) && sh_l == 32) {
+        if (had_sext32)
+          *had_sext32 = true;
+        return idiom_root_copy(f, defs, shl->a);
+      }
+    }
+  }
+  return v;
+}
+
+static bool idiom_is_var_plus_const(const nyr_func_t *f, const int *defs,
+                                    int value, int target_var, int64_t cval) {
+  int v = idiom_root_copy(f, defs, value);
+  if (v < 0 || v >= f->next_value || defs[v] < 0)
+    return false;
+  const nyr_inst_t *in = &f->data[defs[v]];
+  if (in->op != NYIR_ADD_I64)
+    return false;
+  int64_t imm = 0;
+  if (idiom_root_copy(f, defs, in->a) == target_var &&
+      const_i64_val(f, defs, in->b, &imm) && imm == cval)
+    return true;
+  if (idiom_root_copy(f, defs, in->b) == target_var &&
+      const_i64_val(f, defs, in->a, &imm) && imm == cval)
+    return true;
+  return false;
+}
+
+static bool loop_idiom_fold_eq_step_once(nyr_func_t *f) {
+  if (!f || f->next_value <= 0 || f->len < 8)
+    return false;
+  nyr_cfg_t cfg = {0};
+  nyr_scev_info_t info = {0};
+  int *defs = nyr_build_defs(f);
+  nyr_use_def_t uses = {0};
+  if (!defs || !nyr_cfg_build(f, &cfg) || !nyr_scev_analyze(f, &info) ||
+      !nyr_build_use_def(f, &uses)) {
+    free(defs);
+    nyr_use_def_free(&uses);
+    nyr_cfg_free(&cfg);
+    nyr_scev_free(&info);
+    return false;
+  }
+  bool *in_loop = calloc(cfg.block_count ? cfg.block_count : 1, 1);
+  bool applied = false;
+  if (in_loop) {
+    for (size_t li = 0; li < info.count && !applied; ++li) {
+      const nyr_scev_loop_t *loop = &info.loops[li];
+      if (!loop->trip_count_known || loop->trip_count < 2 ||
+          loop->trip_count > (1ULL << 28) || !loop->init_is_const ||
+          loop->step != 1 || loop->iv < 0 ||
+          (loop->predicate != NYIR_CMP_LT && loop->predicate != NYIR_CMP_LE))
+        continue;
+      if (loop->header_block >= cfg.block_count ||
+          loop->preheader_block >= cfg.block_count)
+        continue;
+      memset(in_loop, 0, cfg.block_count);
+      if (!nyr_cfg_natural_loop_blocks(&cfg, loop->latch_block,
+                                       loop->header_block, in_loop,
+                                       cfg.block_count))
+        continue;
+      size_t pre = loop->preheader_block;
+      size_t header = loop->header_block;
+      if (cfg.succ_offsets[pre + 1] - cfg.succ_offsets[pre] != 1 ||
+          cfg.succ_blocks[cfg.succ_offsets[pre]] != header)
+        continue;
+      size_t exit_block = SIZE_MAX;
+      bool multi_exit = false;
+      for (size_t pi = cfg.succ_offsets[header];
+           pi < cfg.succ_offsets[header + 1]; ++pi) {
+        size_t s = cfg.succ_blocks[pi];
+        if (in_loop[s])
+          continue;
+        if (exit_block != SIZE_MAX)
+          multi_exit = true;
+        exit_block = s;
+      }
+      if (multi_exit || exit_block == SIZE_MAX || exit_block >= cfg.block_count)
+        continue;
+      for (size_t b = 0; b < cfg.block_count && !multi_exit; ++b) {
+        if (!in_loop[b] || b == header)
+          continue;
+        for (size_t e = cfg.succ_offsets[b]; e < cfg.succ_offsets[b + 1]; ++e) {
+          size_t succ = cfg.succ_blocks[e];
+          if (!in_loop[succ] ||
+              (succ <= b && (b != loop->latch_block || succ != header))) {
+            multi_exit = true;
+            break;
+          }
+        }
+      }
+      if (multi_exit || !bitasm_loop_is_pure(f, &cfg, in_loop))
+        continue;
+      bool exit_has_phi = false;
+      for (size_t i = cfg.block_start[exit_block];
+           i < cfg.block_end[exit_block]; ++i)
+        if (f->data[i].op == NYIR_PHI)
+          exit_has_phi = true;
+      if (exit_has_phi)
+        continue;
+      int x_phi_idx = -1;
+      int other_phis = 0;
+      for (size_t i = cfg.block_start[header]; i < cfg.block_end[header]; ++i) {
+        const nyr_inst_t *in = &f->data[i];
+        if (in->op != NYIR_PHI)
+          continue;
+        if (in->dst == loop->iv)
+          continue;
+        x_phi_idx = (int)i;
+        other_phis++;
+      }
+      if (x_phi_idx < 0 || other_phis != 1)
+        continue;
+      const nyr_inst_t *x_phi = &f->data[(size_t)x_phi_idx];
+      if (x_phi->phi_incoming_len != 2 || !x_phi->phi_incoming)
+        continue;
+      int64_t pre_label = cfg.block_label[pre];
+      int x0 = -1, x_back = -1;
+      for (size_t k = 0; k < 2; ++k) {
+        if (x_phi->phi_incoming[k].predecessor_label == pre_label)
+          x0 = x_phi->phi_incoming[k].value;
+        else
+          x_back = x_phi->phi_incoming[k].value;
+      }
+      if (x0 < 0 || x_back < 0)
+        continue;
+      bool had_sext32 = false;
+      int sel_v = idiom_unwrap_sext32(f, defs, x_back, &had_sext32);
+      if (sel_v < 0 || sel_v >= f->next_value || defs[sel_v] < 0)
+        continue;
+      const nyr_inst_t *sel = &f->data[defs[sel_v]];
+      if (sel->op != NYIR_SELECT_I64)
+        continue;
+      int cmp_v = idiom_root_copy(f, defs, sel->a);
+      if (cmp_v < 0 || cmp_v >= f->next_value || defs[cmp_v] < 0)
+        continue;
+      const nyr_inst_t *cmp = &f->data[defs[cmp_v]];
+      if (cmp->op != NYIR_CMP_I64 ||
+          (cmp->cmp != NYIR_CMP_EQ && cmp->cmp != NYIR_CMP_NE))
+        continue;
+      int ca = idiom_root_copy(f, defs, cmp->a);
+      int cb = idiom_root_copy(f, defs, cmp->b);
+      if (!((ca == x_phi->dst && cb == loop->iv) ||
+            (cb == x_phi->dst && ca == loop->iv)))
+        continue;
+      int tv = cmp->cmp == NYIR_CMP_EQ ? sel->b : sel->c;
+      int fv = cmp->cmp == NYIR_CMP_EQ ? sel->c : sel->b;
+      int traw = idiom_unwrap_sext32(f, defs, tv, &had_sext32);
+      int fraw = idiom_unwrap_sext32(f, defs, fv, &had_sext32);
+      if (!idiom_is_var_plus_const(f, defs, traw, x_phi->dst, 1) ||
+          !idiom_is_var_plus_const(f, defs, fraw, x_phi->dst, 2))
+        continue;
+      /*
+       * Nothing computed in the loop may escape except x_phi.
+       */
+      bool escapes = false;
+      for (int v = 0; v < f->next_value && !escapes; ++v) {
+        if (v == x_phi->dst)
+          continue;
+        int di = defs[v];
+        if (di < 0 || (size_t)di >= f->len || !in_loop[cfg.inst_block[di]])
+          continue;
+        if ((size_t)v >= uses.value_count)
+          continue;
+        for (size_t u = uses.offsets[v]; u < uses.offsets[v + 1]; ++u) {
+          size_t user = uses.users[u];
+          if (user < f->len && !in_loop[cfg.inst_block[user]]) {
+            escapes = true;
+            break;
+          }
+        }
+      }
+      if (escapes)
+        continue;
+      int64_t n = (int64_t)loop->trip_count;
+      int64_t start = loop->init;
+      if ((__int128)start + n > INT32_MAX || (__int128)start - n < INT32_MIN)
+        continue;
+      int x0_root = idiom_root_copy(f, defs, x0);
+      if (x0_root < 0 || x0_root >= f->next_value || defs[x0_root] < 0)
+        continue;
+      const nyr_inst_t *x0_in = &f->data[defs[x0_root]];
+      int64_t xmin = 0, xmax = 0;
+      if (x0_in->op == NYIR_CONST_I64) {
+        xmin = xmax = x0_in->imm;
+      } else if (x0_in->range.has_min && x0_in->range.has_max) {
+        xmin = x0_in->range.min;
+        xmax = x0_in->range.max;
+      } else {
+        continue;
+      }
+      if (had_sext32) {
+        if (xmin < INT32_MIN || (__int128)xmax + 2 * (__int128)n > INT32_MAX)
+          continue;
+      } else {
+        if (xmin < INT64_MIN / 2 ||
+            (__int128)xmax + 2 * (__int128)n > INT64_MAX / 2)
+          continue;
+      }
+      size_t term = nyr_block_last_non_nop(f, &cfg, pre);
+      bool explicit_br = term > cfg.block_start[pre] &&
+                         f->data[term - 1].op == NYIR_BR &&
+                         f->data[term - 1].imm == cfg.block_label[header];
+      size_t at = explicit_br ? term - 1 : cfg.block_end[pre];
+      bool at_ok = true;
+      for (size_t b = 0; b < cfg.block_count; ++b)
+        if (in_loop[b] && cfg.block_start[b] < at)
+          at_ok = false;
+      if (!at_ok)
+        continue;
+      int64_t exit_label = cfg.block_label[exit_block];
+      size_t exit_label_pos = SIZE_MAX;
+      if (exit_label < 0) {
+        exit_label = nyr_fresh_label(f);
+        exit_label_pos = cfg.block_start[exit_block];
+        if (exit_label < 0)
+          continue;
+      }
+      nyr_func_t cand = {0};
+      if (!nyr_ir_func_clone(f, &cand))
+        continue;
+      size_t count = explicit_br ? 9u : 10u;
+      if (!nir_ensure_inst_space(&cand, count + (exit_label_pos != SIZE_MAX ? 1u : 0u))) {
+        nyr_ir_func_free(&cand);
+        continue;
+      }
+      int c_start = cand.next_value++;
+      int c_lo = cand.next_value++;
+      int c_hit = cand.next_value++;
+      int c_2n = cand.next_value++;
+      int le_v = cand.next_value++;
+      int ge_v = cand.next_value++;
+      int hits_v = cand.next_value++;
+      int x_miss = cand.next_value++;
+      int x_final = cand.next_value++;
+      for (size_t i = 0; i < cand.len; ++i) {
+        size_t b = cfg.inst_block[i];
+        if (b < cfg.block_count && in_loop[b])
+          continue;
+        nyr_inst_t *inst = &cand.data[i];
+        if (inst->a == x_phi->dst)
+          inst->a = x_final;
+        if (inst->b == x_phi->dst)
+          inst->b = x_final;
+        if (inst->c == x_phi->dst)
+          inst->c = x_final;
+        if (inst->d == x_phi->dst)
+          inst->d = x_final;
+        if (inst->e == x_phi->dst)
+          inst->e = x_final;
+        if (inst->f == x_phi->dst)
+          inst->f = x_final;
+        for (size_t k = 0; k < inst->extra_args_len; ++k)
+          if (inst->extra_args[k] == x_phi->dst)
+            inst->extra_args[k] = x_final;
+        for (size_t k = 0; k < inst->phi_incoming_len; ++k)
+          if (inst->phi_incoming[k].value == x_phi->dst)
+            inst->phi_incoming[k].value = x_final;
+      }
+      if (exit_label_pos != SIZE_MAX) {
+        memmove(&cand.data[exit_label_pos + 1], &cand.data[exit_label_pos],
+                (cand.len - exit_label_pos) * sizeof(*cand.data));
+        cand.len += 1;
+        cand.data[exit_label_pos] = (nyr_inst_t){.op = NYIR_LABEL,
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = exit_label};
+        cand.data[exit_label_pos].effects =
+            nyr_inst_effects(&cand.data[exit_label_pos]);
+      }
+      memmove(&cand.data[at + count], &cand.data[at],
+              (cand.len - at) * sizeof(*cand.data));
+      cand.len += count;
+      size_t w = at;
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = c_start,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = start};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = c_lo,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = start - (n - 1)};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = c_hit,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = start + n};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = c_2n,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = 2 * n};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_CMP_I64,
+                                    .dst = le_v,
+                                    .a = x0,
+                                    .b = c_start,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .cmp = NYIR_CMP_LE};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_CMP_I64,
+                                    .dst = ge_v,
+                                    .a = x0,
+                                    .b = c_lo,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .cmp = NYIR_CMP_GE};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_AND_I64,
+                                    .dst = hits_v,
+                                    .a = le_v,
+                                    .b = ge_v,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_ADD_I64,
+                                    .dst = x_miss,
+                                    .a = x0,
+                                    .b = c_2n,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1};
+      cand.data[w++] = (nyr_inst_t){.op = NYIR_SELECT_I64,
+                                    .dst = x_final,
+                                    .a = hits_v,
+                                    .b = c_hit,
+                                    .c = x_miss,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1};
+      if (explicit_br) {
+        cand.data[at + count].imm = exit_label;
+      } else {
+        cand.data[w++] = (nyr_inst_t){.op = NYIR_BR,
+                                      .dst = -1,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = exit_label};
+      }
+      for (size_t k = at; k < at + count; ++k)
+        cand.data[k].effects = nyr_inst_effects(&cand.data[k]);
+      for (size_t b = 0; b < cfg.block_count; ++b) {
+        if (!in_loop[b])
+          continue;
+        for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i) {
+          size_t shift =
+              exit_label_pos != SIZE_MAX && i >= exit_label_pos ? 1 : 0;
+          (void)nyr_erase_instruction(&cand, i + count + shift);
+        }
+      }
+      char err[256] = {0};
+      if (nyr_ir_verify(&cand, err, sizeof(err))) {
+        nyr_func_replace(f, &cand);
+        applied = true;
+      } else {
+        nyr_ir_func_free(&cand);
+      }
+    }
+    free(in_loop);
+  }
+  free(defs);
+  nyr_use_def_free(&uses);
+  nyr_cfg_free(&cfg);
+  nyr_scev_free(&info);
+  return applied;
+}
+
 bool nyr_loop_idiom(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
+  for (size_t round = 0; round < 4; ++round)
+    if (!loop_idiom_fold_eq_step_once(f))
+      break;
   nyr_cfg_t cfg = {0};
   nyr_scev_info_t info = {0};
   int *defs = nyr_build_defs(f);
@@ -3419,6 +3846,12 @@ static bool last_overwrite_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
     nyr_inst_discard(&f->data[header_exit_branch]);
   }
   f->data[latch_branch].imm = exit_label;
+  /*
+   * Rewrite outside uses of `loop->iv` BEFORE rewriting non-IV header PHIs so
+   * a non-IV PHI whose backedge value IS `loop->iv` does not get double-replaced
+   * into `iv_next` when `loop->iv` appears later in the header.
+   */
+  last_overwrite_replace_outside_uses(f, cfg, in_loop, loop->iv, iv_next);
   for (size_t i = cfg->block_start[loop->header_block];
        i < cfg->block_end[loop->header_block]; ++i) {
     nyr_inst_t *phi = &f->data[i];
@@ -3450,8 +3883,6 @@ static bool last_overwrite_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
             (phi->phi_incoming_len - backedge_index - 1) *
                 sizeof(*phi->phi_incoming));
     --phi->phi_incoming_len;
-    if (phi->dst == loop->iv)
-      last_overwrite_replace_outside_uses(f, cfg, in_loop, phi->dst, iv_next);
   }
   memmove(&f->data[insertion + 1], &f->data[insertion],
           (f->len - insertion) * sizeof(*f->data));
@@ -5072,7 +5503,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
         has_terminator = true;
       } else if (in->op != NYIR_LABEL && in->op != NYIR_NOP &&
                  in->op != NYIR_CALL && !lu_scalar_pure_op(in) &&
-                 !lu_clone_ordered_division(in)) {
+                 !lu_clone_memory_read(in) && !lu_clone_ordered_division(in) &&
+                 (!lu_clone_memory_write(in) ||
+                  getenv("NYTRIX_NO_UNROLL_STORES"))) {
         if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
           ny_dbg_heuristic_event(
               "LOOP_UNROLL_SSA",
@@ -6138,6 +6571,802 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
   }
   return true;
 }
+/*
+ * Partial (2x) unrolling for a dynamic counted loop.
+ *
+ * `nyr_loop_unroll_ssa` fully unrolls loops with a known trip count of at
+ * most 32. A data-dependent bound (`for (j = i + 1; j < n; j++)`) never
+ * qualifies even when the body is a scalar reduction, and such a loop keeps
+ * its compare, branch, and induction update for every element. This pass
+ * clones the whole natural loop once and makes the pair the main loop, with
+ * the original loop kept as the remainder for the last 0..1 elements:
+ *
+ *   header: ...; c = cmp.lt iv, bound; br.if c -> body, exit
+ *   body...latch: ...; br -> header
+ *
+ * becomes
+ *
+ *   main.loop.header: m = phi(preheader: init, pair.latch: next')
+ *                     iv2 = m + 1; c2 = cmp.lt iv2, bound
+ *                     br.if c2 -> body, remainder
+ *   body...latch:    ...; br -> pair.header
+ *   pair.header:     ...; br -> pair.body            (guard discharged)
+ *   pair...latch:    ...; br -> main.loop.header
+ *   remainder:       br -> header                    (original loop)
+ *
+ * The guard runs once per pair instead of once per element: the original
+ * header keeps its own compare for the remaining iteration, so no merge PHIs
+ * and no second guard sit on the pair path. The body is replayed in source
+ * order, so loads and stores keep their relative order, and loop state
+ * crosses iterations only through header PHIs, which the main header
+ * re-joins. The rewrite is fail-closed: one preheader edge, one header guard
+ * `cmp.lt iv, bound` with unit step and a loop-invariant bound, one latch,
+ * one loop exit, no calls or returns in the loop, every member block labeled
+ * or phi-free, no value defined in the loop escaping except through a header
+ * PHI, and a bounded body size. Anything else keeps the rolled loop.
+ */
+#define LUP_MAX_MEMBER_BLOCKS 12u
+#define LUP_MAX_LOOP_INSTS 64u
+
+static int lup_block_by_label(const nyr_cfg_t *cfg, int64_t label) {
+  for (size_t b = 0; b < cfg->block_count; ++b)
+    if (cfg->block_label[b] == label)
+      return (int)b;
+  return -1;
+}
+
+static nyr_inst_t lup_inst(nyr_op_t op) {
+  return (nyr_inst_t){.op = op,
+                      .dst = -1,
+                      .a = -1,
+                      .b = -1,
+                      .c = -1,
+                      .d = -1,
+                      .e = -1,
+                      .f = -1};
+}
+
+static bool lup_append(nyr_inst_t *out, size_t cap, size_t *len,
+                       nyr_inst_t inst) {
+  if (*len >= cap)
+    return false;
+  out[(*len)++] = inst;
+  return true;
+}
+
+/* Splice `n` instructions into the instruction stream at `pc`. */
+static bool lup_insert_insts(nyr_func_t *w, size_t pc, const nyr_inst_t *in,
+                             size_t n) {
+  if (!w || pc > w->len || !n)
+    return false;
+  if (!nir_ensure_inst_space(w, n))
+    return false;
+  memmove(&w->data[pc + n], &w->data[pc], (w->len - pc) * sizeof(*w->data));
+  memcpy(&w->data[pc], in, n * sizeof(*in));
+  w->len += n;
+  return true;
+}
+
+/* One cloned loop body: values renamed through `map`, blocks relabelled
+ * through `label`. The header guard is discharged by the caller (it proved
+ * the pair is in range), so the copy header falls straight into its body, and
+ * the latch leaves through `backedge` (the next copy, or the pair header). */
+typedef struct {
+  nyr_func_t *w;
+  const nyr_cfg_t *cfg;
+  const nyr_scev_loop_t *loop;
+  const bool *members;
+  int *map;
+  const int64_t *label;
+  int64_t backedge;
+  int64_t guard_true;
+  size_t skip_inst;
+  size_t value_count;
+  nyr_inst_t *out;
+  size_t cap;
+  size_t *len;
+} lup_copy_t;
+
+static bool lup_emit_copy(lup_copy_t *c) {
+  nyr_func_t *w = c->w;
+  const nyr_cfg_t *cfg = c->cfg;
+  const size_t h = c->loop->header_block;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!c->members[b])
+      continue;
+    nyr_inst_t label = lup_inst(NYIR_LABEL);
+    label.imm = c->label[b];
+    if (!lup_append(c->out, c->cap, c->len, label))
+      return false;
+    size_t block_branch_if = SIZE_MAX;
+    for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+      const nyr_inst_t *src = &w->data[i];
+      if (src->op == NYIR_LABEL || src->op == NYIR_NOP || src->op == NYIR_BR ||
+          src->op == NYIR_BR_IF)
+        continue;
+      if (i == c->skip_inst)
+        continue;
+      if (src->op == NYIR_PHI) {
+        if (b == h)
+          continue;
+        nyr_inst_t copy;
+        if (!unswitch_copy_inst(src, &copy))
+          return false;
+        copy.dst = c->map[src->dst];
+        int *ops[] = {&copy.a, &copy.b, &copy.c, &copy.d, &copy.e, &copy.f};
+        for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+          if (*ops[k] >= 0 && (size_t)*ops[k] < c->value_count &&
+              c->map[*ops[k]] >= 0)
+            *ops[k] = c->map[*ops[k]];
+        for (size_t k = 0; k < copy.phi_incoming_len; ++k) {
+          int pb = lup_block_by_label(
+              cfg, copy.phi_incoming[k].predecessor_label);
+          if (pb < 0 || !c->members[pb]) {
+            nyr_inst_discard(&copy);
+            return false;
+          }
+          copy.phi_incoming[k].predecessor_label = c->label[pb];
+          int v = copy.phi_incoming[k].value;
+          if (v >= 0 && (size_t)v < c->value_count && c->map[v] >= 0)
+            copy.phi_incoming[k].value = c->map[v];
+        }
+        if (!lup_append(c->out, c->cap, c->len, copy)) {
+          nyr_inst_discard(&copy);
+          return false;
+        }
+        continue;
+      }
+      nyr_inst_t copy;
+      if (!unswitch_copy_inst(src, &copy))
+        return false;
+      if (copy.dst >= 0)
+        copy.dst = c->map[copy.dst];
+      int *ops[] = {&copy.a, &copy.b, &copy.c, &copy.d, &copy.e, &copy.f};
+      for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+        if (*ops[k] >= 0 && (size_t)*ops[k] < c->value_count &&
+            c->map[*ops[k]] >= 0)
+          *ops[k] = c->map[*ops[k]];
+      for (size_t k = 0; k < copy.extra_args_len; ++k) {
+        int v = copy.extra_args[k];
+        if (v >= 0 && (size_t)v < c->value_count && c->map[v] >= 0)
+          copy.extra_args[k] = c->map[v];
+      }
+      if (!lup_append(c->out, c->cap, c->len, copy)) {
+        nyr_inst_discard(&copy);
+        return false;
+      }
+    }
+    /*
+     * Terminators. The copy header's guard was discharged by the pair
+     * header, so it falls into the body it guards. Other blocks replay their
+     * successors with this copy's labels.
+     */
+    if (b == h) {
+      nyr_inst_t br = lup_inst(NYIR_BR);
+      br.imm = c->guard_true;
+      br.effects = NYIR_EFFECT_CONTROL;
+      if (!lup_append(c->out, c->cap, c->len, br))
+        return false;
+      continue;
+    }
+    for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i)
+      if (w->data[i].op == NYIR_BR_IF)
+        block_branch_if = i;
+    size_t succ_count = cfg->succ_offsets[b + 1] - cfg->succ_offsets[b];
+    if (block_branch_if != SIZE_MAX && succ_count != 2)
+      return false;
+    if (block_branch_if != SIZE_MAX) {
+      int tb = lup_block_by_label(cfg, w->data[block_branch_if].imm);
+      if (tb < 0 || !c->members[tb])
+        return false;
+      size_t other = SIZE_MAX;
+      for (size_t e = cfg->succ_offsets[b]; e < cfg->succ_offsets[b + 1]; ++e)
+        if (cfg->succ_blocks[e] != (size_t)tb)
+          other = cfg->succ_blocks[e];
+      /*
+       * The false edge stays the lexical fallthrough: the next emitted copy
+       * block is the copy of this block's successor, so PHIs there keep the
+       * predecessor label they name.
+       */
+      if (other == SIZE_MAX || !c->members[other] || other != b + 1)
+        return false;
+      int branch_cond = w->data[block_branch_if].a;
+      nyr_inst_t br_if = lup_inst(NYIR_BR_IF);
+      br_if.a = branch_cond >= 0 && (size_t)branch_cond < c->value_count &&
+                        c->map[branch_cond] >= 0
+                    ? c->map[branch_cond]
+                    : branch_cond;
+      br_if.imm = c->label[tb];
+      br_if.effects = NYIR_EFFECT_CONTROL;
+      if (!lup_append(c->out, c->cap, c->len, br_if))
+        return false;
+      continue;
+    }
+    if (succ_count != 1)
+      return false;
+    size_t to = cfg->succ_blocks[cfg->succ_offsets[b]];
+    if (!c->members[to] && to != h)
+      return false;
+    nyr_inst_t br = lup_inst(NYIR_BR);
+    br.imm = to == h ? c->backedge : c->label[to];
+    br.effects = NYIR_EFFECT_CONTROL;
+    if (!lup_append(c->out, c->cap, c->len, br))
+      return false;
+  }
+  return true;
+}
+
+static bool lup_apply(nyr_func_t *w, const nyr_scev_loop_t *loop) {
+  if (!w || !loop || loop->trip_count_known || loop->step != 1 ||
+      loop->iv < 0)
+    return false;
+  nyr_cfg_t cfg = {0};
+  bool ok = false;
+  int *defs = NULL;
+  bool *members = NULL;
+  bool *inside = NULL;
+  int *phi_next = NULL;
+  size_t *phi_index = NULL;
+  int *mapA = NULL, *mapB = NULL;
+  int *main_phi = NULL;
+  int64_t *labelA = NULL, *labelB = NULL;
+  nyr_inst_t *out = NULL;
+  size_t out_len = 0, out_cap = 0;
+  size_t h = loop->header_block, l = loop->latch_block, p = loop->preheader_block;
+  int64_t hl = -1, ll = -1, pl = -1;
+  size_t guard = SIZE_MAX, phi_count = 0;
+  size_t value_count = (size_t)(w->next_value > 0 ? w->next_value : 1);
+  int next_value = w->next_value;
+
+  if (!nyr_cfg_build(w, &cfg))
+    return false;
+  if (h >= cfg.block_count || l >= cfg.block_count || p >= cfg.block_count ||
+      h == l || value_count < 2)
+    goto done;
+  members = calloc(cfg.block_count, sizeof(*members));
+  if (!members ||
+      !nyr_cfg_natural_loop_blocks(&cfg, l, h, members, cfg.block_count))
+    goto done;
+  hl = cfg.block_label[h];
+  ll = cfg.block_label[l];
+  pl = cfg.block_label[p];
+  if (hl < 0 || ll < 0 || pl < 0)
+    goto done;
+  /*
+   * The header has exactly one outside predecessor (the preheader) and one
+   * backedge, one counted guard, and one exit.
+   */
+  size_t preheader_preds = 0, exit_block = SIZE_MAX, guard_true = SIZE_MAX;
+  for (size_t e = cfg.pred_offsets[h]; e < cfg.pred_offsets[h + 1]; ++e) {
+    size_t pred = cfg.pred_blocks[e];
+    if (pred == p)
+      ++preheader_preds;
+    else if (pred != l)
+      goto done;
+  }
+  if (preheader_preds != 1 ||
+      cfg.succ_offsets[h + 1] - cfg.succ_offsets[h] != 2)
+    goto done;
+  for (size_t i = cfg.block_start[h]; i < cfg.block_end[h]; ++i) {
+    const nyr_inst_t *in = &w->data[i];
+    if (in->op == NYIR_BR_IF) {
+      if (guard != SIZE_MAX)
+        goto done;
+      guard = i;
+    } else if (in->op == NYIR_CALL || in->op == NYIR_RET) {
+      goto done;
+    }
+  }
+  if (guard == SIZE_MAX)
+    goto done;
+  int gt = lup_block_by_label(&cfg, w->data[guard].imm);
+  if (gt < 0 || !members[gt])
+    goto done;
+  guard_true = (size_t)gt;
+  for (size_t e = cfg.succ_offsets[h]; e < cfg.succ_offsets[h + 1]; ++e) {
+    size_t to = cfg.succ_blocks[e];
+    if (to == guard_true)
+      continue;
+    if (members[to] || exit_block != SIZE_MAX)
+      goto done;
+    exit_block = to;
+  }
+  if (exit_block == SIZE_MAX || cfg.succ_offsets[l + 1] - cfg.succ_offsets[l] != 1 ||
+      cfg.succ_blocks[cfg.succ_offsets[l]] != h)
+    goto done;
+  defs = nyr_build_defs(w);
+  if (!defs)
+    goto done;
+  int cond = w->data[guard].a;
+  if (cond < 0 || (size_t)cond >= value_count || defs[cond] < 0)
+    goto done;
+  const nyr_inst_t *cmp = &w->data[(size_t)defs[cond]];
+  if (cmp->op != NYIR_CMP_I64 || cmp->cmp != NYIR_CMP_LT || cmp->a != loop->iv ||
+      cmp->b < 0 || (size_t)cmp->b >= value_count)
+    goto done;
+  /*
+   * Member blocks: bounded size, no calls or returns, only replayable
+   * operations, and no edge leaving the loop other than the header guard.
+   * The bound must be loop-invariant: the main header re-tests it.
+   */
+  size_t member_count = 0, inst_count = 0;
+  for (size_t b = 0; b < cfg.block_count; ++b) {
+    if (!members[b])
+      continue;
+    ++member_count;
+    if (cfg.block_start[b] >= cfg.block_end[b])
+      goto done;
+    size_t block_len = cfg.block_end[b] - cfg.block_start[b];
+    inst_count += block_len;
+    if (inst_count > LUP_MAX_LOOP_INSTS)
+      goto done;
+    size_t conditional = 0;
+    for (size_t e = cfg.succ_offsets[b]; e < cfg.succ_offsets[b + 1]; ++e) {
+      size_t to = cfg.succ_blocks[e];
+      if (members[to])
+        continue;
+      if (b != h || to != exit_block)
+        goto done;
+    }
+    for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i) {
+      const nyr_inst_t *in = &w->data[i];
+      if (in->op == NYIR_LABEL || in->op == NYIR_NOP || in->op == NYIR_PHI ||
+          in->op == NYIR_BR)
+        continue;
+      if (in->op == NYIR_BR_IF) {
+        if (++conditional > 1)
+          goto done;
+        continue;
+      }
+      if (in->op == NYIR_PHI) {
+        if (b == h)
+          continue;
+        if (in->dst < 0 || (size_t)in->dst >= value_count)
+          goto done;
+        for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+          int pb = lup_block_by_label(
+              &cfg, in->phi_incoming[k].predecessor_label);
+          if (pb < 0 || !members[pb])
+            goto done;
+        }
+        continue;
+      }
+      if (in->op == NYIR_CALL || in->op == NYIR_RET ||
+          (!lu_scalar_pure_op(in) && !lu_clone_memory_read(in) &&
+           !lu_clone_memory_write(in) && !lu_clone_ordered_division(in)))
+        goto done;
+      if (in->op != NYIR_CALL && (in->symbol || in->extra_args_len))
+        goto done;
+    }
+  }
+  if (member_count < 2 || member_count > LUP_MAX_MEMBER_BLOCKS)
+    goto done;
+  /*
+   * Header PHIs are the only loop interface. Each carries exactly one
+   * preheader and one latch input, and the induction variable is one of them.
+   */
+  phi_next = malloc(value_count * sizeof(*phi_next));
+  phi_index = malloc(value_count * sizeof(*phi_index));
+  if (!phi_next || !phi_index)
+    goto done;
+  for (size_t v = 0; v < value_count; ++v)
+    phi_next[v] = -1;
+  for (size_t i = cfg.block_start[h]; i < cfg.block_end[h]; ++i) {
+    const nyr_inst_t *phi = &w->data[i];
+    if (phi->op != NYIR_PHI)
+      continue;
+    if (phi->dst < 0 || (size_t)phi->dst >= value_count ||
+        phi->phi_incoming_len != 2 || !phi->phi_incoming)
+      goto done;
+    int init = -1, next = -1;
+    for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+      int64_t label = phi->phi_incoming[k].predecessor_label;
+      if (label == pl)
+        init = phi->phi_incoming[k].value;
+      else if (label == ll)
+        next = phi->phi_incoming[k].value;
+      else
+        goto done;
+    }
+    if (init < 0 || next < 0)
+      goto done;
+    phi_next[phi->dst] = next;
+    phi_index[phi_count++] = i;
+  }
+  if (!phi_count || phi_next[loop->iv] < 0)
+    goto done;
+  /*
+   * A value defined inside the loop may not be read outside it, and no
+   * outside PHI may name the latch (its backedge is redirected).
+   */
+  inside = calloc(value_count, sizeof(*inside));
+  if (!inside)
+    goto done;
+  for (size_t b = 0; b < cfg.block_count; ++b) {
+    if (!members[b])
+      continue;
+    for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i) {
+      const nyr_inst_t *in = &w->data[i];
+      if (in->dst < 0 || (size_t)in->dst >= value_count)
+        continue;
+      if (in->op == NYIR_PHI && b == h)
+        continue;
+      inside[in->dst] = true;
+    }
+  }
+  for (size_t i = 0; i < w->len; ++i) {
+    size_t b = cfg.inst_block[i];
+    if (b < cfg.block_count && members[b])
+      continue;
+    const nyr_inst_t *in = &w->data[i];
+    const int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+    for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+      if (ops[k] >= 0 && (size_t)ops[k] < value_count && inside[ops[k]])
+        goto done;
+    for (size_t k = 0; k < in->extra_args_len; ++k) {
+      int v = in->extra_args[k];
+      if (v >= 0 && (size_t)v < value_count && inside[v])
+        goto done;
+    }
+    for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+      int v = in->phi_incoming[k].value;
+      if (in->phi_incoming[k].predecessor_label == ll)
+        goto done;
+      if (v >= 0 && (size_t)v < value_count && inside[v])
+        goto done;
+    }
+  }
+  /*
+   * The pair header re-tests the bound at the top of the loop, so it must be
+   * loop-invariant.
+   */
+  if (inside[cmp->b])
+    goto done;
+
+  /*
+   * Fresh labels and values for the pair. The original header stays in place
+   * as the remainder loop, so only the two copies are new blocks.
+   */
+  int64_t next_label = 0;
+  for (size_t b = 0; b < cfg.block_count; ++b)
+    if (cfg.block_label[b] >= next_label)
+      next_label = cfg.block_label[b] + 1;
+  labelA = malloc(cfg.block_count * sizeof(*labelA));
+  labelB = malloc(cfg.block_count * sizeof(*labelB));
+  mapA = malloc(value_count * sizeof(*mapA));
+  mapB = malloc(value_count * sizeof(*mapB));
+  main_phi = malloc(phi_count * sizeof(*main_phi));
+  if (!labelA || !labelB || !mapA || !mapB || !main_phi)
+    goto done;
+  for (size_t b = 0; b < cfg.block_count; ++b) {
+    labelA[b] = -1;
+    labelB[b] = -1;
+  }
+  for (size_t v = 0; v < value_count; ++v) {
+    mapA[v] = -1;
+    mapB[v] = -1;
+  }
+  for (size_t b = 0; b < cfg.block_count; ++b)
+    if (members[b]) {
+      labelA[b] = next_label++;
+      labelB[b] = next_label++;
+    }
+  int64_t main_h = next_label++;
+  int64_t main_fall = next_label++;
+  if (next_label == INT64_MAX || next_value >= INT_MAX - 8)
+    goto done;
+  /*
+   * Values defined inside the body get one fresh value per copy. Header PHI
+   * results alias the pair header's PHIs in copy A and copy A's latch values
+   * in copy B, so the pair needs no merge block.
+   */
+  for (size_t b = 0; b < cfg.block_count; ++b) {
+    if (!members[b])
+      continue;
+    for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i) {
+      const nyr_inst_t *in = &w->data[i];
+      if (in->dst < 0 || (size_t)in->dst >= value_count ||
+          (in->op == NYIR_PHI && b == h))
+        continue;
+      if (next_value >= INT_MAX - 4)
+        goto done;
+      mapA[in->dst] = next_value++;
+      mapB[in->dst] = next_value++;
+    }
+  }
+  for (size_t q = 0; q < phi_count; ++q) {
+    const nyr_inst_t *phi = &w->data[phi_index[q]];
+    if (next_value >= INT_MAX - 4)
+      goto done;
+    main_phi[q] = next_value++;
+    mapA[phi->dst] = main_phi[q];
+    int next = phi_next[phi->dst];
+    mapB[phi->dst] =
+        next >= 0 && (size_t)next < value_count && mapA[next] >= 0 ? mapA[next]
+                                                                  : next;
+    if (mapB[phi->dst] < 0)
+      goto done;
+  }
+  int one = next_value++;
+  int ivp1 = next_value++;
+  int cnd = next_value++;
+  /*
+   * The pair body discharges the header guard, so the compare that produced
+   * `cond` is dead in both copies. Skip it only when nothing else reads it.
+   */
+  size_t skip_inst = SIZE_MAX;
+  {
+    size_t cmp_pc = (size_t)defs[cond];
+    bool other_use = false;
+    for (size_t b = 0; b < cfg.block_count && !other_use; ++b) {
+      if (!members[b])
+        continue;
+      for (size_t i = cfg.block_start[b];
+           i < cfg.block_end[b] && !other_use; ++i) {
+        if (i == cmp_pc)
+          continue;
+        const nyr_inst_t *in = &w->data[i];
+        const int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+        for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+          if (ops[k] == cond)
+            other_use = true;
+        for (size_t k = 0; k < in->extra_args_len; ++k)
+          if (in->extra_args[k] == cond)
+            other_use = true;
+        for (size_t k = 0; k < in->phi_incoming_len; ++k)
+          if (in->phi_incoming[k].value == cond)
+            other_use = true;
+      }
+    }
+    if (!other_use && cmp_pc < w->len) {
+      size_t cb = cfg.inst_block[cmp_pc];
+      if (cb < cfg.block_count && members[cb])
+        skip_inst = cmp_pc;
+    }
+  }
+  out_cap = inst_count * 2 + member_count * 8 + phi_count * 3 + 32;
+  out = calloc(out_cap, sizeof(*out));
+  if (!out)
+    goto done;
+  /*
+   * The pair header is entered from the preheader, possibly through a fresh
+   * block when the preheader reaches the header by fallthrough.
+   */
+  size_t preheader_term = SIZE_MAX;
+  for (size_t i = cfg.block_start[p]; i < cfg.block_end[p]; ++i)
+    if (w->data[i].op == NYIR_BR && w->data[i].imm == hl)
+      preheader_term = i;
+  int64_t main_in = pl;
+  if (preheader_term == SIZE_MAX) {
+    main_in = next_label++;
+    if (next_label == INT64_MAX)
+      goto done;
+  }
+
+  /*
+   * Pair header: one PHI per loop-carried value, `iv + 1 < bound`, and a
+   * fallthrough edge into the original header, which is now the remainder.
+   */
+  {
+    nyr_inst_t label = lup_inst(NYIR_LABEL);
+    label.imm = main_h;
+    if (!lup_append(out, out_cap, &out_len, label))
+      goto done;
+  }
+  int iv_main = -1;
+  for (size_t q = 0; q < phi_count; ++q) {
+    const nyr_inst_t *phi = &w->data[phi_index[q]];
+    int init = -1;
+    for (size_t k = 0; k < phi->phi_incoming_len; ++k)
+      if (phi->phi_incoming[k].predecessor_label == pl)
+        init = phi->phi_incoming[k].value;
+    if (init < 0)
+      goto done;
+    if (phi->dst == loop->iv)
+      iv_main = main_phi[q];
+    nyr_inst_t m = lup_inst(NYIR_PHI);
+    m.dst = main_phi[q];
+    m.scalar_class = phi->scalar_class;
+    m.phi_incoming = calloc(2, sizeof(*m.phi_incoming));
+    if (!m.phi_incoming)
+      goto done;
+    m.phi_incoming_len = 2;
+    m.phi_incoming[0].predecessor_label = main_in;
+    m.phi_incoming[0].value = init;
+    m.phi_incoming[1].predecessor_label = labelB[l];
+    int pair_next = phi_next[phi->dst];
+    m.phi_incoming[1].value =
+        pair_next >= 0 && (size_t)pair_next < value_count &&
+                mapB[pair_next] >= 0
+            ? mapB[pair_next]
+            : pair_next;
+    if (m.phi_incoming[1].value < 0)
+      goto done;
+    if (!lup_append(out, out_cap, &out_len, m)) {
+      nyr_inst_discard(&m);
+      goto done;
+    }
+  }
+  if (iv_main < 0)
+    goto done;
+  {
+    nyr_inst_t one_inst = lup_inst(NYIR_CONST_I64);
+    one_inst.dst = one;
+    one_inst.imm = 1;
+    one_inst.effects = NYIR_EFFECT_NONE;
+    one_inst.scalar_class = NYIR_SCALAR_I64_RAW;
+    nyr_inst_t add = lup_inst(NYIR_ADD_I64);
+    add.dst = ivp1;
+    add.a = iv_main;
+    add.b = one;
+    add.effects = NYIR_EFFECT_NONE;
+    add.scalar_class = NYIR_SCALAR_I64_RAW;
+    nyr_inst_t test = lup_inst(NYIR_CMP_I64);
+    test.dst = cnd;
+    test.a = ivp1;
+    test.b = cmp->b;
+    test.cmp = NYIR_CMP_LT;
+    test.effects = NYIR_EFFECT_NONE;
+    test.scalar_class = cmp->scalar_class;
+    nyr_inst_t br_if = lup_inst(NYIR_BR_IF);
+    br_if.a = cnd;
+    br_if.imm = labelA[h];
+    br_if.effects = NYIR_EFFECT_CONTROL;
+    nyr_inst_t fall = lup_inst(NYIR_LABEL);
+    fall.imm = main_fall;
+    nyr_inst_t br = lup_inst(NYIR_BR);
+    br.imm = hl;
+    br.effects = NYIR_EFFECT_CONTROL;
+    if (!lup_append(out, out_cap, &out_len, one_inst) ||
+        !lup_append(out, out_cap, &out_len, add) ||
+        !lup_append(out, out_cap, &out_len, test) ||
+        !lup_append(out, out_cap, &out_len, br_if) ||
+        !lup_append(out, out_cap, &out_len, fall) ||
+        !lup_append(out, out_cap, &out_len, br))
+      goto done;
+  }
+  /*
+   * The pair body: copy A, then copy B, whose latch closes the pair loop.
+   */
+  {
+    lup_copy_t copy = {.w = w,
+                       .cfg = &cfg,
+                       .loop = loop,
+                       .members = members,
+                       .map = mapA,
+                       .label = labelA,
+                       .backedge = labelB[h],
+                       .guard_true = labelA[guard_true],
+                       .skip_inst = skip_inst,
+                       .value_count = value_count,
+                       .out = out,
+                       .cap = out_cap,
+                       .len = &out_len};
+    if (!lup_emit_copy(&copy))
+      goto done;
+    copy.map = mapB;
+    copy.label = labelB;
+    copy.backedge = main_h;
+    copy.guard_true = labelB[guard_true];
+    if (!lup_emit_copy(&copy))
+      goto done;
+  }
+  /*
+   * The pair header takes over the preheader edge, and the original header
+   * PHIs take their values from the pair header through the fall block. The
+   * original latch still branches to the original header, so the remainder
+   * runs for the last 0..1 iterations.
+   */
+  {
+    for (size_t q = 0; q < phi_count; ++q) {
+      nyr_inst_t *phi = &w->data[phi_index[q]];
+      bool matched = false;
+      for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+        if (phi->phi_incoming[k].predecessor_label != pl)
+          continue;
+        phi->phi_incoming[k].predecessor_label = main_fall;
+        phi->phi_incoming[k].value = main_phi[q];
+        matched = true;
+      }
+      if (!matched)
+        goto done;
+    }
+    if (preheader_term != SIZE_MAX) {
+      w->data[preheader_term].imm = main_h;
+    } else {
+      /*
+       * The preheader reaches the header by fallthrough: either it has no
+       * terminator or the header is a conditional's false edge. Give the
+       * fallthrough its own block so the pair loop runs first.
+       */
+      nyr_inst_t edge[2];
+      edge[0] = lup_inst(NYIR_LABEL);
+      edge[0].imm = main_in;
+      edge[1] = lup_inst(NYIR_BR);
+      edge[1].imm = main_h;
+      edge[1].effects = NYIR_EFFECT_CONTROL;
+      if (!lup_insert_insts(w, cfg.block_end[p], edge, 2))
+        goto done;
+    }
+  }
+  if (!nir_ensure_inst_space(w, out_len))
+    goto done;
+  memcpy(&w->data[w->len], out, out_len * sizeof(*out));
+  w->len += out_len;
+  w->next_value = next_value;
+  out_len = 0; /* ownership moved into w */
+  ok = true;
+
+done:
+  if (out)
+    for (size_t i = 0; i < out_len; ++i)
+      nyr_inst_discard(&out[i]);
+  free(out);
+  free(defs);
+  free(members);
+  free(inside);
+  free(phi_next);
+  free(phi_index);
+  free(mapA);
+  free(mapB);
+  free(main_phi);
+  free(labelA);
+  free(labelB);
+  nyr_cfg_free(&cfg);
+  return ok;
+}
+
+bool nyr_loop_unroll_partial(nyr_func_t *f) {
+  /*
+   * Opt-in. With the pair as the main loop and the original loop kept as the
+   * remainder, `cd` no longer pays a guard per element: 80.99 M -> 78.49 M
+   * retired instructions with checksum `387`, and the loop-home allocator
+   * keeps both `calloc` base pointers resident. The rolled build remains the
+   * default until the other fixtures show the same gain; see the 2026-11-21
+   * measurement entry.
+   */
+  const char *enabled = getenv("NYTRIX_UNROLL_PARTIAL");
+  if (!enabled || !enabled[0] || strcmp(enabled, "0") == 0 ||
+      strcmp(enabled, "off") == 0 || strcmp(enabled, "false") == 0)
+    return true;
+  if (!f || f->len < 8 || f->next_value <= 0)
+    return true;
+  nyr_scev_info_t info = {0};
+  if (!nyr_scev_analyze(f, &info))
+    return false;
+  bool ok = true;
+  for (size_t i = 0; i < info.count; ++i) {
+    const nyr_scev_loop_t *loop = &info.loops[i];
+    if (loop->trip_count_known || loop->step != 1 || loop->iv < 0)
+      continue;
+    nyr_func_t candidate = {0};
+    if (!nyr_ir_func_clone(f, &candidate)) {
+      ok = false;
+      break;
+    }
+    char err[256] = {0};
+    bool applied = lup_apply(&candidate, loop);
+    bool verified = applied && nyr_ir_verify(&candidate, err, sizeof(err));
+    if (verified) {
+      if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+        ny_dbg_heuristic_event("LOOP_UNROLL_PARTIAL",
+                               "apply header=L%lld insts=%zu->%zu",
+                               (long long)loop->header_label, f->len,
+                               candidate.len);
+      nyr_func_replace(f, &candidate);
+      break;
+    }
+    nyr_ir_func_free(&candidate);
+    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+      ny_dbg_heuristic_event("LOOP_UNROLL_PARTIAL",
+                             "reject header=L%lld reason=%s",
+                             (long long)loop->header_label,
+                             err[0] ? err : "shape-or-legality");
+  }
+  nyr_scev_free(&info);
+  return ok;
+}
+
 /*
  * Put a loop-invariant relational guard in constant-left canonical form.  It
  * is a concrete, verifier-safe specialization of the existing loop version;

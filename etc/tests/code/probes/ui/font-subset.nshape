@@ -4,7 +4,7 @@ shape font_subset_lazy_glyph {
   features [ny font glyph cache subset]
   template ny-test-case
   timeout 180
-  flags_matrix "--native-only -O0; --native-only -O3; --run=aot -O2; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --run=aot -O2; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect compile_and_run
   expect_message "FONT-SUBSET-OK"
   source ny <<'NY'

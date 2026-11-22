@@ -3,7 +3,7 @@ shape ui_w_tab_strip_narrow {
   generator "regression"
   features [ny render ui gui]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-W-TAB-STRIP-NARROW-OK"
   source ny <<'NY'
 use core

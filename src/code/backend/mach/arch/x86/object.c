@@ -3297,23 +3297,24 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
                                 ny_x64_obj_local_off(c, (int)in->imm));
     return ny_x64_obj_lea_rax(c, ny_x64_obj_local_off(c, (int)in->imm)) &&
            ny_x64_obj_store_value_rax(c, in->dst);
-  case NYIR_ADDR_SYMBOL:
+  case NYIR_ADDR_SYMBOL: {
     if (!in->symbol || !in->symbol[0]) {
       nyr_set_error(
           c->err, c->err_len,
           "x86-64 ELF object writer: addr.symbol missing symbol name");
       return false;
     }
+    bool got = c->position_independent &&
+               !(in->flags & NYIR_INST_F_SYMBOL_NONPREEMPTIBLE);
     if (c->value_reg && c->value_reg[in->dst] >= 0) {
       int reg = c->value_reg[in->dst];
       unsigned char op[] = {(unsigned char)(0x48 | (reg >= 8 ? 0x04 : 0)),
-                            c->position_independent ? 0x8b : 0x8d,
+                            got ? 0x8b : 0x8d,
                             (unsigned char)(0x05 | ((reg & 7) << 3))};
       if (!ny_x64_obj_bytes(c, op, sizeof(op)))
         return false;
     } else {
-      const unsigned char op[] = {0x48, c->position_independent ? 0x8b : 0x8d,
-                                  0x05};
+      const unsigned char op[] = {0x48, got ? 0x8b : 0x8d, 0x05};
       if (!ny_x64_obj_bytes(c, op, sizeof(op)))
         return false;
     }
@@ -3328,8 +3329,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
       size_t disp = c->code.len;
       if (!ny_x64_obj_i32(c, -4) ||
           !ny_x64_obj_add_reloc(c, sym, disp,
-                                c->position_independent ? NY_RELOC_GOTPCREL
-                                                        : NY_RELOC_PC32))
+                                got ? NY_RELOC_GOTPCREL : NY_RELOC_PC32))
         return false;
       if (!c->value_reg || c->value_reg[in->dst] < 0) {
         if (!ny_x64_obj_store_value_rax(c, in->dst))
@@ -3337,6 +3337,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
       }
     }
     return true;
+  }
   case NYIR_STORE_LOCAL:
     if (in->imm < 0 || in->imm >= c->local_slots) {
       nyr_set_error(c->err, c->err_len,

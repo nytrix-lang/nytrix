@@ -104,6 +104,18 @@ static bool phiopt_find_condition(const nyr_func_t *f, int64_t arm0,
   return false;
 }
 
+static int phiopt_resolve_copy(const nyr_func_t *f, const int *defs, int v) {
+  for (unsigned steps = 0; steps < 8; ++steps) {
+    if (v < 0 || v >= f->next_value || defs[v] < 0)
+      return v;
+    const nyr_inst_t *in = &f->data[(size_t)defs[v]];
+    if (in->op != NYIR_COPY)
+      return v;
+    v = in->a;
+  }
+  return v;
+}
+
 bool nyr_phiopt(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -114,12 +126,64 @@ bool nyr_phiopt(nyr_func_t *f) {
   bool *known = calloc((size_t)f->next_value, sizeof(*known));
   int64_t *values = calloc((size_t)f->next_value, sizeof(*values));
   int *defs = nyr_build_defs(f);
-  if (!known || !values || !defs) {
+  nyr_cfg_t cfg = {0};
+  if (!known || !values || !defs || !nyr_cfg_build(f, &cfg)) {
     free(known);
     free(values);
     free(defs);
+    nyr_cfg_free(&cfg);
     return false;
   }
+  bool any_trivial = false;
+  for (bool fold_again = true; fold_again;) {
+    fold_again = false;
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *phi = &f->data[i];
+      if (phi->op != NYIR_PHI || phi->dst < 0 || !phi->phi_incoming ||
+          phi->phi_incoming_len == 0)
+        continue;
+      int unique_v = -1;
+      bool uniform = true;
+      for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+        int v = phiopt_resolve_copy(f, defs, phi->phi_incoming[k].value);
+        if (v < 0 || v == phi->dst)
+          continue;
+        if (unique_v < 0)
+          unique_v = v;
+        else if (v != unique_v) {
+          uniform = false;
+          break;
+        }
+      }
+      if (!uniform || unique_v < 0 || unique_v >= f->next_value ||
+          defs[unique_v] < 0)
+        continue;
+      size_t def_idx = (size_t)defs[unique_v];
+      size_t def_block = cfg.inst_block[def_idx];
+      size_t phi_block = cfg.inst_block[i];
+      bool dominates = def_block == phi_block
+                           ? def_idx < i
+                           : nyr_cfg_dominates(&cfg, def_block, phi_block);
+      if (!dominates)
+        continue;
+      nir_make_copy(phi, unique_v);
+      fold_again = true;
+      any_trivial = true;
+      if (trace)
+        rewritten++;
+    }
+  }
+  if (any_trivial) {
+    free(defs);
+    defs = nyr_build_defs(f);
+    if (!defs) {
+      free(known);
+      free(values);
+      nyr_cfg_free(&cfg);
+      return false;
+    }
+  }
+  nyr_cfg_free(&cfg);
   if (!nir_collect_consts(f, known, values)) {
     free(known);
     free(values);

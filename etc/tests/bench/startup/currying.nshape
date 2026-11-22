@@ -2,14 +2,12 @@ shape bench_currying_direct_residual_factory {
   family "perf-real"
   generator "stress"
   features ["perf", "calls", "currying", "c-vs-ny", "checksum", "time"]
-  ;; Both sources publish every iteration through a global slot, so NYR/C is
-  ;; the closure-call cost plus one store, not a sub-100ns clock sample.
-  ;; Known partial applications now lower to direct calls (~1.2x C), so the
-  ;; C ceiling guards that path. No LLVM ratio: Nytrix has no volatile store,
-  ;; so the LLVM route sums each loop in closed form (~130ns) and the ratio
-  ;; would compare a real loop with none.
+  ;; Both sources feed every iteration through a non-linear recurrence so
+  ;; neither Clang nor LLVM can collapse the three loops into closed form
+  ;; (~130ns), keeping all four routes well above the 500ns signal floor.
   budget {
     max_native_c_ratio 8.0
+    max_native_llvm_ratio 2.0
   }
   template ny-test-case
   expect compile_and_run
@@ -19,16 +17,14 @@ use core.os.time
 
 fn step(int a, int b) int { a * 3 + b }
 
-;; Both sides publish every result through a global slot so the timed loops
-;; keep one store per iteration.  Without it clang folds the C loops into a
-;; closed form and the comparison measures nothing.
-mut int keep_slot = 0
+;; Non-linear feedback keeps every iteration live on NYR, LLVM, C, and NYC.
+mut int keep_slot = 1
 fn keep(int v) int {
-   keep_slot = v
+   keep_slot = ((keep_slot ^ v) * 3 + 1) & 1073741823
    keep_slot
 }
 
-def int n = 2000 + argc()
+def int n = 4000 + argc()
 
 mut int direct = 0
 mut int i = 0
@@ -76,13 +72,12 @@ static int64_t step(int64_t a, int64_t b) { return a * 3 + b; }
 static int64_t call_partial(Partial p, int64_t b) { return step(p.a, b); }
 
 /*
- * Clang reduces the three loops to a closed form and the timed section
- * collapses onto the clock read (~80ns), which drops NYR/C. A volatile
- * publish keeps each iteration and the checksum.
+ * Non-linear feedback through keep_slot matches the Ny source and prevents
+ * closed-form loop collapse across Clang, LLVM, NYR, and NYC.
  */
-static volatile int64_t keep_slot;
+static int64_t keep_slot = 1;
 static int64_t keep(int64_t v) {
-  keep_slot = v;
+  keep_slot = ((keep_slot ^ v) * 3 + 1) & 1073741823;
   return keep_slot;
 }
 
@@ -94,7 +89,7 @@ static int64_t now_ns(void) {
 
 int main(int argc, char **argv) {
   (void)argv;
-  int64_t n = 2000 + argc;
+  int64_t n = 4000 + argc;
   int64_t direct = 0, residual = 0, factory = 0, i;
   int64_t t0 = now_ns();
   for (i = 0; i < n; ++i) direct += keep(step(i, 1));

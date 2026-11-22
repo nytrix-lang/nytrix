@@ -711,7 +711,8 @@ static bool verify_tied_boundary(const nyr_mach_func_t *mach,
  * value from the definition on, and the copy is a no-op. Mirrors
  * vector_phi_reads_precede_source(), which proposes the coloring.
  */
-static bool vector_latch_def_reads_phi_ok(const nyr_mach_inst_t *def,
+static bool vector_latch_def_reads_phi_ok(const nyr_mach_func_t *mach,
+                                          const nyr_mach_inst_t *def,
                                           uint32_t phi);
 
 static bool verify_vector_latch_recurrence(
@@ -726,7 +727,7 @@ static bool verify_vector_latch_recurrence(
     return false;
   const nyr_mach_inst_t *def = &mach->insts[span->start];
   if (!dst_is_def(def) || def->dst.kind != NYR_MACH_OPERAND_VREG ||
-      def->dst.as.reg != src || !vector_latch_def_reads_phi_ok(def, phi))
+      def->dst.as.reg != src || !vector_latch_def_reads_phi_ok(mach, def, phi))
     return false;
   const nyr_mach_inst_t *copy = &mach->insts[span->end];
   if (copy->opcode != NYR_MACH_COPY ||
@@ -2485,14 +2486,22 @@ static bool block_reads_vreg_before(const nyr_mach_func_t *mach, size_t block,
  * shared register is then a no-op. Multi-instruction lowerings (vector shifts,
  * compares, selects) may write the destination before their last read.
  */
-static bool vector_latch_def_reads_phi_ok(const nyr_mach_inst_t *def,
+static bool vector_latch_def_reads_phi_ok(const nyr_mach_func_t *mach,
+                                          const nyr_mach_inst_t *def,
                                           uint32_t phi) {
+  if (def->args_len)
+    return false;
+  /* VBLENDVPD reads all three vector operands before writing its destination. */
+  if (def->opcode == NYR_MACH_SELECT &&
+      def->dst.kind == NYR_MACH_OPERAND_VREG &&
+      def->dst.as.reg < mach->vreg_len &&
+      mach->vreg_types[def->dst.as.reg] == NYR_MACH_TYPE_V256_I64)
+    return true;
   bool src0_phi =
       def->src0.kind == NYR_MACH_OPERAND_VREG && def->src0.as.reg == phi;
   bool other_phi =
       (def->src1.kind == NYR_MACH_OPERAND_VREG && def->src1.as.reg == phi) ||
-      (def->src2.kind == NYR_MACH_OPERAND_VREG && def->src2.as.reg == phi) ||
-      def->args_len;
+      (def->src2.kind == NYR_MACH_OPERAND_VREG && def->src2.as.reg == phi);
   if (other_phi)
     return false;
   if (!src0_phi)
@@ -2537,11 +2546,11 @@ static bool vector_phi_reads_precede_source(const nyr_mach_func_t *mach,
   if (def_pc == SIZE_MAX)
     return false;
   /*
-   * The definition may read the old value as its first operand: the
-   * destination is formed from src0 before src1 is consumed.
+   * Check that the definition consumes the old value before writing the
+   * shared destination register.
    */
   const nyr_mach_inst_t *def = &mach->insts[def_pc];
-  if (!vector_latch_def_reads_phi_ok(def, phi))
+  if (!vector_latch_def_reads_phi_ok(mach, def, phi))
     return false;
   for (size_t pc = def_pc + 1; pc < end; ++pc) {
     if (pc == copy_pc)
@@ -3205,7 +3214,8 @@ coalesce_loop_edges(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
         free(body_work);
       }
       bool carry_chain_ok =
-          copy_len > 0 && carry_enabled && mach->vreg_len <= 1024 &&
+          copy_len > 0 && carry_enabled &&
+          (reg_class == NYR_MACH_REGCLASS_VECTOR || mach->vreg_len <= 1024) &&
           !nested_loop && !loop_phi_has_call_use(mach, v) &&
           !loop_phi_region_has_call(mach, succ, reaches_h, nb, h, work);
       for (size_t k = 0; carry_chain_ok && k < copy_len; ++k)
@@ -3809,8 +3819,62 @@ static void coalesce_unchanged_dag_values(
  * value is live across the entire body. Mark the body segments carried so the
  * encoder seeds C at block entry. Call-free bodies only.
  */
+static bool preheader_align_vector_color(
+    const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a, size_t block,
+    nyr_mach_live_segment_t *ps, int color, const size_vec_t *by_block,
+    const uint8_t *locked_vreg, size_t nv, bool preserve_gpr_calls) {
+  if (!ps || ps->carried || ps->color == color)
+    return ps && ps->color == color &&
+           segment_color_survives_clobbers(mach, ps, NYR_MACH_REGCLASS_VECTOR,
+                                           color, preserve_gpr_calls);
+  if (!segment_accepts_color(mach, ps, a->color_count, color) ||
+      !segment_color_survives_clobbers(mach, ps, NYR_MACH_REGCLASS_VECTOR,
+                                       color, preserve_gpr_calls))
+    return false;
+  int old_color = ps->color;
+  nyr_mach_live_segment_t *conflict = NULL;
+  for (size_t k = 0; k < by_block[block].len; ++k) {
+    nyr_mach_live_segment_t *s = &a->segments[by_block[block].data[k]];
+    if (s == ps || s->color != color)
+      continue;
+    if (s->end < ps->start || ps->end < s->start)
+      continue;
+    if (s->carried || (s->vreg < nv && locked_vreg[s->vreg]))
+      return false;
+    if (conflict)
+      return false;
+    conflict = s;
+  }
+  if (!conflict) {
+    ps->color = color;
+    if (old_color < 0) {
+      ps->spill_reason = NYR_MACH_SPILL_NONE;
+      const nyr_mach_block_t *pb = &mach->blocks[block];
+      ps->reload =
+          ps->start == pb->first_inst && nyr_mach_regalloc_live_in(a, block, ps->vreg);
+    }
+    return true;
+  }
+  if (old_color < 0 ||
+      !segment_accepts_color(mach, conflict, a->color_count, old_color) ||
+      !segment_color_survives_clobbers(mach, conflict, NYR_MACH_REGCLASS_VECTOR,
+                                       old_color, preserve_gpr_calls))
+    return false;
+  for (size_t k = 0; k < by_block[block].len; ++k) {
+    const nyr_mach_live_segment_t *s = &a->segments[by_block[block].data[k]];
+    if (s == ps || s == conflict || s->color != old_color)
+      continue;
+    if (!(s->end < conflict->start || conflict->end < s->start))
+      return false;
+  }
+  conflict->color = old_color;
+  ps->color = color;
+  return true;
+}
+
 static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
                                          nyr_mach_regalloc_t *a,
+                                         const size_vec_t *succ,
                                          const size_vec_t *pred,
                                          const size_vec_t *by_block,
                                          bool preserve_gpr_calls) {
@@ -3819,13 +3883,29 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
     return;
   uint8_t *body = calloc(nb, 1);
   uint8_t *defined = calloc(nv, 1);
+  uint8_t *used = calloc(nv, 1);
+  uint32_t *def_count = calloc(nv, sizeof(*def_count));
+  size_t *def_block = malloc(nv * sizeof(*def_block));
   size_t *work = malloc(nb * sizeof(*work));
-  if (!body || !defined || !work)
+  if (!body || !defined || !used || !def_count || !def_block || !work)
     goto done;
+  for (uint32_t v = 0; v < nv; ++v)
+    def_block[v] = SIZE_MAX;
+  for (size_t b = 0; b < nb; ++b) {
+    const nyr_mach_block_t *blk = &mach->blocks[b];
+    for (size_t n = 0; n < blk->inst_count; ++n) {
+      const nyr_mach_inst_t *in = &mach->insts[blk->first_inst + n];
+      if (dst_is_def(in) && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+          in->dst.as.reg < nv) {
+        def_count[in->dst.as.reg]++;
+        def_block[in->dst.as.reg] = b;
+      }
+    }
+  }
   for (size_t h = 0; h < nb; ++h) {
     bool backedge = false;
     for (size_t pi = 0; pi < pred[h].len; ++pi)
-      backedge |= pred[h].data[pi] > h;
+      backedge |= pred[h].data[pi] >= h;
     if (!backedge)
       continue;
     memset(body, 0, nb);
@@ -3833,7 +3913,7 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
     body[h] = 1;
     for (size_t pi = 0; pi < pred[h].len; ++pi) {
       size_t p = pred[h].data[pi];
-      if (p > h && p < nb && !body[p]) {
+      if (p >= h && p < nb && !body[p]) {
         body[p] = 1;
         work[len++] = p;
       }
@@ -3851,6 +3931,7 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
      */
     bool natural = true, has_call = false;
     memset(defined, 0, nv);
+    memset(used, 0, nv);
     for (size_t b = 0; b < nb && natural; ++b) {
       if (!body[b])
         continue;
@@ -3866,12 +3947,17 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
         if (dst_is_def(in) && in->dst.kind == NYR_MACH_OPERAND_VREG &&
             in->dst.as.reg < nv)
           defined[in->dst.as.reg] = 1;
+        uint32_t u[3 + NYIR_CALL_MAX_ARGS];
+        size_t un = inst_uses(in, u, sizeof(u) / sizeof(*u));
+        for (size_t ui = 0; ui < un; ++ui)
+          if (u[ui] < nv)
+            used[u[ui]] = 1;
       }
     }
     if (!natural || has_call)
       continue;
     for (uint32_t v = 0; v < nv; ++v) {
-      if (defined[v] || !nyr_mach_regalloc_live_in(a, h, v))
+      if (defined[v] || !used[v] || !nyr_mach_regalloc_live_in(a, h, v))
         continue;
       int color = -1;
       bool ok = true;
@@ -3911,21 +3997,48 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
           break;
         }
         size_t last = pb->first_inst + pb->inst_count - 1;
-        const nyr_mach_live_segment_t *ps = NULL;
+        nyr_mach_live_segment_t *ps = NULL;
         for (size_t k = 0; k < by_block[p].len; ++k) {
-          const nyr_mach_live_segment_t *cand =
+          nyr_mach_live_segment_t *cand =
               &a->segments[by_block[p].data[k]];
           if (cand->vreg == v && cand->end == last)
             ps = cand;
         }
-        if (!ps || ps->color != color ||
-            !coalesce_preg_reaches_edge(mach, ps, preserve_gpr_calls) ||
+        if (!ps || !segment_accepts_color(mach, ps, a->color_count, color) ||
             !segment_color_survives_clobbers(mach, ps, NYR_MACH_REGCLASS_VECTOR,
                                              color, preserve_gpr_calls))
           ok = false;
+        else if (ps->color != color) {
+          if (ps->carried ||
+              !preheader_align_vector_color(mach, a, p, ps, color, by_block,
+                                            used, nv, preserve_gpr_calls))
+            ok = false;
+        }
       }
       if (!ok || !entry)
         continue;
+      bool def_outside =
+          def_count[v] == 1 && def_block[v] < nb && !body[def_block[v]];
+      if (def_outside) {
+        nyr_mach_live_segment_t *dseg =
+            segment_in_block_vreg(a, v, def_block[v], by_block, NULL);
+        if (dseg && dseg->color >= 0)
+          dseg->spill = true;
+      }
+      bool has_unpub_exit = false;
+      if (!def_outside) {
+        for (size_t b = 0; b < nb && !has_unpub_exit; ++b) {
+          if (!body[b] || !nyr_mach_regalloc_live_out(a, b, v))
+            continue;
+          for (size_t si = 0; si < succ[b].len; ++si) {
+            size_t q = succ[b].data[si];
+            if (q < nb && !body[q] && nyr_mach_regalloc_live_in(a, q, v)) {
+              has_unpub_exit = true;
+              break;
+            }
+          }
+        }
+      }
       for (size_t b = 0; b < nb; ++b) {
         if (!body[b])
           continue;
@@ -3933,12 +4046,17 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
             segment_in_block_vreg(a, v, b, by_block, NULL);
         seg->carried = true;
         seg->reload = false;
+        if (!has_unpub_exit)
+          seg->spill = false;
       }
     }
   }
 done:
   free(body);
   free(defined);
+  free(used);
+  free(def_count);
+  free(def_block);
   free(work);
 }
 
@@ -4304,7 +4422,8 @@ static bool nyr_mach_regalloc_build_class_mode_once(
                            preserve_gpr_calls);
   if (reg_class == NYR_MACH_REGCLASS_VECTOR && by_block &&
       !regalloc_retry_without_coalescing && loop_phi_carry_enabled(reg_class))
-    carry_loop_invariant_vectors(mach, &a, pred, by_block, preserve_gpr_calls);
+    carry_loop_invariant_vectors(mach, &a, succ, pred, by_block,
+                                 preserve_gpr_calls);
   free(local_snapshot);
   free_segment_by_block(mach, by_block);
   by_block = NULL;
@@ -4555,32 +4674,80 @@ size_t nyr_mach_regalloc_recolor_locals(
     nyr_mach_reg_class_t reg_class, const unsigned char *candidate,
     bool (*color_blocked)(void *ctx, int color, size_t start, size_t end),
     void *ctx) {
-  if (!mach || !a || !candidate || !a->segment_len)
+  if (!mach || !a || !candidate || !a->segment_len || !a->color_count)
     return 0;
   size_vec_t *by_block = build_segment_by_block(mach, a);
   if (!by_block)
     return 0;
+  size_t nc = a->color_count;
+  size_vec_t *color_segs = calloc(nc, sizeof(*color_segs));
+  if (!color_segs) {
+    free_segment_by_block(mach, by_block);
+    return 0;
+  }
   size_t recolored = 0;
-  for (size_t i = 0; i < a->segment_len; ++i) {
-    nyr_mach_live_segment_t *s = &a->segments[i];
-    if (!candidate[i] || s->color >= 0 || s->block >= a->block_count ||
-        s->start > s->end || s->end >= mach->inst_len)
+  for (size_t b = 0; b < a->block_count; ++b) {
+    const size_t *indices = by_block[b].data;
+    size_t count = by_block[b].len;
+    if (!count)
       continue;
-    for (int c = 0; (size_t)c < a->color_count; ++c) {
-      if (!segment_accepts_color(mach, s, a->color_count, c) ||
-          !segment_color_survives_clobbers(mach, s, reg_class, c, false) ||
-          block_has_color_conflict(a, s, c, by_block) ||
-          (color_blocked && color_blocked(ctx, c, s->start, s->end)))
+    bool has_cand = false;
+    for (size_t k = 0; k < count; ++k) {
+      size_t idx = indices[k];
+      const nyr_mach_live_segment_t *s = &a->segments[idx];
+      if (candidate[idx] && s->color < 0 && s->start <= s->end &&
+          s->end < mach->inst_len) {
+        has_cand = true;
+        break;
+      }
+    }
+    if (!has_cand)
+      continue;
+    for (size_t c = 0; c < nc; ++c)
+      color_segs[c].len = 0;
+    for (size_t k = 0; k < count; ++k) {
+      size_t idx = indices[k];
+      int sc = a->segments[idx].color;
+      if (sc >= 0 && (size_t)sc < nc)
+        (void)size_vec_push(&color_segs[sc], idx);
+    }
+    for (size_t k = 0; k < count; ++k) {
+      size_t idx = indices[k];
+      nyr_mach_live_segment_t *s = &a->segments[idx];
+      if (!candidate[idx] || s->color >= 0 || s->start > s->end ||
+          s->end >= mach->inst_len)
         continue;
-      s->color = c;
-      s->reload = false;
-      s->spill = false;
-      s->carried = s->acyclic_carried = false;
-      s->spill_reason = NYR_MACH_SPILL_NONE;
-      ++recolored;
-      break;
+      for (int c = 0; (size_t)c < nc; ++c) {
+        if (!segment_accepts_color(mach, s, nc, c) ||
+            !segment_color_survives_clobbers(mach, s, reg_class, c, false))
+          continue;
+        bool conflict = false;
+        const size_t *cidxs = color_segs[c].data;
+        size_t clen = color_segs[c].len;
+        for (size_t j = 0; j < clen; ++j) {
+          const nyr_mach_live_segment_t *other = &a->segments[cidxs[j]];
+          if (!(other->end < s->start || s->end < other->start)) {
+            conflict = true;
+            break;
+          }
+        }
+        if (conflict ||
+            (color_blocked && color_blocked(ctx, c, s->start, s->end)))
+          continue;
+        s->color = c;
+        s->reload = false;
+        s->spill = false;
+        s->carried = s->acyclic_carried = false;
+        s->spill_reason = NYR_MACH_SPILL_NONE;
+        (void)size_vec_push(&color_segs[c], idx);
+        ++recolored;
+        break;
+      }
     }
   }
+  for (size_t c = 0; c < nc; ++c)
+    free(color_segs[c].data);
+  free(color_segs);
   free_segment_by_block(mach, by_block);
   return recolored;
 }

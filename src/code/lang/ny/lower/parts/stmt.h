@@ -7484,7 +7484,9 @@ static bool nyr_lower_stdlib_module_globals(nyr_builder_t *b, const stmt_t *s,
     b->current_fn_name = init_name;
     b->module_name = s->as.module.name;
     b->initializing_stdlib_globals = true;
+    size_t span_begin = b->nyir.len;
     bool ok = nyr_lower_stmt(b, item);
+    size_t span_end = b->nyir.len;
     b->current_fn_name = saved_name;
     b->module_name = saved_module;
     b->initializing_stdlib_globals = saved_stdlib_init;
@@ -7493,6 +7495,32 @@ static bool nyr_lower_stdlib_module_globals(nyr_builder_t *b, const stmt_t *s,
     b->last_value_f64 = saved_last_f64;
     if (!ok)
       return false;
+    if (span_end > span_begin) {
+      bool straight_line = true;
+      for (size_t pc = span_begin; pc < span_end; ++pc) {
+        nyr_op_t op = b->nyir.data[pc].op;
+        if (op == NYIR_LABEL || op == NYIR_BR || op == NYIR_BR_IF ||
+            op == NYIR_RET || op == NYIR_PHI || op == NYIR_STORE_LOCAL) {
+          straight_line = false;
+          break;
+        }
+      }
+      if (straight_line) {
+        if (b->stdlib_init_spans_len == b->stdlib_init_spans_cap) {
+          size_t next_cap =
+              b->stdlib_init_spans_cap ? b->stdlib_init_spans_cap * 2 : 64;
+          nyr_stdlib_init_span_t *grown = realloc(
+              b->stdlib_init_spans, next_cap * sizeof(*b->stdlib_init_spans));
+          if (grown) {
+            b->stdlib_init_spans = grown;
+            b->stdlib_init_spans_cap = next_cap;
+          }
+        }
+        if (b->stdlib_init_spans_len < b->stdlib_init_spans_cap)
+          b->stdlib_init_spans[b->stdlib_init_spans_len++] =
+              (nyr_stdlib_init_span_t){span_begin, span_end};
+      }
+    }
   }
   return true;
 }
@@ -10072,6 +10100,254 @@ static bool ny_native_per_pass_oracle_cb(const nyr_func_t *f,
   return ok;
 }
 
+typedef struct {
+  const char **keys;
+  size_t cap;
+  size_t len;
+} nyr_sym_set_t;
+
+static uint64_t nyr_sym_set_hash(const char *s) {
+  uint64_t h = UINT64_C(14695981039346656037);
+  for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+    h ^= (uint64_t)*p;
+    h *= UINT64_C(1099511628211);
+  }
+  return h;
+}
+
+static bool nyr_sym_set_has(const nyr_sym_set_t *set, const char *s) {
+  if (!set || !set->keys || !set->cap || !s || !*s)
+    return false;
+  size_t mask = set->cap - 1;
+  size_t idx = (size_t)nyr_sym_set_hash(s) & mask;
+  for (;;) {
+    const char *k = set->keys[idx];
+    if (!k)
+      return false;
+    if (strcmp(k, s) == 0)
+      return true;
+    idx = (idx + 1) & mask;
+  }
+}
+
+static bool nyr_sym_set_add(nyr_sym_set_t *set, const char *s) {
+  if (!set || !s || !*s)
+    return false;
+  if (!set->keys || set->len * 2 >= set->cap) {
+    size_t ncap = set->cap ? set->cap * 2 : 512;
+    const char **nkeys = calloc(ncap, sizeof(*nkeys));
+    if (!nkeys)
+      return false;
+    size_t mask = ncap - 1;
+    for (size_t i = 0; i < set->cap; ++i) {
+      if (!set->keys[i])
+        continue;
+      size_t idx = (size_t)nyr_sym_set_hash(set->keys[i]) & mask;
+      while (nkeys[idx])
+        idx = (idx + 1) & mask;
+      nkeys[idx] = set->keys[i];
+    }
+    free(set->keys);
+    set->keys = nkeys;
+    set->cap = ncap;
+  }
+  size_t mask = set->cap - 1;
+  size_t idx = (size_t)nyr_sym_set_hash(s) & mask;
+  for (;;) {
+    const char *k = set->keys[idx];
+    if (!k) {
+      set->keys[idx] = s;
+      set->len++;
+      return true;
+    }
+    if (strcmp(k, s) == 0)
+      return false;
+    idx = (idx + 1) & mask;
+  }
+}
+
+static bool nyr_stdlib_init_call_pure_alloc(const char *sym) {
+  if (!sym)
+    return false;
+  return strcmp(sym, "rt_dict_new_internal_raw") == 0 ||
+         strcmp(sym, "rt_dict_new_raw") == 0 ||
+         strcmp(sym, "rt_dict_set_raw") == 0 ||
+         strcmp(sym, "rt_list_new_raw") == 0 ||
+         strcmp(sym, "rt_list_new_sized") == 0 ||
+         strcmp(sym, "rt_tbuf_new_raw") == 0 ||
+         strcmp(sym, "rt_tbuf_new_typed_raw") == 0 ||
+         strcmp(sym, "rt_cstr_to_str") == 0 ||
+         strcmp(sym, "rt_cstr_concat") == 0;
+}
+
+/*
+ * Drop stdlib mutable-global initializers from rt_main when no reachable
+ * function and no user top-level code ever references the initialized global.
+ * Eliminates ~15 startup heap allocations (unused info/type/math caches) in
+ * minimal scripts without affecting any reachable stdlib state.
+ */
+static void nyr_prune_unused_stdlib_global_inits(
+    nyr_builder_t *b, const nyr_func_t *reachable_funcs,
+    size_t reachable_count) {
+  if (!b || b->stdlib_init_spans_len == 0 || b->nyir.len == 0 ||
+      ny_env_enabled("NYTRIX_KEEP_ALL_STDLIB_INITS"))
+    return;
+  const nyr_func_t *f = &b->nyir;
+  /* Bail out conservatively if reflection touches the global table. */
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op == NYIR_CALL && f->data[i].symbol &&
+        (strcmp(f->data[i].symbol, "rt_globals_get") == 0 ||
+         strcmp(f->data[i].symbol, "rt_globals_set") == 0))
+      return;
+  }
+  for (size_t fi = 0; fi < reachable_count; ++fi) {
+    const nyr_func_t *rf = &reachable_funcs[fi];
+    for (size_t i = 0; i < rf->len; ++i) {
+      if (rf->data[i].op == NYIR_CALL && rf->data[i].symbol &&
+          (strcmp(rf->data[i].symbol, "rt_globals_get") == 0 ||
+           strcmp(rf->data[i].symbol, "rt_globals_set") == 0))
+        return;
+    }
+  }
+  size_t nspans = b->stdlib_init_spans_len;
+  int *pc_span = malloc(f->len * sizeof(*pc_span));
+  int *val_span =
+      f->next_value > 0 ? malloc((size_t)f->next_value * sizeof(*val_span)) : NULL;
+  bool *span_live = calloc(nspans, sizeof(*span_live));
+  int *defs = f->next_value > 0 ? malloc((size_t)f->next_value * sizeof(*defs))
+                                : NULL;
+  if (!pc_span || !span_live ||
+      (f->next_value > 0 && (!val_span || !defs))) {
+    free(pc_span);
+    free(val_span);
+    free(span_live);
+    free(defs);
+    return;
+  }
+  for (size_t i = 0; i < f->len; ++i)
+    pc_span[i] = -1;
+  for (int v = 0; v < f->next_value; ++v) {
+    val_span[v] = -1;
+    defs[v] = -1;
+  }
+  for (size_t k = 0; k < nspans; ++k) {
+    size_t beg = b->stdlib_init_spans[k].begin_pc;
+    size_t end = b->stdlib_init_spans[k].end_pc;
+    if (end > f->len)
+      end = f->len;
+    for (size_t pc = beg; pc < end; ++pc)
+      pc_span[pc] = (int)k;
+  }
+  for (size_t i = 0; i < f->len; ++i) {
+    int d = f->data[i].dst;
+    if (d >= 0 && d < f->next_value) {
+      defs[d] = (int)i;
+      val_span[d] = pc_span[i];
+    }
+  }
+  /* If any value defined inside span k is used outside span k, keep span k. */
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    int cur_s = pc_span[i];
+    const int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+    for (size_t oi = 0; oi < sizeof(ops) / sizeof(ops[0]); ++oi) {
+      int v = ops[oi];
+      if (v >= 0 && v < f->next_value && val_span[v] >= 0 &&
+          val_span[v] != cur_s)
+        span_live[val_span[v]] = true;
+    }
+    for (size_t oi = 0; oi < in->extra_args_len; ++oi) {
+      int v = in->extra_args[oi];
+      if (v >= 0 && v < f->next_value && val_span[v] >= 0 &&
+          val_span[v] != cur_s)
+        span_live[val_span[v]] = true;
+    }
+    for (size_t oi = 0; oi < in->phi_incoming_len; ++oi) {
+      int v = in->phi_incoming[oi].value;
+      if (v >= 0 && v < f->next_value && val_span[v] >= 0 &&
+          val_span[v] != cur_s)
+        span_live[val_span[v]] = true;
+    }
+  }
+  nyr_sym_set_t live_syms = {0};
+  for (size_t fi = 0; fi < reachable_count; ++fi) {
+    const nyr_func_t *rf = &reachable_funcs[fi];
+    for (size_t i = 0; i < rf->len; ++i)
+      if (rf->data[i].op == NYIR_ADDR_SYMBOL && rf->data[i].symbol)
+        (void)nyr_sym_set_add(&live_syms, rf->data[i].symbol);
+  }
+  for (size_t i = 0; i < f->len; ++i)
+    if (pc_span[i] < 0 && f->data[i].op == NYIR_ADDR_SYMBOL &&
+        f->data[i].symbol)
+      (void)nyr_sym_set_add(&live_syms, f->data[i].symbol);
+
+  /* Mark spans with unexpected side effects live, and propagate liveness. */
+  for (size_t k = 0; k < nspans; ++k) {
+    size_t beg = b->stdlib_init_spans[k].begin_pc;
+    size_t end = b->stdlib_init_spans[k].end_pc;
+    if (end > f->len)
+      end = f->len;
+    for (size_t pc = beg; pc < end && !span_live[k]; ++pc) {
+      const nyr_inst_t *in = &f->data[pc];
+      if (in->op == NYIR_CALL && !nyr_stdlib_init_call_pure_alloc(in->symbol)) {
+        span_live[k] = true;
+      } else if (in->op == NYIR_STORE_I64) {
+        int a = in->a;
+        const char *sym = NULL;
+        if (a >= 0 && a < f->next_value && defs[a] >= 0 &&
+            f->data[defs[a]].op == NYIR_ADDR_SYMBOL)
+          sym = f->data[defs[a]].symbol;
+        if (!sym)
+          span_live[k] = true;
+      }
+    }
+  }
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t k = 0; k < nspans; ++k) {
+      size_t beg = b->stdlib_init_spans[k].begin_pc;
+      size_t end = b->stdlib_init_spans[k].end_pc;
+      if (end > f->len)
+        end = f->len;
+      if (!span_live[k]) {
+        for (size_t pc = beg; pc < end; ++pc) {
+          const nyr_inst_t *in = &f->data[pc];
+          if (in->op == NYIR_STORE_I64 && in->a >= 0 &&
+              in->a < f->next_value && defs[in->a] >= 0 &&
+              f->data[defs[in->a]].op == NYIR_ADDR_SYMBOL &&
+              nyr_sym_set_has(&live_syms, f->data[defs[in->a]].symbol)) {
+            span_live[k] = true;
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (span_live[k]) {
+        for (size_t pc = beg; pc < end; ++pc)
+          if (f->data[pc].op == NYIR_ADDR_SYMBOL && f->data[pc].symbol &&
+              nyr_sym_set_add(&live_syms, f->data[pc].symbol))
+            changed = true;
+      }
+    }
+  }
+  for (size_t k = 0; k < nspans; ++k) {
+    if (span_live[k])
+      continue;
+    size_t beg = b->stdlib_init_spans[k].begin_pc;
+    size_t end = b->stdlib_init_spans[k].end_pc;
+    if (end > f->len)
+      end = f->len;
+    for (size_t pc = beg; pc < end; ++pc)
+      nyr_inst_discard(&b->nyir.data[pc]);
+  }
+  free(live_syms.keys);
+  free(pc_span);
+  free(val_span);
+  free(span_live);
+  free(defs);
+}
+
 /*
  * Lower the top-level program statements
  * into a finalized nyr_func_t for rt_main.
@@ -10082,7 +10358,9 @@ static bool nyr_build_rt_main(const program_t *prog, nyr_func_t *out,
                               const ny_extern_table_t *externs, char *err,
                               size_t err_len, int opt_level,
                               const ny_options *options,
-                              nyr_builder_t *cache_owner) {
+                              nyr_builder_t *cache_owner,
+                              const nyr_func_t *reachable_funcs,
+                              size_t reachable_count) {
   if (!out)
     return false;
   const char *source_file = options ? options->input_file : NULL;
@@ -10287,6 +10565,15 @@ static bool nyr_build_rt_main(const program_t *prog, nyr_func_t *out,
       return false;
     }
   }
+  if (!options || !options->emit_module || !*options->emit_module) {
+    nyr_prune_unused_stdlib_global_inits(&b, reachable_funcs, reachable_count);
+    if (!nyr_promote_private_entry_globals(&b.nyir)) {
+      nyr_fail(&b, "failed to localize private entry globals");
+      nyr_ir_func_free(&b.nyir);
+      nyr_builder_dispose(&b);
+      return false;
+    }
+  }
   bool ok = nyr_finalize(&b, err, err_len);
   if (ok)
     *out = b.nyir;
@@ -10350,7 +10637,133 @@ typedef struct {
   bool scanning_global_initializer;
   ny_dynlist_global_init_entry_t *dynlist_global_inits;
   size_t dynlist_global_inits_cap;
+  const char *seen_fallback_ops[128];
+  size_t seen_fallback_op_count;
+  bool seen_value_fallback;
+  /* Cached module name for the active worklist scope_fn. */
+  const char *scope_module;
+  const stmt_t *scope_module_fn;
+  /* Per-scope_fn hash table of local variables (name -> first initializer) so
+   * ident_is_local and attached-method receiver probes run in O(1) instead of
+   * walking the function AST on every identifier and member expression. */
+  const stmt_t *scope_locals_fn;
+  const char **scope_local_names;
+  const expr_t **scope_local_inits;
+  size_t scope_local_cap;
+  size_t scope_local_len;
+  /* Open-addressed cache of (scope_module, scope_source, name) keys that
+   * ny_native_add_reachable_fn already determined do not add a reachable body
+   * (unresolved locals/fields, externs, inline-lowered builtins). */
+  struct ny_native_neg_slot_t *neg_name_slots;
+  size_t neg_name_cap;
+  size_t neg_name_len;
 } ny_native_fn_collector_t;
+
+typedef struct ny_native_neg_slot_t {
+  uint64_t hash;
+  const char *scope_module;
+  const char *scope_source;
+  char *name;
+} ny_native_neg_slot_t;
+
+static inline const char *
+ny_native_collector_scope_module(ny_native_fn_collector_t *col) {
+  if (!col || !col->scope_fn)
+    return NULL;
+  if (col->scope_module_fn != col->scope_fn) {
+    col->scope_module_fn = col->scope_fn;
+    col->scope_module = ny_native_fn_module(
+        ny_native_fn_index_for(col->shared_cache), col->prog, col->scope_fn);
+  }
+  return col->scope_module;
+}
+
+static uint64_t ny_native_neg_hash(const char *mod, const char *src,
+                                   const char *name) {
+  uint64_t h = UINT64_C(1469598103934665603);
+  h = (h ^ (uint64_t)(uintptr_t)mod) * UINT64_C(1099511628211);
+  h = (h ^ (uint64_t)(uintptr_t)src) * UINT64_C(1099511628211);
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p)
+    h = (h ^ *p) * UINT64_C(1099511628211);
+  return h ? h : 1u;
+}
+
+static bool ny_native_neg_has(ny_native_fn_collector_t *col, const char *mod,
+                              const char *src, const char *name,
+                              uint64_t *hash_out) {
+  uint64_t h = ny_native_neg_hash(mod, src, name);
+  if (hash_out)
+    *hash_out = h;
+  if (!col || !col->neg_name_slots || !col->neg_name_cap)
+    return false;
+  size_t mask = col->neg_name_cap - 1u;
+  size_t pos = (size_t)h & mask;
+  for (; col->neg_name_slots[pos].hash; pos = (pos + 1u) & mask) {
+    const ny_native_neg_slot_t *s = &col->neg_name_slots[pos];
+    if (s->hash == h && s->scope_module == mod && s->scope_source == src &&
+        strcmp(s->name, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static void ny_native_neg_put(ny_native_fn_collector_t *col, const char *mod,
+                              const char *src, const char *name, uint64_t h) {
+  if (!col || !name || !*name)
+    return;
+  if ((col->neg_name_len + 1u) * 10u >= col->neg_name_cap * 7u) {
+    size_t cap = col->neg_name_cap ? col->neg_name_cap * 2u : 4096u;
+    ny_native_neg_slot_t *t = calloc(cap, sizeof(*t));
+    if (!t)
+      return;
+    size_t mask = cap - 1u;
+    for (size_t i = 0; i < col->neg_name_cap; ++i) {
+      if (!col->neg_name_slots[i].hash)
+        continue;
+      size_t pos = (size_t)col->neg_name_slots[i].hash & mask;
+      while (t[pos].hash)
+        pos = (pos + 1u) & mask;
+      t[pos] = col->neg_name_slots[i];
+    }
+    free(col->neg_name_slots);
+    col->neg_name_slots = t;
+    col->neg_name_cap = cap;
+  }
+  size_t mask = col->neg_name_cap - 1u;
+  size_t pos = (size_t)h & mask;
+  for (; col->neg_name_slots[pos].hash; pos = (pos + 1u) & mask) {
+    const ny_native_neg_slot_t *s = &col->neg_name_slots[pos];
+    if (s->hash == h && s->scope_module == mod && s->scope_source == src &&
+        strcmp(s->name, name) == 0)
+      return;
+  }
+  char *dup = ny_strdup(name);
+  if (!dup)
+    return;
+  col->neg_name_slots[pos] = (ny_native_neg_slot_t){
+      .hash = h, .scope_module = mod, .scope_source = src, .name = dup};
+  col->neg_name_len++;
+}
+
+static void ny_native_collector_free_extras(ny_native_fn_collector_t *col) {
+  if (!col)
+    return;
+  free(col->scope_local_names);
+  free(col->scope_local_inits);
+  col->scope_local_names = NULL;
+  col->scope_local_inits = NULL;
+  col->scope_local_cap = 0;
+  col->scope_local_len = 0;
+  col->scope_locals_fn = NULL;
+  if (col->neg_name_slots) {
+    for (size_t i = 0; i < col->neg_name_cap; ++i)
+      free(col->neg_name_slots[i].name);
+    free(col->neg_name_slots);
+    col->neg_name_slots = NULL;
+    col->neg_name_cap = 0;
+    col->neg_name_len = 0;
+  }
+}
 
 static bool ny_native_collector_index_init(ny_native_fn_collector_t *col) {
   if (!col || col->seen_slot_cap)
@@ -10701,6 +11114,144 @@ nyr_find_var_init_in_stmt(const stmt_t *s, const char *name, unsigned depth) {
   }
 }
 
+static void ny_native_scope_locals_put(ny_native_fn_collector_t *col,
+                                       const char *name, const expr_t *init) {
+  if (!col || !name || !*name)
+    return;
+  if ((col->scope_local_len + 1u) * 10u >= col->scope_local_cap * 7u) {
+    size_t cap = col->scope_local_cap ? col->scope_local_cap * 2u : 64u;
+    const char **names = calloc(cap, sizeof(*names));
+    const expr_t **inits = calloc(cap, sizeof(*inits));
+    if (!names || !inits) {
+      free(names);
+      free(inits);
+      return;
+    }
+    size_t mask = cap - 1u;
+    for (size_t i = 0; i < col->scope_local_cap; ++i) {
+      if (!col->scope_local_names[i])
+        continue;
+      size_t pos =
+          ny_native_collector_name_slot(col->scope_local_names[i], mask);
+      while (names[pos])
+        pos = (pos + 1u) & mask;
+      names[pos] = col->scope_local_names[i];
+      inits[pos] = col->scope_local_inits[i];
+    }
+    free(col->scope_local_names);
+    free(col->scope_local_inits);
+    col->scope_local_names = names;
+    col->scope_local_inits = inits;
+    col->scope_local_cap = cap;
+  }
+  size_t mask = col->scope_local_cap - 1u;
+  size_t pos = ny_native_collector_name_slot(name, mask);
+  while (col->scope_local_names[pos]) {
+    if (strcmp(col->scope_local_names[pos], name) == 0) {
+      if (!col->scope_local_inits[pos] && init)
+        col->scope_local_inits[pos] = init;
+      return;
+    }
+    pos = (pos + 1u) & mask;
+  }
+  col->scope_local_names[pos] = name;
+  col->scope_local_inits[pos] = init;
+  col->scope_local_len++;
+}
+
+static void ny_native_scope_locals_collect_stmt(ny_native_fn_collector_t *col,
+                                                const stmt_t *s, int depth) {
+  if (!s || depth > 32)
+    return;
+  switch (s->kind) {
+  case NY_S_VAR:
+    for (size_t i = 0; i < s->as.var.names.len; ++i) {
+      const char *nm = s->as.var.names.data[i];
+      const expr_t *init =
+          i < s->as.var.exprs.len ? s->as.var.exprs.data[i] : NULL;
+      if (nm && init)
+        ny_native_scope_locals_put(col, nm, init);
+    }
+    return;
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      ny_native_scope_locals_collect_stmt(col, s->as.block.body.data[i],
+                                          depth + 1);
+    return;
+  case NY_S_MODULE:
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      ny_native_scope_locals_collect_stmt(col, s->as.module.body.data[i],
+                                          depth + 1);
+    return;
+  case NY_S_FUNC:
+    ny_native_scope_locals_collect_stmt(col, s->as.fn.body, depth + 1);
+    return;
+  case NY_S_IF:
+    ny_native_scope_locals_collect_stmt(col, s->as.iff.conseq, depth + 1);
+    ny_native_scope_locals_collect_stmt(col, s->as.iff.alt, depth + 1);
+    return;
+  case NY_S_WHILE:
+    ny_native_scope_locals_collect_stmt(col, s->as.whl.body, depth + 1);
+    return;
+  case NY_S_FOR:
+    ny_native_scope_locals_collect_stmt(col, s->as.fr.body, depth + 1);
+    return;
+  case NY_S_MATCH:
+    for (size_t i = 0; i < s->as.match.arms.len; ++i)
+      ny_native_scope_locals_collect_stmt(col, s->as.match.arms.data[i].conseq,
+                                          depth + 1);
+    ny_native_scope_locals_collect_stmt(col, s->as.match.default_conseq,
+                                        depth + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+static void ny_native_scope_locals_ensure(ny_native_fn_collector_t *col) {
+  if (!col || !col->scope_fn || col->scope_locals_fn == col->scope_fn)
+    return;
+  col->scope_locals_fn = col->scope_fn;
+  col->scope_local_len = 0;
+  if (col->scope_local_cap) {
+    memset(col->scope_local_names, 0,
+           col->scope_local_cap * sizeof(*col->scope_local_names));
+    memset(col->scope_local_inits, 0,
+           col->scope_local_cap * sizeof(*col->scope_local_inits));
+  }
+  if (col->scope_fn->kind == NY_S_FUNC) {
+    for (size_t i = 0; i < col->scope_fn->as.fn.params.len; ++i) {
+      const char *param = col->scope_fn->as.fn.params.data[i].name;
+      if (param && *param)
+        ny_native_scope_locals_put(col, param, NULL);
+    }
+    ny_native_scope_locals_collect_stmt(col, col->scope_fn->as.fn.body, 0);
+  }
+}
+
+static const expr_t *
+ny_native_scope_locals_find(ny_native_fn_collector_t *col, const char *name,
+                            bool *found_out) {
+  if (found_out)
+    *found_out = false;
+  if (!col || !col->scope_fn || !name || !*name)
+    return NULL;
+  ny_native_scope_locals_ensure(col);
+  if (!col->scope_local_cap || !col->scope_local_len)
+    return NULL;
+  size_t mask = col->scope_local_cap - 1u;
+  size_t pos = ny_native_collector_name_slot(name, mask);
+  while (col->scope_local_names[pos]) {
+    if (strcmp(col->scope_local_names[pos], name) == 0) {
+      if (found_out)
+        *found_out = true;
+      return col->scope_local_inits[pos];
+    }
+    pos = (pos + 1u) & mask;
+  }
+  return NULL;
+}
+
 /* A local or formal name shadows a
  * same-named top-level function during
  * reachability collection just as it does
@@ -10709,18 +11260,14 @@ nyr_find_var_init_in_stmt(const stmt_t *s, const char *name, unsigned depth) {
  * locals such as `bits` can accidentally
  * root unrelated stdlib methods with those
  * names. */
-static bool
-ny_native_collector_ident_is_local(const ny_native_fn_collector_t *col,
-                                   const char *name) {
+static bool ny_native_collector_ident_is_local(ny_native_fn_collector_t *col,
+                                               const char *name) {
   if (!col || !col->scope_fn || col->scope_fn->kind != NY_S_FUNC || !name ||
       !*name)
     return false;
-  for (size_t i = 0; i < col->scope_fn->as.fn.params.len; ++i) {
-    const char *param = col->scope_fn->as.fn.params.data[i].name;
-    if (param && strcmp(param, name) == 0)
-      return true;
-  }
-  return nyr_find_var_init_in_stmt(col->scope_fn->as.fn.body, name, 0) != NULL;
+  bool found = false;
+  (void)ny_native_scope_locals_find(col, name, &found);
+  return found;
 }
 
 /* Reachability scanning runs before
@@ -10741,11 +11288,7 @@ ny_native_collector_attached_method(ny_native_fn_collector_t *col,
   nyr_builder_impl_t probe = {
       .prog = col->prog,
       .options = col->opt,
-      .module_name =
-          col->scope_fn
-              ? ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
-                                    col->prog, col->scope_fn)
-              : NULL,
+      .module_name = ny_native_collector_scope_module(col),
       /* Type probes used only by
        * reachability must not populate the
        * shared resolver cache under the
@@ -10773,7 +11316,7 @@ ny_native_collector_attached_method(ny_native_fn_collector_t *col,
     return attached;
   const expr_t *init = NULL;
   if (col->scope_fn)
-    init = nyr_find_var_init_in_stmt(col->scope_fn, target->as.ident.name, 0);
+    init = ny_native_scope_locals_find(col, target->as.ident.name, NULL);
   else
     init = nyr_find_top_level_value(&probe, target->as.ident.name);
   return init ? nyr_find_attached_method(&probe, init, method) : NULL;
@@ -10792,23 +11335,18 @@ static const char *ny_native_collector_expr_type(ny_native_fn_collector_t *col,
         return param->type;
     }
   }
-  nyr_builder_impl_t probe = {
-      .prog = col->prog,
-      .options = col->opt,
-      .module_name =
-          col->scope_fn
-              ? ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
-                                    col->prog, col->scope_fn)
-              : NULL,
-      .source_file = NULL,
-      .cache_owner = col->shared_cache};
+  nyr_builder_impl_t probe = {.prog = col->prog,
+                              .options = col->opt,
+                              .module_name =
+                                  ny_native_collector_scope_module(col),
+                              .source_file = NULL,
+                              .cache_owner = col->shared_cache};
   const char *type = nyr_expr_type_name(&probe, expr);
   if (type || expr->kind != NY_E_IDENT || !expr->as.ident.name)
     return type;
   const expr_t *init =
-      col->scope_fn
-          ? nyr_find_var_init_in_stmt(col->scope_fn, expr->as.ident.name, 0)
-          : nyr_find_top_level_value(&probe, expr->as.ident.name);
+      col->scope_fn ? ny_native_scope_locals_find(col, expr->as.ident.name, NULL)
+                    : nyr_find_top_level_value(&probe, expr->as.ident.name);
   return init ? nyr_expr_type_name(&probe, init) : NULL;
 }
 
@@ -10823,11 +11361,7 @@ static void ny_native_collector_add_typed_member(ny_native_fn_collector_t *col,
   const char *owner = ny_native_collector_expr_type(col, target);
   if (!owner || !*owner || strcmp(owner, "any") == 0)
     return;
-  const char *module =
-      col->scope_fn
-          ? ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
-                                col->prog, col->scope_fn)
-          : NULL;
+  const char *module = ny_native_collector_scope_module(col);
   char qualified[512];
   int n = strchr(owner, '.') || !module
               ? snprintf(qualified, sizeof(qualified), "%s.%s", owner, method)
@@ -11004,6 +11538,12 @@ static const stmt_t *ny_native_collector_operator(ny_native_fn_collector_t *col,
      * unchanged).
      */
     const char *op = expr->as.binary.op;
+    for (size_t si = 0; si < col->seen_fallback_op_count; ++si)
+      if (strcmp(col->seen_fallback_ops[si], op) == 0)
+        return NULL;
+    if (col->seen_fallback_op_count <
+        sizeof(col->seen_fallback_ops) / sizeof(col->seen_fallback_ops[0]))
+      col->seen_fallback_ops[col->seen_fallback_op_count++] = op;
     if (ny_trace_enabled("NY_TRACE_NATIVE_REACHABLE_MISSES"))
       ny_trace_line("NATIVE_REACHABLE_MISSES",
                     "native-reach-operator-fallback %s: '%s' at %s:%d "
@@ -11014,8 +11554,36 @@ static const stmt_t *ny_native_collector_operator(ny_native_fn_collector_t *col,
                     op ? op : "?", expr->tok.filename ? expr->tok.filename : "?",
                     expr->tok.line, (int)expr->semantic.resolved,
                     selected != NULL);
-    for (size_t i = 0; i < col->prog->body.len; ++i)
-      ny_native_collect_impl_op_bodies(col, col->prog->body.data[i], op);
+    ny_native_fn_index_t *fn_index = ny_native_fn_index_for(col->shared_cache);
+    if (ny_native_impl_index_ensure(fn_index, col->prog)) {
+      for (size_t i = 0; i < fn_index->impl_stmt_count; ++i)
+        ny_native_collect_impl_op_bodies(col, fn_index->impl_stmts[i], op);
+    } else {
+      for (size_t i = 0; i < col->prog->body.len; ++i)
+        ny_native_collect_impl_op_bodies(col, col->prog->body.data[i], op);
+    }
+    return NULL;
+  }
+  ny_native_fn_index_t *fn_index = ny_native_fn_index_for(col->shared_cache);
+  if (ny_native_impl_index_ensure(fn_index, col->prog)) {
+    for (size_t i = 0; i < fn_index->impl_stmt_count; ++i) {
+      const stmt_t *op = ny_native_find_impl_operator_in_stmt(
+          fn_index->impl_stmts[i], owner, expr->as.binary.op, right, NULL);
+      if (!op || !op->as.oper.target)
+        continue;
+      const stmt_t *method = ny_native_collector_attached_method(
+          col, expr->as.binary.left, op->as.oper.target);
+      if (method)
+        return method;
+      for (size_t k = 0; k < fn_index->impl_stmt_count; ++k) {
+        const stmt_t *target_fn = ny_native_find_impl_method_for_target(
+            fn_index->impl_stmts[k], owner, op->as.oper.target, NULL);
+        if (target_fn) {
+          ny_native_collector_add_fn(col, target_fn);
+          return target_fn;
+        }
+      }
+    }
     return NULL;
   }
   ny_native_operator_walk_t walk = {0};
@@ -11252,11 +11820,7 @@ static bool ny_native_scan_qualified_call(ny_native_fn_collector_t *col,
   nyr_builder_impl_t probe = {
       .prog = col->prog,
       .options = col->opt,
-      .module_name =
-          col->scope_fn
-              ? ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
-                                    col->prog, col->scope_fn)
-              : NULL,
+      .module_name = ny_native_collector_scope_module(col),
       .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL,
       .cache_owner = col->shared_cache};
   probe.source_file = target->tok.filename;
@@ -11343,18 +11907,19 @@ static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
         strcmp(col->funcs[i]->as.fn.name, name) == 0)
       return;
   }
-  nyr_builder_impl_t probe = {
-      .prog = col->prog,
-      .options = col->opt,
-      .module_name =
-          col->scope_fn
-              ? ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
-                                    col->prog, col->scope_fn)
-              : NULL,
-      .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL,
-      .cache_owner = col->shared_cache};
+  const char *scope_mod = ny_native_collector_scope_module(col);
+  const char *scope_src = col->scope_fn ? col->scope_fn->tok.filename : NULL;
+  uint64_t neg_h = 0;
+  if (ny_native_neg_has(col, scope_mod, scope_src, name, &neg_h))
+    return;
+  nyr_builder_impl_t probe = {.prog = col->prog,
+                              .options = col->opt,
+                              .module_name = scope_mod,
+                              .source_file = scope_src,
+                              .cache_owner = col->shared_cache};
   const stmt_t *fn = nyr_find_user_function(&probe, name);
   if (!fn) {
+    ny_native_neg_put(col, scope_mod, scope_src, name, neg_h);
     if (ny_trace_enabled("NY_TRACE_NATIVE_REACHABLE_MISSES")) {
       const char *from = col->scope_fn && col->scope_fn->as.fn.name
                              ? col->scope_fn->as.fn.name
@@ -11368,6 +11933,7 @@ static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
     return;
   }
   if (fn->as.fn.is_extern || fn->as.fn.link_name) {
+    ny_native_neg_put(col, scope_mod, scope_src, name, neg_h);
     if (ny_trace_enabled("NY_TRACE_NATIVE_REACHABLE_MISSES")) {
       const char *from = col->scope_fn && col->scope_fn->as.fn.name
                              ? col->scope_fn->as.fn.name
@@ -11404,8 +11970,10 @@ static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
     ny_native_add_reachable_fn(col, "core.math.float.float");
   if (nyr_runtime_symbol(name) && ny_is_stdlib_tok(fn->tok) &&
       core_runtime_module && !boxed_float_converter &&
-      !ny_native_runtime_stub_yields_to_source(nyr_runtime_symbol(name)))
+      !ny_native_runtime_stub_yields_to_source(nyr_runtime_symbol(name))) {
+    ny_native_neg_put(col, scope_mod, scope_src, name, neg_h);
     return;
+  }
   /* `float(i)` inside the boxed core.math.float floor/ceil implementations
    * is an ordinary call to the module's boxed converter.  The frontend also
    * recognizes `float` as a native scalar leaf, so its dependency edge is
@@ -11436,10 +12004,12 @@ static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
        (ny_builtin_alloc_kind(leaf) != NY_BUILTIN_ALLOC_NONE &&
         strcmp(leaf, "zalloc") != 0) ||
        nyr_stdlib_call_lowered_inline(name))) {
+    ny_native_neg_put(col, scope_mod, scope_src, name, neg_h);
     return;
   }
   if (ny_native_collector_index_init(col) &&
       ny_native_collector_has_name(col, fn->as.fn.name)) {
+    ny_native_neg_put(col, scope_mod, scope_src, name, neg_h);
     return;
   }
   for (size_t i = 0; !col->seen_name_slots && i < col->count; ++i) {
@@ -11693,16 +12263,12 @@ static void ny_native_scan_member_global_initializer(const expr_t *e,
   char path[512];
   if (!nyr_qualified_expr(e->as.member.target, path, sizeof(path)))
     return;
-  nyr_builder_impl_t probe = {
-      .prog = col->prog,
-      .options = col->opt,
-      .module_name = col->scope_fn
-                         ? ny_native_fn_module(
-                               ny_native_fn_index_for(col->shared_cache),
-                               col->prog, col->scope_fn)
-                         : NULL,
-      .source_file = e->tok.filename,
-      .cache_owner = col->shared_cache};
+  nyr_builder_impl_t probe = {.prog = col->prog,
+                              .options = col->opt,
+                              .module_name =
+                                  ny_native_collector_scope_module(col),
+                              .source_file = e->tok.filename,
+                              .cache_owner = col->shared_cache};
   char root[256];
   const char *dot = strchr(path, '.');
   size_t root_len = dot ? (size_t)(dot - path) : strlen(path);
@@ -12025,11 +12591,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
         nyr_builder_impl_t probe = {
             .prog = col->prog,
             .options = col->opt,
-            .module_name = col->scope_fn
-                               ? ny_native_fn_module(
-                                     ny_native_fn_index_for(col->shared_cache),
-                                     col->prog, col->scope_fn)
-                               : NULL,
+            .module_name = ny_native_collector_scope_module(col),
             .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL,
             .cache_owner = col->shared_cache};
         const stmt_t *target = nyr_find_user_function(&probe, e->as.ident.name);
@@ -12126,7 +12688,10 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
                         ? resolved->as.fn.name
                         : "<none>");
     }
-    if (getenv("NY_DEBUG_CALL_SCAN") && e->as.call.callee &&
+    static int debug_call_scan = -1;
+    if (debug_call_scan < 0)
+      debug_call_scan = getenv("NY_DEBUG_CALL_SCAN") ? 1 : 0;
+    if (debug_call_scan && e->as.call.callee &&
         e->as.call.callee->kind == NY_E_MEMBER &&
         e->as.call.callee->as.member.name &&
         strcmp(e->as.call.callee->as.member.name, "add") == 0)
@@ -12207,9 +12772,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
            * a declaration and the JIT resolves it to a null address.
            */
           if (col->scope_fn && !strchr(callee_name, '.')) {
-            const char *module =
-                ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
-                                    col->prog, col->scope_fn);
+            const char *module = ny_native_collector_scope_module(col);
             if (module && *module) {
               char scoped[512];
               int sn = snprintf(scoped, sizeof(scoped), "%s.%s", module,
@@ -12229,11 +12792,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
         nyr_builder_impl_t probe = {
             .prog = col->prog,
             .options = col->opt,
-            .module_name = col->scope_fn
-                               ? ny_native_fn_module(
-                                     ny_native_fn_index_for(col->shared_cache),
-                                     col->prog, col->scope_fn)
-                               : NULL,
+            .module_name = ny_native_collector_scope_module(col),
             .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL,
             .cache_owner = col->shared_cache};
         const char *owner =
@@ -12341,8 +12900,12 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
       ny_native_scan_expr_for_calls(e->as.memcall.args.data[i].val, col);
     break;
   case NY_E_MEMBER:
+    if (col->is_dynlist_prewarm) {
+      ny_native_scan_expr_for_calls(e->as.member.target, col);
+      break;
+    }
     if (e->as.member.name && strcmp(e->as.member.name, "value") == 0 &&
-        !e->semantic.canonical_callee_stmt) {
+        !e->semantic.canonical_callee_stmt && !col->seen_value_fallback) {
       /*
        * Narrow fan-out 2026-10-11: `value` reads that lack a resolved body
        * lower to single-argument attached calls once flow typing narrows
@@ -12350,9 +12913,18 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
        * late-synthesized calls link. Bounded: only impl methods named
        * exactly `value` taking exactly one parameter.
        */
-      for (size_t i = 0; i < col->prog->body.len; ++i)
-        ny_native_collect_impl_method_bodies(col, col->prog->body.data[i],
-                                             "value");
+      col->seen_value_fallback = true;
+      ny_native_fn_index_t *fn_index =
+          ny_native_fn_index_for(col->shared_cache);
+      if (ny_native_impl_index_ensure(fn_index, col->prog)) {
+        for (size_t i = 0; i < fn_index->impl_stmt_count; ++i)
+          ny_native_collect_impl_method_bodies(col, fn_index->impl_stmts[i],
+                                               "value");
+      } else {
+        for (size_t i = 0; i < col->prog->body.len; ++i)
+          ny_native_collect_impl_method_bodies(col, col->prog->body.data[i],
+                                               "value");
+      }
     }
     if (e->semantic.canonical_callee)
       ny_native_add_reachable_fn(col, e->semantic.canonical_callee);
@@ -12396,7 +12968,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
     ny_native_scan_expr_for_calls(e->as.unary.right, col);
     break;
   case NY_E_BINARY:
-    if (e->as.binary.op) {
+    if (!col->is_dynlist_prewarm && e->as.binary.op) {
       if (strcmp(e->as.binary.op, "**") == 0)
         ny_native_add_reachable_fn(col, "core.pow");
       const stmt_t *method = ny_native_collector_operator(col, e);
@@ -12811,6 +13383,7 @@ static void ny_native_defer_capture_globals(const program_t *prog,
                                             const stmt_t *s, const stmt_t *body,
                                             ny_native_lambda_entry_t *entry,
                                             const char *module_name,
+                                            nyr_builder_impl_t *shared_cache,
                                             unsigned depth) {
   if (!prog || !s || !body || !entry || depth > 64)
     return;
@@ -12837,7 +13410,8 @@ static void ny_native_defer_capture_globals(const program_t *prog,
         continue;
       nyr_builder_t probe = {.prog = prog,
                              .module_name = module_name,
-                             .source_file = s->tok.filename};
+                             .source_file = s->tok.filename,
+                             .cache_owner = shared_cache};
       nyr_local_t *dst = &entry->capture_types[ci];
       memset(dst, 0, sizeof(*dst));
       dst->is_list = nyr_expr_is_list(&probe, init);
@@ -12866,19 +13440,20 @@ static void ny_native_defer_capture_globals(const program_t *prog,
       return;
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       ny_native_defer_capture_globals(prog, s->as.module.body.data[i], body,
-                                      entry, child, depth + 1);
+                                      entry, child, shared_cache, depth + 1);
     return;
   }
   case NY_S_BLOCK:
     for (size_t i = 0; i < s->as.block.body.len; ++i)
       ny_native_defer_capture_globals(prog, s->as.block.body.data[i], body,
-                                      entry, module_name, depth + 1);
+                                      entry, module_name, shared_cache,
+                                      depth + 1);
     return;
   case NY_S_IF:
     ny_native_defer_capture_globals(prog, s->as.iff.conseq, body, entry,
-                                    module_name, depth + 1);
+                                    module_name, shared_cache, depth + 1);
     ny_native_defer_capture_globals(prog, s->as.iff.alt, body, entry,
-                                    module_name, depth + 1);
+                                    module_name, shared_cache, depth + 1);
     return;
   default:
     return;
@@ -12987,7 +13562,8 @@ static void ny_native_scan_stmt_for_calls(const stmt_t *s,
                 : NULL;
         for (size_t i = 0; i < col->prog->body.len; ++i)
           ny_native_defer_capture_globals(col->prog, col->prog->body.data[i],
-                                          s->as.de.body, entry, module, 0);
+                                          s->as.de.body, entry, module,
+                                          col->shared_cache, 0);
       }
       if (entry)
         ny_native_collector_add_fn(col, entry->fn);
@@ -13208,6 +13784,7 @@ ny_native_collect_reachable_fns(const program_t *prog, const ny_options *opt,
   NY_NATIVE_REACH_TIMED("transitive-worklist");
 
   size_t reachable_count = col.count;
+  ny_native_collector_free_extras(&col);
   free(col.seen_fn_slots);
   free(col.seen_name_slots);
   return col.overflow ? SIZE_MAX : reachable_count;
@@ -13866,22 +14443,30 @@ static size_t nyr_build_name_map_find(const nyr_build_name_map_t *map,
  */
 static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
                                      size_t n, const nyr_build_name_map_t *map,
-                                     size_t *level_of) {
+                                     const bool *inline_changed, int opt_level,
+                                     size_t *level_of, bool *needs_opt,
+                                     bool *need_snapshot) {
   size_t *edge_off = calloc(func_count + 1, sizeof(*edge_off));
   size_t *stack = malloc(func_count * sizeof(*stack));
   uint32_t *mark = calloc(func_count, sizeof(*mark));
-  if (!edge_off || !stack || !mark) {
+  bool *self_ref = calloc(n, sizeof(*self_ref));
+  if (!edge_off || !stack || !mark || !self_ref) {
     free(edge_off);
     free(stack);
     free(mark);
+    free(self_ref);
     return 0;
   }
   size_t edge_count = 0;
   for (size_t i = 0; i < func_count; ++i) {
     for (size_t k = 0; k < funcs[i].len; ++k) {
       size_t t = nyr_build_name_map_find(map, funcs[i].data[k].symbol);
-      if (t != SIZE_MAX && t != i)
-        edge_count++;
+      if (t != SIZE_MAX) {
+        if (t != i)
+          edge_count++;
+        else if (i < n)
+          self_ref[i] = true;
+      }
     }
     edge_off[i + 1] = edge_count;
   }
@@ -13890,6 +14475,7 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
     free(edge_off);
     free(stack);
     free(mark);
+    free(self_ref);
     return 0;
   }
   for (size_t i = 0, e = 0; i < func_count; ++i)
@@ -13900,6 +14486,8 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
     }
   size_t levels = 0;
   for (size_t c = 0; c < n; ++c) {
+    bool want = !inline_changed || inline_changed[c] ||
+                (opt_level >= 2 && self_ref[c]);
     uint32_t stamp = (uint32_t)c + 1;
     size_t level = 0, sp = 0;
     mark[c] = stamp;
@@ -13912,9 +14500,25 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
           continue;
         mark[v] = stamp;
         stack[sp++] = v;
-        if (v < c && level_of[v] + 1 > level)
-          level = level_of[v] + 1;
+        if (v < c) {
+          if (needs_opt && !needs_opt[v])
+            continue;
+          want = true;
+          if (level_of[v] + 1 > level)
+            level = level_of[v] + 1;
+        }
       }
+    }
+    if (needs_opt)
+      needs_opt[c] = want;
+    if (!want) {
+      level_of[c] = 0;
+      continue;
+    }
+    if (need_snapshot) {
+      for (size_t v = c + 1; v < n; ++v)
+        if (mark[v] == stamp)
+          need_snapshot[v] = true;
     }
     level_of[c] = level;
     if (level + 1 > levels)
@@ -13924,7 +14528,25 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
   free(edge_off);
   free(stack);
   free(mark);
-  return levels;
+  free(self_ref);
+  return levels ? levels : 1;
+}
+
+typedef struct {
+  const nyr_func_t *funcs;
+  nyr_func_t *clones;
+  const nyr_func_t **snapshot;
+  const size_t *clone_reg_indices;
+  const size_t *reg_fi;
+} nyr_parallel_clone_ctx_t;
+
+static bool nyr_parallel_clone_task(size_t k, void *opaque) {
+  nyr_parallel_clone_ctx_t *ctx = opaque;
+  size_t r = ctx->clone_reg_indices[k];
+  if (!nyr_ir_func_clone(&ctx->funcs[ctx->reg_fi[r]], &ctx->clones[r]))
+    return false;
+  ctx->snapshot[r] = &ctx->clones[r];
+  return true;
 }
 
 /*
@@ -13936,7 +14558,8 @@ static size_t nyr_post_inline_levels(const nyr_func_t *funcs, size_t func_count,
 static int nyr_parallel_post_inline(nyr_func_t *funcs, size_t func_count,
                                     const char **names, size_t n,
                                     const nyr_inline_callee_t *callees,
-                                    size_t callee_count, int opt_level,
+                                    size_t callee_count,
+                                    const bool *inline_changed, int opt_level,
                                     const ny_options *opt, char *err,
                                     size_t err_len) {
   if (!funcs || n < 2 || n > func_count || !callees || !callee_count)
@@ -13948,12 +14571,16 @@ static int nyr_parallel_post_inline(nyr_func_t *funcs, size_t func_count,
   const nyr_func_t **snapshot = calloc(callee_count, sizeof(*snapshot));
   size_t *view_first = calloc(n, sizeof(*view_first));
   size_t *level_of = calloc(n, sizeof(*level_of));
+  bool *needs_opt = calloc(n, sizeof(*needs_opt));
+  bool *need_snapshot = calloc(n, sizeof(*need_snapshot));
   size_t *order = calloc(n, sizeof(*order));
+  size_t *clone_reg_indices = calloc(callee_count, sizeof(*clone_reg_indices));
   size_t *level_start = NULL;
   char(*errors)[256] = calloc(n, sizeof(*errors));
   nyr_build_name_map_t map = {0};
   if (!reg_names || !reg_fi || !clones || !snapshot || !view_first ||
-      !level_of || !order || !errors)
+      !level_of || !needs_opt || !need_snapshot || !order ||
+      !clone_reg_indices || !errors)
     goto done;
   for (size_t r = 0; r < callee_count; ++r) {
     reg_names[r] = callees[r].name;
@@ -13969,13 +14596,29 @@ static int nyr_parallel_post_inline(nyr_func_t *funcs, size_t func_count,
   for (size_t slot = 0; slot <= map.mask; ++slot)
     if (map.slots[slot].name)
       map.slots[slot].index = reg_fi[map.slots[slot].index];
-  size_t levels = nyr_post_inline_levels(funcs, func_count, n, &map, level_of);
+  size_t levels = nyr_post_inline_levels(funcs, func_count, n, &map,
+                                         inline_changed, opt_level, level_of,
+                                         needs_opt, need_snapshot);
   if (!levels)
     goto done;
+  size_t clone_count = 0;
+  size_t clone_work = 0;
   for (size_t r = 0; r < callee_count && reg_fi[r] < n; ++r) {
-    if (!nyr_ir_func_clone(&funcs[reg_fi[r]], &clones[r]))
+    if (!need_snapshot[reg_fi[r]] || !needs_opt[reg_fi[r]])
+      continue;
+    clone_reg_indices[clone_count++] = r;
+    clone_work += funcs[reg_fi[r]].len;
+  }
+  if (clone_count) {
+    nyr_parallel_clone_ctx_t clone_ctx = {.funcs = funcs,
+                                          .clones = clones,
+                                          .snapshot = snapshot,
+                                          .clone_reg_indices =
+                                              clone_reg_indices,
+                                          .reg_fi = reg_fi};
+    if (!ny_parallel_for(clone_count, clone_work, nyr_parallel_clone_task,
+                         &clone_ctx))
       goto done;
-    snapshot[r] = &clones[r];
   }
   for (size_t i = 0, r = 0; i < n; ++i) {
     while (r < callee_count && reg_fi[r] <= i)
@@ -13985,8 +14628,13 @@ static int nyr_parallel_post_inline(nyr_func_t *funcs, size_t func_count,
   level_start = calloc(levels + 1, sizeof(*level_start));
   if (!level_start)
     goto done;
-  for (size_t i = 0; i < n; ++i)
+  size_t active_count = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (!needs_opt[i])
+      continue;
     level_start[level_of[i] + 1]++;
+    active_count++;
+  }
   for (size_t l = 0; l < levels; ++l)
     level_start[l + 1] += level_start[l];
   {
@@ -13995,15 +14643,20 @@ static int nyr_parallel_post_inline(nyr_func_t *funcs, size_t func_count,
       goto done;
     memcpy(cursor, level_start, levels * sizeof(*cursor));
     for (size_t i = 0; i < n; ++i)
-      order[cursor[level_of[i]]++] = i;
+      if (needs_opt[i])
+        order[cursor[level_of[i]]++] = i;
     free(cursor);
   }
   if (ny_trace_enabled("NYTRIX_TRACE_NYIR_EMIT_TIMING"))
-    fprintf(stderr, "[nyir-build-timing] post-inline functions=%zu levels=%zu\n",
-            n, levels);
+    fprintf(stderr,
+            "[nyir-build-timing] post-inline functions=%zu/%zu clones=%zu "
+            "levels=%zu\n",
+            active_count, n, clone_count, levels);
   result = 1;
   for (size_t l = 0; l < levels && result > 0; ++l) {
     size_t begin = level_start[l], end = level_start[l + 1];
+    if (begin == end)
+      continue;
     {
       size_t *sorted =
           nyr_schedule_largest_first(funcs, order + begin, end - begin);
@@ -14038,14 +14691,18 @@ done:
   free(map.slots);
   if (clones)
     for (size_t r = 0; r < callee_count; ++r)
-      nyr_ir_func_free(&clones[r]);
+      if (snapshot && snapshot[r])
+        nyr_ir_func_free(&clones[r]);
   free(clones);
   free(snapshot);
   free(reg_names);
   free(reg_fi);
   free(view_first);
   free(level_of);
+  free(needs_opt);
+  free(need_snapshot);
   free(order);
+  free(clone_reg_indices);
   free(level_start);
   free(errors);
   return result;
@@ -14063,6 +14720,49 @@ done:
  * debug/dump mode falls back to the serial loop, which then reports
  * diagnostics exactly as before.
  */
+typedef struct {
+  size_t *slots; /* 1-based index into func_names, 0 = empty */
+  size_t mask;
+} ny_emitted_sym_set_t;
+
+static void ny_emitted_sym_set_init(ny_emitted_sym_set_t *set,
+                                    size_t max_entries) {
+  set->slots = NULL;
+  set->mask = 0;
+  size_t cap = 64;
+  while (cap < max_entries * 2 && cap <= SIZE_MAX / 2)
+    cap *= 2;
+  if (cap <= SIZE_MAX / sizeof(*set->slots)) {
+    set->slots = calloc(cap, sizeof(*set->slots));
+    if (set->slots)
+      set->mask = cap - 1;
+  }
+}
+
+static bool ny_emitted_sym_set_check_or_insert(ny_emitted_sym_set_t *set,
+                                               const char *const *func_names,
+                                               size_t count) {
+  const char *name = func_names[count];
+  if (!name)
+    return false;
+  if (!set->slots) {
+    for (size_t j = 0; j < count; ++j)
+      if (func_names[j] && strcmp(func_names[j], name) == 0)
+        return true;
+    return false;
+  }
+  uint64_t h = ny_native_call_effect_hash(name);
+  size_t pos = (size_t)h & set->mask;
+  while (set->slots[pos]) {
+    size_t idx = set->slots[pos] - 1;
+    if (func_names[idx] && strcmp(func_names[idx], name) == 0)
+      return true;
+    pos = (pos + 1) & set->mask;
+  }
+  set->slots[pos] = count + 1;
+  return false;
+}
+
 #if defined(__linux__)
 #include <stdatomic.h>
 #include <sys/mman.h>
@@ -14185,19 +14885,27 @@ static void nyr_fl_put_func(nyr_fl_buf_t *b, const nyr_func_t *f, size_t str0,
     nyr_fl_put(b, f->param_abi, f->param_count * sizeof(*f->param_abi));
   if (f->source_param_count)
     nyr_fl_put(b, f->source_param_widths, f->source_param_count);
+  const char *prev_file = NULL;
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
     nyr_fl_put(b, in, sizeof(*in));
+    bool has_file = in->debug.file && in->debug.file[0];
+    bool reuse_file = has_file && prev_file &&
+                      (in->debug.file == prev_file ||
+                       strcmp(in->debug.file, prev_file) == 0);
     unsigned char mask = (in->symbol ? 1 : 0) |
-                         (in->debug.file && in->debug.file[0] ? 2 : 0) |
+                         (has_file && !reuse_file ? 2 : 0) |
                          (in->extra_args && in->extra_args_len ? 4 : 0) |
                          (in->arg_sizes && in->imm > 0 ? 8 : 0) |
-                         (in->phi_incoming && in->phi_incoming_len ? 16 : 0);
+                         (in->phi_incoming && in->phi_incoming_len ? 16 : 0) |
+                         (reuse_file ? 32 : 0);
     nyr_fl_put(b, &mask, 1);
     if (mask & 1)
       nyr_fl_put_symbol(b, in->symbol, str0, arr0);
-    if (mask & 2)
+    if (mask & 2) {
       nyr_fl_str(b, in->debug.file);
+      prev_file = in->debug.file;
+    }
     if (mask & 4)
       nyr_fl_put(b, in->extra_args, in->extra_args_len * sizeof(int));
     if (mask & 8)
@@ -14301,6 +15009,7 @@ static bool nyr_fl_get_func(nyr_fl_rd_t *r, nyr_func_t *out) {
     ok = f.data != NULL;
     f.cap = ok ? len : 0;
   }
+  const char *prev_file = NULL;
   for (size_t i = 0; ok && i < len; ++i) {
     const nyr_inst_t *rin = nyr_fl_get(r, sizeof(*rin));
     const unsigned char *mask = rin ? nyr_fl_get(r, 1) : NULL;
@@ -14322,11 +15031,15 @@ static bool nyr_fl_get_func(nyr_fl_rd_t *r, nyr_func_t *out) {
     nyr_inst_t *d = &f.data[f.len - 1];
     if (*mask & 1)
       ok = (d->symbol = nyr_fl_get_symbol(r, &f)) != NULL;
-    if (ok && (*mask & 2)) {
+    if (ok && (*mask & 32)) {
+      d->debug.file = prev_file;
+    } else if (ok && (*mask & 2)) {
       size_t n = 0;
       bool present = false;
       const char *s = nyr_fl_rstr(r, &n, &present);
       ok = s && (d->debug.file = nyr_fl_own(&f, s, n)) != NULL;
+      if (ok)
+        prev_file = d->debug.file;
     }
     if (ok && (*mask & 4)) {
       const void *a = nyr_fl_get(r, rin->extra_args_len * sizeof(int));
@@ -14378,7 +15091,8 @@ static bool nyr_fork_lower_wanted(const ny_options *opt, size_t fn_count) {
 
 typedef struct {
   uint32_t index;
-  const unsigned char *rec; /* start of the record body after the index */
+  const unsigned char *rec;     /* start of the record body after the index */
+  const unsigned char *rec_end; /* end of the worker mapping containing rec */
 } nyr_fl_rec_t;
 
 /*
@@ -14396,6 +15110,11 @@ static bool nyr_fork_lower_functions(
     return false;
   long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
   size_t workers = ncpu > 2 ? (size_t)ncpu / 2 : 1;
+  /* Cap default fork fan-out so kernel page-table duplication and COW faults
+   * across many workers do not outweigh lowering work. */
+  size_t default_cap = all_fn_count < 4000 ? 8 : 12;
+  if (workers > default_cap)
+    workers = default_cap;
   /* Respect the compiler's thread budget (NYTRIX_PARALLEL_THREADS,
    * OMP_NUM_THREADS, NYTRIX_PARALLEL_MODE=off) so concurrent compiles, as in
    * the test runner, do not each spawn a worker per core. */
@@ -14531,10 +15250,18 @@ static bool nyr_fork_lower_functions(
         const char *emitted = ny_native_emitted_fn_name(
             ny_native_fn_index_for(cache), prog, opt, s);
         uint32_t idx = (uint32_t)i;
+        uint32_t payload_len = 0;
         nyr_fl_put(&out, &idx, 4);
+        size_t len_off = out.len;
+        nyr_fl_put(&out, &payload_len, 4);
+        size_t payload_start = out.len;
         nyr_fl_put(&out, &d, sizeof(d));
         nyr_fl_str(&out, emitted);
         nyr_fl_put_func(&out, &f, str0, arr0);
+        if (!out.oom) {
+          payload_len = (uint32_t)(out.len - payload_start);
+          memcpy(out.data + len_off, &payload_len, 4);
+        }
       }
       if (out.oom)
         child_ok = false;
@@ -14559,7 +15286,6 @@ static bool nyr_fork_lower_functions(
       ok = false;
   }
   munmap((void *)next, shared_bytes);
-  free(is_lambda);
   free(snap);
   unsigned char **maps = calloc(workers, sizeof(*maps));
   size_t *map_len = calloc(workers, sizeof(*map_len));
@@ -14581,85 +15307,72 @@ static bool nyr_fork_lower_functions(
       ok = false;
       break;
     }
-    /* Index the records: skip over each one with a scratch decode. */
+    /* Index the records in O(1) per function using the length-prefixed frame. */
     nyr_fl_rd_t r = {maps[w], maps[w] + map_len[w], false};
     while (ok && r.p < r.end) {
       const uint32_t *idx = nyr_fl_get(&r, 4);
-      if (!idx || *idx >= all_fn_count || have[*idx]) {
+      const uint32_t *plen = nyr_fl_get(&r, 4);
+      if (!idx || !plen || *idx >= all_fn_count || have[*idx]) {
+        ok = false;
+        break;
+      }
+      const unsigned char *payload = nyr_fl_get(&r, *plen);
+      if (!payload) {
         ok = false;
         break;
       }
       recs[*idx].index = *idx;
-      recs[*idx].rec = r.p;
+      recs[*idx].rec = payload;
+      recs[*idx].rec_end = payload + *plen;
       have[*idx] = true;
-      /* skip deferred + name + function */
-      nyr_fl_get(&r, sizeof(nyr_deferred_finalize_t));
-      size_t nlen = 0;
-      bool present = false;
-      nyr_fl_rstr(&r, &nlen, &present);
-      const nyr_func_t *raw = nyr_fl_get(&r, sizeof(*raw));
-      if (!raw) {
-        ok = false;
-        break;
-      }
-      if (raw->param_count)
-        nyr_fl_get(&r, raw->param_count * sizeof(*raw->param_types));
-      const unsigned char *has_abi = nyr_fl_get(&r, 1);
-      if (has_abi && *has_abi)
-        nyr_fl_get(&r, raw->param_count * sizeof(*raw->param_abi));
-      if (raw->source_param_count)
-        nyr_fl_get(&r, raw->source_param_count);
-      for (size_t k = 0; k < raw->len && !r.bad; ++k) {
-        const nyr_inst_t *in = nyr_fl_get(&r, sizeof(*in));
-        const unsigned char *mask = in ? nyr_fl_get(&r, 1) : NULL;
-        if (!mask)
-          break;
-        if (*mask & 1) {
-          const unsigned char *kind = nyr_fl_get(&r, 1);
-          if (!kind)
-            break;
-          if (*kind == NYR_FL_SYM_STR) {
-            nyr_fl_get(&r, (size_t)nyr_fl_ru64(&r));
-          } else if (*kind == NYR_FL_SYM_ARR) {
-            size_t cnt = (size_t)nyr_fl_ru64(&r);
-            nyr_fl_ru64(&r);
-            for (size_t e = 0; e < cnt && !r.bad; ++e) {
-              nyr_fl_ru64(&r);
-              nyr_fl_ru64(&r);
-              size_t sl = (size_t)nyr_fl_ru64(&r);
-              const unsigned char *has = nyr_fl_get(&r, 1);
-              if (has && *has)
-                nyr_fl_get(&r, sl);
-            }
-          } else {
-            nyr_fl_rstr(&r, &nlen, &present);
-          }
-        }
-        if (*mask & 2)
-          nyr_fl_rstr(&r, &nlen, &present);
-        if (*mask & 4)
-          nyr_fl_get(&r, in->extra_args_len * sizeof(int));
-        if (*mask & 8)
-          nyr_fl_get(&r, (size_t)in->imm * sizeof(uint32_t));
-        if (*mask & 16)
-          nyr_fl_get(&r, in->phi_incoming_len * sizeof(*in->phi_incoming));
-      }
-      if (r.bad)
-        ok = false;
     }
   }
   for (size_t i = 0; ok && i < all_fn_count; ++i)
-    if (all_fns[i] && !have[i])
+    if (all_fns[i] && !have[i] && !is_lambda[i])
       ok = false;
   size_t count = 0;
+  ny_emitted_sym_set_t sym_set = {0};
+  if (ok && all_fn_count)
+    ny_emitted_sym_set_init(&sym_set, all_fn_count);
   for (size_t i = 0; ok && i < all_fn_count; ++i) {
     if (!all_fns[i])
       continue;
-    nyr_fl_rd_t r = {recs[i].rec, NULL, false};
-    /* records are bounded by their worker's mapping */
-    for (size_t w = 0; w < started; ++w)
-      if (maps[w] && recs[i].rec >= maps[w] && recs[i].rec < maps[w] + map_len[w])
-        r.end = maps[w] + map_len[w];
+    if (!have[i]) {
+      /*
+       * A lambda whose capture types stayed at their initial snapshot (e.g.
+       * owned by rt_main or capturing default `any` slots) was not claimed by
+       * any worker. Lower it directly in the parent instead of discarding the
+       * entire parallel lowering batch.
+       */
+      char local_err[256] = {0};
+      nyr_deferred_finalize_t d = {0};
+      if (!nyr_build_function(prog, all_fns[i], externs, &funcs_out[count],
+                              local_err, sizeof(local_err), opt_level, opt,
+                              cache, deferred ? &d : NULL)) {
+        ok = false;
+        break;
+      }
+      if (deferred)
+        deferred[count] = d;
+      const char *emitted = ny_native_emitted_fn_name(
+          ny_native_fn_index_for(cache), prog, opt, all_fns[i]);
+      func_names[count] = nyr_builder_own_string(cache, emitted);
+      if (!func_names[count]) {
+        nyr_ir_func_free(&funcs_out[count]);
+        ok = false;
+        break;
+      }
+      bool duplicate_symbol =
+          ny_emitted_sym_set_check_or_insert(&sym_set, func_names, count);
+      if (duplicate_symbol) {
+        nyr_ir_func_free(&funcs_out[count]);
+        func_names[count] = NULL;
+        continue;
+      }
+      count++;
+      continue;
+    }
+    nyr_fl_rd_t r = {recs[i].rec, recs[i].rec_end, false};
     const nyr_deferred_finalize_t *d = nyr_fl_get(&r, sizeof(*d));
     size_t nlen = 0;
     bool present = false;
@@ -14688,12 +15401,8 @@ static bool nyr_fork_lower_functions(
       ok = false;
       break;
     }
-    bool duplicate_symbol = false;
-    for (size_t j = 0; j < count; ++j)
-      if (func_names[j] && strcmp(func_names[j], func_names[count]) == 0) {
-        duplicate_symbol = true;
-        break;
-      }
+    bool duplicate_symbol =
+        ny_emitted_sym_set_check_or_insert(&sym_set, func_names, count);
     if (duplicate_symbol) {
       nyr_ir_func_free(&funcs_out[count]);
       func_names[count] = NULL;
@@ -14701,6 +15410,8 @@ static bool nyr_fork_lower_functions(
     }
     count++;
   }
+  free(is_lambda);
+  free(sym_set.slots);
   for (size_t w = 0; w < workers; ++w) {
     if (maps && maps[w])
       munmap(maps[w], map_len[w]);
@@ -15020,6 +15731,9 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     bool fork_lowered = nyr_fork_lower_functions(
         prog, (const stmt_t **)all_fns, all_fn_count, &externs, funcs_out,
         func_names, &count, deferred, opt_level, opt, &compilation_cache);
+    ny_emitted_sym_set_t serial_sym_set = {0};
+    if (!fork_lowered && all_fn_count)
+      ny_emitted_sym_set_init(&serial_sym_set, all_fn_count);
     for (size_t i = 0; !fork_lowered && i < all_fn_count; ++i) {
       const stmt_t *s = all_fns[i];
       if (!s)
@@ -15130,6 +15844,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                 s->as.fn.name ? s->as.fn.name : "<anonymous>");
         }
         if (!opt || (!opt->native_dump_ir_path && !opt->nyr_dump_bin_path)) {
+          free(serial_sym_set.slots);
           free(deferred);
           free(all_fns);
           free(func_names);
@@ -15163,6 +15878,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
           for (size_t j = 0; j <= count; ++j)
             nyr_ir_func_free(&funcs_out[j]);
           *func_count = 0;
+          free(serial_sym_set.slots);
           free(deferred);
           free(all_fns);
           free(func_names);
@@ -15178,12 +15894,8 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
          * `core`).  The object writer rejects duplicate definitions, so keep
          * the first definition; calls resolve by name and reach it.
          */
-        bool duplicate_symbol = false;
-        for (size_t j = 0; j < count; ++j)
-          if (func_names[j] && strcmp(func_names[j], func_names[count]) == 0) {
-            duplicate_symbol = true;
-            break;
-          }
+        bool duplicate_symbol = ny_emitted_sym_set_check_or_insert(
+            &serial_sym_set, func_names, count);
         if (duplicate_symbol) {
           nyr_ir_func_free(&funcs_out[count]);
           func_names[count] = NULL;
@@ -15198,6 +15910,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
         count++;
       }
     }
+    free(serial_sym_set.slots);
     NY_NATIVE_STAGE_TIMED("function-lowering");
     if (deferred && count) {
       /* Lowering only verified each body; optimize them all concurrently. */
@@ -15330,6 +16043,9 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       for (size_t i = 0; i < *func_count; ++i)
         (void)nyr_parallel_cleanup_task(i, funcs_out);
     NY_NATIVE_STAGE_TIMED("function-inline-cleanup");
+    bool *inline_changed =
+        inline_func_count ? calloc(inline_func_count, sizeof(*inline_changed))
+                          : NULL;
     for (int pass = 0; pass < 3; ++pass) {
       if (ny_trace_enabled("NY_TRACE_LOWER") && ny_dbg_function_selected(NULL))
         if (ny_dbg_verbosity() >= 6)
@@ -15337,15 +16053,40 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                   "[build_nir] "
                   "inline_small pass %d\n",
                   pass);
+      bool pass_changed = false;
       for (size_t i = 0; i < inline_func_count; ++i) {
+        if (!funcs_out[i].has_symbol_calls)
+          continue;
+        size_t len_before = funcs_out[i].len;
+        uint64_t fp_before = (uint64_t)len_before * UINT64_C(1099511628211);
+        for (size_t k = 0; k < len_before; ++k)
+          fp_before = (fp_before ^ (uint64_t)funcs_out[i].data[k].op ^
+                       ((uint64_t)(uintptr_t)funcs_out[i].data[k].symbol << 8) ^
+                       ((uint64_t)funcs_out[i].data[k].imm << 16)) *
+                      UINT64_C(1099511628211);
         if (nyr_inline_small(&funcs_out[i])) {
-          (void)nyr_mem2reg(&funcs_out[i]);
-          (void)nyr_copy_prop(&funcs_out[i]);
-          (void)nyr_dce(&funcs_out[i]);
-          (void)nyr_compact(&funcs_out[i]);
-          nyr_refresh_metadata(&funcs_out[i]);
+          size_t len_after = funcs_out[i].len;
+          uint64_t fp_after = (uint64_t)len_after * UINT64_C(1099511628211);
+          for (size_t k = 0; k < len_after; ++k)
+            fp_after =
+                (fp_after ^ (uint64_t)funcs_out[i].data[k].op ^
+                 ((uint64_t)(uintptr_t)funcs_out[i].data[k].symbol << 8) ^
+                 ((uint64_t)funcs_out[i].data[k].imm << 16)) *
+                UINT64_C(1099511628211);
+          if (fp_after != fp_before) {
+            pass_changed = true;
+            if (inline_changed)
+              inline_changed[i] = true;
+            (void)nyr_mem2reg(&funcs_out[i]);
+            (void)nyr_copy_prop(&funcs_out[i]);
+            (void)nyr_dce(&funcs_out[i]);
+            (void)nyr_compact(&funcs_out[i]);
+            nyr_refresh_metadata(&funcs_out[i]);
+          }
         }
       }
+      if (!pass_changed)
+        break;
     }
     NY_NATIVE_STAGE_TIMED("function-small-inline");
     /*
@@ -15369,13 +16110,21 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                   "[build_nir] "
                   "inline_general fn %zu\n",
                   i);
+      size_t len_before = funcs_out[i].len;
+      int nv_before = funcs_out[i].next_value;
       bool inline_ok = nyr_inline_general(&funcs_out[i]);
       if (trace_context)
         ny_dbg_exit_context(trace_fn);
       if (inline_ok) {
-        nyr_refresh_metadata(&funcs_out[i]);
+        if (funcs_out[i].len != len_before ||
+            funcs_out[i].next_value != nv_before) {
+          if (inline_changed)
+            inline_changed[i] = true;
+          nyr_refresh_metadata(&funcs_out[i]);
+        }
         continue;
       }
+      free(inline_changed);
       for (size_t j = 0; j < *func_count; ++j)
         nyr_ir_func_free(&funcs_out[j]);
       *func_count = 0;
@@ -15409,11 +16158,12 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     size_t post_inline_done = 0;
     if (parallel_build && inline_func_count > 1) {
       char post_err[256] = {0};
-      int post = nyr_parallel_post_inline(funcs_out, *func_count, func_names,
-                                          inline_func_count, inline_callees,
-                                          inline_count, opt_level, opt,
-                                          post_err, sizeof(post_err));
+      int post = nyr_parallel_post_inline(
+          funcs_out, *func_count, func_names, inline_func_count, inline_callees,
+          inline_count, inline_changed, opt_level, opt, post_err,
+          sizeof(post_err));
       if (post < 0) {
+        free(inline_changed);
         nyr_set_error(err, err_len, "%s", post_err);
         for (size_t j = 0; j < *func_count; ++j)
           nyr_ir_func_free(&funcs_out[j]);
@@ -15430,6 +16180,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       if (post > 0)
         post_inline_done = inline_func_count;
     }
+    free(inline_changed);
     for (size_t i = post_inline_done; i < inline_func_count; ++i) {
       if (ny_trace_enabled("NY_TRACE_LOWER") &&
           ny_dbg_function_selected(func_names && func_names[i] ? func_names[i]
@@ -15622,7 +16373,8 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
   if (opt && opt->native_oracle_per_pass && funcs_out && func_count)
     nyr_set_per_pass_oracle(true, ny_native_per_pass_oracle_cb, &oracle_ctx);
   bool ok = nyr_build_rt_main(prog, rt_main_out, &externs, err, err_len,
-                              opt_level, opt, &compilation_cache);
+                              opt_level, opt, &compilation_cache, funcs_out,
+                              func_count ? *func_count : 0);
   NY_NATIVE_STAGE_TIMED("rt-main-lowering");
   /*
    * Tag rt_main's direct calls to pure user

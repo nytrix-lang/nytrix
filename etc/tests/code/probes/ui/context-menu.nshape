@@ -4,7 +4,7 @@ shape context-menu {
   features ["ny", "sys", "render"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "CONTEXT-MENU-OK"
   source ny <<'NY'
 use core

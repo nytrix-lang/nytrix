@@ -4,7 +4,7 @@ shape wayland-seat-input {
   features ["ny", "ui", "wayland", "input", "pointer", "keyboard", "gui"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 420
   expect_stdout "WAYLAND-SEAT-INPUT-OK"
   source ny <<'NY'
@@ -84,12 +84,14 @@ fn centre(list r) list {
 fn inject(str kind, int a=0, int b=0, str path="") bool { window.inject_platform_input(win, kind, a, b, path) }
 
 fn type_key(int code, bool shift=false) any {
+   inject("kenter")
    if shift {
       inject("key", 42, 1)
       inject("modifiers", 1, 0)
    }
    inject("key", code, 1)
    frames(1)
+   inject("kenter")
    inject("key", code, 0)
    if shift {
       inject("key", 42, 0)
@@ -144,7 +146,7 @@ if common.env_trim("WAYLAND_DISPLAY").len == 0 {
       print("clicks after a press+release in one frame: " + to_str(clicks))
       assert(clicks == 2, "a press and release in one pointer frame is still a click")
       ;; Keyboard: keymap, focus, click the field, type "Hi 7".
-      def str keymap = temp_dir() + "/ny-seat-input.xkb"
+      def str keymap = temp_dir() + "/ny-seat-input-" + to_str(__getpid()) + ".xkb"
       def res = run_capture(["xkbcli", "compile-keymap", "--layout", "us"], [], nil, false)
       def str km = to_str(res.get("stdout", ""))
       assert(km.len > 1000, "xkbcli compiles a US keymap")
@@ -152,8 +154,7 @@ if common.env_trim("WAYLAND_DISPLAY").len == 0 {
       assert(inject("keymap", km.len + 1, 0, keymap), "keymap")
       inject("kenter")
       def list fc = centre(field_rect)
-      inject("motion", int(fc[0]), int(fc[1]))
-      inject("frame")
+      assert(inject("enter", int(fc[0]), int(fc[1])) && inject("frame"), "pointer enter field")
       frames(1)
       inject("button", 0x110, 1)
       inject("frame")
@@ -161,6 +162,7 @@ if common.env_trim("WAYLAND_DISPLAY").len == 0 {
       inject("button", 0x110, 0)
       inject("frame")
       frames(2)
+      inject("kenter")
       type_key(35, true)
       type_key(23)
       type_key(57)

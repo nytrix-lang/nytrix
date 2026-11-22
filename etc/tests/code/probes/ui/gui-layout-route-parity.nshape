@@ -3,7 +3,7 @@ shape gui_layout_route_parity {
   generator "embedded"
   features [gui layout]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect compile_and_run
   expect_message "GUI-LAYOUT-ROUTE-PARITY-OK"
   source ny <<'NY'

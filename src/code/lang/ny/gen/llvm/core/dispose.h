@@ -51,6 +51,16 @@ void codegen_dispose(codegen_t *cg) {
   if (cg->di_builder) {
     codegen_debug_finalize(cg);
   }
+  free(cg->layout_index_slots);
+  cg->layout_index_slots = NULL;
+  cg->layout_index_cap = 0;
+  cg->layout_index_len = 0;
+  cg->layout_index_synced = 0;
+  free(cg->attached_method_slots);
+  cg->attached_method_slots = NULL;
+  cg->attached_method_cap = 0;
+  cg->attached_method_len = 0;
+  cg->attached_method_synced = 0;
   ny_sym_state_free(cg);
   if (cg->alloca_builder) {
     LLVMDisposeBuilder(cg->alloca_builder);

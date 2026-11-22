@@ -370,18 +370,20 @@ static bool strip_const_check(nyr_func_t *f, const int *defs,
   return false;
 }
 
-static bool relational_check_safe(const nyr_func_t *f,
+static bool relational_check_safe(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                  const int *defs,
                                   const nyr_value_fact_t *facts, size_t at,
                                   const nyr_inst_t *check) {
   if (!f || !facts || !check || check->b < 0)
     return false;
   nyr_range_t index = {0};
-  if (!nir_value_range_at(f, facts, check->b, at, &index) || !index.has_min ||
-      !index.has_max || index.min < 0)
+  if (!nir_value_range_at_with_cfg(f, facts, cfg, defs, check->b, at, &index) ||
+      !index.has_min || !index.has_max || index.min < 0)
     return false;
   nyr_range_t length = {0};
   if (check->c >= 0) {
-    if (!nir_value_range_at(f, facts, check->c, at, &length))
+    if (!nir_value_range_at_with_cfg(f, facts, cfg, defs, check->c, at,
+                                     &length))
       return false;
   } else {
     length = (nyr_range_t){
@@ -390,13 +392,15 @@ static bool relational_check_safe(const nyr_func_t *f,
   return length.has_min && index.max < length.min;
 }
 
-static bool irce_value_nonnegative(const nyr_func_t *f, const int *defs,
+static bool irce_value_nonnegative(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                   const int *defs,
                                    const nyr_value_fact_t *facts, int value,
                                    size_t at) {
   if (!f || !defs || !facts || value < 0 || value >= f->next_value)
     return false;
   nyr_range_t r = {0};
-  if (nir_value_range_at(f, facts, value, at, &r) && r.has_min && r.min >= 0)
+  if (nir_value_range_at_with_cfg(f, facts, cfg, defs, value, at, &r) &&
+      r.has_min && r.min >= 0)
     return true;
   int64_t c = 0;
   if (const_i64(f, defs, value, &c))
@@ -434,7 +438,8 @@ static bool irce_value_nonnegative(const nyr_func_t *f, const int *defs,
     nyr_range_t sr = {0};
     if (step < 0 ||
         (!const_i64(f, defs, step, &c) &&
-         !(nir_value_range_at(f, facts, step, at, &sr) && sr.has_min)))
+         !(nir_value_range_at_with_cfg(f, facts, cfg, defs, step, at, &sr) &&
+           sr.has_min)))
       return false;
     int64_t step_min = sr.has_min ? sr.min : c;
     if (step_min < 0)
@@ -488,7 +493,7 @@ static bool guarded_scaled_check_safe(const nyr_func_t *f,
     if (scaled_value(f, defs, check->b, cmp->a, &index_scale) &&
         scaled_value(f, defs, check->c, cmp->b, &length_scale) &&
         index_scale == length_scale &&
-        irce_value_nonnegative(f, defs, facts, cmp->a, check_idx))
+        irce_value_nonnegative(f, cfg, defs, facts, cmp->a, check_idx))
       return true;
   }
   return false;
@@ -660,16 +665,6 @@ bool nyr_irce(nyr_func_t *f) {
   size_t checks_before = 0;
   for (size_t i = 0; i < f->len; ++i)
     checks_before += f->data[i].op == NYIR_BOUNDS_CHECK;
-  for (size_t i = 0; i < f->len; ++i) {
-    if (f->data[i].op != NYIR_BOUNDS_CHECK)
-      continue;
-    if (relational_check_safe(f, facts, i, &f->data[i])) {
-      nyr_inst_discard(&f->data[i]);
-      relational_elided++;
-    } else {
-      strip_const_check(f, defs, &f->data[i]);
-    }
-  }
   nyr_cfg_t cfg = {0};
   bool cfg_ok = nyr_cfg_build(f, &cfg);
   bool *in_loop = cfg_ok ? calloc(cfg.block_count, sizeof(*in_loop)) : NULL;
@@ -680,6 +675,16 @@ bool nyr_irce(nyr_func_t *f) {
     free(facts);
     nyr_scev_free(&info);
     return false;
+  }
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op != NYIR_BOUNDS_CHECK)
+      continue;
+    if (relational_check_safe(f, &cfg, defs, facts, i, &f->data[i])) {
+      nyr_inst_discard(&f->data[i]);
+      relational_elided++;
+    } else {
+      strip_const_check(f, defs, &f->data[i]);
+    }
   }
   irce_elide_affine_const_checks(f, &info, defs, &cfg, in_loop);
   for (size_t i = 0; i < f->len; ++i) {

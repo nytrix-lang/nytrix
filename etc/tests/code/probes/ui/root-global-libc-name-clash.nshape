@@ -3,7 +3,7 @@ shape root_global_libc_name_clash {
   generator "embedded"
   features [window llvm globals]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect compile_and_run
   expect_message "ROOT-GLOBAL-LIBC-NAME-CLASH-OK"
   source ny <<'NY'

@@ -2708,10 +2708,15 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                           "\tleaq\t.Lnyir_%s_L%" PRIu64 "(%%rip), %%rax\n",
                           c->label_prefix, label_id) &&
                ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-      if (c->position_independent)
+      if (c->position_independent &&
+          !(in->flags & NYIR_INST_F_SYMBOL_NONPREEMPTIBLE))
         return nyr_printf(c->w, "\tmovq\t%s@GOTPCREL(%%rip), %%rax\n",
                           ny_x64_nir_link_symbol(in->symbol)) &&
                ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+      if ((in->flags & NYIR_INST_F_SYMBOL_NONPREEMPTIBLE) &&
+          !nyr_printf(c->w, "\t.hidden\t%s\n",
+                      ny_x64_nir_link_symbol(in->symbol)))
+        return false;
       return nyr_printf(c->w, "\tleaq\t%s(%%rip), %%rax\n",
                         ny_x64_nir_link_symbol(in->symbol)) &&
              ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
@@ -4028,6 +4033,9 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     const char *sym_name = in->symbol ? in->symbol : "<null>";
     if (in->flags & NYIR_INST_F_EXTERN)
       sym_name = ny_x64_nir_link_symbol(sym_name);
+    if (!indirect && (in->flags & NYIR_INST_F_SYMBOL_NONPREEMPTIBLE) &&
+        !nyr_printf(c->w, "\t.hidden\t%s\n", sym_name))
+      return false;
     if (argc < 0 || argc > NYIR_CALL_MAX_ARGS) {
       nyr_set_error(
           c->err, c->err_len,
@@ -9771,7 +9779,11 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           if (!nyr_printf(w, "\tleaq\t-%d(%%rbp), %%rax\n", a))
             return false;
         } else if (in->src0.kind == NYR_MACH_OPERAND_SYMBOL) {
-          if (position_independent) {
+          if (in->src0.nonpreemptible &&
+              !nyr_printf(w, "\t.hidden\t%s\n",
+                          ny_x64_nir_link_symbol(in->src0.as.symbol)))
+            return false;
+          if (position_independent && !in->src0.nonpreemptible) {
             if (!nyr_printf(w, "\tmovq\t%s@GOTPCREL(%%rip), %%rax\n",
                             ny_x64_nir_link_symbol(in->src0.as.symbol)))
               return false;
@@ -10892,6 +10904,11 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           return false;
         break;
       case NYR_MACH_CALL: {
+        if (in->src0.kind == NYR_MACH_OPERAND_SYMBOL &&
+            in->src0.nonpreemptible &&
+            !nyr_printf(w, "\t.hidden\t%s\n",
+                        ny_x64_nir_link_symbol(in->src0.as.symbol)))
+          return false;
         if (in->call_is_variadic && target->abi != NY_NATIVE_ABI_SYSV)
           return false;
         if (target->syscalls.available &&

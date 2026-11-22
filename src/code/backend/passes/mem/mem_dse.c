@@ -51,7 +51,10 @@ static int md_root(const nyr_func_t *f, const int *defs, int v) {
     if (d->op == NYIR_ALLOCA)
       return v;
     if (d->op == NYIR_CALL && d->symbol &&
-        strcmp(d->symbol, "rt_tbuf_new_typed_raw") == 0)
+        (strcmp(d->symbol, "rt_tbuf_new_typed_raw") == 0 ||
+         strcmp(d->symbol, "rt_tbuf_new_raw") == 0 ||
+         strcmp(d->symbol, "malloc") == 0 ||
+         strcmp(d->symbol, "calloc") == 0))
       return v;
     if ((d->op == NYIR_ADD_I64 || d->op == NYIR_SUB_I64) && d->a >= 0) {
       v = d->a;
@@ -60,6 +63,84 @@ static int md_root(const nyr_func_t *f, const int *defs, int v) {
     return -1;
   }
   return -1;
+}
+
+static bool md_const(const nyr_func_t *f, const int *defs, int v,
+                     int64_t *out) {
+  v = md_strip(f, defs, v);
+  const nyr_inst_t *d = md_def(f, defs, v);
+  if (!d || d->op != NYIR_CONST_I64)
+    return false;
+  *out = d->imm;
+  return true;
+}
+
+static void md_base_off(const nyr_func_t *f, const int *defs, int v,
+                        int *base_out, int64_t *off_out) {
+  int cur = v;
+  int64_t off = 0;
+  for (int depth = 0; depth < 32; ++depth) {
+    cur = md_strip(f, defs, cur);
+    const nyr_inst_t *d = md_def(f, defs, cur);
+    if (!d)
+      break;
+    if (d->op == NYIR_ADD_I64) {
+      int64_t c = 0;
+      if (md_const(f, defs, d->b, &c)) {
+        off += c;
+        cur = d->a;
+        continue;
+      }
+      if (md_const(f, defs, d->a, &c)) {
+        off += c;
+        cur = d->b;
+        continue;
+      }
+    } else if (d->op == NYIR_SUB_I64) {
+      int64_t c = 0;
+      if (md_const(f, defs, d->b, &c)) {
+        off -= c;
+        cur = d->a;
+        continue;
+      }
+    }
+    break;
+  }
+  *base_out = cur;
+  *off_out = off;
+}
+
+static int64_t md_op_width(const nyr_inst_t *in) {
+  if (in->op == NYIR_VEC4_LOAD_F64 || in->op == NYIR_VEC4_STORE_F64 ||
+      in->op == NYIR_VEC8_LOAD_F32 || in->op == NYIR_VEC8_STORE_F32 ||
+      in->op == NYIR_VEC8_LOAD_I64 || in->op == NYIR_VEC8_STORE_I64)
+    return 32;
+  if (in->op == NYIR_VEC4_LOAD_I64 || in->op == NYIR_VEC4_STORE_I64)
+    return 16;
+  if (in->flags & NYIR_INST_F_MEM_BYTE)
+    return 1;
+  if (in->flags & NYIR_INST_F_MEM_U16)
+    return 2;
+  if (in->flags & NYIR_INST_F_MEM_I32)
+    return 4;
+  return 8;
+}
+
+static bool md_disjoint(const nyr_func_t *f, const int *defs,
+                        const nyr_inst_t *a, const nyr_inst_t *b) {
+  int ra = md_root(f, defs, a->a);
+  int rb = md_root(f, defs, b->a);
+  if (ra >= 0 && rb >= 0 && ra != rb)
+    return true;
+  int ba = -1, bb = -1;
+  int64_t oa = 0, ob = 0;
+  md_base_off(f, defs, a->a, &ba, &oa);
+  md_base_off(f, defs, b->a, &bb, &ob);
+  if (ba >= 0 && ba == bb) {
+    int64_t wa = md_op_width(a), wb = md_op_width(b);
+    return (oa + wa <= ob) || (ob + wb <= oa);
+  }
+  return false;
 }
 
 static bool md_same(const nyr_func_t *f, const int *defs, int x, int y,
@@ -128,10 +209,16 @@ bool nyr_mem_dse(nyr_func_t *f) {
       if (in->op == NYIR_LABEL || in->op == NYIR_BR || in->op == NYIR_BR_IF ||
           in->op == NYIR_RET || in->op == NYIR_PHI)
         break; /* block boundary */
-      if (in->op == s1->op && in->flags == 0 &&
-          md_same(f, defs, in->a, s1->a, 0)) {
-        nyr_inst_discard(&f->data[i]);
-        break;
+      if (in->op == s1->op && in->flags == 0) {
+        int b1 = -1, b2 = -1;
+        int64_t o1 = 0, o2 = 0;
+        md_base_off(f, defs, s1->a, &b1, &o1);
+        md_base_off(f, defs, in->a, &b2, &o2);
+        if ((b1 >= 0 && b1 == b2 && o1 == o2) ||
+            md_same(f, defs, in->a, s1->a, 0)) {
+          nyr_inst_discard(&f->data[i]);
+          break;
+        }
       }
       unsigned eff = nyr_effective_effects(in);
       if ((eff & MD_BARRIER) || in->op == NYIR_CALL)
@@ -140,8 +227,7 @@ bool nyr_mem_dse(nyr_func_t *f) {
       if (reads) {
         if (!md_is_load(in->op) || in->a < 0)
           break;
-        int other = md_root(f, defs, in->a);
-        if (other < 0 || other == root)
+        if (!md_disjoint(f, defs, s1, in))
           break;
       }
     }

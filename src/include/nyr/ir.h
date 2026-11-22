@@ -283,6 +283,9 @@ typedef enum {
 /* NYIR_CALL uses the SysV variadic calling convention, including %al's
  * vector-register argument count on x86-64. */
 #define NYIR_INST_F_VARIADIC 8192u
+/* Symbol is marked non-preemptible (e.g., protected visibility or internal
+ * linkage). The emitter can bind directly without going through PLT/GOT. */
+#define NYIR_INST_F_SYMBOL_NONPREEMPTIBLE (1u << 25)
 /* i386 integer/pointer argument registers: EAX, EDX, ECX. */
 #define NYIR_INST_F_I386_REGPARM_SHIFT 14u
 #define NYIR_INST_F_I386_REGPARM_MASK (3u << NYIR_INST_F_I386_REGPARM_SHIFT)
@@ -724,6 +727,10 @@ typedef struct {
   uint64_t *frontiers;
   size_t frontier_words;
   int *idom;
+  /* Dominator tree entry/exit times for O(1) dominance queries.
+   * Computed by nyr_cfg_build_topology when needed. */
+  uint32_t *dom_tin;
+  uint32_t *dom_tout;
 } nyr_cfg_t;
 
 /*
@@ -821,6 +828,7 @@ bool nyr_cfg_natural_loop_blocks(const nyr_cfg_t *cfg, size_t latch,
  * those PHIs; machine lowering destroys them with predecessor-edge copies.
  */
 bool nyr_mem2reg(nyr_func_t *f);
+void nyr_set_mem2reg_phi_enabled(bool enable);
 bool nyr_validate_constraints(const nyr_func_t *f, char *err, size_t err_len);
 bool nyr_metadata_summary(const nyr_func_t *f, nyr_metadata_summary_t *summary,
                           char *err, size_t err_len);

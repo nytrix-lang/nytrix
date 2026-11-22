@@ -63,7 +63,7 @@ shape svg-icon-pixels {
   features ["ny", "svg", "render", "icons"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 180
   expect_stdout "SVG-ICON-PIXELS-OK"
   source ny <<'NY'

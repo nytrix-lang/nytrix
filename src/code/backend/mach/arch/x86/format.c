@@ -2177,7 +2177,17 @@ static bool nyr_x64_c_bundle_pad_code_start(nyr_obj_buf_t *code,
  * machine lowering would silently drop.
  */
 static bool nyr_x64_c_func_needs_direct_encoder(const nyr_func_t *f) {
-  if (f->return_aggregate_size)
+  /*
+   * SysV MEMORY-class aggregate returns (> 16 bytes) are lowered by the C
+   * frontend into an explicit sret pointer parameter, a COPY_STRUCT, and a
+   * scalar pointer return, so the machine encoder handles them directly.
+   * Register-packed aggregate returns (<= 16 bytes, INTEGER/SSE classes)
+   * still use the direct NYIR encoder.
+   */
+  if (f->return_aggregate_size &&
+      f->return_aggregate_size <= 16 &&
+      f->return_aggregate_classes[0] != NYIR_ARG_CLASS_MEMORY &&
+      f->return_aggregate_classes[0] != NYIR_ARG_CLASS_NONE)
     return true;
   for (size_t i = 0; f->param_types && i < (size_t)f->param_count; ++i)
     if (f->param_types[i] == NYIR_PARAM_AGGREGATE)

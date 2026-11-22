@@ -4,7 +4,7 @@ shape ui_scancode_query_stable {
   features [ny ui window input]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-SCANCODE-QUERY-OK"
   source ny <<'NY'
 use core
@@ -36,7 +36,7 @@ shape ui_fps_sample_ints {
   features [ny ui viewer]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-FPS-SAMPLE-OK"
   source ny <<'NY'
 use core
@@ -64,7 +64,7 @@ shape ui_engine_state_lists {
   features [ny ui viewer engine]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-ENGINE-STATE-LISTS-OK"
   source ny <<'NY'
 use core
@@ -92,7 +92,7 @@ shape ui_gui_tab_strip_labels {
   features [ny render ui gui]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect_stdout "UI-GUI-TAB-LABELS-OK"
   source ny <<'NY'
 use core

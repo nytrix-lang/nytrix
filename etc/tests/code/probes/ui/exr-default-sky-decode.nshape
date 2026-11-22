@@ -3,7 +3,7 @@ shape exr_default_sky_decode {
   generator "embedded"
   features [image exr]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect compile_and_run
   expect_message "EXR-DEFAULT-SKY-DECODE-OK"
   source ny <<'NY'

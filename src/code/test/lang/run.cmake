@@ -811,12 +811,44 @@ if(pic_asm_plain MATCHES "GOTPCREL")
   message(FATAL_ERROR "non-PIC assembly used GOTPCREL data addressing")
 endif()
 
+if(READELF)
+  set(hidden_pic "${BINARY_DIR}/pic-hidden-visibility.o")
+  nyc_execute_output("hidden PIC compilation failed" "${hidden_pic}"
+    COMMAND "${NYC}" -Os -fPIC -c "${NY_C_CORPUS_pic-hidden-visibility.c}"
+      -o "${hidden_pic}")
+  nyc_execute_ok("could not inspect hidden PIC object"
+    COMMAND "${READELF}" -rWs "${hidden_pic}")
+  if(NOT stdout MATCHES "R_X86_64_PC32[^\n]* startup_data" OR
+     stdout MATCHES "GOTPCREL[^\n]* startup_data" OR
+     NOT stdout MATCHES "GOTPCREL[^\n]* interposable_data" OR
+     NOT stdout MATCHES "HIDDEN[^\n]* startup_data" OR
+     NOT stdout MATCHES "HIDDEN[^\n]* startup_address" OR
+     NOT stdout MATCHES "HIDDEN[^\n]* startup_value" OR
+     stdout MATCHES "UND[^\n]* dead_data" OR
+     stdout MATCHES "UND[^\n]* local_startup_address" OR
+     NOT stdout MATCHES "DEFAULT[^\n]* interposable_address")
+    message(FATAL_ERROR "visibility pragma produced incorrect PIC relocations or binding\n${stdout}")
+  endif()
+endif()
+
 # Unsigned arithmetic, 16/32-bit widths, and named sections must agree across
 # the assembly and direct-object routes and with the pinned reference output.
 file(WRITE "${BINARY_DIR}/width-parity.c" [=[
 #include <stdio.h>
 __attribute__((section("mydata"))) int sec_g = 5;
 __attribute__((section(".mytext"))) int secf(void) { return sec_g; }
+int pointer_before(const void *a, const void *b) { return a < b; }
+int unsigned_before(unsigned a, unsigned b) { return a < b; }
+int bool_local(unsigned flags, double from_float) {
+  _Bool selected = flags & 16u;
+  int pools[] = {7, 9};
+  int pool = pools[selected];
+  selected = flags & 256u;
+  int assigned = selected;
+  selected += 2;
+  _Bool converted = from_float;
+  return pool * 1000 + assigned * 100 + selected * 10 + converted;
+}
 int main(void) {
   unsigned a = 0xffffffffu, q, r;
   unsigned short s = 65535; short ss = -32768; unsigned char uc = 250;
@@ -827,10 +859,16 @@ int main(void) {
   printf("%llu %llu %u %u %d\n", u64 / 10u, u64 % 10u,
          (unsigned)(s / 7u), (unsigned)prod, (int)(s2 < 2));
   printf("%d %u %d\n", secf(), (unsigned)(uc + 10u) & 0xffu, (int)(ss >> 3));
+  const void *upper = (const void *)0xffff800000000002ULL;
+  const void *lower = (const void *)254UL;
+  printf("%d %d\n", pointer_before(upper, lower), pointer_before(lower, upper));
+  printf("%d %d\n", unsigned_before(0x80000000u, 1),
+         unsigned_before(1, 0xffffffffu));
+  printf("%d %d\n", bool_local(272u, 0.25), bool_local(0u, -0.0));
   return 0;
 }
 ]=])
-set(width_expected "1431655765 0 1 -32768 0 250\n1844674407370955161 5 9362 65533 1\n5 4 -4096\n")
+set(width_expected "1431655765 0 1 -32768 0 250\n1844674407370955161 5 9362 65533 1\n5 4 -4096\n0 1\n0 1\n9111 7010\n")
 nyc_check_x64_parity(width-parity "${width_expected}")
 file(READ "${BINARY_DIR}/width-parity-assembly.s" width_asm)
 string(FIND "${width_asm}" ".section \"mydata\"" width_asm_data)
@@ -4033,14 +4071,10 @@ message(STATUS "${stdout}")
 # Cross-target ABI checks and unsupported-input diagnostics.
 set(target_source "${NY_C_CORPUS_target-link.c}")
 set(aarch64_object "${BINARY_DIR}/target-link-aarch64.o")
-execute_process(
+nyc_execute_output("nyc AArch64 ELF emission failed" "${aarch64_object}"
   COMMAND "${NYC}" --target=aarch64-unknown-linux-gnu "${target_source}"
           "${aarch64_object}" c_target_link
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
 )
-if(NOT status EQUAL 0 OR NOT EXISTS "${aarch64_object}")
-  message(FATAL_ERROR "nyc AArch64 ELF emission failed\n${stdout}${stderr}")
-endif()
 file(READ "${aarch64_object}" aarch64_header HEX LIMIT 20)
 string(SUBSTRING "${aarch64_header}" 36 4 aarch64_machine)
 if(NOT aarch64_machine STREQUAL "b700")
@@ -4063,14 +4097,10 @@ foreach(symbol IN ITEMS c_a64_pair_scale c_a64_triple_shift
                         c_a64_union_identity c_a64_call_union_identity
                         c_a64_call_mixed_union_identity)
   set(object "${BINARY_DIR}/${symbol}-aarch64.o")
-  execute_process(
+  nyc_execute_output("nyc AArch64 aggregate compilation failed for ${symbol}" "${object}"
     COMMAND "${NYC}" --target=aarch64-unknown-linux-gnu
             "${aarch64_aggregate_source}" "${object}" "${symbol}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT EXISTS "${object}")
-    message(FATAL_ERROR "nyc AArch64 aggregate compilation failed for ${symbol}\n${stdout}${stderr}")
-  endif()
   list(APPEND aarch64_aggregate_objects "${object}")
 endforeach()
 
@@ -4078,16 +4108,12 @@ find_program(AARCH64_CC NAMES aarch64-linux-gnu-gcc)
 find_program(AARCH64_QEMU NAMES qemu-aarch64)
 if(AARCH64_CC)
   set(aarch64_aggregate_exe "${BINARY_DIR}/aarch64-aggregate-host")
-  execute_process(
+  nyc_execute_output("AArch64 C aggregate link failed" "${aarch64_aggregate_exe}"
     COMMAND "${AARCH64_CC}" -std=c11 -O2 -Wall -Wextra -Werror
             -o "${aarch64_aggregate_exe}"
             "${NY_C_CORPUS_aarch64-aggregate-host.c}"
             ${aarch64_aggregate_objects}
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT EXISTS "${aarch64_aggregate_exe}")
-    message(FATAL_ERROR "AArch64 C aggregate link failed\n${stdout}${stderr}")
-  endif()
   if(AARCH64_QEMU)
     execute_process(COMMAND "${AARCH64_CC}" -print-sysroot
                     OUTPUT_VARIABLE aarch64_sysroot
@@ -4132,14 +4158,10 @@ foreach(symbol IN ITEMS c_win_word_add c_win_point_add c_win_big_make
                         c_win_big_sum c_win_big_sum_after4
                         c_win_many_with_point)
   set(object "${BINARY_DIR}/${symbol}-win64.obj")
-  execute_process(
+  nyc_execute_output("nyc Win64 aggregate compilation failed for ${symbol}" "${object}"
     COMMAND "${NYC}" --target=x86_64-pc-windows-msvc
             "${win64_aggregate_source}" "${object}" "${symbol}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT EXISTS "${object}")
-    message(FATAL_ERROR "nyc Win64 aggregate compilation failed for ${symbol}\n${stdout}${stderr}")
-  endif()
   list(APPEND win64_aggregate_objects "${object}")
 endforeach()
 
@@ -4147,16 +4169,12 @@ find_program(WIN64_CC NAMES x86_64-w64-mingw32-gcc)
 find_program(WIN64_RUNNER NAMES wine wine64)
 if(WIN64_CC)
   set(win64_aggregate_exe "${BINARY_DIR}/win64-aggregate-host.exe")
-  execute_process(
+  nyc_execute_output("Win64 C aggregate link failed" "${win64_aggregate_exe}"
     COMMAND "${WIN64_CC}" -std=c11 -O2 -Wall -Wextra -Werror
             -o "${win64_aggregate_exe}"
             "${NY_C_CORPUS_win64-aggregate-host.c}"
             ${win64_aggregate_objects}
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT EXISTS "${win64_aggregate_exe}")
-    message(FATAL_ERROR "Win64 C aggregate link failed\n${stdout}${stderr}")
-  endif()
   if(WIN64_RUNNER)
     nyc_execute_ok(
       [=[Win64 C aggregate runtime parity failed\n${stdout}${stderr}]=]
@@ -4172,19 +4190,14 @@ endif()
 if(LLD_LINK AND EXISTS "${LLD_LINK}")
   set(coff_object "${BINARY_DIR}/target-link.obj")
   set(coff_exe "${BINARY_DIR}/target-link-coff.exe")
-  nyc_execute_ok(
-    [=[nyc COFF emission failed\n${stdout}${stderr}]=]
+  nyc_execute_output("nyc COFF emission failed" "${coff_object}"
     COMMAND "${NYC}" --target=x86_64-pc-windows-msvc "${target_source}"
                 "${coff_object}" c_target_link
   )
-  execute_process(
+  nyc_execute_output("lld-link could not link nyc COFF output" "${coff_exe}"
     COMMAND "${LLD_LINK}" /entry:c_target_link /subsystem:console
             /nodefaultlib /machine:x64 "/out:${coff_exe}" "${coff_object}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT EXISTS "${coff_exe}")
-    message(FATAL_ERROR "lld-link could not link nyc COFF output\n${stdout}${stderr}")
-  endif()
 else()
   message(STATUS "COFF link acceptance skipped: lld-link was not found")
 endif()
@@ -4192,20 +4205,15 @@ endif()
 if(LD64_LLD AND EXISTS "${LD64_LLD}")
   set(macho_object "${BINARY_DIR}/target-link-macho.o")
   set(macho_exe "${BINARY_DIR}/target-link-macho")
-  nyc_execute_ok(
-    [=[nyc Mach-O emission failed\n${stdout}${stderr}]=]
+  nyc_execute_output("nyc Mach-O emission failed" "${macho_object}"
     COMMAND "${NYC}" --target=x86_64-apple-darwin "${target_source}"
                 "${macho_object}" c_target_link
   )
-  execute_process(
+  nyc_execute_output("ld64.lld could not link nyc Mach-O output" "${macho_exe}"
     COMMAND "${LD64_LLD}" -arch x86_64
             -platform_version macos 10.15 14.0 -e _c_target_link
             -o "${macho_exe}" "${macho_object}"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT EXISTS "${macho_exe}")
-    message(FATAL_ERROR "ld64.lld could not link nyc Mach-O output\n${stdout}${stderr}")
-  endif()
 else()
   message(STATUS "Mach-O link acceptance skipped: ld64.lld was not found")
 endif()
@@ -4214,16 +4222,16 @@ endif()
 set(unsupported_cases
   "unsupported.c|c_unsupported|continue statement is not inside a loop"
   "unsupported.c|c_break_outside|break statement is not inside a loop"
-  "void.c|c_void_return_value|void function return must not include a value"
+  "void.c|c_void_return_value|void function return expression must have void type"
 
   "const-update.c|c_const_update|cannot assign to a const C object"
   "const-update.c|c_const_expression_update|assignment requires a modifiable C lvalue"
   "const-pointer-store.c|c_const_store|cannot write through a pointer to const C data"
   "const-double-pointer-store.c|c_const_f64_store|cannot write through a pointer to const C data"
   "const-index-store.c|c_const_index_store|cannot write through a pointer to const C data"
-  "mixed-pointer-store.c|c_mixed_store||"
-  "for-scope.c|c_for_scope|references must name a function parameter or declared local"
-  "compound.c|c_block_scope|references must name a function parameter or declared local"
+  "mixed-pointer-store.c|c_mixed_store|pointer assignment type mismatch"
+  "for-scope.c|c_for_scope|must name a function parameter or declared local"
+  "compound.c|c_block_scope|must name a function parameter or declared local"
   "compound.c|c_redeclare_local|duplicate declaration in the same C scope"
 
   "increment.c|c_const_postfix_increment|increment and decrement require a mutable scalar or pointer local"
@@ -4233,9 +4241,9 @@ set(unsupported_cases
   "typedef.c|c_typedef_const_update|cannot assign to a const C object"
   "typedef-function-signature-conflict.c|nyc_signature_conflict|conflicting function typedef declarations"
   "global-asm-unsupported.c|main|unsupported file-scope assembler directive or expression"
-  "inline-asm-unsupported.c|nyc_inline_asm_unsupported|unsupported GNU RIP-relative pointer assembly operands"
+  "inline-asm-unsupported.c|nyc_inline_asm_unsupported|unsupported inline asm template '__nyc_unsupported_inline_asm:leaq"
   "inline-asm-unsupported.c|nyc_inline_asm_expression_unsupported|GNU inline assembly is not supported by NYC"
-  "inline-asm-unsupported.c|nyc_inline_asm_goto_unsupported|GNU asm goto is not supported by NYC"
+  "inline-asm-unsupported.c|nyc_inline_asm_goto_unsupported|unsupported inline asm template '__nyc_unsupported_inline_asm:jmp"
   "invalid-shift.c|c_invalid_shift|unsupported #if expression"
 )
 foreach(case IN LISTS unsupported_cases)
@@ -4243,33 +4251,22 @@ foreach(case IN LISTS unsupported_cases)
   list(GET fields 0 source)
   list(GET fields 1 symbol)
   list(GET fields 2 expected_diagnostic)
-  list(LENGTH fields field_count)
-  if(field_count GREATER 3)
-    list(GET fields 3 expected_location)
-  else()
-    set(expected_location "")
-  endif()
+  set(object "${BINARY_DIR}/unsupported.o")
+  nyc_remove_artifact("${object}")
   execute_process(
-    COMMAND "${NYC}" "${NY_C_CORPUS_${source}}"
-            "${BINARY_DIR}/unsupported.o" "${symbol}"
+    COMMAND "${NYC}" "${NY_C_CORPUS_${source}}" "${object}" "${symbol}"
     RESULT_VARIABLE status
-    OUTPUT_VARIABLE stdout
-    ERROR_VARIABLE stderr
+    ERROR_VARIABLE diagnostic
+    TIMEOUT 15
   )
-  if(status EQUAL 0)
-    message(FATAL_ERROR "nyc accepted unsupported input ${source}")
+  if(NOT "${status}" STREQUAL "1")
+    message(FATAL_ERROR
+      "nyc returned ${status} for ${source}:${symbol}, expected rejection (1)\n${diagnostic}")
   endif()
-  string(CONCAT diagnostic "${stdout}" "${stderr}")
-  if(diagnostic STREQUAL "")
-    message(FATAL_ERROR "nyc rejected ${source} without a diagnostic")
-  endif()
-  if(expected_location)
-    string(FIND "${diagnostic}" "${expected_location}" location_found)
-    if(location_found EQUAL -1)
-      message(FATAL_ERROR
-        "diagnostic for ${source}:${symbol} omitted source location "
-        "'${expected_location}'\n${diagnostic}")
-    endif()
+  string(FIND "${diagnostic}" "${expected_diagnostic}" found)
+  if(found EQUAL -1 OR EXISTS "${object}" OR IS_SYMLINK "${object}")
+    message(FATAL_ERROR
+      "expected '${expected_diagnostic}' and no object for ${source}:${symbol}\n${diagnostic}")
   endif()
 endforeach()
 
@@ -6213,6 +6210,18 @@ nyc_execute_ok(
   [=[get_user helper outputs were not preserved through the call\n${stdout}${stderr}]=]
   COMMAND "${BINARY_DIR}/get-user-asm"
 )
+set(irq_stack_asm "${BINARY_DIR}/irq-stack-boundaries.s")
+nyc_execute_output("IRQ and plain stack-call lowering failed" "${irq_stack_asm}"
+  COMMAND "${NYC}" -S "${NY_C_CORPUS_irq-stack-boundaries.c}"
+    -o "${irq_stack_asm}")
+file(READ "${irq_stack_asm}" irq_stack_text)
+string(REGEX MATCHALL "call[ \t]+(irq_enter_rcu|handler|irq_exit_rcu)\n"
+  irq_stack_calls "${irq_stack_text}")
+string(REGEX REPLACE "call[ \t]+|\n" "" irq_stack_calls "${irq_stack_calls}")
+if(NOT irq_stack_calls STREQUAL "irq_enter_rcu;handler;irq_exit_rcu;handler")
+  message(FATAL_ERROR "incorrect IRQ stack call order: ${irq_stack_calls}")
+endif()
+
 set(put-user-asm-source "${NY_C_CORPUS_put-user-asm.c}")
 
 nyc_execute_ok(
@@ -6406,4 +6415,22 @@ foreach(machine_volatile_opt IN ITEMS -O0 -O3)
   nyc_compile_obj_run(machine-volatile-wait
     "${NY_C_CORPUS_machine-volatile-wait.c}"
     NYC_FLAGS "${machine_volatile_opt}" TIMEOUT 10 OUTPUT_MATCH "checksum=1")
+endforeach()
+
+foreach(volatile_mode IN ITEMS -m16 -m64)
+  nyc_execute_output("volatile global array compilation failed"
+    "${BINARY_DIR}/volatile-global-array${volatile_mode}.s"
+    COMMAND "${CMAKE_COMMAND}" -E env NYTRIX_DUMP_FINAL_NYIR=1
+      "${NYC}" "${volatile_mode}" -D_SETUP -Os -S
+      "${NY_C_CORPUS_volatile-global-array.c}"
+      -o "${BINARY_DIR}/volatile-global-array${volatile_mode}.s")
+  string(REGEX MATCHALL "ld\\.i64\\.i32 " volatile_loads "${stderr}")
+  list(LENGTH volatile_loads volatile_load_count)
+  string(REGEX MATCHALL "[ls][dt]\\.i64\\.u16 " volatile_halfword_accesses
+    "${stderr}")
+  list(LENGTH volatile_halfword_accesses volatile_halfword_count)
+  if(NOT volatile_load_count EQUAL 4 OR NOT volatile_halfword_count EQUAL 2)
+    message(FATAL_ERROR
+      "volatile global arrays lost a read or used the wrong access width in ${volatile_mode}\n${stderr}")
+  endif()
 endforeach()

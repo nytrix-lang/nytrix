@@ -71,7 +71,8 @@ typedef enum {
   NY_NATIVE_CAP_MACH_SCALED_LEA = 1u << 11,
   NY_NATIVE_CAP_MACH_FMA = 1u << 12,
   NY_NATIVE_CAP_MACH_AVX = 1u << 13,
-  NY_NATIVE_CAP_MACH_AVX2 = 1u << 14
+  NY_NATIVE_CAP_MACH_AVX2 = 1u << 14,
+  NY_NATIVE_CAP_MACH_BMI2 = 1u << 15
 } nyr_target_cap_t;
 
 /* OS syscall numbers used by freestanding runtime legalization. Register

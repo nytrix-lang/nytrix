@@ -254,6 +254,44 @@ static bool check_unreachable_local_cleanup(void) {
   return ok;
 }
 
+static bool check_phi_free_promotion(bool take_branch) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int choice = nyr_opt_const(&f, take_branch);
+  int fixed = nyr_opt_const(&f, 12);
+  int one = nyr_opt_const(&f, 1);
+  int two = nyr_opt_const(&f, 2);
+  store(&f, 0, fixed);
+  store(&f, 1, one);
+  nyr_opt_br_if(&f, choice, 10);
+  nyr_opt_br(&f, 20);
+  nyr_opt_label(&f, 10);
+  store(&f, 1, two);
+  nyr_opt_br(&f, 20);
+  nyr_opt_label(&f, 20);
+  int a = load(&f, 0);
+  int b = load(&f, 1);
+  nyr_opt_ret(&f, nyr_opt_binop(&f, NYIR_ADD_I64, a, b));
+
+  nyr_set_mem2reg_phi_enabled(false);
+  bool ok = nyr_mem2reg(&f);
+  nyr_set_mem2reg_phi_enabled(true);
+  ok = ok && nyr_opt_verify(&f, "mem2reg-phi-free") &&
+       nyr_opt_eval(&f, "mem2reg-phi-free") == (take_branch ? 14 : 13);
+  bool kept_join_load = false;
+  for (size_t i = 0; i < f.len; ++i) {
+    const nyr_inst_t *in = &f.data[i];
+    if (in->op == NYIR_PHI ||
+        ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL) &&
+         in->imm == 0))
+      ok = false;
+    if (in->op == NYIR_LOAD_LOCAL && in->imm == 1)
+      kept_join_load = true;
+  }
+  nyr_ir_func_free(&f);
+  return ok && kept_join_load;
+}
+
 int main(void) {
   nyr_func_t no_locals;
   nyr_opt_begin(&no_locals);
@@ -271,7 +309,8 @@ int main(void) {
       !check_non_dominating_zero_fallback() ||
       !check_address_taken_nested_join() || !check_irreducible_join() ||
       !check_uninitialized_and_dead_locals() ||
-      !check_unreachable_local_cleanup())
+      !check_unreachable_local_cleanup() ||
+      !check_phi_free_promotion(false) || !check_phi_free_promotion(true))
     return 1;
   nyr_func_t f;
   nyr_opt_begin(&f);

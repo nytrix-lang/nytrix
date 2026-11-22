@@ -163,22 +163,38 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
    * local storage), so avoid constructing a full value type map when there
    * is nothing this pass can repair.
    */
-  bool has_local_value_access = false;
-  bool has_unknown_return = false;
+  bool has_local_store = false;
+  bool has_unknown_ret = false;
+  bool has_float_hint = false;
   int64_t max_local = -1;
+  if (f->param_types) {
+    for (size_t p = 0; p < f->param_count; ++p)
+      if (f->param_types[p] == NYIR_PARAM_F64 ||
+          f->param_types[p] == NYIR_PARAM_F32)
+        has_float_hint = true;
+  }
   for (size_t i = 0; i < f->len; ++i) {
-    nyr_op_t op = f->data[i].op;
+    const nyr_inst_t *in = &f->data[i];
+    nyr_op_t op = in->op;
     if ((op == NYIR_LOAD_LOCAL || op == NYIR_STORE_LOCAL ||
          op == NYIR_ADDR_LOCAL) &&
-        f->data[i].imm > max_local)
-      max_local = f->data[i].imm;
-    if (op == NYIR_LOAD_LOCAL || op == NYIR_STORE_LOCAL)
-      has_local_value_access = true;
-    if (op == NYIR_RET && f->data[i].scalar_class == NYIR_SCALAR_UNKNOWN &&
-        f->data[i].a >= 0)
-      has_unknown_return = true;
+        in->imm > max_local)
+      max_local = in->imm;
+    if (op == NYIR_STORE_LOCAL)
+      has_local_store = true;
+    if (op == NYIR_RET && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
+        in->a >= 0)
+      has_unknown_ret = true;
+    if (!has_float_hint &&
+        (in->scalar_class == NYIR_SCALAR_F64 ||
+         in->scalar_class == NYIR_SCALAR_F32 ||
+         (op >= NYIR_CONST_F64 && op <= NYIR_CMP_F32) ||
+         (op >= NYIR_VEC4_LOAD_F64 && op <= NYIR_VEC8_SHUFFLE_F32) ||
+         op == NYIR_SIN_F64 || op == NYIR_COS_F64 ||
+         op == NYIR_VEC4_REDUCE_ADD_F64))
+      has_float_hint = true;
   }
-  if (!has_local_value_access && !has_unknown_return)
+  if (!has_local_store && !(has_unknown_ret && has_float_hint))
     return;
   size_t local_count = max_local >= 0 ? (size_t)max_local + 1u : 0;
   nyr_type_map_t types = {0};
@@ -1028,6 +1044,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_loop_predication, "loop_predication"},
     {nyr_loop_unswitch, "loop_unswitch"},
     {nyr_loop_unroll_ssa, "loop_unroll_ssa"},
+    {nyr_loop_unroll_partial, "loop_unroll_partial"},
     {nyr_iv_elim, "iv_elim"},
     {nyr_gvn_pre, "gvn_pre"},
     {nyr_loop_vectorize, "loop_vectorize"},
@@ -1928,6 +1945,19 @@ static bool nyr_run_finish_scalar(nyr_func_t *f, nyr_opt_stats_t *stats,
   return *ok;
 }
 
+static size_t nyr_count_vec_ops(const nyr_func_t *f) {
+  size_t n = 0;
+  for (size_t i = 0; f && i < f->len; ++i) {
+    nyr_op_t op = f->data[i].op;
+    if (op == NYIR_VEC4_LOAD_F64 || op == NYIR_VEC4_STORE_F64 ||
+        op == NYIR_VEC4_SET1_F64 || op == NYIR_VEC4_LOAD_I64 ||
+        op == NYIR_VEC4_STORE_I64 || op == NYIR_VEC8_LOAD_F32 ||
+        op == NYIR_VEC8_STORE_F32 || op == NYIR_VEC8_SET1_F32)
+      ++n;
+  }
+  return n;
+}
+
 static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
                                   int opt_level, unsigned options, FILE *dump) {
   /*
@@ -2083,17 +2113,26 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
                                                         nyr_cse,
                                                         nyr_scev_lite,
                                                         nyr_irce,
-                                                        nyr_alias_store_sink};
+                                                        nyr_alias_store_sink,
+                                                        nyr_vrp,
+                                                        nyr_peephole,
+                                                        nyr_copy_prop};
       /*
        * LICM/CSE can expose a simpler loop guard and can replace repeated
        * managed-buffer length helpers with one dominating SSA value.  Refresh
        * SCEV and IRCE once after those motions so O2 actually consumes the
        * newly exposed affine/bounds facts before vectorization.
        */
-      nyr_run_seq(f, loop_opts, 13, stats, dump, &ok);
+      nyr_run_seq(f, loop_opts, 16, stats, dump, &ok);
     }
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_loop_unroll_ssa, stats, dump, &ok);
+    /*
+     * A dynamic counted loop cannot be fully unrolled, but one guarded copy
+     * still removes every second induction update and loop branch.
+     */
+    if (ok && !nyr_pass_stopped && nyr_has_loop(f))
+      nyr_run_pass(f, nyr_loop_unroll_partial, stats, dump, &ok);
     /*
      * O2 is the default benchmark tier, so it must not skip the existing
      * vector pipeline entirely.  Keep the canonical induction/address form
@@ -2143,8 +2182,13 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
         nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
     }
     if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
-        !nyr_pass_stopped)
+        !nyr_pass_stopped) {
+      size_t pre_slp_vec = nyr_count_vec_ops(f);
       nyr_run_pass(f, nyr_slp_vectorize, stats, dump, &ok);
+      if (ok && !nyr_pass_stopped && nyr_count_vec_ops(f) > pre_slp_vec &&
+          nyr_has_loop(f))
+        nyr_run_pass(f, nyr_licm_post_vectorize, stats, dump, &ok);
+    }
     if (ok && !nyr_pass_stopped)
       nyr_run_pass(f, nyr_tbuf_inline, stats, dump, &ok);
     if (ok && !nyr_pass_stopped)
@@ -2202,9 +2246,11 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_overflow_check_elim, nyr_vrp,        nyr_cvp};
       nyr_run_seq(f, mid_after_egraph, 7, stats, dump, &ok);
       static bool (*const chain_fold[])(nyr_func_t *) = {
-          nyr_select_chain_fold, nyr_float_zero_guard_fold, nyr_copy_prop,
-          nyr_const_fold,        nyr_cfg_simplify,          nyr_dce};
-      nyr_run_seq(f, chain_fold, 6, stats, dump, &ok);
+          nyr_peephole,           nyr_select_chain_fold,
+          nyr_float_zero_guard_fold, nyr_copy_prop,
+          nyr_const_fold,         nyr_cfg_simplify,
+          nyr_dce};
+      nyr_run_seq(f, chain_fold, 7, stats, dump, &ok);
     }
     /*
      * Loop-only O3 passes: skip entirely for straight-line functions
@@ -2213,6 +2259,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * A loop with no SSA values has no induction or memory access to optimize.
      */
     if (ok && !nyr_pass_stopped && f->next_value > 0 && nyr_has_loop(f)) {
+      static bool (*const pre_loop_thread[])(nyr_func_t *) = {
+          nyr_jump_thread, nyr_sccp, nyr_cfg_simplify, nyr_dce};
+      nyr_run_seq(f, pre_loop_thread, 4, stats, dump, &ok);
       static bool (*const loop_analysis[])(nyr_func_t *) = {
           nyr_loop_rotate,
           nyr_scev_lite,
@@ -2250,10 +2299,23 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
        * instead of expanding into large scalar unrolled bodies first. Re-run
        * vectorization only if SSA unrolling exposes a new outer candidate.
        */
-      if (ok && !nyr_pass_stopped && f->untagged_values) {
-        static bool (*const c_canon_pre_vec[])(nyr_func_t *) = {
-            nyr_cse, nyr_copy_prop, nyr_dce};
-        nyr_run_seq(f, c_canon_pre_vec, 3, stats, dump, &ok);
+      if (ok && !nyr_pass_stopped) {
+        if (f->untagged_values || f->len <= 1024) {
+          static bool (*const pre_vec_canon[])(nyr_func_t *) = {
+              nyr_cfg_simplify,      nyr_peephole,        nyr_if_convert,
+              nyr_select_chain_fold, nyr_cfg_simplify,    nyr_phiopt,
+              nyr_vrp,               nyr_peephole,        nyr_copy_prop,
+              nyr_strength_reduce,   nyr_vrp,             nyr_cse,
+              nyr_copy_prop,         nyr_dce,             nyr_licm,
+              nyr_compact_if_sparse};
+          nyr_run_seq(f, pre_vec_canon, 16, stats, dump, &ok);
+        } else {
+          static bool (*const pre_vec_canon_nocse[])(nyr_func_t *) = {
+              nyr_cfg_simplify, nyr_peephole,   nyr_if_convert,
+              nyr_select_chain_fold, nyr_cfg_simplify, nyr_copy_prop,
+              nyr_dce,          nyr_compact_if_sparse};
+          nyr_run_seq(f, pre_vec_canon_nocse, 8, stats, dump, &ok);
+        }
       }
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
           !nyr_pass_stopped)
@@ -2265,11 +2327,17 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       size_t pre_unroll_len = f->len;
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_loop_unroll_ssa, stats, dump, &ok);
+      if (ok && !nyr_pass_stopped)
+        nyr_run_pass(f, nyr_loop_unroll_partial, stats, dump, &ok);
       bool unrolled_ssa = f->len != pre_unroll_len;
-      if (ok && unrolled_ssa && !nyr_pass_stopped && f->untagged_values) {
-        static bool (*const c_canon_late[])(nyr_func_t *) = {
-            nyr_cse, nyr_copy_prop, nyr_dce};
-        nyr_run_seq(f, c_canon_late, 3, stats, dump, &ok);
+      if (ok && unrolled_ssa && !nyr_pass_stopped &&
+          (f->untagged_values || f->len <= 1024)) {
+        static bool (*const pre_vec_canon_late[])(nyr_func_t *) = {
+            nyr_peephole,          nyr_if_convert,      nyr_select_chain_fold,
+            nyr_cfg_simplify,      nyr_vrp,             nyr_strength_reduce,
+            nyr_vrp,               nyr_cse,             nyr_copy_prop,
+            nyr_dce,               nyr_compact_if_sparse};
+        nyr_run_seq(f, pre_vec_canon_late, 11, stats, dump, &ok);
       }
       if (ok && unrolled_ssa && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
           !nyr_pass_stopped)
@@ -2311,19 +2379,26 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     /*
      * SLP + scalar cleanup run regardless of loops: SLP vectorizes
-     * straight-line code too.
+     * straight-line code too. Fold freshly unrolled index arithmetic before
+     * RLE/SROA so constant-offset stack/tbuf accesses forward and scalarize.
      */
     if (ok && !nyr_pass_stopped) {
       if (ok && !nyr_pass_stopped) {
-        static bool (*const pre_slp[])(nyr_func_t *) = {nyr_redundant_load_elim,
+        static bool (*const pre_slp[])(nyr_func_t *) = {nyr_const_fold,
+                                                        nyr_copy_prop,
+                                                        nyr_redundant_load_elim,
                                                         nyr_memory_ssa_forward,
+                                                        nyr_mem_dse,
                                                         nyr_tbuf_private_object,
                                                         nyr_tbuf_promote_alloca,
                                                         nyr_sroa_scalar,
                                                         nyr_dead_store_elim,
+                                                        nyr_const_fold,
+                                                        nyr_peephole,
+                                                        nyr_copy_prop,
                                                         nyr_dce,
                                                         nyr_alias_store_sink};
-        nyr_run_seq(f, pre_slp, 8, stats, dump, &ok);
+        nyr_run_seq(f, pre_slp, 14, stats, dump, &ok);
         /*
          * Store-to-load forwarding above can expose constant loop seeds
          * (for example a promoted global counter), which the select-chain
@@ -2336,8 +2411,13 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
       }
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
-          !nyr_pass_stopped)
+          !nyr_pass_stopped) {
+        size_t pre_slp_vec = nyr_count_vec_ops(f);
         nyr_run_pass(f, nyr_slp_vectorize, stats, dump, &ok);
+        if (ok && !nyr_pass_stopped && nyr_count_vec_ops(f) > pre_slp_vec &&
+            nyr_has_loop(f))
+          nyr_run_pass(f, nyr_licm_post_vectorize, stats, dump, &ok);
+      }
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_tbuf_inline, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
@@ -2349,7 +2429,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_pass(f, nyr_icp_profile, stats, dump, &ok);
     if (ok)
       nyr_run_pass(f, nyr_block_layout, stats, dump, &ok);
-    if (ok && f->untagged_values && nyr_has_control_flow(f))
+    if (ok && nyr_has_control_flow(f))
       nyr_run_pass(f, nyr_invert_fallthrough_branches, stats, dump, &ok);
     if (ok) {
       static bool (*const cfg[])(nyr_func_t *) = {

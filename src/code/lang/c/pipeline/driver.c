@@ -1992,10 +1992,16 @@ static int compile_source(int argc, char **argv, int source_arg,
           "loop_unroll,unroll_jam,loop_peel,loop_unswitch,loop_versioning,"
           "loop_predication,softpipe_rewrite,loop_vectorize,slp_vectorize";
       /*
-       * The i386 encoder keeps frame homes across branches. Promoting
-       * source locals here adds PHI edge copies without freeing those homes.
+       * The i386 encoder keeps frame homes across branches. Setup can
+       * promote locals that need no PHI copies, even within branching code.
        */
-      const char *target_disabled = abi == NYC_ABI_I386 ? ",mem2reg" : "";
+      bool setup = abi == NYC_ABI_I386 && driver->code16 &&
+                   nyc_setup_macro_enabled(driver);
+      if (setup)
+        nyr_set_mem2reg_phi_enabled(false);
+      const char *target_disabled = abi == NYC_ABI_I386 && !setup
+                                        ? ",mem2reg"
+                                        : "";
       const char *user = getenv("NYC_DISABLE_PASS");
       size_t bytes = sizeof(disabled) + strlen(target_disabled) +
                      (user ? strlen(user) : 0) + 1;
@@ -2171,9 +2177,15 @@ static int compile_source(int argc, char **argv, int source_arg,
      * objects. Tiny bodies also pay back their call boundary when used more
      * than once. Decide after optimization, so disabled-feature stubs that
      * return a single constant can eliminate their callers' dead paths.
+     * A nontrivial externally visible body survives inlining, so only
+     * local helpers qualify for the one-use size allowance.
      */
     if (ok && driver->optimize_size && !getenv("NYC_DISABLE_SIZE_INLINE")) {
       size_t original_count = inline_callee_count;
+      /* Real-mode calls favor smaller helpers because stack traffic and
+       * wider instruction prefixes make larger clones more expensive. */
+      bool code16 = abi == NYC_ABI_I386 && driver->code16;
+      size_t work_limit = code16 ? 96 : 112;
       for (size_t i = 0; i < unit.count; ++i) {
         const nyr_func_t *callee = &unit.funcs[i];
         bool eligible =
@@ -2181,8 +2193,11 @@ static int compile_source(int argc, char **argv, int source_arg,
             (unit.function_local[i] ||
              (!driver->position_independent && !unit.function_weak[i]));
         size_t work = 0;
+        bool has_asm = false, has_call = false;
         for (size_t k = 0; eligible && k < callee->len; ++k) {
           const nyr_inst_t *in = &callee->data[k];
+          has_asm |= in->op == NYIR_INLINE_ASM;
+          has_call |= in->op == NYIR_CALL;
           switch (in->op) {
           case NYIR_ALLOCA:
             eligible &= in->imm > 0;
@@ -2208,6 +2223,10 @@ static int compile_source(int argc, char **argv, int source_arg,
             break;
           }
         }
+        /* The isolated body contains the register constraints of inline
+         * assembly and ordinary call boundaries in its own frame. */
+        if (code16 && has_asm && has_call)
+          continue;
         size_t call_sites = 0;
         for (size_t caller = 0; caller < unit.count; ++caller)
           for (size_t inst = 0; inst < unit.funcs[caller].len; ++inst) {
@@ -2216,12 +2235,12 @@ static int compile_source(int argc, char **argv, int source_arg,
                 strcmp(call->symbol, unit.names[i]) == 0)
               ++call_sites;
           }
-        eligible &= call_sites == 1 ||
-                    (call_sites > 1 && work <= 1 && callee->len <= 8);
+        eligible &= (call_sites == 1 && unit.function_local[i]) ||
+                    (call_sites > 0 && work <= 1 && callee->len <= 8);
         for (size_t c = 0; c < inline_callee_count; ++c)
           if (inline_callees[c].func == callee)
             eligible = false;
-        if (eligible && work <= 112 && callee->len <= 224)
+        if (eligible && work <= work_limit && callee->len <= 224)
           inline_callees[inline_callee_count++] =
               (nyr_inline_callee_t){.name = unit.names[i], .func = callee};
       }
@@ -2417,7 +2436,8 @@ static int compile_source(int argc, char **argv, int source_arg,
         unlink(i386_path);
       }
     } else if (ok && !driver->assembly_output) {
-      bool raw_file_asm = unit.raw_file_scope_asm != NULL;
+      bool raw_file_asm =
+          unit.raw_file_scope_asm != NULL || unit.has_hidden_references;
       size_t function_alias_base = unit.data_count + unit.variable_alias_count;
       size_t data_count = function_alias_base + unit.alias_count;
       nyr_c_object_data_t *data = !raw_file_asm && data_count
@@ -2566,8 +2586,9 @@ static int compile_source(int argc, char **argv, int source_arg,
                     "nyc: note: %s: emitted through GNU as (object writer "
                     "has no encoding for %s)\n",
                     argv[source_arg],
-                    raw_file_asm ? "file-scope assembly"
-                                 : "an inline-asm form");
+                    unit.has_hidden_references ? "ELF hidden symbol references"
+                    : raw_file_asm              ? "file-scope assembly"
+                                                : "an inline-asm form");
             ok = true;
             err[0] = '\0';
           }
@@ -2647,6 +2668,7 @@ static int compile_source(int argc, char **argv, int source_arg,
     nyr_set_pass_controls(NULL, NULL);
     free(size_disabled_passes);
   }
+  nyr_set_mem2reg_phi_enabled(true);
   free(source);
   return ok ? 0 : 1;
 }

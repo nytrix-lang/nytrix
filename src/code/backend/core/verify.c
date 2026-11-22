@@ -205,6 +205,9 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
     return false;
   unsigned allowed = 0;
   switch (in->op) {
+  case NYIR_ADDR_SYMBOL:
+    allowed = NYIR_INST_F_SYMBOL_NONPREEMPTIBLE;
+    break;
   case NYIR_LOAD_LOCAL:
     allowed = NYIR_INST_F_NARROW32;
     break;
@@ -212,7 +215,8 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
     allowed = NYIR_INST_F_LABEL_ADDRESS_TAKEN;
     break;
   case NYIR_CALL:
-    allowed = NYIR_INST_F_EXTERN | NYIR_INST_F_SRET |
+    allowed = NYIR_INST_F_EXTERN | NYIR_INST_F_SYMBOL_NONPREEMPTIBLE |
+              NYIR_INST_F_SRET |
               NYIR_INST_F_EFFECTS_KNOWN | NYIR_INST_F_NOALIAS |
               NYIR_INST_F_INDIRECT | NYIR_INST_F_VARIADIC |
               NYIR_INST_F_I386_REGPARM_MASK | NYIR_INST_F_I386_C_ABI;
@@ -409,25 +413,43 @@ static bool nir_value_dominates_use(const nyr_func_t *f, const nyr_cfg_t *cfg,
 }
 
 /*
- * A zero-extending load shifted by at least width-1 produces only 0 or 1.
+ * A zero-extended or nonnegative masked value shifted by at least
+ * width-1 produces only 0 or 1.
  */
 static bool nir_select_shift_is_boolean(const nyr_func_t *f,
                                         const nyr_inst_t *shift,
                                         size_t before) {
   int input = shift->a, count = shift->b;
+  int mask_candidates[2] = {-1, -1};
   unsigned width = 0;
   int64_t amount = -1;
   for (size_t i = before; i-- > 0 && (!width || amount < 0);) {
     const nyr_inst_t *def = &f->data[i];
-    if (!width && def->dst == input) {
+    if (!width && input >= 0 && def->dst == input) {
       if (def->op == NYIR_COPY)
         input = def->a;
       else if (def->op == NYIR_LOAD_I64 && (def->flags & NYIR_INST_F_MEM_BYTE))
         width = 8;
       else if (def->op == NYIR_LOAD_I64 && (def->flags & NYIR_INST_F_MEM_U16))
         width = 16;
-      else
+      else if (def->op == NYIR_AND_I64) {
+        mask_candidates[0] = def->a;
+        mask_candidates[1] = def->b;
+        input = -1;
+      } else
         return false;
+    }
+    for (size_t k = 0; !width && k < 2; ++k) {
+      if (mask_candidates[k] < 0 || def->dst != mask_candidates[k])
+        continue;
+      if (def->op == NYIR_COPY)
+        mask_candidates[k] = def->a;
+      else if (def->op == NYIR_CONST_I64 && def->imm >= 0) {
+        for (uint64_t mask = (uint64_t)def->imm; mask > 1; mask >>= 1)
+          ++width;
+        ++width;
+      } else
+        mask_candidates[k] = -1;
     }
     if (amount < 0 && def->dst == count) {
       if (def->op == NYIR_COPY)

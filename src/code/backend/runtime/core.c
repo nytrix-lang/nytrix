@@ -3526,7 +3526,7 @@ static void rt_str_repeat_copy(char *destination, const char *bytes,
     memset(destination, (unsigned char)bytes[0], total_len);
     return;
   }
-  enum { REPEAT_PATTERN_SIZE = 4096 };
+  enum { REPEAT_PATTERN_SIZE = 32768 };
   if (source_len <= REPEAT_PATTERN_SIZE && total_len > REPEAT_PATTERN_SIZE) {
     char pattern[REPEAT_PATTERN_SIZE];
     memcpy(pattern, bytes, source_len);
@@ -4963,13 +4963,11 @@ int64_t rt_dict_get_raw(int64_t value, int64_t key, int64_t fallback) {
       rt_header_readable_cached((uintptr_t)value - RT_NATIVE_TBUF_HEADER,
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)value - RT_NATIVE_TBUF_HEADER);
-    if (rt_tbuf_header_valid(hdr))
-      /*
-       * Native NYIR get calls carry a raw index.  Do not apply the tagged
-       * integer untag here: odd index 1 must remain 1, not become 0.
-       */
-      return rt_tbuf_get_any(value, key,
+    if (rt_tbuf_header_valid(hdr)) {
+      int64_t idx = is_int(key) ? rt_untag_v(key) : key;
+      return rt_tbuf_get_any(value, idx,
                              ny_native_unbox_tbuf_fallback(fallback));
+    }
   }
   /*
    * `any.get` can be conservatively lowered through the dictionary bridge.
@@ -4983,7 +4981,7 @@ int64_t rt_dict_get_raw(int64_t value, int64_t key, int64_t fallback) {
     if (tag == TAG_LIST || tag == TAG_TUPLE) {
       int64_t len_v = *(int64_t *)((char *)(uintptr_t)heap_value + 0);
       int64_t count = is_int(len_v) ? rt_untag_v(len_v) : len_v;
-      int64_t idx = key;
+      int64_t idx = is_int(key) ? rt_untag_v(key) : key;
       if (idx < 0)
         idx += count;
       if (idx < 0 || idx >= count)

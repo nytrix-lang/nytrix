@@ -41,6 +41,7 @@ typedef struct {
   const char *error;
   /* Whitespace before this token ended a backslash-newline continuation. */
   bool continued;
+  bool hidden_visibility;
 } ny_ctok_t;
 
 typedef struct {

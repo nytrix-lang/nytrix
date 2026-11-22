@@ -206,6 +206,172 @@ const char *ny_gencall_attached_owner(const char *type_name) {
   return leaf;
 }
 
+typedef struct ny_attached_method_slot {
+  const char *owner;
+  const char *leaf;
+  size_t sig_idx;
+  uint64_t hash;
+  bool ambiguous;
+} ny_attached_method_slot_t;
+
+static inline uint64_t ny_attached_method_hash(const char *owner,
+                                               const char *leaf) {
+  uint64_t h = UINT64_C(14695981039346656037);
+  for (const unsigned char *p = (const unsigned char *)owner; *p; ++p)
+    h = (h ^ *p) * UINT64_C(1099511628211);
+  h = (h ^ 0xffu) * UINT64_C(1099511628211);
+  for (const unsigned char *p = (const unsigned char *)leaf; *p; ++p)
+    h = (h ^ *p) * UINT64_C(1099511628211);
+  return h ? h : 1u;
+}
+
+static void ny_attached_method_insert(ny_attached_method_slot_t *slots,
+                                      size_t cap, size_t *len_io,
+                                      const char *owner, const char *leaf,
+                                      size_t sig_idx) {
+  uint64_t h = ny_attached_method_hash(owner, leaf);
+  size_t mask = cap - 1u;
+  size_t pos = (size_t)h & mask;
+  for (;;) {
+    ny_attached_method_slot_t *s = &slots[pos];
+    if (!s->hash) {
+      s->owner = owner;
+      s->leaf = leaf;
+      s->sig_idx = sig_idx;
+      s->hash = h;
+      s->ambiguous = false;
+      (*len_io)++;
+      return;
+    }
+    if (s->hash == h && strcmp(s->owner, owner) == 0 &&
+        strcmp(s->leaf, leaf) == 0) {
+      if (s->sig_idx != sig_idx)
+        s->ambiguous = true;
+      return;
+    }
+    pos = (pos + 1u) & mask;
+  }
+}
+
+static bool ny_attached_method_index_sync(codegen_t *cg) {
+  if (!cg)
+    return false;
+  if (cg->fun_sigs.len == 0)
+    return true;
+  if (cg->attached_method_synced > cg->fun_sigs.len) {
+    free(cg->attached_method_slots);
+    cg->attached_method_slots = NULL;
+    cg->attached_method_cap = 0;
+    cg->attached_method_len = 0;
+    cg->attached_method_synced = 0;
+  }
+  if (cg->attached_method_synced == cg->fun_sigs.len &&
+      cg->attached_method_slots)
+    return true;
+  size_t start = cg->attached_method_synced;
+  size_t extra = 0;
+  for (size_t i = start; i < cg->fun_sigs.len; ++i) {
+    const fun_sig *sig = &cg->fun_sigs.data[i];
+    if (sig->is_attached_method && sig->owner_type && sig->name)
+      extra++;
+  }
+  size_t need = cg->attached_method_len + extra;
+  if (!cg->attached_method_slots ||
+      need * 10u >= cg->attached_method_cap * 7u) {
+    size_t cap = cg->attached_method_cap ? cg->attached_method_cap : 256u;
+    while (need * 10u >= cap * 7u)
+      cap <<= 1;
+    ny_attached_method_slot_t *slots = calloc(cap, sizeof(*slots));
+    if (!slots)
+      return false;
+    size_t new_len = 0;
+    for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+      const fun_sig *sig = &cg->fun_sigs.data[i];
+      if (!sig->is_attached_method || !sig->owner_type || !sig->name)
+        continue;
+      const char *sig_owner = ny_gencall_attached_owner(sig->owner_type);
+      if (!sig_owner || !*sig_owner)
+        continue;
+      const char *leaf = strrchr(sig->name, '.');
+      leaf = leaf ? leaf + 1 : sig->name;
+      ny_attached_method_insert(slots, cap, &new_len, sig_owner, leaf, i);
+    }
+    free(cg->attached_method_slots);
+    cg->attached_method_slots = slots;
+    cg->attached_method_cap = cap;
+    cg->attached_method_len = new_len;
+    cg->attached_method_synced = cg->fun_sigs.len;
+    return true;
+  }
+  ny_attached_method_slot_t *slots =
+      (ny_attached_method_slot_t *)cg->attached_method_slots;
+  for (size_t i = start; i < cg->fun_sigs.len; ++i) {
+    const fun_sig *sig = &cg->fun_sigs.data[i];
+    if (!sig->is_attached_method || !sig->owner_type || !sig->name)
+      continue;
+    const char *sig_owner = ny_gencall_attached_owner(sig->owner_type);
+    if (!sig_owner || !*sig_owner)
+      continue;
+    const char *leaf = strrchr(sig->name, '.');
+    leaf = leaf ? leaf + 1 : sig->name;
+    ny_attached_method_insert(slots, cg->attached_method_cap,
+                              &cg->attached_method_len, sig_owner, leaf, i);
+  }
+  cg->attached_method_synced = cg->fun_sigs.len;
+  return true;
+}
+
+static fun_sig *ny_attached_method_fallback_find(codegen_t *cg,
+                                                 const char *owner,
+                                                 const char *method_name,
+                                                 bool *ambiguous_out) {
+  *ambiguous_out = false;
+  if (!cg->fun_sigs.len)
+    return NULL;
+  if (ny_attached_method_index_sync(cg) && cg->attached_method_slots) {
+    const ny_attached_method_slot_t *slots =
+        (const ny_attached_method_slot_t *)cg->attached_method_slots;
+    uint64_t h = ny_attached_method_hash(owner, method_name);
+    size_t mask = cg->attached_method_cap - 1u;
+    size_t pos = (size_t)h & mask;
+    for (;;) {
+      const ny_attached_method_slot_t *s = &slots[pos];
+      if (!s->hash)
+        return NULL;
+      if (s->hash == h && strcmp(s->owner, owner) == 0 &&
+          strcmp(s->leaf, method_name) == 0) {
+        if (s->ambiguous) {
+          *ambiguous_out = true;
+          return NULL;
+        }
+        if (s->sig_idx < cg->fun_sigs.len)
+          return &cg->fun_sigs.data[s->sig_idx];
+        return NULL;
+      }
+      pos = (pos + 1u) & mask;
+    }
+  }
+  fun_sig *match = NULL;
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    fun_sig *sig = &cg->fun_sigs.data[i];
+    if (!sig->is_attached_method || !sig->owner_type || !sig->name)
+      continue;
+    const char *sig_owner = ny_gencall_attached_owner(sig->owner_type);
+    if (!sig_owner || strcmp(sig_owner, owner) != 0)
+      continue;
+    const char *leaf = strrchr(sig->name, '.');
+    leaf = leaf ? leaf + 1 : sig->name;
+    if (strcmp(leaf, method_name) != 0)
+      continue;
+    if (match && match != sig) {
+      *ambiguous_out = true;
+      return NULL;
+    }
+    match = sig;
+  }
+  return match;
+}
+
 static fun_sig *ny_gencall_lookup_attached_method_candidate(codegen_t *cg,
                                                             const char *name) {
   fun_sig *sig = lookup_fun(cg, name, 0);
@@ -311,23 +477,11 @@ fun_sig *ny_gencall_lookup_attached_method(codegen_t *cg, const char *type_name,
    * be in either use list. Resolve that fallback by its recorded nominal
    * owner and method leaf, and reject ambiguity instead of using table order.
    */
-  fun_sig *match = NULL;
-  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-    fun_sig *sig = &cg->fun_sigs.data[i];
-    const char *sig_owner =
-        sig->owner_type ? ny_gencall_attached_owner(sig->owner_type) : NULL;
-    if (!sig->is_attached_method || !sig->owner_type || !sig->name ||
-        !sig_owner || strcmp(sig_owner, owner) != 0 ||
-        !ny_sig_in_current_sigs(cg, sig))
-      continue;
-    const char *leaf = strrchr(sig->name, '.');
-    leaf = leaf ? leaf + 1 : sig->name;
-    if (strcmp(leaf, method_name) != 0)
-      continue;
-    if (match && match != sig)
-      return NULL;
-    match = sig;
-  }
+  bool ambiguous = false;
+  fun_sig *match =
+      ny_attached_method_fallback_find(cg, owner, method_name, &ambiguous);
+  if (ambiguous)
+    return NULL;
   if (match)
     return match;
   char core_builtin[512];

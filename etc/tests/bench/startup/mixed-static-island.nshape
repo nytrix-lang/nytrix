@@ -12,18 +12,18 @@ use core.os.time
 ;; remain concrete integers; this catches representation contamination.
 fn identity(any value) any { value }
 
-def N = 10000
+def int N = 20000 + (argc() & 1)
 mut int i = 0
-mut int sum = 0
+mut int sum = 1
 mut any dynamic = identity(7)
 def int t0 = ticks()
 while i < N {
-   sum += i
+   sum = ((sum ^ i) * 3 + 1) & 1073741823
    if i == N / 2 { dynamic = identity(dynamic) }
    i += 1
 }
 def int t1 = ticks()
-print("checksum=", sum)
+print("checksum=", sum + dynamic)
 print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
@@ -37,17 +37,18 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-int main(void) {
-    const long n = 10000;
-    long dynamic = 7;
-    long sum = 0;
+int main(int argc, char **argv) {
+    (void)argv;
+    const int64_t n = 20000 + (argc & 1);
+    int64_t dynamic = 7;
+    int64_t sum = 1;
     int64_t start = now_ns();
-    for (long i = 0; i < n; ++i) {
-        sum += i;
+    for (int64_t i = 0; i < n; ++i) {
+        sum = ((sum ^ i) * 3 + 1) & 1073741823;
         if (i == n / 2) dynamic = dynamic;
     }
-    printf("checksum=%ld\n", sum);
     int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)(sum + dynamic));
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));
     return 0;

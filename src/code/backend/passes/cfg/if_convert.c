@@ -249,6 +249,7 @@ static bool ifc_safe_arm_op(const nyr_inst_t *in) {
   case NYIR_BSWAP_I64:
   case NYIR_BSWAP32_I64:
   case NYIR_CMP_I64:
+  case NYIR_SELECT_I64:
     return true;
   default:
     return false;
@@ -279,7 +280,11 @@ static bool ifc_arm_operands_available(const nyr_cfg_t *cfg, const int *defs,
     return false;
   if (in->op == NYIR_COPY || in->op == NYIR_STORE_LOCAL)
     return true;
-  return ifc_value_available(cfg, defs, arm, header, header_branch, in->b);
+  if (!ifc_value_available(cfg, defs, arm, header, header_branch, in->b))
+    return false;
+  if (in->op == NYIR_SELECT_I64)
+    return ifc_value_available(cfg, defs, arm, header, header_branch, in->c);
+  return true;
 }
 
 static bool ifc_local_load_is_initialized(const nyr_func_t *f,
@@ -466,7 +471,7 @@ static bool ifc_arm_defines(const nyr_func_t *f, const ifc_arm_t *arm,
   return false;
 }
 
-static bool ifc_rewrite(nyr_func_t *f, size_t branch,
+static bool ifc_rewrite(nyr_func_t *f, size_t branch, size_t trailing_br,
                         const ifc_arm_t *false_arm, const ifc_arm_t *true_arm,
                         const ifc_phi_pair_t *phis, size_t phi_count,
                         const ifc_store_pair_t *store_pairs,
@@ -586,16 +591,29 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
                                     .f = -1,
                                     .imm = join_label,
                                     .debug = old_branch.debug};
-  for (size_t i = 0; i < false_arm->count; ++i)
-    (void)nyr_erase_instruction(f, false_arm->insts[i] + delta);
-  for (size_t i = 0; i < true_arm->count; ++i)
-    (void)nyr_erase_instruction(f, true_arm->insts[i] + delta);
-  if (false_arm->branch != SIZE_MAX)
-    (void)nyr_erase_instruction(f, false_arm->branch + delta);
-  if (true_arm->branch != SIZE_MAX)
-    (void)nyr_erase_instruction(f, true_arm->branch + delta);
-  for (size_t i = 0; i < phi_count; ++i)
-    (void)nyr_erase_instruction(f, phis[i].phi_index + delta);
+  if (trailing_br != SIZE_MAX)
+    (void)nyr_erase_instruction(f, trailing_br + delta);
+  for (size_t i = 0; i < false_arm->count; ++i) {
+    size_t idx = false_arm->insts[i];
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  for (size_t i = 0; i < true_arm->count; ++i) {
+    size_t idx = true_arm->insts[i];
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  if (false_arm->branch != SIZE_MAX) {
+    size_t idx = false_arm->branch;
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  if (true_arm->branch != SIZE_MAX) {
+    size_t idx = true_arm->branch;
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  for (size_t i = 0; i < phi_count; ++i) {
+    size_t pidx = phis[i].phi_index > branch ? phis[i].phi_index + delta
+                                             : phis[i].phi_index;
+    (void)nyr_erase_instruction(f, pidx);
+  }
   nyr_refresh_metadata(f);
   return true;
 }
@@ -616,6 +634,7 @@ static bool ifc_block_has_phi(const nyr_func_t *f, const nyr_cfg_t *cfg,
  * as the PHI form, then select the stored value and keep one store.
  */
 static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
+                                   size_t trailing_br,
                                    const ifc_arm_t *false_arm,
                                    const ifc_arm_t *true_arm,
                                    const ifc_store_pair_t *store_pairs,
@@ -710,14 +729,24 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
                              .f = -1,
                              .imm = join_label,
                              .debug = old_branch.debug};
-  for (size_t i = 0; i < false_arm->count; ++i)
-    (void)nyr_erase_instruction(f, false_arm->insts[i] + delta);
-  for (size_t i = 0; i < true_arm->count; ++i)
-    (void)nyr_erase_instruction(f, true_arm->insts[i] + delta);
-  if (false_arm->branch != SIZE_MAX)
-    (void)nyr_erase_instruction(f, false_arm->branch + delta);
-  if (true_arm->branch != SIZE_MAX)
-    (void)nyr_erase_instruction(f, true_arm->branch + delta);
+  if (trailing_br != SIZE_MAX)
+    (void)nyr_erase_instruction(f, trailing_br + delta);
+  for (size_t i = 0; i < false_arm->count; ++i) {
+    size_t idx = false_arm->insts[i];
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  for (size_t i = 0; i < true_arm->count; ++i) {
+    size_t idx = true_arm->insts[i];
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  if (false_arm->branch != SIZE_MAX) {
+    size_t idx = false_arm->branch;
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
+  if (true_arm->branch != SIZE_MAX) {
+    size_t idx = true_arm->branch;
+    (void)nyr_erase_instruction(f, idx > branch ? idx + delta : idx);
+  }
   nyr_refresh_metadata(f);
   return true;
 }
@@ -739,7 +768,7 @@ static bool ifc_value_raw_visited(const nyr_func_t *f, const int *defs, int v,
   for (unsigned k = 0; k < depth; ++k)
     if (visited[k] == v)
       return true;
-  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 || depth >= 16)
+  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 || depth >= 64)
     return false;
   const nyr_inst_t *def = &f->data[(size_t)defs[v]];
   if (def->scalar_class == NYIR_SCALAR_I64_RAW)
@@ -755,6 +784,9 @@ static bool ifc_value_raw_visited(const nyr_func_t *f, const int *defs, int v,
   visited[depth] = v;
   if (def->op == NYIR_COPY)
     return ifc_value_raw_visited(f, defs, def->a, root, visited, depth + 1);
+  if (def->op == NYIR_SELECT_I64)
+    return ifc_value_raw_visited(f, defs, def->b, root, visited, depth + 1) &&
+           ifc_value_raw_visited(f, defs, def->c, root, visited, depth + 1);
   if (def->op != NYIR_PHI || !def->phi_incoming || !def->phi_incoming_len)
     return false;
   for (size_t k = 0; k < def->phi_incoming_len; ++k) {
@@ -768,13 +800,83 @@ static bool ifc_value_raw_visited(const nyr_func_t *f, const int *defs, int v,
 
 static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v, int root,
                           unsigned depth) {
-  int visited[16];
+  int visited[64];
   (void)depth;
   return ifc_value_raw_visited(f, defs, v, root, visited, 0);
 }
 
 static bool ifc_block_has_phi(const nyr_func_t *f, const nyr_cfg_t *cfg,
                               size_t block);
+
+static size_t ifc_resolve_empty_bridges_pred(const nyr_func_t *f,
+                                             const nyr_cfg_t *cfg,
+                                             size_t prev_block, size_t block,
+                                             size_t *out_pred) {
+  size_t pred = prev_block;
+  for (size_t hops = 0;
+       f && cfg && block < cfg->block_count && hops < cfg->block_count;
+       ++hops) {
+    if (cfg->succ_offsets[block + 1] - cfg->succ_offsets[block] != 1)
+      break;
+    size_t branch = SIZE_MAX;
+    bool empty = true;
+    for (size_t i = cfg->block_start[block]; i < cfg->block_end[block]; ++i) {
+      nyr_op_t op = f->data[i].op;
+      if (op == NYIR_LABEL || op == NYIR_NOP)
+        continue;
+      if (op == NYIR_BR && branch == SIZE_MAX)
+        branch = i;
+      else
+        empty = false;
+    }
+    if (!empty || branch == SIZE_MAX)
+      break;
+    size_t succ = cfg->succ_blocks[cfg->succ_offsets[block]];
+    if (succ == block)
+      break;
+    pred = block;
+    block = succ;
+  }
+  if (out_pred)
+    *out_pred = pred;
+  return block;
+}
+
+static bool ifc_phi_edges_agree(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                size_t join, size_t pred_a, size_t pred_b) {
+  if (!ifc_block_has_phi(f, cfg, join))
+    return true;
+  if (pred_a == pred_b)
+    return true;
+  if (pred_a >= cfg->block_count || pred_b >= cfg->block_count)
+    return false;
+  int64_t lbl_a = cfg->block_label[pred_a];
+  int64_t lbl_b = cfg->block_label[pred_b];
+  if (lbl_a < 0 || lbl_b < 0)
+    return false;
+  for (size_t i = cfg->block_start[join]; i < cfg->block_end[join]; ++i) {
+    const nyr_inst_t *phi = &f->data[i];
+    if (phi->op != NYIR_PHI)
+      continue;
+    if (!phi->phi_incoming)
+      return false;
+    int val_a = -1, val_b = -1;
+    bool seen_a = false, seen_b = false;
+    for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+      if (phi->phi_incoming[k].predecessor_label == lbl_a) {
+        val_a = phi->phi_incoming[k].value;
+        seen_a = true;
+      }
+      if (phi->phi_incoming[k].predecessor_label == lbl_b) {
+        val_b = phi->phi_incoming[k].value;
+        seen_b = true;
+      }
+    }
+    if (!seen_a || !seen_b || val_a != val_b)
+      return false;
+  }
+  return true;
+}
 
 /*
  * Flatten short-circuit boolean conjunctions (`if (c1 && c2)`) and
@@ -826,20 +928,6 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
     int64_t b2_label = cfg->block_label[b2];
     if (b2_label < 0 && ifc_block_has_phi(f, cfg, common))
       continue;
-    /* Ensure no PHI anywhere references b2_label. */
-    if (b2_label >= 0) {
-      bool phi_ref = false;
-      for (size_t k = 0; k < f->len && !phi_ref; ++k) {
-        const nyr_inst_t *ki = &f->data[k];
-        if (ki->op != NYIR_PHI || !ki->phi_incoming)
-          continue;
-        for (size_t pi = 0; pi < ki->phi_incoming_len; ++pi)
-          if (ki->phi_incoming[pi].predecessor_label == b2_label)
-            phi_ref = true;
-      }
-      if (phi_ref)
-        continue;
-    }
     /* Parse b2: LABEL, <= 8 pure non-local ops, BR_IF c2 -> t2, optional BR. */
     size_t b2_start = cfg->block_start[b2];
     size_t b2_end = cfg->block_end[b2];
@@ -888,16 +976,54 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
     if (t2 >= cfg->block_count || f2 >= cfg->block_count || t2 == f2)
       continue;
     /* Resolve empty jump-only bridges (e.g. unlabeled `BR L49` after BR_IF). */
-    size_t r_common = ifc_resolve_empty_bridges(f, cfg, common);
-    size_t r_f2 = ifc_resolve_empty_bridges(f, cfg, f2);
-    size_t r_t2 = ifc_resolve_empty_bridges(f, cfg, t2);
-    /* Check shared target matches AND or OR pattern. */
+    size_t common_pred = header, f2_pred = b2, t2_pred = b2;
+    size_t r_common =
+        ifc_resolve_empty_bridges_pred(f, cfg, header, common, &common_pred);
+    size_t r_f2 = ifc_resolve_empty_bridges_pred(f, cfg, b2, f2, &f2_pred);
+    size_t r_t2 = ifc_resolve_empty_bridges_pred(f, cfg, b2, t2, &t2_pred);
+    /* Check shared target matches AND, OR, or inverted-c1 AND (!c1 && c2). */
+    bool inv_and = false;
     if (!is_or && r_f2 != r_common)
       continue;
-    if (is_or && r_t2 != r_common)
+    if (is_or && r_t2 != r_common) {
+      if (r_f2 == r_common)
+        inv_and = true;
+      else
+        continue;
+    }
+    /*
+     * Deleting b2 funnels the bypassed path (`c1 && !c2` for AND, `!c1 && c2`
+     * for OR, `!c1 && !c2` for inverted-c1 AND) through `common -> r_common`.
+     * Allow PHIs on `r_common` ONLY when `common`'s edge and b2's bypassed
+     * edge supply identical values to every PHI on `r_common` (e.g. `if a { if
+     * b { hits += 1 } }` where both miss paths carry `hits`, while rejecting
+     * distinct values like `spectral` or `statemate`). When `common` IS
+     * `r_common` and has PHIs, also allow direct `b2 -> r_common` edges by
+     * removing `b2_label` from `r_common`'s PHIs.
+     */
+    size_t b2_common_pred = (is_or && !inv_and) ? t2_pred : f2_pred;
+    if (ifc_block_has_phi(f, cfg, common) ||
+        !ifc_phi_edges_agree(f, cfg, r_common, common_pred, b2_common_pred))
       continue;
-    size_t new_true = is_or ? common : t2;
-    size_t new_false = is_or ? f2 : common;
+    /* Ensure no PHI anywhere references b2_label. */
+    if (b2_label >= 0) {
+      bool phi_ref = false;
+      for (size_t k = 0; k < f->len && !phi_ref; ++k) {
+        const nyr_inst_t *ki = &f->data[k];
+        if (ki->op != NYIR_PHI || !ki->phi_incoming)
+          continue;
+        for (size_t pi = 0; pi < ki->phi_incoming_len; ++pi)
+          if (ki->phi_incoming[pi].predecessor_label == b2_label)
+            phi_ref = true;
+      }
+      if (phi_ref)
+        continue;
+    }
+    size_t new_true = (is_or && !inv_and) ? common : t2;
+    size_t new_false = (is_or && !inv_and) ? f2 : common;
+    if (b2_label < 0 && (ifc_block_has_phi(f, cfg, new_true) ||
+                         ifc_block_has_phi(f, cfg, new_false)))
+      continue;
     int64_t new_true_label = cfg->block_label[new_true];
     int64_t new_false_label = cfg->block_label[new_false];
     if (new_true_label < 0 || (is_or && new_false_label < 0))
@@ -906,32 +1032,65 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
      * For AND: header's fallthrough edge already goes to `common` (whose
      * bridge resolves to r_common), so we leave header's fallthrough intact
      * and only update header's BR_IF condition & target!
-     * For OR: header fell through to b2 (which we are deleting), so we emit
-     * an explicit BR new_false_label right after header's BR_IF.
+     * For OR / inv_and: header fell through to b2 (which we are deleting), so
+     * we emit an explicit BR new_false_label right after header's BR_IF.
      */
     bool need_trail_br = is_or && (h_trail_br == SIZE_MAX);
-    size_t extra = pure_count + 1u + (need_trail_br ? 1u : 0u);
+    size_t pre_extra = pure_count + (inv_and ? 3u : 1u);
+    size_t extra = pre_extra + (need_trail_br ? 1u : 0u);
     nyr_inst_t moved[8];
     for (size_t k = 0; k < pure_count; ++k)
       moved[k] = f->data[pure_idx[k]];
-    /* Make space before `branch` (and after `branch` if adding trail BR). */
-    size_t pre_extra = pure_count + 1u;
     if (!nir_ensure_inst_space(f, extra))
       return false;
     /* Discard b2 instructions BEFORE shifting indices! */
     for (size_t pc = b2_start; pc < b2_end; ++pc)
       nyr_inst_discard(&f->data[pc]);
-    /* Insert pure_count + 1 instructions right before `branch`. */
+    /* Insert pure_count + combine instructions right before `branch`. */
     memmove(&f->data[branch + pre_extra], &f->data[branch],
             (f->len - branch) * sizeof(*f->data));
     f->len += pre_extra;
     for (size_t k = 0; k < pure_count; ++k)
       f->data[branch + k] = moved[k];
+    size_t ins = branch + pure_count;
+    int lhs_c = c1;
+    if (inv_and) {
+      int one_v = f->next_value++;
+      int not_v = f->next_value++;
+      f->data[ins] = (nyr_inst_t){
+          .op = NYIR_CONST_I64,
+          .dst = one_v,
+          .a = -1,
+          .b = -1,
+          .c = -1,
+          .d = -1,
+          .e = -1,
+          .f = -1,
+          .imm = 1,
+          .scalar_class = NYIR_SCALAR_I64_RAW,
+      };
+      f->data[ins].effects = nyr_inst_effects(&f->data[ins]);
+      ++ins;
+      f->data[ins] = (nyr_inst_t){
+          .op = NYIR_XOR_I64,
+          .dst = not_v,
+          .a = c1,
+          .b = one_v,
+          .c = -1,
+          .d = -1,
+          .e = -1,
+          .f = -1,
+          .scalar_class = NYIR_SCALAR_I64_RAW,
+      };
+      f->data[ins].effects = nyr_inst_effects(&f->data[ins]);
+      ++ins;
+      lhs_c = not_v;
+    }
     int comb = f->next_value++;
-    f->data[branch + pure_count] = (nyr_inst_t){
-        .op = is_or ? NYIR_OR_I64 : NYIR_AND_I64,
+    f->data[ins] = (nyr_inst_t){
+        .op = (is_or && !inv_and) ? NYIR_OR_I64 : NYIR_AND_I64,
         .dst = comb,
-        .a = c1,
+        .a = lhs_c,
         .b = c2,
         .c = -1,
         .d = -1,
@@ -939,8 +1098,7 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
         .f = -1,
         .scalar_class = NYIR_SCALAR_I64_RAW,
     };
-    f->data[branch + pure_count].effects =
-        nyr_inst_effects(&f->data[branch + pure_count]);
+    f->data[ins].effects = nyr_inst_effects(&f->data[ins]);
     size_t new_br_if = branch + pre_extra;
     f->data[new_br_if].a = comb;
     f->data[new_br_if].imm = new_true_label;
@@ -970,6 +1128,212 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
   return false;
 }
 
+static bool ifc_eval_flag_cmp(nyr_cmp_t op, int64_t a, int64_t b) {
+  switch (op) {
+  case NYIR_CMP_EQ:
+    return a == b;
+  case NYIR_CMP_NE:
+    return a != b;
+  case NYIR_CMP_LT:
+    return a < b;
+  case NYIR_CMP_LE:
+    return a <= b;
+  case NYIR_CMP_GT:
+    return a > b;
+  case NYIR_CMP_GE:
+    return a >= b;
+  default:
+    return false;
+  }
+}
+
+/*
+ * Avoid if-converting a diamond whose join PHI directly supplies a loop
+ * header's exit-flag PHI with one constant loop-terminating value and one
+ * continuing value (e.g. `while go == 1 { if ... { ... } else { go = 0 } }`).
+ */
+static bool ifc_and_leaf_sets_exit_flag(const nyr_func_t *f,
+                                        const nyr_cfg_t *cfg, const int *defs,
+                                        size_t header, int64_t prev_lbl,
+                                        int cond_v, const ifc_phi_pair_t *phis,
+                                        const int *tracked_vals,
+                                        size_t phi_count, unsigned depth) {
+  if (depth > 8 || cond_v < 0 || cond_v >= f->next_value || defs[cond_v] < 0)
+    return false;
+  const nyr_inst_t *cinst = &f->data[(size_t)defs[cond_v]];
+  if (cinst->op == NYIR_COPY)
+    return ifc_and_leaf_sets_exit_flag(f, cfg, defs, header, prev_lbl, cinst->a,
+                                       phis, tracked_vals, phi_count,
+                                       depth + 1);
+  if (cinst->op == NYIR_AND_I64)
+    return ifc_and_leaf_sets_exit_flag(f, cfg, defs, header, prev_lbl, cinst->a,
+                                       phis, tracked_vals, phi_count,
+                                       depth + 1) ||
+           ifc_and_leaf_sets_exit_flag(f, cfg, defs, header, prev_lbl, cinst->b,
+                                       phis, tracked_vals, phi_count,
+                                       depth + 1);
+  int flag_v = cond_v;
+  bool has_cmp = false;
+  bool phi_on_right = false;
+  nyr_cmp_t cmp_op = NYIR_CMP_NE;
+  int64_t cmp_rhs = 0;
+  if (cinst->op == NYIR_CMP_I64 && cinst->a >= 0 && cinst->a < f->next_value &&
+      cinst->b >= 0 && cinst->b < f->next_value) {
+    int ca = cinst->a, cb = cinst->b;
+    for (unsigned d = 0;
+         d < 8 && ca >= 0 && ca < f->next_value && defs[ca] >= 0 &&
+         f->data[(size_t)defs[ca]].op == NYIR_COPY;
+         ++d)
+      ca = f->data[(size_t)defs[ca]].a;
+    for (unsigned d = 0;
+         d < 8 && cb >= 0 && cb < f->next_value && defs[cb] >= 0 &&
+         f->data[(size_t)defs[cb]].op == NYIR_COPY;
+         ++d)
+      cb = f->data[(size_t)defs[cb]].a;
+    if (cinst->cmp == NYIR_CMP_NE && cb >= 0 && cb < f->next_value &&
+        defs[cb] >= 0 && f->data[(size_t)defs[cb]].op == NYIR_CONST_I64 &&
+        f->data[(size_t)defs[cb]].imm == 0 && ca >= 0 && ca < f->next_value &&
+        defs[ca] >= 0 &&
+        (f->data[(size_t)defs[ca]].op == NYIR_CMP_I64 ||
+         f->data[(size_t)defs[ca]].op == NYIR_AND_I64))
+      return ifc_and_leaf_sets_exit_flag(f, cfg, defs, header, prev_lbl, ca,
+                                         phis, tracked_vals, phi_count,
+                                         depth + 1);
+    if (cinst->cmp == NYIR_CMP_NE && ca >= 0 && ca < f->next_value &&
+        defs[ca] >= 0 && f->data[(size_t)defs[ca]].op == NYIR_CONST_I64 &&
+        f->data[(size_t)defs[ca]].imm == 0 && cb >= 0 && cb < f->next_value &&
+        defs[cb] >= 0 &&
+        (f->data[(size_t)defs[cb]].op == NYIR_CMP_I64 ||
+         f->data[(size_t)defs[cb]].op == NYIR_AND_I64))
+      return ifc_and_leaf_sets_exit_flag(f, cfg, defs, header, prev_lbl, cb,
+                                         phis, tracked_vals, phi_count,
+                                         depth + 1);
+    if (cb >= 0 && cb < f->next_value && defs[cb] >= 0 &&
+        f->data[(size_t)defs[cb]].op == NYIR_CONST_I64) {
+      flag_v = ca;
+      cmp_op = cinst->cmp;
+      cmp_rhs = f->data[(size_t)defs[cb]].imm;
+      has_cmp = true;
+    } else if (ca >= 0 && ca < f->next_value && defs[ca] >= 0 &&
+               f->data[(size_t)defs[ca]].op == NYIR_CONST_I64) {
+      flag_v = cb;
+      cmp_op = cinst->cmp;
+      cmp_rhs = f->data[(size_t)defs[ca]].imm;
+      has_cmp = true;
+      phi_on_right = true;
+    }
+  }
+  for (unsigned d = 0;
+       d < 8 && flag_v >= 0 && flag_v < f->next_value && defs[flag_v] >= 0 &&
+       f->data[(size_t)defs[flag_v]].op == NYIR_COPY;
+       ++d)
+    flag_v = f->data[(size_t)defs[flag_v]].a;
+  if (flag_v < 0 || flag_v >= f->next_value || defs[flag_v] < 0)
+    return false;
+  const nyr_inst_t *hphi = &f->data[(size_t)defs[flag_v]];
+  if (hphi->op != NYIR_PHI || cfg->inst_block[(size_t)defs[flag_v]] != header)
+    return false;
+  int incoming_v = -1;
+  for (size_t k = 0; k < hphi->phi_incoming_len; ++k) {
+    if (hphi->phi_incoming[k].predecessor_label == prev_lbl) {
+      incoming_v = hphi->phi_incoming[k].value;
+      break;
+    }
+  }
+  if (incoming_v < 0)
+    return false;
+  for (size_t i = 0; i < phi_count; ++i) {
+    if (tracked_vals[i] != incoming_v)
+      continue;
+    int vals[2] = {phis[i].false_value, phis[i].true_value};
+    bool has_const_exit = false, has_non_exit = false;
+    for (int side = 0; side < 2; ++side) {
+      int v = vals[side];
+      if (v >= 0 && v < f->next_value && defs[v] >= 0 &&
+          f->data[(size_t)defs[v]].op == NYIR_CONST_I64) {
+        int64_t c = f->data[(size_t)defs[v]].imm;
+        bool taken = has_cmp
+                         ? (phi_on_right ? ifc_eval_flag_cmp(cmp_op, cmp_rhs, c)
+                                         : ifc_eval_flag_cmp(cmp_op, c, cmp_rhs))
+                         : (c != 0);
+        if (!taken)
+          has_const_exit = true;
+        else
+          has_non_exit = true;
+      } else {
+        has_non_exit = true;
+      }
+    }
+    if (has_const_exit && has_non_exit)
+      return true;
+  }
+  return false;
+}
+
+static bool ifc_sets_loop_exit_flag(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                    const int *defs, size_t join,
+                                    const ifc_phi_pair_t *phis,
+                                    size_t phi_count) {
+  if (!f || !cfg || !defs || !phis || phi_count == 0 || phi_count > 8 ||
+      join >= cfg->block_count)
+    return false;
+  int tracked[8];
+  for (size_t i = 0; i < phi_count; ++i)
+    tracked[i] = f->data[phis[i].phi_index].dst;
+  size_t cur = join;
+  size_t prev = SIZE_MAX;
+  size_t header = SIZE_MAX;
+  for (int hops = 0; hops < 6; ++hops) {
+    size_t s0 = cfg->succ_offsets[cur], s1 = cfg->succ_offsets[cur + 1];
+    if (s1 - s0 != 1)
+      return false;
+    size_t next = cfg->succ_blocks[s0];
+    if (next <= cur) {
+      prev = cur;
+      header = next;
+      break;
+    }
+    /* Follow tracked PHI results across intermediate merge blocks. */
+    int64_t cur_lbl = cfg->block_label[cur];
+    if (cur_lbl >= 0) {
+      for (size_t pi = cfg->block_start[next]; pi < cfg->block_end[next];
+           ++pi) {
+        const nyr_inst_t *nphi = &f->data[pi];
+        if (nphi->op != NYIR_PHI || nphi->dst < 0)
+          continue;
+        for (size_t k = 0; k < nphi->phi_incoming_len; ++k) {
+          if (nphi->phi_incoming[k].predecessor_label != cur_lbl)
+            continue;
+          for (size_t i = 0; i < phi_count; ++i) {
+            if (tracked[i] == nphi->phi_incoming[k].value)
+              tracked[i] = nphi->dst;
+          }
+        }
+      }
+    }
+    cur = next;
+  }
+  if (header == SIZE_MAX || prev == SIZE_MAX || header >= cfg->block_count)
+    return false;
+  size_t hend = cfg->block_end[header];
+  while (hend > cfg->block_start[header] && f->data[hend - 1].op == NYIR_NOP)
+    --hend;
+  if (hend > cfg->block_start[header] && f->data[hend - 1].op == NYIR_BR) {
+    size_t prev_end = hend - 1;
+    while (prev_end > cfg->block_start[header] &&
+           f->data[prev_end - 1].op == NYIR_NOP)
+      --prev_end;
+    if (prev_end > cfg->block_start[header] &&
+        f->data[prev_end - 1].op == NYIR_BR_IF)
+      hend = prev_end;
+  }
+  if (hend == cfg->block_start[header] || f->data[hend - 1].op != NYIR_BR_IF)
+    return false;
+  return ifc_and_leaf_sets_exit_flag(f, cfg, defs, header, cfg->block_label[prev],
+                                     f->data[hend - 1].a, phis, tracked,
+                                     phi_count, 0);
+}
+
 bool nyr_if_convert(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -993,6 +1357,18 @@ bool nyr_if_convert(nyr_func_t *f) {
         continue;
       if (end == cfg.block_start[header])
         continue;
+      size_t trailing_br = SIZE_MAX;
+      if (f->data[end - 1].op == NYIR_BR) {
+        size_t prev_end = end - 1;
+        while (prev_end > cfg.block_start[header] &&
+               f->data[prev_end - 1].op == NYIR_NOP)
+          --prev_end;
+        if (prev_end > cfg.block_start[header] &&
+            f->data[prev_end - 1].op == NYIR_BR_IF) {
+          trailing_br = end - 1;
+          end = prev_end;
+        }
+      }
       if (f->data[end - 1].op != NYIR_BR_IF)
         continue;
       if (cfg.succ_offsets[header + 1] - cfg.succ_offsets[header] != 2)
@@ -1155,6 +1531,9 @@ bool nyr_if_convert(nyr_func_t *f) {
                         !ifc_block_has_phi(f, &cfg, join);
       if (!have_phi && !store_only)
         continue;
+      if (have_phi &&
+          ifc_sets_loop_exit_flag(f, &cfg, defs, join, phis, phi_count))
+        continue;
       size_t cost = ifc_arm_cost(f, &false_arm) + ifc_arm_cost(f, &true_arm);
       size_t budget =
           cost > 4 && ifc_diamond_is_in_loop(&cfg, header, false_block,
@@ -1165,13 +1544,13 @@ bool nyr_if_convert(nyr_func_t *f) {
         continue;
       bool rewritten = false;
       if (have_phi) {
-        rewritten = ifc_rewrite(f, branch, &false_arm, &true_arm, phis,
-                                phi_count, store_pairs, store_pair_count,
+        rewritten = ifc_rewrite(f, branch, trailing_br, &false_arm, &true_arm,
+                                phis, phi_count, store_pairs, store_pair_count,
                                 join_label, !condition_is_boolean);
       } else {
-        rewritten = ifc_rewrite_store_only(f, branch, &false_arm, &true_arm,
-                                           store_pairs, store_pair_count,
-                                           join_label, !condition_is_boolean);
+        rewritten = ifc_rewrite_store_only(
+            f, branch, trailing_br, &false_arm, &true_arm, store_pairs,
+            store_pair_count, join_label, !condition_is_boolean);
       }
       if (!rewritten) {
         free(defs);

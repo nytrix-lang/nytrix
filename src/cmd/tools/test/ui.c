@@ -178,15 +178,15 @@ static pid_t child_start(const char *compiler, const char *app,
   char project[PATH_MAX];
   snprintf(project, sizeof(project), "%s/etc/labs/%s.ny", root, app);
   int width = (!strcmp(app, "engine") || !strcmp(app, "synth")) ? 32
-              : (!strcmp(app, "editor") || !strcmp(app, "input") ||
-                 !strcmp(app, "monitor"))
-                  ? 160
-                  : 320;
+              : !strcmp(app, "input")                           ? 64
+              : !strcmp(app, "term")                            ? 128
+              : (!strcmp(app, "editor") || !strcmp(app, "monitor")) ? 160
+                                                                : 320;
   int height = (!strcmp(app, "engine") || !strcmp(app, "synth")) ? 24
-               : (!strcmp(app, "editor") || !strcmp(app, "input") ||
-                  !strcmp(app, "monitor"))
-                   ? 120
-                   : 240;
+               : !strcmp(app, "input")                           ? 48
+               : !strcmp(app, "term")                            ? 96
+               : (!strcmp(app, "editor") || !strcmp(app, "monitor")) ? 120
+                                                                 : 240;
   replay_env(app, width, height);
   char *args[16];
   int n = 0;
@@ -358,15 +358,15 @@ static int validate_log(const char *app, const char *route, const char *path,
   int frames = 0, states = 0, events = 0, engine_states = 0, engine_actions = 0;
   int animation_states = 0;
   int width = (!strcmp(app, "engine") || !strcmp(app, "synth")) ? 32
-              : (!strcmp(app, "editor") || !strcmp(app, "input") ||
-                 !strcmp(app, "monitor"))
-                  ? 160
-                  : 320;
+              : !strcmp(app, "input")                           ? 64
+              : !strcmp(app, "term")                            ? 128
+              : (!strcmp(app, "editor") || !strcmp(app, "monitor")) ? 160
+                                                                : 320;
   int height = (!strcmp(app, "engine") || !strcmp(app, "synth")) ? 24
-               : (!strcmp(app, "editor") || !strcmp(app, "input") ||
-                  !strcmp(app, "monitor"))
-                   ? 120
-                   : 240;
+               : !strcmp(app, "input")                           ? 48
+               : !strcmp(app, "term")                            ? 96
+               : (!strcmp(app, "editor") || !strcmp(app, "monitor")) ? 120
+                                                                 : 240;
   size_t used = 0, cap = 0;
   while (line) {
     if (has_prefix(line, "NYTRIX_UI_") ||

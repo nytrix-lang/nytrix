@@ -87,6 +87,7 @@ typedef struct {
   } as;
   nyr_mach_reloc_kind_t relocation;
   int64_t addend;
+  bool nonpreemptible;
 } nyr_mach_operand_t;
 
 typedef enum {

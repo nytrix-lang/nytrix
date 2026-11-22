@@ -317,7 +317,19 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
      * signal tests must not be able to terminate ny-test with kill(0, sig).
      */
     (void)setpgid(0, 0);
+    if (g_test_active_jobs >= 16 && test_is_memory_heavy(path))
+      test_setenv_default("NYTRIX_PARALLEL_THREADS", "2");
+    else if (g_test_active_jobs > 4 && test_is_memory_heavy(path))
+      test_setenv_default("NYTRIX_PARALLEL_THREADS", "4");
     apply_test_child_env(!test_path_is_benchmark(path));
+    {
+      int devnull_in = open("/dev/null", O_RDONLY);
+      if (devnull_in >= 0) {
+        dup2(devnull_in, STDIN_FILENO);
+        if (devnull_in != STDIN_FILENO)
+          close(devnull_in);
+      }
+    }
     if (output_path) {
       int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
       if (fd >= 0) {

@@ -661,6 +661,13 @@ static bool nir_range_query_prepare(const nyr_func_t *f,
   cache->data = f->data;
   cache->len = f->len;
   cache->next_value = f->next_value;
+  cache->has_addr_local = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op == NYIR_ADDR_LOCAL) {
+      cache->has_addr_local = true;
+      break;
+    }
+  }
   return true;
 }
 
@@ -671,18 +678,14 @@ static bool nir_range_query_prepare(const nyr_func_t *f,
  * only on that path.  It lets BCE/peepholes consume branch facts without
  * making branch-local assumptions global metadata.
  */
-static void nir_refine_range_from_edges(const nyr_func_t *f,
-                                        const nyr_value_fact_t *facts,
-                                        int value, size_t at,
-                                        nyr_range_t *range,
-                                        nir_range_query_cache_t *cache) {
-  if (!f || !facts || !range || at >= f->len || value < 0 ||
-      value >= f->next_value)
+static void nir_refine_range_from_edges_impl(const nyr_func_t *f,
+                                             const nyr_value_fact_t *facts,
+                                             const nyr_cfg_t *cfg,
+                                             const int *defs, int value,
+                                             size_t at, nyr_range_t *range) {
+  if (!f || !facts || !cfg || !defs || !range || at >= f->len || value < 0 ||
+      value >= f->next_value || !cfg->block_count)
     return;
-  if (!nir_range_query_prepare(f, cache))
-    return;
-  const nyr_cfg_t *cfg = &cache->cfg;
-  const int *defs = cache->defs;
   int root_value = nir_strip_copy_value(f, defs, value);
   size_t child = cfg->inst_block[at];
   /*
@@ -738,6 +741,66 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
   }
 }
 
+static void nir_refine_range_from_edges(const nyr_func_t *f,
+                                        const nyr_value_fact_t *facts,
+                                        int value, size_t at,
+                                        nyr_range_t *range,
+                                        nir_range_query_cache_t *cache) {
+  if (!f || !facts || !range || at >= f->len || value < 0 ||
+      value >= f->next_value)
+    return;
+  if (!nir_range_query_prepare(f, cache))
+    return;
+  nir_refine_range_from_edges_impl(f, facts, &cache->cfg, cache->defs, value,
+                                   at, range);
+}
+
+bool nir_value_range_at_with_cfg(const nyr_func_t *f,
+                                 const nyr_value_fact_t *facts,
+                                 const nyr_cfg_t *cfg, const int *defs,
+                                 int value, size_t at, nyr_range_t *out) {
+  if (!f || !facts || !out || value < 0 || value >= f->next_value)
+    return false;
+  if (!cfg || !defs || !cfg->block_count)
+    return nir_value_range_at(f, facts, value, at, out);
+  bool have = false;
+  if (facts[value].range.has_min || facts[value].range.has_max) {
+    *out = facts[value].range;
+    have = true;
+  } else {
+    int def_idx = defs[value];
+    if (def_idx >= 0 && (size_t)def_idx < at && (size_t)def_idx < f->len &&
+        f->data[(size_t)def_idx].op == NYIR_LOAD_LOCAL) {
+      int64_t local = f->data[(size_t)def_idx].imm;
+      bool escaped = nir_local_address_taken(f, local);
+      for (size_t k = (size_t)def_idx; k > 0; --k) {
+        const nyr_inst_t *store = &f->data[k - 1];
+        if (store->op == NYIR_STORE_LOCAL && store->imm == local) {
+          if (store->a >= 0 && store->a < f->next_value &&
+              (facts[store->a].range.has_min ||
+               facts[store->a].range.has_max)) {
+            *out = facts[store->a].range;
+            have = true;
+          }
+          break;
+        }
+        if (store->op == NYIR_LABEL || store->op == NYIR_BR ||
+            store->op == NYIR_BR_IF)
+          break;
+        if (escaped && nir_inst_may_clobber_escaped_local(store))
+          break;
+      }
+    }
+  }
+  if (!have)
+    *out = (nyr_range_t){0};
+  if (out->has_min && out->has_max && out->min == out->max)
+    return true;
+  if (at < f->len)
+    nir_refine_range_from_edges_impl(f, facts, cfg, defs, value, at, out);
+  return out->has_min || out->has_max;
+}
+
 bool nir_value_range_at_cached(const nyr_func_t *f,
                                const nyr_value_fact_t *facts, int value,
                                size_t at, nyr_range_t *out,
@@ -751,7 +814,40 @@ bool nir_value_range_at_cached(const nyr_func_t *f,
     *out = facts[value].range;
     have = true;
   } else {
-    have = nir_recover_load_local_range(f, facts, value, at, out);
+    /*
+     * Fast path: use cached defs (which we need below for edge refinement
+     * anyway) so non-LOAD_LOCAL values skip the backward scan completely, and
+     * LOAD_LOCAL values jump directly to their def and skip the full-function
+     * ADDR_LOCAL scan when no local has its address taken.
+     */
+    if (nir_range_query_prepare(f, cache) && cache->defs) {
+      int def_idx = cache->defs[value];
+      if (def_idx >= 0 && (size_t)def_idx < at && (size_t)def_idx < f->len &&
+          f->data[(size_t)def_idx].op == NYIR_LOAD_LOCAL) {
+        int64_t local = f->data[(size_t)def_idx].imm;
+        bool escaped =
+            cache->has_addr_local && nir_local_address_taken(f, local);
+        for (size_t k = (size_t)def_idx; k > 0; --k) {
+          const nyr_inst_t *store = &f->data[k - 1];
+          if (store->op == NYIR_STORE_LOCAL && store->imm == local) {
+            if (store->a >= 0 && store->a < f->next_value &&
+                (facts[store->a].range.has_min ||
+                 facts[store->a].range.has_max)) {
+              *out = facts[store->a].range;
+              have = true;
+            }
+            break;
+          }
+          if (store->op == NYIR_LABEL || store->op == NYIR_BR ||
+              store->op == NYIR_BR_IF)
+            break;
+          if (escaped && nir_inst_may_clobber_escaped_local(store))
+            break;
+        }
+      }
+    } else {
+      have = nir_recover_load_local_range(f, facts, value, at, out);
+    }
   }
   if (!have)
     *out = (nyr_range_t){0};
@@ -769,7 +865,7 @@ bool nir_value_range_at_cached(const nyr_func_t *f,
 
 bool nir_value_range_at(const nyr_func_t *f, const nyr_value_fact_t *facts,
                         int value, size_t at, nyr_range_t *out) {
-  nir_range_query_cache_t cache = {0};
+  nir_range_query_cache_t cache = {.manual_invalidation = true};
   bool result = nir_value_range_at_cached(f, facts, value, at, out, &cache);
   nir_range_query_cache_free(&cache);
   return result;

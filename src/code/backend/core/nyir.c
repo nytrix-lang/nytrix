@@ -179,187 +179,185 @@ static void nyr_type_roots_fill(size_t value_count, const nyr_func_t *nyir,
    */
   for (size_t i = 0; i < nyir->len; ++i) {
     const nyr_inst_t *in = &nyir->data[i];
-    if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0 &&
-        (size_t)in->dst < value_count && (size_t)in->a < value_count)
-      nyr_type_union(parents, (size_t)in->dst, (size_t)in->a);
-    if (in->op == NYIR_PHI && in->dst >= 0 && (size_t)in->dst < value_count) {
-      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
-        int incoming = in->phi_incoming[k].value;
-        if (incoming >= 0 && (size_t)incoming < value_count)
-          nyr_type_union(parents, (size_t)in->dst, (size_t)incoming);
+    switch (in->op) {
+    case NYIR_COPY:
+      if (in->dst >= 0 && in->a >= 0 && (size_t)in->dst < value_count &&
+          (size_t)in->a < value_count)
+        nyr_type_union(parents, (size_t)in->dst, (size_t)in->a);
+      break;
+    case NYIR_PHI:
+      if (in->dst >= 0 && (size_t)in->dst < value_count) {
+        for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+          int incoming = in->phi_incoming[k].value;
+          if (incoming >= 0 && (size_t)incoming < value_count)
+            nyr_type_union(parents, (size_t)in->dst, (size_t)incoming);
+        }
       }
+      break;
+    case NYIR_LOAD_LOCAL:
+      if (in->scalar_class == NYIR_SCALAR_UNKNOWN && in->dst >= 0 &&
+          in->imm >= 0 && (size_t)in->dst < value_count &&
+          (size_t)in->imm < local_count)
+        nyr_type_union(parents, (size_t)in->dst, value_count + (size_t)in->imm);
+      break;
+    case NYIR_STORE_LOCAL:
+      if (in->scalar_class == NYIR_SCALAR_UNKNOWN && in->a >= 0 &&
+          in->imm >= 0 && (size_t)in->a < value_count &&
+          (size_t)in->imm < local_count)
+        nyr_type_union(parents, (size_t)in->a, value_count + (size_t)in->imm);
+      break;
+    default:
+      break;
     }
-    if (in->op == NYIR_LOAD_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
-        in->dst >= 0 && in->imm >= 0 && (size_t)in->dst < value_count &&
-        (size_t)in->imm < local_count)
-      nyr_type_union(parents, (size_t)in->dst, value_count + (size_t)in->imm);
-    if (in->op == NYIR_STORE_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
-        in->a >= 0 && in->imm >= 0 && (size_t)in->a < value_count &&
-        (size_t)in->imm < local_count)
-      nyr_type_union(parents, (size_t)in->a, value_count + (size_t)in->imm);
   }
 
   for (size_t i = 0; i < param_count; ++i) {
-    size_t root = nyr_type_root(parents, value_count + i);
     if (nyir->param_types[i] == NYIR_PARAM_F64)
-      root_types[root] |= 1u;
+      root_types[nyr_type_root(parents, value_count + i)] |= 1u;
     else if (nyir->param_types[i] == NYIR_PARAM_F32)
-      root_types[root] |= 2u;
+      root_types[nyr_type_root(parents, value_count + i)] |= 2u;
   }
 
   for (size_t i = 0; i < nyir->len; ++i) {
     const nyr_inst_t *in = &nyir->data[i];
-    bool f64_result =
-        in->scalar_class == NYIR_SCALAR_F64 || nyr_op_is_f64(in->op);
-    bool f32_result =
-        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f32(in->op);
+    nyr_op_t op = in->op;
     /*
      * A classified store declares the slot's carrier on that path. Seed the
      * local root with it so an unclassified load in a merge block (where the
      * reaching store lives in a predecessor) still observes the float fact.
-     * Mixed-class slots surface through the store/load ABI checks instead.
      */
-    if (in->op == NYIR_STORE_LOCAL && in->a >= 0 && in->imm >= 0 &&
-        (size_t)in->imm < local_count) {
-      size_t local_root = nyr_type_root(parents, value_count + (size_t)in->imm);
-      if (in->scalar_class == NYIR_SCALAR_F64)
-        root_types[local_root] |= 1u;
-      else if (in->scalar_class == NYIR_SCALAR_F32)
-        root_types[local_root] |= 2u;
-    }
-    bool v128_i64_result =
-        nyr_op_v128_i64(in->op) ||
-        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
-    bool v256_i64_result = nyr_op_v256_i64(in->op);
-    bool v256_f64_result = nyr_op_v256_f64(in->op);
-    bool v128_f32_result = nyr_op_v128_f32(in->op);
-    if (in->dst >= 0 && (size_t)in->dst < value_count) {
-      size_t root = nyr_type_root(parents, (size_t)in->dst);
-      if (f64_result)
-        root_types[root] |= 1u;
-      if (f32_result)
-        root_types[root] |= 2u;
-      if (v128_i64_result)
-        root_types[root] |= 4u;
-      if (v256_i64_result)
-        root_types[root] |= 4u | 32u;
-      if (v256_f64_result)
-        root_types[root] |= 64u;
-      if (v128_f32_result)
-        root_types[root] |= 16u;
-    }
-    /*
-     * RET's scalar_class describes the ABI contract. It must not be fed back
-     * into the producer's type facts, or a mismatched annotation would make
-     * the producer appear to have both float widths.
-     */
-    bool f64_operands = in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
-                        in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
-                        in->op == NYIR_CMP_F64 || in->op == NYIR_F64_TO_F32 ||
-                        in->op == NYIR_SQRT_F64 || in->op == NYIR_SIN_F64 ||
-                        in->op == NYIR_COS_F64;
-    bool f32_operands = in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
-                        in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
-                        in->op == NYIR_CMP_F32 || in->op == NYIR_F32_TO_F64;
-    bool v128_i64_ops =
-        in->op == NYIR_VEC4_ADD_I64 || in->op == NYIR_VEC4_SUB_I64 ||
-        in->op == NYIR_VEC4_AND_I64 || in->op == NYIR_VEC4_OR_I64 ||
-        in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC4_SHL_I64 ||
-        in->op == NYIR_VEC4_SAR_I64;
-    bool v256_i64_ops =
-        in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
-        in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
-        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_MUL_I64 ||
-        in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
-        in->op == NYIR_VEC8_SHL_I64 || in->op == NYIR_VEC8_CMP_I64 ||
-        in->op == NYIR_VEC8_SELECT_I64;
-    bool v256_f64_ops =
-        in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
-        in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
-        in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC4_SHUFFLE_F64;
-    bool v128_f32_ops =
-        in->op == NYIR_VEC8_ADD_F32 || in->op == NYIR_VEC8_SUB_F32 ||
-        in->op == NYIR_VEC8_MUL_F32 || in->op == NYIR_VEC8_DIV_F32 ||
-        in->op == NYIR_VEC8_FMA_F32 || in->op == NYIR_VEC8_SHUFFLE_F32;
-    if (in->a >= 0 && (size_t)in->a < value_count) {
-      size_t root = nyr_type_root(parents, (size_t)in->a);
-      if (f64_operands)
-        root_types[root] |= 1u;
-      if (f32_operands)
-        root_types[root] |= 2u;
-      if (v128_i64_ops)
-        root_types[root] |= 4u;
-      if (v256_i64_ops)
-        root_types[root] |= 4u | 32u;
-      if (v256_f64_ops)
-        root_types[root] |= 64u;
-      if (v128_f32_ops)
-        root_types[root] |= 16u;
-    }
-    if (in->b >= 0 && (size_t)in->b < value_count) {
-      size_t root = nyr_type_root(parents, (size_t)in->b);
-      if (f64_operands)
-        root_types[root] |= 1u;
-      if (f32_operands)
-        root_types[root] |= 2u;
-      if (v128_i64_ops)
-        root_types[root] |= 4u;
-      if (v256_i64_ops)
-        root_types[root] |= 4u | 32u;
-      if (v256_f64_ops)
-        root_types[root] |= 64u;
-      if (v128_f32_ops)
-        root_types[root] |= 16u;
-    }
-    /*
-     * FMA's c operand is a vector input; a typed memory store's class is an
-     * assertion about the destination layout and must not rewrite the
-     * producer's independent scalar fact.
-     */
-    if (in->c >= 0 && (size_t)in->c < value_count &&
-        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32 ||
-         in->op == NYIR_VEC8_SELECT_I64)) {
-      size_t root = nyr_type_root(parents, (size_t)in->c);
-      if (in->op == NYIR_VEC4_FMA_F64)
-        root_types[root] |= 64u;
-      else if (in->op == NYIR_VEC8_SELECT_I64)
-        root_types[root] |= 4u | 32u;
-      else
-        root_types[root] |= 16u;
-    }
-    if (in->op == NYIR_VEC4_REDUCE_ADD_F64) {
-      if (in->a >= 0 && (size_t)in->a < value_count) {
-        size_t root = nyr_type_root(parents, (size_t)in->a);
-        root_types[root] |= 1u;
+    if (op == NYIR_STORE_LOCAL) {
+      if (in->a >= 0 && in->imm >= 0 && (size_t)in->imm < local_count) {
+        if (in->scalar_class == NYIR_SCALAR_F64)
+          root_types[nyr_type_root(parents, value_count + (size_t)in->imm)] |=
+              1u;
+        else if (in->scalar_class == NYIR_SCALAR_F32)
+          root_types[nyr_type_root(parents, value_count + (size_t)in->imm)] |=
+              2u;
       }
-      if (in->b >= 0 && (size_t)in->b < value_count) {
-        size_t root = nyr_type_root(parents, (size_t)in->b);
-        root_types[root] |= 64u;
-      }
+      continue;
     }
-    if (in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
-        in->op == NYIR_VEC8_REDUCE_ADD_I64) {
-      if (in->b >= 0 && (size_t)in->b < value_count) {
-        size_t root = nyr_type_root(parents, (size_t)in->b);
-        root_types[root] |=
-            in->op == NYIR_VEC8_REDUCE_ADD_I64 ? (4u | 32u) : 4u;
-      }
-    }
-    if (in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64 ||
-        in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32) {
+    unsigned char dst_bits = 0;
+    if (in->scalar_class == NYIR_SCALAR_F64)
+      dst_bits |= 1u;
+    else if (in->scalar_class == NYIR_SCALAR_F32)
+      dst_bits |= 2u;
+    if (nyr_op_is_f64(op))
+      dst_bits |= 1u;
+    else if (nyr_op_is_f32(op))
+      dst_bits |= 2u;
+    else if (nyr_op_v128_i64(op) ||
+             (op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13))
+      dst_bits |= 4u;
+    else if (nyr_op_v256_i64(op))
+      dst_bits |= 4u | 32u;
+    else if (nyr_op_v256_f64(op))
+      dst_bits |= 64u;
+    else if (nyr_op_v128_f32(op))
+      dst_bits |= 16u;
+    if (dst_bits && in->dst >= 0 && (size_t)in->dst < value_count)
+      root_types[nyr_type_root(parents, (size_t)in->dst)] |= dst_bits;
+
+    unsigned char op_bits = 0;
+    switch (op) {
+    case NYIR_ADD_F64:
+    case NYIR_SUB_F64:
+    case NYIR_MUL_F64:
+    case NYIR_DIV_F64:
+    case NYIR_CMP_F64:
+    case NYIR_F64_TO_F32:
+    case NYIR_SQRT_F64:
+    case NYIR_SIN_F64:
+    case NYIR_COS_F64:
+      op_bits = 1u;
+      break;
+    case NYIR_ADD_F32:
+    case NYIR_SUB_F32:
+    case NYIR_MUL_F32:
+    case NYIR_DIV_F32:
+    case NYIR_CMP_F32:
+    case NYIR_F32_TO_F64:
+      op_bits = 2u;
+      break;
+    case NYIR_VEC4_ADD_I64:
+    case NYIR_VEC4_SUB_I64:
+    case NYIR_VEC4_AND_I64:
+    case NYIR_VEC4_OR_I64:
+    case NYIR_VEC4_XOR_I64:
+    case NYIR_VEC4_SHL_I64:
+    case NYIR_VEC4_SAR_I64:
+      op_bits = 4u;
+      break;
+    case NYIR_VEC8_ADD_I64:
+    case NYIR_VEC8_SUB_I64:
+    case NYIR_VEC8_AND_I64:
+    case NYIR_VEC8_OR_I64:
+    case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_MUL_I64:
+    case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_CMP_I64:
+    case NYIR_VEC8_SELECT_I64:
+      op_bits = 4u | 32u;
+      break;
+    case NYIR_VEC4_ADD_F64:
+    case NYIR_VEC4_SUB_F64:
+    case NYIR_VEC4_MUL_F64:
+    case NYIR_VEC4_DIV_F64:
+    case NYIR_VEC4_FMA_F64:
+    case NYIR_VEC4_SHUFFLE_F64:
+      op_bits = 64u;
+      break;
+    case NYIR_VEC8_ADD_F32:
+    case NYIR_VEC8_SUB_F32:
+    case NYIR_VEC8_MUL_F32:
+    case NYIR_VEC8_DIV_F32:
+    case NYIR_VEC8_FMA_F32:
+    case NYIR_VEC8_SHUFFLE_F32:
+      op_bits = 16u;
+      break;
+    case NYIR_VEC4_REDUCE_ADD_F64:
+      if (in->a >= 0 && (size_t)in->a < value_count)
+        root_types[nyr_type_root(parents, (size_t)in->a)] |= 1u;
+      if (in->b >= 0 && (size_t)in->b < value_count)
+        root_types[nyr_type_root(parents, (size_t)in->b)] |= 64u;
+      continue;
+    case NYIR_VEC4_REDUCE_ADD_I64:
+    case NYIR_VEC8_REDUCE_ADD_I64:
+      if (in->b >= 0 && (size_t)in->b < value_count)
+        root_types[nyr_type_root(parents, (size_t)in->b)] |=
+            op == NYIR_VEC8_REDUCE_ADD_I64 ? (4u | 32u) : 4u;
+      continue;
+    case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC8_STORE_I64:
+    case NYIR_VEC4_STORE_F64:
+    case NYIR_VEC8_STORE_F32: {
       int value = in->b >= 0 ? in->b : in->c;
       if (value >= 0 && (size_t)value < value_count) {
         size_t root = nyr_type_root(parents, (size_t)value);
-        if (in->op == NYIR_VEC4_STORE_I64)
+        if (op == NYIR_VEC4_STORE_I64)
           root_types[root] |= 4u;
-        else if (in->op == NYIR_VEC8_STORE_I64)
+        else if (op == NYIR_VEC8_STORE_I64)
           root_types[root] |= 4u | 32u;
-        else if (in->op == NYIR_VEC4_STORE_F64)
+        else if (op == NYIR_VEC4_STORE_F64)
           root_types[root] |= 64u;
         else
           root_types[root] |= 16u;
       }
+      continue;
     }
+    default:
+      continue;
+    }
+    if (in->a >= 0 && (size_t)in->a < value_count)
+      root_types[nyr_type_root(parents, (size_t)in->a)] |= op_bits;
+    if (in->b >= 0 && (size_t)in->b < value_count)
+      root_types[nyr_type_root(parents, (size_t)in->b)] |= op_bits;
+    if (in->c >= 0 && (size_t)in->c < value_count &&
+        (op == NYIR_VEC4_FMA_F64 || op == NYIR_VEC8_FMA_F32 ||
+         op == NYIR_VEC8_SELECT_I64))
+      root_types[nyr_type_root(parents, (size_t)in->c)] |= op_bits;
   }
 }
 
@@ -1175,6 +1173,10 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
     return false;
   }
   dst->cap = src->len;
+  const char *last_src_file = NULL;
+  const char *last_dst_file = NULL;
+  const char *last_src_sym = NULL;
+  const char *last_dst_sym = NULL;
   for (size_t i = 0; i < src->len; ++i) {
     const nyr_inst_t *s = &src->data[i];
     nyr_inst_t d = *s;
@@ -1186,17 +1188,31 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
     d.symbol = NULL;
     d.debug.file = NULL;
     if (s->symbol) {
-      d.symbol = nyr_func_own_symbol_copy(dst, s->symbol);
-      if (!d.symbol) {
-        nyr_ir_func_free(dst);
-        return false;
+      if (last_src_sym &&
+          (s->symbol == last_src_sym || strcmp(s->symbol, last_src_sym) == 0)) {
+        d.symbol = last_dst_sym;
+      } else {
+        d.symbol = nyr_func_own_symbol_copy(dst, s->symbol);
+        if (!d.symbol) {
+          nyr_ir_func_free(dst);
+          return false;
+        }
+        last_src_sym = s->symbol;
+        last_dst_sym = d.symbol;
       }
     }
     if (s->debug.file && s->debug.file[0]) {
-      d.debug.file = nyr_func_own_symbol_copy(dst, s->debug.file);
-      if (!d.debug.file) {
-        nyr_ir_func_free(dst);
-        return false;
+      if (last_src_file && (s->debug.file == last_src_file ||
+                            strcmp(s->debug.file, last_src_file) == 0)) {
+        d.debug.file = last_dst_file;
+      } else {
+        d.debug.file = nyr_func_own_symbol_copy(dst, s->debug.file);
+        if (!d.debug.file) {
+          nyr_ir_func_free(dst);
+          return false;
+        }
+        last_src_file = s->debug.file;
+        last_dst_file = d.debug.file;
       }
     }
     if (s->extra_args && s->extra_args_len > 0) {

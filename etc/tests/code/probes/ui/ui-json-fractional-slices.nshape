@@ -3,7 +3,7 @@ shape ui_json_fractional_slices {
   generator "embedded"
   features [json utf8 slice gltf]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
   expect compile_and_run
   expect_message "UI-JSON-FRACTIONAL-SLICES-OK"
   source ny <<'NY'

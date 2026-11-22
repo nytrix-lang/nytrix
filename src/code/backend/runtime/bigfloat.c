@@ -35,10 +35,11 @@ typedef struct {
   size_t n;
   size_t cap;
   /*
-   * Default-precision arithmetic keeps its temporary limbs on the stack.
-   * Magnitudes remain local and are never transferred by structure copy.
+   * Default-precision arithmetic (including 256-bit sqrt radices) keeps its
+   * temporary limbs on the stack. Magnitudes remain local and are never
+   * transferred by structure copy.
    */
-  uint64_t local[8];
+  uint64_t local[12];
 } bf_mag_t;
 
 static uint32_t bf_precision_clamp(int64_t p) {
@@ -89,7 +90,7 @@ static int64_t bf_precision_arg(int64_t p) {
   return p;
 }
 
-static ny_bigfloat_t *bf_ptr(int64_t v) {
+static inline ny_bigfloat_t *bf_ptr(int64_t v) {
   if (!is_ptr(v) || !is_heap_ptr(v))
     return NULL;
   if (*(int64_t *)((char *)(uintptr_t)v - 8) != TAG_BIGFLOAT)
@@ -112,7 +113,6 @@ static bool mag_reserve(bf_mag_t *a, size_t cap) {
   if (!a->d && cap <= sizeof(a->local) / sizeof(a->local[0])) {
     a->d = a->local;
     a->cap = sizeof(a->local) / sizeof(a->local[0]);
-    memset(a->local, 0, sizeof(a->local));
     return true;
   }
   size_t nc = a->cap ? a->cap : 4;
@@ -403,6 +403,49 @@ static bool mag_mul(bf_mag_t *out, const bf_mag_t *a, const bf_mag_t *b) {
   return true;
 }
 
+#if defined(__SIZEOF_INT128__)
+static inline uint64_t bf_div_u128_u64(uint64_t high, uint64_t low,
+                                       uint64_t denominator,
+                                       uint64_t *remainder) {
+#if defined(__x86_64__) && !defined(_WIN32) &&                                 \
+    (defined(__GNUC__) || defined(__clang__))
+  uint64_t quotient = low;
+  uint64_t rem = high;
+  __asm__ volatile("divq %[denominator]"
+                   : "+&a"(quotient), "+&d"(rem)
+                   : [denominator] "r"(denominator)
+                   : "cc");
+  *remainder = rem;
+  return quotient;
+#else
+  __uint128_t cur = ((__uint128_t)high << 64) | low;
+  *remainder = (uint64_t)(cur % denominator);
+  return (uint64_t)(cur / denominator);
+#endif
+}
+
+/*
+ * Möller-Granlund Algorithm 4 (udiv_qrnnd_preinv): exact 2-by-1 limb division
+ * for normalized d >= 2^63, u1 < d, and v = floor((2^128 - 1) / d) - 2^64.
+ */
+static inline uint64_t bf_mg_div2by1(uint64_t u1, uint64_t u0, uint64_t d,
+                                     uint64_t v, uint64_t *rem_out) {
+  __uint128_t q = (__uint128_t)v * u1 + (((__uint128_t)u1 << 64) | u0);
+  uint64_t q1 = (uint64_t)(q >> 64) + 1u;
+  uint64_t q0 = (uint64_t)q;
+  uint64_t r = u0 - q1 * d;
+  if (r > q0) {
+    --q1;
+    r += d;
+  }
+  if (__builtin_expect(r >= d, 0)) {
+    ++q1;
+    r -= d;
+  }
+  *rem_out = r;
+  return q1;
+}
+#else
 static size_t mag_to_u32(const bf_mag_t *a, uint32_t *out) {
   size_t n = 0;
   for (size_t i = 0; i < a->n; ++i) {
@@ -428,6 +471,7 @@ static unsigned bf_clz32(uint32_t x) {
   return n;
 #endif
 }
+#endif
 
 /*
  * Rounding needs only whether the exact quotient had a remainder.
@@ -448,20 +492,132 @@ static bool mag_div(bf_mag_t *q, bool *inexact, const bf_mag_t *u,
       return false;
     uint64_t rem = 0;
     for (size_t i = u->n; i > 0; --i) {
-      __uint128_t cur = ((__uint128_t)rem << 64) | u->d[i - 1];
-      q->d[i - 1] = (uint64_t)(cur / divisor);
-      rem = (uint64_t)(cur % divisor);
+      uint64_t limb = u->d[i - 1];
+      if (rem == 0 && limb < divisor) {
+        q->d[i - 1] = 0;
+        rem = limb;
+      } else {
+        q->d[i - 1] = bf_div_u128_u64(rem, limb, divisor, &rem);
+      }
     }
     q->n = u->n;
     mag_trim(q);
     *inexact = rem != 0;
     return true;
   }
-#endif
   /*
-   * Division is used repeatedly by BigFloat Newton iterations. Keep the
-   * normalized base-2^32 workspace on the stack for ordinary precisions;
-   * large user-selected precisions retain the heap-backed path.
+   * Base-2^64 Knuth Algorithm D directly on uint64_t limbs. Keeps ordinary
+   * precisions (up to 2048-bit) on the stack and uses hardware DIVQ on x86_64.
+   */
+  size_t n = v->n;
+  size_t un_len = u->n;
+  size_t m = un_len - n;
+  if (!mag_reserve(q, m + 1))
+    return false;
+  enum { BF_DIV64_VN_LOCAL = 32, BF_DIV64_UN_LOCAL = 65 };
+  uint64_t vn_local[BF_DIV64_VN_LOCAL];
+  uint64_t un_local[BF_DIV64_UN_LOCAL];
+  bool local_ws = n <= BF_DIV64_VN_LOCAL && un_len + 1 <= BF_DIV64_UN_LOCAL;
+  uint64_t *vn = local_ws ? vn_local : malloc(n * sizeof(*vn));
+  uint64_t *un = local_ws ? un_local : malloc((un_len + 1) * sizeof(*un));
+  if (!vn || !un) {
+    if (!local_ws) {
+      free(vn);
+      free(un);
+    }
+    return false;
+  }
+  unsigned s = bf_clz64(v->d[n - 1]);
+  if (s == 0) {
+    memcpy(vn, v->d, n * sizeof(*vn));
+    memcpy(un, u->d, un_len * sizeof(*un));
+    un[un_len] = 0;
+  } else {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < n; ++i) {
+      uint64_t x = v->d[i];
+      vn[i] = (x << s) | carry;
+      carry = x >> (64u - s);
+    }
+    carry = 0;
+    for (size_t i = 0; i < un_len; ++i) {
+      uint64_t x = u->d[i];
+      un[i] = (x << s) | carry;
+      carry = x >> (64u - s);
+    }
+    un[un_len] = carry;
+  }
+  uint64_t divisor = vn[n - 1];
+  bool use_preinv = m >= 2u;
+  uint64_t inv = 0;
+  if (use_preinv) {
+    uint64_t inv_rem = 0;
+    inv = bf_div_u128_u64(~divisor, UINT64_MAX, divisor, &inv_rem);
+  }
+  for (size_t jj = m + 1; jj-- > 0;) {
+    size_t j = jj;
+    uint64_t qhat, rhat;
+    bool rhat_carried = false;
+    if (un[j + n] == divisor) {
+      qhat = UINT64_MAX;
+      rhat = un[j + n - 1] + divisor;
+      rhat_carried = rhat < divisor;
+    } else if (use_preinv) {
+      qhat = bf_mg_div2by1(un[j + n], un[j + n - 1], divisor, inv, &rhat);
+    } else {
+      qhat = bf_div_u128_u64(un[j + n], un[j + n - 1], divisor, &rhat);
+    }
+    if (!rhat_carried) {
+      while ((__uint128_t)qhat * vn[n - 2] >
+             ((__uint128_t)rhat << 64) + un[j + n - 2]) {
+        --qhat;
+        uint64_t old = rhat;
+        rhat += divisor;
+        if (rhat < old)
+          break;
+      }
+    }
+    if (qhat) {
+      uint64_t borrow = 0;
+      for (size_t i = 0; i < n; ++i) {
+        __uint128_t prod = (__uint128_t)qhat * vn[i] + borrow;
+        uint64_t low = (uint64_t)prod;
+        uint64_t old = un[j + i];
+        un[j + i] = old - low;
+        borrow = (uint64_t)(prod >> 64) + (old < low);
+      }
+      bool neg = un[j + n] < borrow;
+      un[j + n] -= borrow;
+      if (neg) {
+        --qhat;
+        uint64_t carry = 0;
+        for (size_t i = 0; i < n; ++i) {
+          __uint128_t sum = (__uint128_t)un[j + i] + vn[i] + carry;
+          un[j + i] = (uint64_t)sum;
+          carry = (uint64_t)(sum >> 64);
+        }
+        un[j + n] += carry;
+      }
+    }
+    q->d[j] = qhat;
+  }
+  q->n = m + 1;
+  mag_trim(q);
+  /*
+   * Normalizing multiplies the remainder by 2^s; zero is unchanged.
+   */
+  uint64_t sticky = 0;
+  for (size_t i = 0; i < n; ++i)
+    sticky |= un[i];
+  *inexact = sticky != 0;
+  if (!local_ws) {
+    free(vn);
+    free(un);
+  }
+  return true;
+#else
+  /*
+   * Portable base-2^32 fallback for targets without __uint128_t.
    */
   enum { BF_DIV_LOCAL_WORDS = 64 };
   uint32_t uu_local[BF_DIV_LOCAL_WORDS];
@@ -621,6 +777,7 @@ div_allocation_failed:
     free(unorm);
   }
   return false;
+#endif
 }
 
 static int64_t bf_alloc_zero(uint32_t precision) {
@@ -637,11 +794,10 @@ static int64_t bf_alloc_zero(uint32_t precision) {
   return p;
 }
 
-static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
-                                 uint32_t precision) {
+static bool bf_mag_round_norm(bf_mag_t *m, int64_t *exp2, uint32_t precision) {
   mag_trim(m);
-  if (!m->n || sign == 0)
-    return bf_alloc_zero(precision);
+  if (!m->n)
+    return true;
   size_t bits = mag_bitlen(m);
   if (bits > precision) {
     size_t drop = bits - precision;
@@ -649,22 +805,32 @@ static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
     bool sticky = drop > 1 && mag_any_low(m, drop - 1);
     bool lsb = mag_get_bit(m, drop);
     mag_shr_plain(m, drop);
-    exp2 += (int64_t)drop;
+    *exp2 += (int64_t)drop;
     if (guard && (sticky || lsb)) {
       if (!mag_add_one(m))
-        return 0;
+        return false;
       if (mag_bitlen(m) > precision) {
         mag_shr_plain(m, 1);
-        exp2++;
+        (*exp2)++;
       }
     }
   } else if (bits < precision) {
     size_t shift = precision - bits;
     if (!mag_shl(m, shift))
-      return 0;
-    exp2 -= (int64_t)shift;
+      return false;
+    *exp2 -= (int64_t)shift;
   }
   mag_trim(m);
+  return true;
+}
+
+static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
+                                 uint32_t precision) {
+  mag_trim(m);
+  if (!m->n || sign == 0)
+    return bf_alloc_zero(precision);
+  if (!bf_mag_round_norm(m, &exp2, precision))
+    return 0;
   size_t bytes = sizeof(ny_bigfloat_t) + m->n * sizeof(uint64_t);
   /*
    * All object fields and live limbs are written before publishing it.
@@ -687,15 +853,14 @@ static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
   if (!mag || sign == 0)
     return bf_alloc_zero(precision);
 
-  size_t bits = 64u - bf_clz64(mag);
+  unsigned lz = bf_clz64(mag);
+  size_t bits = 64u - lz;
   if (precision >= bits) {
     /*
      * Normalize exact values directly into final storage.
      */
     size_t words = ((size_t)precision + 63u) / 64u;
     size_t shift = (size_t)precision - bits;
-    size_t word_shift = shift / 64u;
-    unsigned bit_shift = (unsigned)(shift % 64u);
     size_t bytes = sizeof(ny_bigfloat_t) + words * sizeof(uint64_t);
     int64_t p = rt_malloc_uninit((int64_t)bytes);
     if (!p)
@@ -707,6 +872,15 @@ static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
     x->exp2 = exp2 - (int64_t)shift;
     x->precision = precision;
     x->words = (uint32_t)words;
+    if (__builtin_expect(precision == 256u, 1)) {
+      x->limb[0] = 0;
+      x->limb[1] = 0;
+      x->limb[2] = 0;
+      x->limb[3] = mag << lz;
+      return p;
+    }
+    size_t word_shift = shift / 64u;
+    unsigned bit_shift = (unsigned)(shift % 64u);
     memset(x->limb, 0, words * sizeof(uint64_t));
     x->limb[word_shift] = mag << bit_shift;
     if (bit_shift && word_shift + 1 < words)
@@ -809,7 +983,7 @@ static int bf_cmp_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
  * integer operands while retaining the normal rounding/allocation path for
  * the result.
  */
-static bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
+static inline bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
   if (!x || !out)
     return false;
   if (x->sign == 0) {
@@ -824,8 +998,12 @@ static bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
     return false;
   size_t bits = ((size_t)x->words - 1u) * 64u + 64u - bf_clz64(top);
   size_t whole = 0;
-  while (whole < x->words && x->limb[whole] == 0)
-    ++whole;
+  if (x->words == 4u && (x->limb[0] | x->limb[1] | x->limb[2]) == 0) {
+    whole = 3u;
+  } else {
+    while (whole < x->words && x->limb[whole] == 0)
+      ++whole;
+  }
   if (whole == x->words)
     return false;
   unsigned part = (unsigned)__builtin_ctzll(x->limb[whole]);
@@ -858,21 +1036,9 @@ static bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
   return true;
 }
 
-static int64_t bf_addsub_scaled_obj(const ny_bigfloat_t *a,
-                                    const ny_bigfloat_t *b, bool subtract,
-                                    int64_t exp2_shift) {
-  uint32_t p = a->precision > b->precision ? a->precision : b->precision;
-  if (!a->sign)
-    return bf_clone_prec_shift(b, p, exp2_shift);
-  if (!b->sign)
-    return bf_clone_prec_shift(a, p, exp2_shift);
-  int64_t ai = 0, bi = 0, ri = 0;
-  if (bf_exact_i64(a, &ai) && bf_exact_i64(b, &bi) &&
-      !(subtract ? __builtin_sub_overflow(ai, bi, &ri)
-                 : __builtin_add_overflow(ai, bi, &ri))) {
-    uint64_t magnitude = ri < 0 ? (uint64_t)(-(ri + 1)) + 1u : (uint64_t)ri;
-    return bf_from_u64_raw(magnitude, ri < 0 ? -1 : ri > 0, exp2_shift, p);
-  }
+static __attribute__((noinline)) int64_t
+bf_addsub_slow(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
+               int64_t exp2_shift, uint32_t p) {
   int bs = subtract ? -(int)b->sign : (int)b->sign;
   uint32_t qprec = p + 8;
   bf_mag_t am = {0}, bm = {0}, out = {0};
@@ -926,9 +1092,21 @@ fail:
   return 0;
 }
 
-static int64_t bf_addsub_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b,
-                             bool subtract) {
-  return bf_addsub_scaled_obj(a, b, subtract, 0);
+static inline int64_t bf_addsub_obj(const ny_bigfloat_t *a,
+                                    const ny_bigfloat_t *b, bool subtract) {
+  uint32_t p = a->precision > b->precision ? a->precision : b->precision;
+  if (!a->sign)
+    return bf_clone_prec_shift(b, p, 0);
+  if (!b->sign)
+    return bf_clone_prec_shift(a, p, 0);
+  int64_t ai = 0, bi = 0, ri = 0;
+  if (bf_exact_i64(a, &ai) && bf_exact_i64(b, &bi) &&
+      !(subtract ? __builtin_sub_overflow(ai, bi, &ri)
+                 : __builtin_add_overflow(ai, bi, &ri))) {
+    uint64_t magnitude = ri < 0 ? (uint64_t)(-(ri + 1)) + 1u : (uint64_t)ri;
+    return bf_from_u64_raw(magnitude, ri < 0 ? -1 : ri > 0, 0, p);
+  }
+  return bf_addsub_slow(a, b, subtract, 0, p);
 }
 
 static int64_t bf_mul_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
@@ -945,16 +1123,46 @@ static int64_t bf_mul_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
     ++az;
   while (bz < b->words && b->limb[bz] == 0)
     ++bz;
-  bf_mag_t am = {.d = (uint64_t *)(a->limb + az), .n = a->words - az};
-  bf_mag_t bm = {.d = (uint64_t *)(b->limb + bz), .n = b->words - bz};
+  size_t an = a->words - az;
+  size_t bn = b->words - bz;
+  int64_t exponent = a->exp2 + b->exp2 + (int64_t)(az + bz) * 64;
+  int sign = (int)(a->sign * b->sign);
+#if defined(__SIZEOF_INT128__)
+  if (an == 1u && bn == 1u) {
+    __uint128_t prod = (__uint128_t)a->limb[az] * b->limb[bz];
+    uint64_t hi = (uint64_t)(prod >> 64);
+    uint64_t lo = (uint64_t)prod;
+    if (!hi)
+      return bf_from_u64_raw(lo, sign, exponent, p);
+    if (__builtin_expect(p == 256u, 1)) {
+      unsigned lz = bf_clz64(hi);
+      size_t shift = 128u + lz;
+      size_t bytes = sizeof(ny_bigfloat_t) + 4u * sizeof(uint64_t);
+      int64_t out_p = rt_malloc_uninit((int64_t)bytes);
+      if (!out_p)
+        return 0;
+      *(int64_t *)((char *)(uintptr_t)out_p - 8) = TAG_BIGFLOAT;
+      ny_bigfloat_t *x = (ny_bigfloat_t *)(uintptr_t)out_p;
+      x->sign = sign < 0 ? -1 : 1;
+      x->exp2 = exponent - (int64_t)shift;
+      x->precision = 256u;
+      x->words = 4u;
+      x->limb[0] = 0;
+      x->limb[1] = 0;
+      x->limb[2] = lo << lz;
+      x->limb[3] = (hi << lz) | (lz ? (lo >> (64u - lz)) : 0);
+      return out_p;
+    }
+  }
+#endif
+  bf_mag_t am = {.d = (uint64_t *)(a->limb + az), .n = an};
+  bf_mag_t bm = {.d = (uint64_t *)(b->limb + bz), .n = bn};
   bf_mag_t out = {0};
   if (!mag_mul(&out, &am, &bm)) {
     mag_free(&out);
     return 0;
   }
-  int64_t exponent = a->exp2 + b->exp2 + (int64_t)(az + bz) * 64;
-  int64_t result =
-      bf_alloc_from_mag((int)(a->sign * b->sign), exponent, &out, p);
+  int64_t result = bf_alloc_from_mag(sign, exponent, &out, p);
   mag_free(&out);
   return result;
 }
@@ -965,19 +1173,65 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
     return bf_from_u64_raw(0, 0, 0, p);
   if (!a->sign)
     return bf_from_u64_raw(0, 0, 0, p);
-  bf_mag_t num = {0}, quo = {0};
-  uint32_t extra = p + 10;
   size_t az = 0, bz = 0;
   while (az < a->words && a->limb[az] == 0)
     ++az;
   while (bz < b->words && b->limb[bz] == 0)
     ++bz;
+  int64_t removed_exp = ((int64_t)az - (int64_t)bz) * 64;
+#if defined(__SIZEOF_INT128__)
+  if (a->words - az == 1u && b->words - bz == 1u && p == 256u) {
+    uint64_t a_top = a->limb[az];
+    uint64_t b_top = b->limb[bz];
+    if ((a_top & (UINT64_C(1) << 63)) && (b_top & (UINT64_C(1) << 63))) {
+      uint64_t inv_rem = 0;
+      uint64_t inv = bf_div_u128_u64(~b_top, UINT64_MAX, b_top, &inv_rem);
+      uint64_t rem = 0, q3 = 0, q2 = 0, q1 = 0, q0 = 0;
+      int64_t out_exp = a->exp2 - b->exp2 + removed_exp;
+      if (a_top >= b_top) {
+        rem = a_top >> 1;
+        q3 = bf_mg_div2by1(rem, a_top << 63, b_top, inv, &rem);
+        out_exp -= 255;
+      } else {
+        rem = a_top;
+        q3 = bf_mg_div2by1(rem, 0, b_top, inv, &rem);
+        out_exp -= 256;
+      }
+      q2 = bf_mg_div2by1(rem, 0, b_top, inv, &rem);
+      q1 = bf_mg_div2by1(rem, 0, b_top, inv, &rem);
+      q0 = bf_mg_div2by1(rem, 0, b_top, inv, &rem);
+      __uint128_t rem2 = (__uint128_t)rem << 1;
+      if (rem2 > b_top || (rem2 == b_top && (q0 & 1u))) {
+        if (++q0 == 0 && ++q1 == 0 && ++q2 == 0 && ++q3 == 0) {
+          q3 = UINT64_C(1) << 63;
+          out_exp++;
+        }
+      }
+      size_t bytes = sizeof(ny_bigfloat_t) + 4u * sizeof(uint64_t);
+      int64_t out_p = rt_malloc_uninit((int64_t)bytes);
+      if (!out_p)
+        return 0;
+      *(int64_t *)((char *)(uintptr_t)out_p - 8) = TAG_BIGFLOAT;
+      ny_bigfloat_t *x = (ny_bigfloat_t *)(uintptr_t)out_p;
+      x->sign = (int)(a->sign * b->sign) < 0 ? -1 : 1;
+      x->exp2 = out_exp;
+      x->precision = 256u;
+      x->words = 4u;
+      x->limb[0] = q0;
+      x->limb[1] = q1;
+      x->limb[2] = q2;
+      x->limb[3] = q3;
+      return out_p;
+    }
+  }
+#endif
+  bf_mag_t num = {0}, quo = {0};
+  uint32_t extra = p + 10;
   /*
    * Preserve the original scaled quotient and its guard/sticky bits even
    * when only one input has padding. Merely changing the result exponent
    * would lose quotient precision in that case.
    */
-  int64_t removed_exp = ((int64_t)az - (int64_t)bz) * 64;
   extra = (uint32_t)((int64_t)extra + removed_exp);
   bf_mag_t den = {.d = (uint64_t *)(b->limb + bz), .n = b->words - bz};
   bool inexact = false;
@@ -1147,63 +1401,226 @@ double rt_bigfloat_to_f64_raw(int64_t av) {
   return rt_flt_unbox_double(rt_bigfloat_to_f64(av));
 }
 
+static inline double bf_sqrt_f64_hw(double x) {
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+  double out;
+  __asm__("sqrtsd %1, %0" : "=x"(out) : "x"(x));
+  return out;
+#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+  double out;
+  __asm__("fsqrt %d0, %d1" : "=w"(out) : "w"(x));
+  return out;
+#else
+  if (x <= 0.0)
+    return 0.0;
+  double g = x;
+  uint64_t bits = 0;
+  memcpy(&bits, &x, sizeof(bits));
+  bits = (bits >> 1) + UINT64_C(0x1ff8000000000000);
+  memcpy(&g, &bits, sizeof(g));
+  for (int i = 0; i < 6; ++i)
+    g = 0.5 * (g + x / g);
+  return g;
+#endif
+}
+
+static uint64_t mag_extract_top_u64(const bf_mag_t *a, size_t drop) {
+  size_t w = drop >> 6;
+  unsigned b = (unsigned)(drop & 63u);
+  if (w >= a->n)
+    return 0;
+  uint64_t v = a->d[w] >> b;
+  if (b && w + 1u < a->n)
+    v |= a->d[w + 1u] << (64u - b);
+  return v;
+}
+
 int64_t rt_bigfloat_sqrt(int64_t av) {
   ny_bigfloat_t *a = bf_ptr(av);
   if (!a || a->sign <= 0)
     return bf_from_u64_raw(0, 0, 0, a ? a->precision : bf_default_precision());
-  int64_t top = a->exp2 + (int64_t)a->precision - 1;
-  int64_t guess_exp = top >= 0 ? top / 2 : -(((-top) + 1) / 2);
-  int64_t xv = bf_from_u64_raw(1, 1, guess_exp, a->precision);
-  if (!xv)
-    return 0;
+  uint32_t p = a->precision;
   /*
-   * The Newton relative error roughly squares each step. The exponent-based
-   * seed is within a factor of two, so ceil(log2(precision)) steps plus one
-   * guard step is enough to reach a precision-sized result.
+   * Scale M by 2^shift so (exp2 - shift) is even and S = M << shift has
+   * 2*(p+1)-1 or 2*(p+1) bits. Then R = isqrt(S) has exactly p+1 bits,
+   * and (R << 1) | (S > R*R) gives exact round-to-nearest-even rounding.
    */
-  unsigned iterations = 1;
-  for (uint32_t p = a->precision - 1; p; p >>= 1)
-    iterations++;
-  for (unsigned i = 0; i < iterations; ++i) {
-    ny_bigfloat_t *x = bf_ptr(xv);
-    int64_t qv = bf_div_obj(a, x);
-    ny_bigfloat_t *q = bf_ptr(qv);
-    int64_t nv = q ? bf_addsub_scaled_obj(x, q, false, -1) : 0;
-    if (!nv)
-      return xv;
-    ny_bigfloat_t *next = bf_ptr(nv);
-    if (next && bf_cmp_obj(x, next) == 0)
-      return nv;
-    xv = nv;
+  size_t shift = (size_t)p + 1u;
+  if (((uint64_t)a->exp2 ^ (uint64_t)shift) & 1u)
+    shift += 1u;
+  if (a->exp2 < INT64_MIN + (int64_t)shift + 2)
+    return bf_from_u64_raw(0, 0, 0, p);
+  int64_t e_out = (a->exp2 - (int64_t)shift) / 2;
+
+  bf_mag_t s = {0}, x = {0}, q = {0}, next = {0};
+  if (!mag_copy(&s, a->limb, a->words) || !mag_shl(&s, shift))
+    goto sqrt_fail;
+  size_t sbits = mag_bitlen(&s);
+  if (sbits < 64u)
+    goto sqrt_fail;
+
+  /*
+   * Seed x strictly above floor(sqrt(S)) using a hardware double sqrt of the
+   * top 52-53 bits. Starting above the root guarantees integer Newton
+   * converges monotonically and stops at next >= x iff x == floor(sqrt(S)).
+   */
+  size_t drop_pairs = (sbits - 52u) / 2u;
+  uint64_t top_val = mag_extract_top_u64(&s, drop_pairs * 2u);
+  double r_d = bf_sqrt_f64_hw((double)(top_val + 1u));
+  uint64_t seed = 0;
+  size_t seed_shift = 0;
+  if (drop_pairs >= 26u) {
+    seed = (uint64_t)(r_d * 67108864.0) + 4u;
+    seed_shift = drop_pairs - 26u;
+  } else {
+    seed = (uint64_t)r_d + 2u;
+    seed_shift = drop_pairs;
   }
-  return xv;
+  if (!mag_reserve(&x, (seed_shift >> 6) + 4u))
+    goto sqrt_fail;
+  x.d[0] = seed;
+  x.n = 1;
+  if (seed_shift && !mag_shl(&x, seed_shift))
+    goto sqrt_fail;
+
+  for (;;) {
+    bool div_inexact = false;
+    if (!mag_div(&q, &div_inexact, &s, &x) || !mag_add(&next, &x, &q))
+      goto sqrt_fail;
+    mag_shr_plain(&next, 1);
+    if (mag_cmp(&next, &x) >= 0) {
+      bool exact = (mag_cmp(&q, &x) == 0) && !div_inexact;
+      if (!mag_shl(&x, 1))
+        goto sqrt_fail;
+      if (!exact)
+        x.d[0] |= 1u;
+      int64_t out = bf_alloc_from_mag(1, e_out - 1, &x, p);
+      mag_free(&s);
+      mag_free(&x);
+      mag_free(&q);
+      mag_free(&next);
+      return out;
+    }
+    if (!mag_copy(&x, next.d, next.n))
+      goto sqrt_fail;
+  }
+
+sqrt_fail:
+  mag_free(&s);
+  mag_free(&x);
+  mag_free(&q);
+  mag_free(&next);
+  return 0;
 }
 
 int64_t rt_bigfloat_pow_int(int64_t av, int64_t ev) {
   ny_bigfloat_t *a = bf_ptr(av);
   if (!a)
     return 0;
+  uint32_t p = a->precision;
   int64_t e = is_int(ev) ? rt_untag_v(ev) : ev;
   bool negative = e < 0;
   uint64_t n = negative ? (uint64_t)(-(e + 1)) + 1 : (uint64_t)e;
-  int64_t result = bf_from_u64_raw(1, 1, 0, a->precision);
-  int64_t base = bf_clone_prec(a, a->precision);
+  if (n == 0)
+    return bf_from_u64_raw(1, 1, 0, p);
+  if (!a->sign)
+    return bf_from_u64_raw(0, 0, 0, p);
+
+  /*
+   * Exact int64 fast path when |a|^|e| fits uint64_t without overflow.
+   */
+  int64_t ai = 0;
+  if (!negative && bf_exact_i64(a, &ai)) {
+    uint64_t b = ai < 0 ? (uint64_t)(-(ai + 1)) + 1u : (uint64_t)ai;
+    uint64_t acc = 1u;
+    uint64_t rem = n;
+    bool overflow = false;
+    while (rem) {
+      if (rem & 1u) {
+        if (__builtin_mul_overflow(acc, b, &acc)) {
+          overflow = true;
+          break;
+        }
+      }
+      rem >>= 1;
+      if (rem) {
+        if (__builtin_mul_overflow(b, b, &b)) {
+          overflow = true;
+          break;
+        }
+      }
+    }
+    if (!overflow) {
+      int res_sign = (ai < 0 && (n & 1u)) ? -1 : 1;
+      return bf_from_u64_raw(acc, res_sign, 0, p);
+    }
+  }
+
+  /*
+   * Stack-backed binary exponentiation: keeps all intermediate products off
+   * the managed heap and performs one final allocation.
+   */
+  bf_mag_t res = {0}, base = {0}, tmp = {0};
+  if (!mag_reserve(&res, 2) || !mag_copy(&base, a->limb, a->words))
+    goto pow_fail;
+  res.d[0] = 1;
+  res.n = 1;
+  int64_t res_exp = 0;
+  int res_sign = 1;
+  int64_t base_exp = a->exp2;
+  int base_sign = (int)a->sign;
+  if (!bf_mag_round_norm(&res, &res_exp, p) ||
+      !bf_mag_round_norm(&base, &base_exp, p))
+    goto pow_fail;
   while (n) {
-    if (n & 1) {
-      ny_bigfloat_t *r = bf_ptr(result), *b = bf_ptr(base);
-      result = bf_mul_obj(r, b);
+    if (n & 1u) {
+      size_t rz = 0, bz = 0;
+      while (rz < res.n && res.d[rz] == 0)
+        ++rz;
+      while (bz < base.n && base.d[bz] == 0)
+        ++bz;
+      bf_mag_t rm = {.d = res.d + rz, .n = res.n - rz};
+      bf_mag_t bm = {.d = base.d + bz, .n = base.n - bz};
+      if (!mag_mul(&tmp, &rm, &bm))
+        goto pow_fail;
+      res_exp = res_exp + base_exp + (int64_t)(rz + bz) * 64;
+      res_sign *= base_sign;
+      if (!bf_mag_round_norm(&tmp, &res_exp, p) ||
+          !mag_copy(&res, tmp.d, tmp.n))
+        goto pow_fail;
     }
     n >>= 1;
     if (n) {
-      ny_bigfloat_t *b = bf_ptr(base);
-      base = bf_mul_obj(b, b);
+      size_t bz = 0;
+      while (bz < base.n && base.d[bz] == 0)
+        ++bz;
+      bf_mag_t bm = {.d = base.d + bz, .n = base.n - bz};
+      if (!mag_mul(&tmp, &bm, &bm))
+        goto pow_fail;
+      base_exp = base_exp * 2 + (int64_t)(bz * 2) * 64;
+      base_sign *= base_sign;
+      if (!bf_mag_round_norm(&tmp, &base_exp, p) ||
+          !mag_copy(&base, tmp.d, tmp.n))
+        goto pow_fail;
     }
   }
+  int64_t result = bf_alloc_from_mag(res_sign, res_exp, &res, p);
+  mag_free(&res);
+  mag_free(&base);
+  mag_free(&tmp);
+  if (!result)
+    return 0;
   if (negative) {
-    int64_t one = bf_from_u64_raw(1, 1, 0, a->precision);
+    int64_t one = bf_from_u64_raw(1, 1, 0, p);
     return bf_div_obj(bf_ptr(one), bf_ptr(result));
   }
   return result;
+
+pow_fail:
+  mag_free(&res);
+  mag_free(&base);
+  mag_free(&tmp);
+  return 0;
 }
 
 int64_t rt_bigfloat_pow_int_raw(int64_t a, int64_t exponent) {

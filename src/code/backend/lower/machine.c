@@ -53,31 +53,52 @@ static bool mach_rotate_scalar_loops(nyr_mach_func_t *m) {
     const nyr_mach_block_t *head = &m->blocks[b - 2];
     const nyr_mach_block_t *false_edge = &m->blocks[b - 1];
     size_t guard_count = head->inst_count;
-    size_t count = guard_count + 1;
-    if (guard_count < 2 || count > 6 || false_edge->inst_count != 1)
+    size_t exit_count = false_edge->inst_count;
+    if (guard_count < 2 || guard_count > 6 || exit_count < 1 || exit_count > 4)
       continue;
     /*
-     * Leave loops that define vector values unrotated: the vector carry
-     * proof needs a latch distinct from the header to keep loop-carried
-     * vectors resident across the backedge.
+     * Leave loops with loop-carried (multi-def or live-across-backedge) vector
+     * values unrotated: coalesce_loop_edges needs a latch distinct from the
+     * header (`pred > h`) to keep mutable vector PHIs resident across the
+     * backedge. Invariant vectors (`carry_invariant_vectors` handles `>= h`)
+     * and loop-local vector temporaries rotate safely into single-branch loops.
      */
-    bool has_vector = false;
-    for (size_t pc = body->first_inst; pc <= latch && !has_vector; ++pc) {
+    bool has_carried_vector = false;
+    for (size_t pc = body->first_inst; pc <= latch && !has_carried_vector; ++pc) {
       const nyr_mach_inst_t *in = &m->insts[pc];
-      has_vector = in->dst.kind == NYR_MACH_OPERAND_VREG &&
-                   in->dst.as.reg < m->vreg_len &&
-                   (m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V256_I64 ||
-                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V128_I64 ||
-                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V256_F64 ||
-                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V128_F64 ||
-                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V128_F32);
+      if (in->dst.kind != NYR_MACH_OPERAND_VREG ||
+          in->dst.as.reg >= m->vreg_len)
+        continue;
+      nyr_mach_type_t dt = m->vreg_types[in->dst.as.reg];
+      bool is_vec = dt == NYR_MACH_TYPE_V256_I64 ||
+                    dt == NYR_MACH_TYPE_V128_I64 ||
+                    dt == NYR_MACH_TYPE_V256_F64 ||
+                    dt == NYR_MACH_TYPE_V128_F64 ||
+                    dt == NYR_MACH_TYPE_V128_F32;
+      if (!is_vec)
+        continue;
+      uint32_t v = in->dst.as.reg;
+      for (size_t k = 0; k < m->inst_len && !has_carried_vector; ++k) {
+        if (k == pc)
+          continue;
+        const nyr_mach_inst_t *o = &m->insts[k];
+        if (o->dst.kind == NYR_MACH_OPERAND_VREG && o->dst.as.reg == v)
+          has_carried_vector = true;
+        else if (k < pc || k > latch) {
+          if ((o->src0.kind == NYR_MACH_OPERAND_VREG && o->src0.as.reg == v) ||
+              (o->src1.kind == NYR_MACH_OPERAND_VREG && o->src1.as.reg == v) ||
+              (o->src2.kind == NYR_MACH_OPERAND_VREG && o->src2.as.reg == v))
+            has_carried_vector = true;
+        }
+      }
     }
-    if (has_vector)
+    if (has_carried_vector)
       continue;
     const nyr_mach_inst_t *guard = &m->insts[head->first_inst];
     const nyr_mach_inst_t *cmp = &guard[guard_count - 2];
     const nyr_mach_inst_t *branch = &guard[guard_count - 1];
-    const nyr_mach_inst_t *exit = &m->insts[false_edge->first_inst];
+    const nyr_mach_inst_t *exit_insts = &m->insts[false_edge->first_inst];
+    const nyr_mach_inst_t *exit = &exit_insts[exit_count - 1];
     if (cmp->opcode != NYR_MACH_CMP || cmp->dst.kind != NYR_MACH_OPERAND_VREG ||
         cmp->dst.reg_class != NYR_MACH_REGCLASS_GPR ||
         branch->opcode != NYR_MACH_BR_IF ||
@@ -90,9 +111,10 @@ static bool mach_rotate_scalar_loops(nyr_mach_func_t *m) {
         exit->src1.as.block_index != b + 1 || exit->args || exit->arg_sizes)
       continue;
     bool safe = true;
-    for (size_t n = 0; n < count - 2; ++n) {
+    for (size_t n = 0; n + 1 < guard_count; ++n) {
       const nyr_mach_inst_t *in = &guard[n];
-      safe &= (in->opcode == NYR_MACH_COPY || in->opcode == NYR_MACH_CMP) &&
+      safe &= (in->opcode == NYR_MACH_COPY || in->opcode == NYR_MACH_CMP ||
+               in->opcode == NYR_MACH_ADD || in->opcode == NYR_MACH_XOR) &&
               !in->effects && !in->args && !in->arg_sizes &&
               in->dst.kind == NYR_MACH_OPERAND_VREG &&
               in->dst.reg_class == NYR_MACH_REGCLASS_GPR &&
@@ -102,6 +124,14 @@ static bool mach_rotate_scalar_loops(nyr_mach_func_t *m) {
                in->src1.kind == NYR_MACH_OPERAND_VREG ||
                in->src1.kind == NYR_MACH_OPERAND_IMM);
     }
+    for (size_t n = 0; n + 1 < exit_count; ++n) {
+      const nyr_mach_inst_t *in = &exit_insts[n];
+      safe &= in->opcode == NYR_MACH_COPY && !in->effects && !in->args &&
+              !in->arg_sizes && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+              in->dst.reg_class == NYR_MACH_REGCLASS_GPR &&
+              (in->src0.kind == NYR_MACH_OPERAND_VREG ||
+               in->src0.kind == NYR_MACH_OPERAND_IMM);
+    }
     for (size_t pc = body->first_inst; pc < latch; ++pc) {
       nyr_mach_opcode_t op = m->insts[pc].opcode;
       if (op == NYR_MACH_BR || op == NYR_MACH_BR_IF || op == NYR_MACH_RET ||
@@ -110,19 +140,80 @@ static bool mach_rotate_scalar_loops(nyr_mach_func_t *m) {
     }
     if (!safe)
       continue;
-    nyr_mach_inst_t cloned[6];
-    memcpy(cloned, guard, guard_count * sizeof(*cloned));
-    cloned[guard_count] = *exit;
-    while (m->inst_cap - m->inst_len < count - 1)
-      if (!mach_grow((void **)&m->insts, &m->inst_cap, sizeof(*m->insts)))
+    if (exit_count == 1) {
+      size_t count = guard_count + 1;
+      nyr_mach_inst_t cloned[8];
+      memcpy(cloned, guard, guard_count * sizeof(*cloned));
+      cloned[guard_count] = *exit;
+      while (m->inst_cap - m->inst_len < count - 1)
+        if (!mach_grow((void **)&m->insts, &m->inst_cap, sizeof(*m->insts)))
+          return false;
+      memmove(&m->insts[latch + count], &m->insts[latch + 1],
+              (m->inst_len - latch - 1) * sizeof(*m->insts));
+      memcpy(&m->insts[latch], cloned, count * sizeof(*cloned));
+      m->inst_len += count - 1;
+      body->inst_count += count - 1;
+      for (size_t next = b + 1; next < m->block_len; ++next)
+        m->blocks[next].first_inst += count - 1;
+    } else {
+      /*
+       * false_edge carries exit PHI copies before branching to b+1. End body
+       * with `guard` (ending in BR_IF -> b) and insert a fresh fallthrough
+       * exit block at b+1 containing a clone of false_edge, shifting targets
+       * >= b+1 by 1 so block terminators and layout backedges stay valid.
+       */
+      uint32_t max_label = 0;
+      for (size_t bi = 0; bi < m->block_len; ++bi)
+        if (m->blocks[bi].label != UINT32_MAX &&
+            m->blocks[bi].label > max_label)
+          max_label = m->blocks[bi].label;
+      if (max_label >= UINT32_MAX - 1)
+        continue;
+      uint32_t new_label = max_label + 1;
+      size_t total_add = guard_count + exit_count - 1;
+      nyr_mach_inst_t cloned_guard[6];
+      nyr_mach_inst_t cloned_exit[4];
+      memcpy(cloned_guard, guard, guard_count * sizeof(*cloned_guard));
+      memcpy(cloned_exit, exit_insts, exit_count * sizeof(*cloned_exit));
+      while (m->inst_cap - m->inst_len < total_add)
+        if (!mach_grow((void **)&m->insts, &m->inst_cap, sizeof(*m->insts)))
+          return false;
+      if (m->block_len == m->block_cap &&
+          !mach_grow((void **)&m->blocks, &m->block_cap, sizeof(*m->blocks)))
         return false;
-    memmove(&m->insts[latch + count], &m->insts[latch + 1],
-            (m->inst_len - latch - 1) * sizeof(*m->insts));
-    memcpy(&m->insts[latch], cloned, count * sizeof(*cloned));
-    m->inst_len += count - 1;
-    body->inst_count += count - 1;
-    for (size_t next = b + 1; next < m->block_len; ++next)
-      m->blocks[next].first_inst += count - 1;
+      body = &m->blocks[b];
+      memmove(&m->insts[latch + guard_count + exit_count],
+              &m->insts[latch + 1],
+              (m->inst_len - latch - 1) * sizeof(*m->insts));
+      memcpy(&m->insts[latch], cloned_guard,
+             guard_count * sizeof(*cloned_guard));
+      memcpy(&m->insts[latch + guard_count], cloned_exit,
+             exit_count * sizeof(*cloned_exit));
+      m->inst_len += total_add;
+      body->inst_count += (uint32_t)(guard_count - 1);
+      memmove(&m->blocks[b + 2], &m->blocks[b + 1],
+              (m->block_len - (b + 1)) * sizeof(*m->blocks));
+      m->block_len += 1;
+      m->blocks[b + 1] = (nyr_mach_block_t){
+          .first_inst = (uint32_t)(latch + guard_count),
+          .inst_count = (uint32_t)exit_count,
+          .label = new_label,
+          .source_pc = m->blocks[b - 1].source_pc};
+      if (new_label > m->max_block_label)
+        m->max_block_label = new_label;
+      for (size_t next = b + 2; next < m->block_len; ++next)
+        m->blocks[next].first_inst += (uint32_t)total_add;
+      for (size_t pc = 0; pc < m->inst_len; ++pc) {
+        nyr_mach_inst_t *in = &m->insts[pc];
+        if (in->src0.kind == NYR_MACH_OPERAND_BLOCK &&
+            in->src0.as.block_index >= b + 1)
+          in->src0.as.block_index += 1;
+        if (in->src1.kind == NYR_MACH_OPERAND_BLOCK &&
+            in->src1.as.block_index >= b + 1)
+          in->src1.as.block_index += 1;
+      }
+      ++b;
+    }
   }
   return true;
 }
@@ -5672,7 +5763,10 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       inst.dst = mach_vreg(&lowered, values[in->dst]);
       inst.src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_SYMBOL,
                                        .as.symbol = in->symbol,
-                                       .relocation = NYR_MACH_RELOC_PC_REL32};
+                                       .relocation = NYR_MACH_RELOC_PC_REL32,
+                                       .nonpreemptible =
+                                           (in->flags &
+                                            NYIR_INST_F_SYMBOL_NONPREEMPTIBLE) != 0};
     } else if (in->op == NYIR_LOAD_I64) {
       inst.opcode = NYR_MACH_LOAD;
       inst.dst = mach_vreg(&lowered, values[in->dst]);
@@ -5872,7 +5966,10 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
         }
         inst.src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_SYMBOL,
                                          .as.symbol = in->symbol,
-                                         .relocation = NYR_MACH_RELOC_CALL};
+                                         .relocation = NYR_MACH_RELOC_CALL,
+                                         .nonpreemptible =
+                                             (in->flags &
+                                              NYIR_INST_F_SYMBOL_NONPREEMPTIBLE) != 0};
       }
       inst.call_is_extern = !indirect && (in->flags & NYIR_INST_F_EXTERN) != 0;
       inst.call_has_sret = (in->flags & NYIR_INST_F_SRET) != 0;
@@ -6139,9 +6236,10 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
         inst.opcode = NYR_MACH_OR;
       else if (in->op == NYIR_VEC8_XOR_I64)
         inst.opcode = NYR_MACH_XOR;
-      else if (in->op == NYIR_VEC8_MUL_I64)
+      else if (in->op == NYIR_VEC8_MUL_I64) {
         inst.opcode = NYR_MACH_MUL;
-      else if (in->op == NYIR_VEC4_SHL_I64)
+        inst.unsigned_arith = (in->imm == 1);
+      } else if (in->op == NYIR_VEC4_SHL_I64)
         inst.opcode = NYR_MACH_SHL;
       else if (in->op == NYIR_VEC4_SAR_I64)
         inst.opcode = NYR_MACH_SAR;
@@ -6479,6 +6577,11 @@ static bool mach_schedule_opcode_allowed(nyr_mach_opcode_t opcode) {
   case NYR_MACH_AND:
   case NYR_MACH_OR:
   case NYR_MACH_XOR:
+  case NYR_MACH_SHL:
+  case NYR_MACH_SAR:
+  case NYR_MACH_SHR:
+  case NYR_MACH_ROR:
+  case NYR_MACH_ROR32:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
   case NYR_MACH_POPCOUNT64:
@@ -6509,6 +6612,10 @@ static bool mach_schedule_inst_safe(const nyr_mach_func_t *func,
    * division by zero and INT64_MIN / -1 remain ordering barriers. The
    * register allocator models the fixed-register clobbers after scheduling.
    */
+  if (inst->opcode == NYR_MACH_SHL || inst->opcode == NYR_MACH_SAR ||
+      inst->opcode == NYR_MACH_SHR || inst->opcode == NYR_MACH_ROR ||
+      inst->opcode == NYR_MACH_ROR32)
+    return inst->src1.kind == NYR_MACH_OPERAND_IMM;
   if (inst->opcode == NYR_MACH_DIV)
     return mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_I64 &&
            inst->src1.kind == NYR_MACH_OPERAND_IMM && inst->src1.as.imm != 0 &&
@@ -6705,7 +6812,8 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
   return true;
 }
 
-static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
+static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count,
+                                  const nyr_mach_operand_t *prev_def) {
   if (!insts || count < 2)
     return true;
 
@@ -6729,15 +6837,21 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
   bool *selected = calloc(count, sizeof(*selected));
   size_t *order = malloc(count * sizeof(*order));
   size_t *src0_user = malloc(count * sizeof(*src0_user));
+  size_t *single_user = malloc(count * sizeof(*single_user));
+  unsigned *local_uses = calloc(count, sizeof(*local_uses));
+  unsigned *rem_uses = calloc(count, sizeof(*rem_uses));
   nyr_mach_inst_t *ordered = malloc(count * sizeof(*ordered));
   if (!edges || !indegree || !critical || !selected || !order || !src0_user ||
-      !ordered) {
+      !single_user || !local_uses || !rem_uses || !ordered) {
     free(edges);
     free(indegree);
     free(critical);
     free(selected);
     free(order);
     free(src0_user);
+    free(single_user);
+    free(local_uses);
+    free(rem_uses);
     free(ordered);
     return false;
   }
@@ -6747,14 +6861,24 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
    * original order is otherwise not a dependency, which is what lets the
    * ready-list choose independent work from later in the block.
    */
+  unsigned prev_rem_uses = 0;
+  bool track_prev = prev_def && mach_is_value(prev_def);
   for (size_t i = 0; i < count; ++i) {
+    if (track_prev) {
+      if (mach_schedule_inst_reads(&insts[i], prev_def))
+        ++prev_rem_uses;
+      if (mach_schedule_inst_writes(&insts[i], prev_def))
+        track_prev = false;
+    }
     src0_user[i] = SIZE_MAX;
+    single_user[i] = SIZE_MAX;
     size_t user = SIZE_MAX, uses = 0;
     for (size_t j = i + 1; j < count; ++j) {
       bool dependency = false;
+      bool reads_i = false;
       if (mach_is_value(&insts[i].dst)) {
-        dependency = mach_schedule_inst_reads(&insts[j], &insts[i].dst) ||
-                     mach_schedule_inst_writes(&insts[j], &insts[i].dst);
+        reads_i = mach_schedule_inst_reads(&insts[j], &insts[i].dst);
+        dependency = reads_i || mach_schedule_inst_writes(&insts[j], &insts[i].dst);
       }
       if (!dependency && mach_is_value(&insts[j].dst))
         dependency = mach_schedule_inst_reads(&insts[i], &insts[j].dst);
@@ -6762,6 +6886,8 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
         edges[i * count + j] = 1;
         ++indegree[j];
       }
+      if (reads_i)
+        ++local_uses[i];
       if (uses < 2 && mach_is_value(&insts[i].dst)) {
         size_t found = mach_schedule_operand_uses(&insts[j], &insts[i].dst);
         if (found) {
@@ -6770,8 +6896,11 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
         }
       }
     }
+    rem_uses[i] = local_uses[i];
     if (!mach_is_value(&insts[i].dst))
       continue;
+    if (local_uses[i] == 1 && user != SIZE_MAX)
+      single_user[i] = user;
     if (uses == 1 && user != SIZE_MAX &&
         mach_schedule_value_equal(&insts[user].src0, &insts[i].dst))
       src0_user[i] = user;
@@ -6786,21 +6915,95 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
     critical[i] = latency + successor;
   }
 
+  int live_temps = 0;
+  bool pressure_mode = count >= 4;
   for (size_t out = 0; out < count; ++out) {
     size_t best = SIZE_MAX;
+    int best_delta = 1000;
+    /*
+     * Priority 1: If the barrier instruction right before this segment (e.g. a
+     * load of w[i] in SHA-256) produced a value with a single remaining read in
+     * this segment, consume it immediately so its scratch register is freed
+     * before an unrelated expression tree begins.
+     */
+    if (pressure_mode && prev_def && prev_rem_uses == 1) {
+      for (size_t i = 0; i < count; ++i) {
+        if (selected[i] || indegree[i] != 0)
+          continue;
+        if (!mach_schedule_inst_reads(&insts[i], prev_def))
+          continue;
+        if (best == SIZE_MAX || critical[i] > critical[best] ||
+            (critical[i] == critical[best] && i < best))
+          best = i;
+      }
+    }
+    /*
+     * Priority 2: When register pressure is building inside a basic block (such
+     * as SHA-256 rounds with 9+ live loop PHIs), prefer ready instructions that
+     * reduce live temporaries (negative net delta) before opening a new tree.
+     */
+    if (best == SIZE_MAX && pressure_mode && live_temps >= 1) {
+      for (size_t i = 0; i < count; ++i) {
+        if (selected[i] || indegree[i] != 0)
+          continue;
+        int delta = local_uses[i] > 0 ? 1 : 0;
+        for (size_t p = 0; p < i; ++p)
+          if (selected[p] && rem_uses[p] == 1 &&
+              mach_is_value(&insts[p].dst) &&
+              mach_schedule_inst_reads(&insts[i], &insts[p].dst))
+            --delta;
+        if (delta < 0 &&
+            (best == SIZE_MAX || delta < best_delta ||
+             (delta == best_delta && critical[i] > critical[best]) ||
+             (delta == best_delta && critical[i] == critical[best] &&
+              i < best))) {
+          best = i;
+          best_delta = delta;
+        }
+      }
+    }
+    /*
+     * Priority 3 (Sethi-Ullman tree completion): When at least one local temp
+     * is already live, prefer a ready instruction whose sole consumer is only
+     * waiting on it and will retire an already-live temp (e.g. ror(a,22) before
+     * starting Maj), rather than opening a second concurrent expression tree.
+     */
+    if (best == SIZE_MAX && pressure_mode && live_temps >= 1) {
+      for (size_t i = 0; i < count; ++i) {
+        if (selected[i] || indegree[i] != 0)
+          continue;
+        size_t u = single_user[i];
+        if (u == SIZE_MAX || selected[u] || indegree[u] != 1)
+          continue;
+        bool kills_live = false;
+        for (size_t p = 0; p < u; ++p)
+          if (selected[p] && rem_uses[p] == 1 &&
+              mach_is_value(&insts[p].dst) &&
+              mach_schedule_inst_reads(&insts[u], &insts[p].dst)) {
+            kills_live = true;
+            break;
+          }
+        if (kills_live &&
+            (best == SIZE_MAX || critical[i] > critical[best] ||
+             (critical[i] == critical[best] && i < best)))
+          best = i;
+      }
+    }
     /*
      * Keep a single-use source-0 value live in %rax through its consumer.
      * Wait to issue that producer until the consumer's other inputs are ready,
      * then force the consumer into the immediately following slot.
      */
-    for (size_t i = 0; i < count; ++i) {
-      if (selected[i] || indegree[i] != 0 || src0_user[i] == SIZE_MAX)
-        continue;
-      size_t user = src0_user[i];
-      if (indegree[user] == 1 &&
-          (best == SIZE_MAX || critical[i] > critical[best] ||
-           (critical[i] == critical[best] && i < best)))
-        best = i;
+    if (best == SIZE_MAX) {
+      for (size_t i = 0; i < count; ++i) {
+        if (selected[i] || indegree[i] != 0 || src0_user[i] == SIZE_MAX)
+          continue;
+        size_t user = src0_user[i];
+        if (indegree[user] == 1 &&
+            (best == SIZE_MAX || critical[i] > critical[best] ||
+             (critical[i] == critical[best] && i < best)))
+          best = i;
+      }
     }
     if (best == SIZE_MAX) {
       size_t deferred = SIZE_MAX;
@@ -6831,12 +7034,25 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
       free(selected);
       free(order);
       free(src0_user);
+      free(single_user);
+      free(local_uses);
+      free(rem_uses);
       free(ordered);
       return false;
     }
     selected[best] = true;
     order[out] = best;
     ordered[out] = insts[best];
+    if (prev_def && prev_rem_uses > 0 &&
+        mach_schedule_inst_reads(&insts[best], prev_def))
+      --prev_rem_uses;
+    for (size_t p = 0; p < best; ++p)
+      if (selected[p] && rem_uses[p] > 0 && mach_is_value(&insts[p].dst) &&
+          mach_schedule_inst_reads(&insts[best], &insts[p].dst) &&
+          --rem_uses[p] == 0)
+        --live_temps;
+    if (local_uses[best] > 0)
+      ++live_temps;
     size_t forced_user = src0_user[best];
     for (size_t j = best + 1; j < count; ++j)
       if (edges[best * count + j])
@@ -6846,6 +7062,16 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
       selected[forced_user] = true;
       order[out + 1] = forced_user;
       ordered[out + 1] = insts[forced_user];
+      if (prev_def && prev_rem_uses > 0 &&
+          mach_schedule_inst_reads(&insts[forced_user], prev_def))
+        --prev_rem_uses;
+      for (size_t p = 0; p < forced_user; ++p)
+        if (selected[p] && rem_uses[p] > 0 && mach_is_value(&insts[p].dst) &&
+            mach_schedule_inst_reads(&insts[forced_user], &insts[p].dst) &&
+            --rem_uses[p] == 0)
+          --live_temps;
+      if (local_uses[forced_user] > 0)
+        ++live_temps;
       ++out;
       for (size_t j = forced_user + 1; j < count; ++j)
         if (edges[forced_user * count + j])
@@ -6870,6 +7096,9 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
   free(selected);
   free(order);
   free(src0_user);
+  free(single_user);
+  free(local_uses);
+  free(rem_uses);
   free(ordered);
   return true;
 }
@@ -6890,7 +7119,11 @@ static bool mach_schedule_block(nyr_mach_func_t *func,
     while (end < block->inst_count &&
            mach_schedule_inst_safe(func, &insts[end]))
       ++end;
-    if (!mach_schedule_segment(insts + start, end - start))
+    const nyr_mach_operand_t *prev_def =
+        (start > 0 && mach_is_value(&insts[start - 1].dst))
+            ? &insts[start - 1].dst
+            : NULL;
+    if (!mach_schedule_segment(insts + start, end - start, prev_def))
       return false;
     start = end;
   }

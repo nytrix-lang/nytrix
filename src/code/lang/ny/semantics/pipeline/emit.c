@@ -4519,6 +4519,15 @@ int ny_type_pipeline_validate_semantics(
     *errors_json_out = NULL;
   ny_tp_ctx_t ctx;
   tp_ctx_build(&ctx, prog, cg, source_name, include_std);
+  if (include_std && !ny_env_enabled("NYTRIX_HM_EAGER_STD") && prog) {
+    for (size_t i = 0; i < prog->body.len; ++i) {
+      stmt_t *s = prog->body.data[i];
+      if (s && !ny_is_stdlib_tok(s->tok)) {
+        ctx.lazy_std_inference = true;
+        break;
+      }
+    }
+  }
   NY_TP_STAGE_TIMED("context-build");
 
   ny_hm_state_t hm;

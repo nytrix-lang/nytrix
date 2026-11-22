@@ -25,6 +25,37 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 ### NYC C compiler
 
+- Size builds apply a tighter inlining limit to helpers whose exported
+  definitions must still be emitted.
+- The i386 setup emitter uses a shorter encoding for signed-byte constants
+  loaded into registers and for accumulator copies with dead sources.
+- The i386 setup emitter folds constant offsets into symbol-relative memory
+  operands for moves and comparisons while preserving 32-bit relocations.
+  It also folds address arithmetic into relocations when the arithmetic
+  flags are overwritten before use.
+- The i386 setup emitter tests memory operands directly when the loaded
+  register is dead.
+- Volatile file-scope integer arrays retain observable element reads and
+  writes through optimization.
+- Real-mode setup size builds promote locals that need no PHI edge copies.
+- SysV x86-64 PIC uses PC-relative addresses for declarations under
+  GCC hidden visibility pragmas.
+- Ordered comparisons of opaque C object pointers use unsigned address order.
+- Comparisons of zero-extended unsigned 32-bit operands avoid widening
+  the comparison with a sign-bit bias.
+- Real-mode setup can store a pushed immediate directly into a frame
+  home when the temporary register dies at the store.
+- i386 size selection accounts for finalized frames and accumulator
+  encodings. Real-mode size inlining keeps helpers that mix inline
+  assembly and ordinary calls out of the optional inlining pass.
+- x86-64 IRQ stack switches preserve the IRQ entry and exit calls
+  surrounding the handler.
+- Automatic scalar `_Bool` initialization and assignment canonicalize
+  nonzero values to 1.
+- Cross-target C tests require fresh build artifacts and match the expected
+  diagnostic for rejected input. `bench-gcc` fails on missing checksums,
+  failed runs, and unavailable instruction counts, and keeps fixtures with
+  matching basenames isolated.
 - NYIR verifier accepts an integer select as another select's condition when
   both arms are boolean; four Linux translation units now compile through the
   verifier and emit native dependency files.
@@ -87,6 +118,23 @@ build and runtime evidence and its limits.
 
 ### Compiler and backends
 
+- Compile-time pipeline optimization: demand-driven stdlib HM scheme inference
+  (`NYTRIX_HM_EAGER_STD=1` overrides), O(1) hash indexes for module exports,
+  active modules, use aliases, attached methods, layouts, and function
+  reachability; cached FFI return-line checks; zero-allocation CFG reuse in
+  range queries; stack-buffered CFG/RPO builders; fixed parallel fork lowering
+  unclaimed-lambda handling and small-inliner change detection. Cold native
+  `-O3` compiles drop on `etc/labs/pong.ny` (14.78 s to 8.50–9.20 s) and
+  `etc/labs/editor.ny` (33.92 s to 21.00–28.03 s).
+- Native NYR/x86-64 codegen and optimization: multi-hop loop-exit-flag
+  preservation, `NYIR_SELECT_I64` arm conversion, inverted-AND short-circuit
+  flattening, and trailing-branch handling in `if_convert`; pure `AND`/`OR`
+  branch-tree evaluation, 1-incoming PHI collapse, and fallthrough edge
+  threading in `jump_thread`; `int32_t`-scoped literal decoloring and a
+  resident-base SIB addressing fast path in `object64`; improved tail-call,
+  loop, vector, and scalar passes (`xz` 4.24 ms to 1.84–1.94 ms, `fhourstones`
+  3.61 ms to 2.29–2.38 ms, `nussinov` 4.11 ms to 3.82 ms, `mandel` 335 µs to
+  137 µs, `radix-tree` 6.30 ms).
 - Safe mode: guard-page user heap + RC/RAII; LLVM ASan/TSan passes: required attrs; sanitizer compile fail-closed on unsupported native encoders/failed instrumentation; user-memory fuzz: deterministic alloc/byte-access mutations under native/LLVM safe heap + emitted ASan; LLVM literal-array symbols: valid ASan COMDAT sigs; numeric native string conversions: managed storage, no leaked uncached formatting buffers.
 - Strict ownership: raw alloc identities via copied/interior local aliases + explicit releasing callees; contracts on every annotated parameter; owned factory results keep caller-side provenance; consuming raw owner invalidates copied/interior aliases; uncaught panics run active defers; managed dict alloc checks failure before dereferencing new storage.
 - Indexed resource extraction: conservative invalidation of collection owner, incl. resource-bearing layout fields; ownership-rule errors fail shared type validation, no print-and-return-success; layout fields: common generic/alias grammar; nominal dict values keep layout on field read.
@@ -153,6 +201,14 @@ build and runtime evidence and its limits.
 
 ### Runtime and standard library
 
+- Large runtime allocations (`>= 2 MiB`) request `MADV_HUGEPAGE` on Linux and
+  `rt_str_repeat_copy` uses a 32 KiB pattern buffer (`repeat` drops to 0.23–0.37×
+  vs C, 0.95× vs LLVM); BigInt/BigFloat arithmetic and `core/math/big.ny`
+  tightened (`bigint-oracle` 32.2 ms to 11.0–17.2 ms).
+- Parallelized `./make bench` and `./make test` defaults for multi-core hosts,
+  stabilized UI probe and AVR QEMU runtime timeouts, and refreshed the
+  benchmark dashboard in `etc/docs/spec/stats.md` (110/110 fixtures OK, all
+  per-class gates pass).
 - Fixed correctness issues in string/list/buffer operations, hashing/crypto
   helpers, subprocess/process handling, terminal and UI behavior, audio
   resource loading, HTTP handling, and platform-specific bridges.

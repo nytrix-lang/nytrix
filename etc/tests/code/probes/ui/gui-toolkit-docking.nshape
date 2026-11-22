@@ -4,7 +4,7 @@ shape gui-toolkit-docking {
   features ["ny", "render", "gui", "toolkit", "docking"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 300
   expect_stdout "GUI-TOOLKIT-DOCKING-OK"
   source ny <<'NY'

@@ -4,7 +4,7 @@ shape vg-composite {
   features ["ny", "render", "vg", "vector", "blend"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 420
   expect_stdout "VG-COMPOSITE-OK"
   source ny <<'NY'

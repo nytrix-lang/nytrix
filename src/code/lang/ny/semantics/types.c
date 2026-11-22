@@ -4232,21 +4232,119 @@ static type_layout_t make_layout(size_t size, size_t align,
 
 static size_t ptr_size(void) { return sizeof(void *); }
 
-layout_def_t *lookup_layout(codegen_t *cg, const char *name) {
-  if (!cg || !name)
+typedef struct ny_layout_index_slot {
+  const char *name;
+  layout_def_t *def;
+  uint64_t hash;
+} ny_layout_index_slot_t;
+
+static inline uint64_t ny_layout_name_hash(const char *name) {
+  uint64_t h = UINT64_C(14695981039346656037);
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p)
+    h = (h ^ *p) * UINT64_C(1099511628211);
+  return h ? h : 1u;
+}
+
+static void ny_layout_index_insert(ny_layout_index_slot_t *slots, size_t cap,
+                                   size_t *len_io, layout_def_t *def) {
+  if (!def || !def->name)
+    return;
+  uint64_t h = ny_layout_name_hash(def->name);
+  size_t mask = cap - 1u;
+  size_t pos = (size_t)h & mask;
+  for (;;) {
+    ny_layout_index_slot_t *s = &slots[pos];
+    if (!s->hash) {
+      s->name = def->name;
+      s->def = def;
+      s->hash = h;
+      (*len_io)++;
+      return;
+    }
+    if (s->hash == h && strcmp(s->name, def->name) == 0)
+      return; /* keep first definition, matching linear scan */
+    pos = (pos + 1u) & mask;
+  }
+}
+
+static bool ny_layout_index_sync(codegen_t *cg) {
+  if (!cg)
+    return false;
+  if (cg->layouts.len == 0)
+    return true;
+  if (cg->layout_index_synced > cg->layouts.len) {
+    free(cg->layout_index_slots);
+    cg->layout_index_slots = NULL;
+    cg->layout_index_cap = 0;
+    cg->layout_index_len = 0;
+    cg->layout_index_synced = 0;
+  }
+  if (cg->layout_index_synced == cg->layouts.len && cg->layout_index_slots)
+    return true;
+  size_t need = cg->layouts.len;
+  if (!cg->layout_index_slots || need * 10u >= cg->layout_index_cap * 7u) {
+    size_t cap = cg->layout_index_cap ? cg->layout_index_cap : 64u;
+    while (need * 10u >= cap * 7u)
+      cap <<= 1;
+    ny_layout_index_slot_t *slots = calloc(cap, sizeof(*slots));
+    if (!slots)
+      return false;
+    size_t new_len = 0;
+    for (size_t i = 0; i < cg->layouts.len; ++i)
+      ny_layout_index_insert(slots, cap, &new_len, cg->layouts.data[i]);
+    free(cg->layout_index_slots);
+    cg->layout_index_slots = slots;
+    cg->layout_index_cap = cap;
+    cg->layout_index_len = new_len;
+    cg->layout_index_synced = cg->layouts.len;
+    return true;
+  }
+  ny_layout_index_slot_t *slots =
+      (ny_layout_index_slot_t *)cg->layout_index_slots;
+  for (size_t i = cg->layout_index_synced; i < cg->layouts.len; ++i)
+    ny_layout_index_insert(slots, cg->layout_index_cap, &cg->layout_index_len,
+                           cg->layouts.data[i]);
+  cg->layout_index_synced = cg->layouts.len;
+  return true;
+}
+
+static layout_def_t *ny_layout_index_find(codegen_t *cg, const char *name) {
+  if (!cg->layouts.len)
     return NULL;
+  if (ny_layout_index_sync(cg) && cg->layout_index_slots) {
+    const ny_layout_index_slot_t *slots =
+        (const ny_layout_index_slot_t *)cg->layout_index_slots;
+    uint64_t h = ny_layout_name_hash(name);
+    size_t mask = cg->layout_index_cap - 1u;
+    size_t pos = (size_t)h & mask;
+    for (;;) {
+      const ny_layout_index_slot_t *s = &slots[pos];
+      if (!s->hash)
+        return NULL;
+      if (s->hash == h && strcmp(s->name, name) == 0)
+        return s->def;
+      pos = (pos + 1u) & mask;
+    }
+  }
   for (size_t i = 0; i < cg->layouts.len; i++) {
     layout_def_t *def = cg->layouts.data[i];
     if (def && def->name && strcmp(def->name, name) == 0)
       return def;
   }
+  return NULL;
+}
+
+layout_def_t *lookup_layout(codegen_t *cg, const char *name) {
+  if (!cg || !name)
+    return NULL;
+  layout_def_t *found = ny_layout_index_find(cg, name);
+  if (found)
+    return found;
   if (cg->current_module_name && !strchr(name, '.')) {
     const char *qname = codegen_qname(cg, name, cg->current_module_name);
-    for (size_t i = 0; i < cg->layouts.len; i++) {
-      layout_def_t *def = cg->layouts.data[i];
-      if (def && def->name && strcmp(def->name, qname) == 0)
-        return def;
-    }
+    found = ny_layout_index_find(cg, qname);
+    if (found)
+      return found;
   }
   /*
    * Explicit deftype-layout instantiation: "Buf<16>".

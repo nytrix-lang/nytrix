@@ -3256,7 +3256,8 @@ static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
       fail(p, "pointer-to-array element type is unsupported");
       return (c_value_t){-1, C_BAD, NULL};
     }
-    return (c_value_t){address, pointer_type, (c_agg_type_t *)shape.agg};
+    return (c_value_t){address, pointer_type,
+                       c_value_pointee_volatile(value) ? value.agg : shape.agg};
   }
   if (shape.rank) {
     if (!remember_array_shape(p, address, shape))
@@ -3265,6 +3266,7 @@ static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
   }
   if (shape.element_type == C_AGG)
     return (c_value_t){address, C_AGG, shape.agg};
+  bool is_volatile = c_value_pointee_volatile(value);
   uint8_t flags = shape.element_type == C_U8 || shape.element_type == C_CHAR
                       ? NYIR_INST_F_MEM_BYTE
                   : shape.element_type == C_I32 ||
@@ -3274,7 +3276,7 @@ static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
                       : 0;
   int loaded =
       shape.element_type == C_I16 || shape.element_type == C_U16
-          ? lower_load_u16_field(p, address, shape.element_type, false)
+          ? lower_load_u16_field(p, address, shape.element_type, is_volatile)
           : emit_value(p, (nyr_inst_t){
                               .op = NYIR_LOAD_I64,
                               .dst = -1,
@@ -3289,7 +3291,7 @@ static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
   if (loaded >= 0 && c_type_is_integer(shape.element_type))
     loaded = normalize_integer(p, shape.element_type, loaded);
   if (loaded < 0 ||
-      !record_lvalue(p, loaded, address, shape.element_type, false))
+      !record_lvalue(p, loaded, address, shape.element_type, is_volatile))
     return (c_value_t){-1, C_BAD, NULL};
   return (c_value_t){loaded, shape.element_type,
                      c_type_is_pointer(shape.element_type) ? shape.agg : NULL};
@@ -5552,7 +5554,11 @@ static c_value_t parse_primary(c_parser_t *p) {
               if (!remember_array_shape(p, row, shape))
                 return (c_value_t){-1, C_BAD, NULL};
             }
-            return (c_value_t){row, c_array_pointer_type(global->type), NULL};
+            return (c_value_t){
+                row, c_array_pointer_type(global->type),
+                global->is_volatile
+                    ? c_pointee_marker(global->is_const, true, 0)
+                    : NULL};
           }
           int element_address =
               lower_pointer_index_address(p, array_type, address, index.value);
@@ -5580,6 +5586,14 @@ static c_value_t parse_primary(c_parser_t *p) {
                                global->type == C_AGG_PTR ? global->agg : NULL};
           }
           if (array_type == C_U16_PTR || array_type == C_I16_PTR) {
+            if (global->is_volatile) {
+              c_type_t type = array_type == C_I16_PTR ? C_I16 : C_U16;
+              int loaded = lower_load_u16_field(p, element_address, type, true);
+              if (loaded < 0 ||
+                  !record_lvalue(p, loaded, element_address, type, true))
+                return (c_value_t){-1, C_BAD, NULL};
+              return (c_value_t){loaded, type, NULL};
+            }
             int one = emit_value(
                 p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = 1});
             int high_address =
@@ -5659,7 +5673,8 @@ static c_value_t parse_primary(c_parser_t *p) {
                                                 : normalize_u32(p, loaded);
             c_type_t element_type = array_type == C_I32_PTR ? C_I32 : C_U32;
             if (value < 0 ||
-                !record_lvalue(p, value, element_address, element_type, false))
+                !record_lvalue(p, value, element_address, element_type,
+                               global->is_volatile))
               return (c_value_t){-1, C_BAD, NULL};
             return (c_value_t){value, element_type, NULL};
           }
@@ -5706,7 +5721,8 @@ static c_value_t parse_primary(c_parser_t *p) {
               return (c_value_t){-1, C_BAD, NULL};
             loaded = right;
           }
-          if (!record_lvalue(p, loaded, element_address, element_type, false))
+          if (!record_lvalue(p, loaded, element_address, element_type,
+                             global->is_volatile))
             return (c_value_t){-1, C_BAD, NULL};
           return (c_value_t){loaded, element_type, NULL};
         }
@@ -5718,7 +5734,11 @@ static c_value_t parse_primary(c_parser_t *p) {
               : global->type == C_CHAR_PTR ? C_CHAR_PTR
               : global->type == C_AGG ? C_AGG_ARRAY_PTR
                                       : c_add_pointer_levels(global->type, 1),
-              global->type == C_AGG_PTR ? global->agg : NULL};
+              global->type == C_AGG_PTR ? global->agg
+              : !global->is_pointer_array && global->is_volatile &&
+                        c_type_is_integer(global->type)
+                  ? c_pointee_marker(global->is_const, true, 0)
+                  : NULL};
         if (global->type == C_AGG) {
           c_value_t member;
           if (!lower_member_rvalue(p, (c_value_t){address, C_AGG, global->agg},
@@ -9658,11 +9678,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
                       : ny_ctok_eq(op, "<=") ? NYIR_CMP_LE
                       : ny_ctok_eq(op, ">")  ? NYIR_CMP_GT
                                              : NYIR_CMP_GE;
-      int result = emit_value(p, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                              .dst = -1,
-                                              .a = left.value,
-                                              .b = right.value,
-                                              .cmp = cmp});
+      int result = relational
+                       ? emit_u64_compare(p, left.value, right.value, cmp)
+                       : emit_i64_compare(p, left.value, right.value, cmp);
       left = (c_value_t){result, C_I64, NULL};
       continue;
     }
@@ -10157,7 +10175,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
     else if (cmp) {
       bool relational = ny_ctok_eq(op, "<") || ny_ctok_eq(op, "<=") ||
                         ny_ctok_eq(op, ">") || ny_ctok_eq(op, ">=");
-      if (unsigned_operation && relational) {
+      /* Both unsigned int operands have already been zero-extended. Only
+       * a full-width unsigned comparison needs to bias the sign bit. */
+      if (relational && (left.type == C_U64 || right.type == C_U64)) {
         int sign_bit = emit_value(
             p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = INT64_MIN});
         if (sign_bit < 0)

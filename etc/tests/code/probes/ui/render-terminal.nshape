@@ -3,7 +3,7 @@ shape render_terminal_rgba {
   generator "embedded"
   features [ny render tty ansi framebuffer]
   template ny-test-case
-  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   timeout 180
   expect compile_and_run
   expect_message "RENDER-TERMINAL-OK"

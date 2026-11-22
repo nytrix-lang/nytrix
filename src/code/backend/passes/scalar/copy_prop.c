@@ -132,9 +132,13 @@ static unsigned char *nir_call_arg_values(const nyr_func_t *f) {
 }
 
 /*
- * Per-value scalar class of the defining instruction.
+ * Per-value scalar class of the defining instruction, including fixed-point
+ * inference for untagged PHIs whose non-self incoming values all share one
+ * exact raw numeric scalar class (i64-raw / f64 / f32). Refining those PHIs
+ * lets copy propagation collapse redundant `[abi=i64-raw]` mov noise after
+ * mem2reg without weakening ownership contracts on dynamic/object values.
  */
-static nyr_scalar_class_t *nir_value_classes(const nyr_func_t *f) {
+static nyr_scalar_class_t *nir_value_classes(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return NULL;
   nyr_scalar_class_t *vclass = calloc((size_t)f->next_value, sizeof(*vclass));
@@ -144,6 +148,45 @@ static nyr_scalar_class_t *nir_value_classes(const nyr_func_t *f) {
     const nyr_inst_t *in = &f->data[i];
     if (in->dst >= 0 && in->dst < f->next_value)
       vclass[in->dst] = in->scalar_class;
+  }
+  bool changed = true;
+  for (int round = 0; changed && round < 8; ++round) {
+    changed = false;
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *in = &f->data[i];
+      if (in->op != NYIR_PHI || in->dst < 0 || in->dst >= f->next_value ||
+          vclass[in->dst] != NYIR_SCALAR_UNKNOWN || !in->phi_incoming ||
+          in->phi_incoming_len == 0)
+        continue;
+      nyr_scalar_class_t joined = NYIR_SCALAR_UNKNOWN;
+      bool valid = true;
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int iv = in->phi_incoming[k].value;
+        if (iv == in->dst)
+          continue;
+        if (iv < 0 || iv >= f->next_value) {
+          valid = false;
+          break;
+        }
+        nyr_scalar_class_t ic = vclass[iv];
+        if (ic != NYIR_SCALAR_I64_RAW && ic != NYIR_SCALAR_F64 &&
+            ic != NYIR_SCALAR_F32) {
+          valid = false;
+          break;
+        }
+        if (joined == NYIR_SCALAR_UNKNOWN) {
+          joined = ic;
+        } else if (joined != ic) {
+          valid = false;
+          break;
+        }
+      }
+      if (valid && joined != NYIR_SCALAR_UNKNOWN) {
+        vclass[in->dst] = joined;
+        in->scalar_class = joined;
+        changed = true;
+      }
+    }
   }
   return vclass;
 }

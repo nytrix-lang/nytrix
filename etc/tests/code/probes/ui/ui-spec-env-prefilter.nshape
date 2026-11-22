@@ -4,7 +4,7 @@ shape ui_spec_env_prefilter {
   features [ui render environment ibl performance]
   template ny-test-case
   timeout 240
-  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect compile_and_run
   expect_message "UI-SPEC-ENV-OK"
   source ny <<'NY'

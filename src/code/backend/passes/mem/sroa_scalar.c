@@ -57,7 +57,7 @@ static nyr_inst_t sroa_raw_inst(nyr_op_t op, int dst, int a, int b, int64_t imm,
  */
 static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
   *changed = false;
-  if (!f->untagged_values || f->next_value <= 0)
+  if (f->next_value <= 0)
     return true;
   bool has_alloca = false, has_load = false;
   for (size_t i = 0; i < f->len; ++i) {
@@ -73,16 +73,18 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
   int64_t *constants = calloc(nv, sizeof(*constants));
   int64_t *offsets = malloc(nv * sizeof(*offsets));
   bool *derived = calloc(nv, sizeof(*derived));
+  bool *var_derived = calloc(nv, sizeof(*var_derived));
   int *queue = malloc(nv * sizeof(*queue));
   bool *memory = calloc(f->len, sizeof(*memory));
   sroa_stack_field_t *fields = calloc(f->len, sizeof(*fields));
-  if (!known || !constants || !offsets || !derived || !queue || !memory ||
-      !fields || !nir_collect_consts(f, known, constants) ||
+  if (!known || !constants || !offsets || !derived || !var_derived || !queue ||
+      !memory || !fields || !nir_collect_consts(f, known, constants) ||
       !nyr_build_use_def(f, &uses) || !nyr_cfg_build(f, &cfg)) {
     free(known);
     free(constants);
     free(offsets);
     free(derived);
+    free(var_derived);
     free(queue);
     free(memory);
     free(fields);
@@ -97,6 +99,7 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
         allocation->imm <= 0)
       continue;
     memset(derived, 0, nv * sizeof(*derived));
+    memset(var_derived, 0, nv * sizeof(*var_derived));
     memset(memory, 0, f->len * sizeof(*memory));
     size_t tail = 1, head = 0, field_count = 0;
     queue[0] = allocation->dst;
@@ -105,6 +108,7 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
     bool safe = true;
     while (safe && head < tail) {
       int value = queue[head++];
+      bool is_var = var_derived[value];
       for (size_t u = uses.offsets[value]; safe && u < uses.offsets[value + 1];
            ++u) {
         size_t pc = uses.users[u];
@@ -112,39 +116,77 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
         if (in->op == NYIR_COPY && in->a == value && in->dst >= 0) {
           if (!derived[in->dst]) {
             derived[in->dst] = true;
+            var_derived[in->dst] = is_var;
             offsets[in->dst] = offsets[value];
             queue[tail++] = in->dst;
+          } else if (is_var && !var_derived[in->dst]) {
+            safe = false;
+            break;
           }
         } else if ((in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) &&
                    in->dst >= 0 &&
                    (in->a == value ||
                     (in->op == NYIR_ADD_I64 && in->b == value))) {
           int other = in->a == value ? in->b : in->a;
-          if (other < 0 || !known[other]) {
-            safe = false;
-            break;
+          if (!is_var && other >= 0 && known[other]) {
+            int64_t delta = constants[other];
+            __int128 offset =
+                (__int128)offsets[value] +
+                (in->op == NYIR_SUB_I64 ? -(__int128)delta : delta);
+            if (offset < 0 || offset > allocation->imm) {
+              safe = false;
+              break;
+            }
+            if (!derived[in->dst]) {
+              derived[in->dst] = true;
+              var_derived[in->dst] = false;
+              offsets[in->dst] = (int64_t)offset;
+              queue[tail++] = in->dst;
+            } else if (var_derived[in->dst] ||
+                       offsets[in->dst] != (int64_t)offset) {
+              safe = false;
+              break;
+            }
+          } else {
+            /*
+             * Variable-offset pointer into this alloca: legal as long as it
+             * only feeds read-only loads (never a store or escaping use),
+             * since original stores remain in place.
+             */
+            if (!derived[in->dst]) {
+              derived[in->dst] = true;
+              var_derived[in->dst] = true;
+              offsets[in->dst] = 0;
+              queue[tail++] = in->dst;
+            } else if (!var_derived[in->dst]) {
+              safe = false;
+              break;
+            }
           }
-          int64_t delta = constants[other];
-          __int128 offset = (__int128)offsets[value] +
-                            (in->op == NYIR_SUB_I64 ? -(__int128)delta : delta);
-          if (offset < 0 || offset > allocation->imm) {
-            safe = false;
-            break;
-          }
-          if (!derived[in->dst]) {
-            derived[in->dst] = true;
-            offsets[in->dst] = (int64_t)offset;
-            queue[tail++] = in->dst;
-          }
-        } else if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+        } else if ((in->op == NYIR_VEC4_LOAD_I64 ||
+                    in->op == NYIR_VEC8_LOAD_I64 ||
+                    in->op == NYIR_VEC4_LOAD_F64 ||
+                    in->op == NYIR_VEC8_LOAD_F32) &&
+                   in->a == value) {
+          /* Read-only vector load: original stores stay intact. */
+          continue;
+        } else if (is_var && in->op == NYIR_LOAD_I64 && in->a == value &&
+                   !(in->effects & NYIR_EFFECT_VOLATILE) &&
+                   !(in->flags & NYIR_INST_F_MEM_VOLATILE)) {
+          /* Read-only variable-index scalar load: original stores stay. */
+          continue;
+        } else if (!is_var &&
+                   (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
                    in->a == value && in->imm == 0 &&
                    !(nyr_effective_effects(in) &
                      ~(NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
                        NYIR_EFFECT_MAY_TRAP)) &&
                    !(in->effects & NYIR_EFFECT_VOLATILE) &&
                    !(in->flags & NYIR_INST_F_MEM_VOLATILE) &&
-                   (in->scalar_class == NYIR_SCALAR_UNKNOWN ||
-                    in->scalar_class == NYIR_SCALAR_I64_RAW) &&
+                   (f->untagged_values
+                        ? (in->scalar_class == NYIR_SCALAR_UNKNOWN ||
+                           in->scalar_class == NYIR_SCALAR_I64_RAW)
+                        : (in->scalar_class == NYIR_SCALAR_I64_RAW)) &&
                    (in->op != NYIR_STORE_I64 || in->c != value)) {
           unsigned width = sroa_memory_width(in);
           if (offsets[value] > allocation->imm - (int64_t)width) {
@@ -296,6 +338,7 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
   free(constants);
   free(offsets);
   free(derived);
+  free(var_derived);
   free(queue);
   free(memory);
   free(fields);
@@ -307,9 +350,16 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
 bool nyr_sroa_unified(nyr_func_t *f) {
   if (!f || f->len == 0)
     return true;
-  bool promoted_stack = false;
-  if (!sroa_private_stack_fields(f, &promoted_stack) ||
-      (promoted_stack && !nyr_mem2reg(f)))
+  bool any_promoted = false;
+  for (int round = 0; round < 8; ++round) {
+    bool promoted_stack = false;
+    if (!sroa_private_stack_fields(f, &promoted_stack))
+      return false;
+    if (!promoted_stack)
+      break;
+    any_promoted = true;
+  }
+  if (any_promoted && !nyr_mem2reg(f))
     return false;
 
   size_t slot_count = nyr_local_slot_count(f);

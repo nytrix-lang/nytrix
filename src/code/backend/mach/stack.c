@@ -344,6 +344,12 @@ static bool sm_ldv(ny_sm_ctx_t *c, const char *reg, int v) {
     if (bits == 1 || bits == UINT32_MAX)
       return nyr_printf(c->w, "\txorl\t%s, %s\n\t%s\t%s\n", reg, reg,
                         bits == 1 ? "incl" : "decl", reg);
+    /* In setup mode, signed imm8 push plus pop uses five bytes and
+     * preserves flags. The imm32 register move uses six bytes. */
+    if (c->i386_address16 && (int32_t)bits >= INT8_MIN &&
+        (int32_t)bits <= INT8_MAX)
+      return nyr_printf(c->w, "\tpushl\t$%" PRId32 "\n\tpopl\t%s\n",
+                        (int32_t)bits, reg);
     return nyr_printf(c->w, "\tmovl\t$0x%08" PRIx32 ", %s\n", bits, reg);
   }
   return sm_ld(c, reg, sm_voff(c, v));
@@ -5017,18 +5023,33 @@ static size_t sm_i386_cost_line(const sm_i386_cost_line_t *line,
     const char *operands = args + opcode_len;
     while (*operands == ' ' || *operands == '\t')
       ++operands;
-    if (opcode_len == 4 && !strncmp(args, "mov", 3) &&
-        (args[3] == 'b' || args[3] == 'w' || args[3] == 'l')) {
-      const char *accumulator = args[3] == 'l'   ? "%eax"
-                                : args[3] == 'w' ? "%ax"
-                                                 : "%al";
+    bool move = opcode_len == 4 && !strncmp(args, "mov", 3);
+    bool compare = opcode_len == 4 && !strncmp(args, "cmp", 3);
+    bool test = opcode_len == 5 && !strncmp(args, "test", 4);
+    if (move || compare || test) {
+      char width = args[opcode_len - 1];
+      size_t bytes = 7 + (width == 'l');
+      if (*operands == '$') {
+        size_t immediate = width == 'l' ? 4 : width == 'w' ? 2 : 1;
+        char *end = NULL;
+        uint32_t bits = (uint32_t)strtoull(operands + 1, &end, 0);
+        int32_t value = width == 'w' ? (int16_t)bits : (int32_t)bits;
+        if (compare && end != operands + 1 && *end == ',' &&
+            value >= INT8_MIN && value <= INT8_MAX)
+          immediate = 1;
+        return bytes + immediate;
+      }
+      if (!move)
+        return bytes;
+      const char *accumulator =
+          width == 'l' ? "%eax" : width == 'w' ? "%ax" : "%al";
       size_t length = strlen(accumulator);
       const char *comma = strchr(operands, ',');
       bool accumulator_form =
           comma && (((size_t)(comma - operands) == length &&
                      !strncmp(operands, accumulator, length)) ||
                     !strcmp(comma + 1 + strspn(comma + 1, " \t"), accumulator));
-      return 7 + (args[3] == 'l') - accumulator_form;
+      return bytes - accumulator_form;
     }
     if (opcode_len == 6 &&
         (!strncmp(args, "movz", 4) || !strncmp(args, "movs", 4)))
@@ -5087,12 +5108,24 @@ static size_t sm_i386_cost_line(const sm_i386_cost_line_t *line,
     bytes = *args == '$' ? (memory ? 6 : 5) : 2;
   else if (!strcmp(text, "leal"))
     bytes = 2;
+  else if (!strcmp(text, "xchgl") && !memory)
+    bytes = !strncmp(args, "%eax,", 5) || strstr(args, ", %eax") ? 1 : 2;
   else if (!strcmp(text, "bswapl"))
     bytes = 2;
   else if (*args == '$') {
     uint32_t bits = (uint32_t)strtoull(args + 1, NULL, 0);
     int32_t value = (int32_t)bits;
     bytes = value >= -128 && value <= 127 ? 3 : 6;
+    const char *comma = strchr(args, ',');
+    bool accumulator =
+        comma && !strcmp(comma + 1 + strspn(comma + 1, " \t"), "%eax");
+    if (!strcmp(text, "testl"))
+      bytes = accumulator ? 5 : 6;
+    else if (bytes == 6 && accumulator &&
+             (!strcmp(text, "addl") || !strcmp(text, "subl") ||
+              !strcmp(text, "andl") || !strcmp(text, "orl") ||
+              !strcmp(text, "xorl") || !strcmp(text, "cmpl")))
+      bytes = 5;
     if ((!strcmp(text, "shll") || !strcmp(text, "shrl") ||
          !strcmp(text, "sarl")) &&
         bits == 1)
@@ -5389,34 +5422,44 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
        * Keep the existing sequence when local allocation's save/restore
        * and boundary stores exceed its removed spill instructions.
        */
-      const char *chosen = baseline.data;
-      const char *candidates[] = {compact.data,       four.data,
-                                  three.data,         promoted.data,
-                                  promoted_four.data, promoted_three.data,
-                                  colored.data,       colored_four.data};
-      for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i)
-        if (candidates[i] &&
-            sm_i386_assembly_cost(candidates[i], i386_address16) <
-                sm_i386_assembly_cost(chosen, i386_address16))
-          chosen = candidates[i];
+      const char *candidates[] = {
+          baseline.data, compact.data,       four.data,
+          three.data,    promoted.data,      promoted_four.data,
+          promoted_three.data, colored.data, colored_four.data};
+      static const char *const names[] = {
+          "baseline",       "compact",       "four",
+          "three",          "promoted",      "promoted-four",
+          "promoted-three", "colored",       "colored-four"};
       const char *forced = getenv("NYC_I386_REGISTER_VARIANT");
-      if (forced) {
-        static const char *const names[] = {
-            "compact",       "four",           "three",   "promoted",
-            "promoted-four", "promoted-three", "colored", "colored-four"};
-        if (!strcmp(forced, "baseline"))
-          chosen = baseline.data;
-        for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i)
-          if (!strcmp(forced, names[i]) && candidates[i])
-            chosen = candidates[i];
+      size_t candidate_count = sizeof(candidates) / sizeof(candidates[0]);
+      size_t forced_index = candidate_count;
+      for (size_t i = 0; forced && i < candidate_count; ++i)
+        if (candidates[i] && !strcmp(forced, names[i]))
+          forced_index = i;
+      nyr_writer_t selected = {0};
+      size_t selected_cost = SIZE_MAX;
+      for (size_t i = 0; emitted && i < candidate_count; ++i) {
+        if (!candidates[i] ||
+            (forced_index < candidate_count && forced_index != i))
+          continue;
+        nyr_writer_t finalized = {0};
+        emitted = sm_i386_finalize_frame(nyir, frame_align, i386_address16,
+                                         candidates[i], &finalized);
+        if (emitted) {
+          size_t cost = sm_i386_assembly_cost(finalized.data, i386_address16);
+          if (cost < selected_cost) {
+            free(selected.data);
+            selected = finalized;
+            selected_cost = cost;
+            continue;
+          }
+        }
+        free(finalized.data);
       }
-      nyr_writer_t frameless = {0};
-      emitted = sm_i386_finalize_frame(nyir, frame_align, i386_address16,
-                                       chosen ? chosen : "", &frameless);
       if (emitted)
-        emitted = i386_address16 ? sm_i386_write_code16(w, frameless.data)
-                                 : nyr_put(w, frameless.data);
-      free(frameless.data);
+        emitted = i386_address16 ? sm_i386_write_code16(w, selected.data)
+                                 : nyr_put(w, selected.data);
+      free(selected.data);
     }
   }
   free(compact.data);
