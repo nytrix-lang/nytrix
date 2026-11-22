@@ -301,48 +301,7 @@ Bars for workloads whose C reference is under 1 ms are drawn lighter: their rati
 
 <!-- AUTO_BENCHMARK_RESULTS_BEGIN -->
 
-## Latest full benchmark run
-
-Generated automatically by the full `ny-test --bench` run.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:77a2e3f1cff7ba5f`.
-NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
-C: clang version 23.1.5; flags `-O3 -march=native`. GCC: gcc (GCC) 16.2.1 20260810; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 24, route workers 1.
-Results: 110 fixtures; 109 passed, 0 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 0 low-time, 0 noisy; 0 fixture budget misses.
-
-### Runtime relative to Host C
-
-Fixture medians are grouped by **Nytrix / C time**: lower is faster. Only correctness-passing, stable, above-timer-floor comparisons are counted; the `1×` boundary means parity. This distribution is an overview, not a replacement for per-fixture samples in the linked raw report.
-
-<svg width="880" height="330" viewBox="0 0 880 330" role="img" aria-label="Distribution of NYR and LLVM benchmark ratios relative to Host C">
-<text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Workloads by relative runtime</text>
-<line x1="82" y1="232" x2="780" y2="232" stroke="var(--border)" stroke-width="1"/><text x="70" y="236" text-anchor="end" font-size="11" fill="var(--muted)">0</text>
-<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">15</text>
-<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">30</text>
-<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">45</text>
-<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">60</text>
-<rect x="110" y="220" width="34" height="12" rx="3" fill="var(--c1)"/><text x="127" y="216" text-anchor="middle" font-size="11" fill="currentColor">4</text>
-<rect x="152" y="214" width="34" height="18" rx="3" fill="var(--c2)"/><text x="169" y="210" text-anchor="middle" font-size="11" fill="currentColor">6</text>
-<text x="148" y="250" text-anchor="middle" font-size="11" fill="var(--muted)"><0.5×</text>
-<rect x="252" y="211" width="34" height="21" rx="3" fill="var(--c1)"/><text x="269" y="207" text-anchor="middle" font-size="11" fill="currentColor">7</text>
-<rect x="294" y="199" width="34" height="33" rx="3" fill="var(--c2)"/><text x="311" y="195" text-anchor="middle" font-size="11" fill="currentColor">11</text>
-<text x="290" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.5–0.8×</text>
-<rect x="394" y="91" width="34" height="141" rx="3" fill="var(--c1)"/><text x="411" y="87" text-anchor="middle" font-size="11" fill="currentColor">46</text>
-<rect x="436" y="52" width="34" height="180" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">59</text>
-<text x="432" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.8–1.25×</text>
-<rect x="536" y="104" width="34" height="128" rx="3" fill="var(--c1)"/><text x="553" y="100" text-anchor="middle" font-size="11" fill="currentColor">42</text>
-<rect x="578" y="147" width="34" height="85" rx="3" fill="var(--c2)"/><text x="595" y="143" text-anchor="middle" font-size="11" fill="currentColor">28</text>
-<text x="574" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">1.25–2×</text>
-<rect x="678" y="202" width="34" height="30" rx="3" fill="var(--c1)"/><text x="695" y="198" text-anchor="middle" font-size="11" fill="currentColor">10</text>
-<rect x="720" y="217" width="34" height="15" rx="3" fill="var(--c2)"/><text x="737" y="213" text-anchor="middle" font-size="11" fill="currentColor">5</text>
-<text x="716" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">≥2×</text>
-<text x="26" y="140" text-anchor="middle" font-size="11" fill="var(--muted)">fixture count</text>
-<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (109)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (109)</text>
-</svg>
-
-
-The empty timer control is shown for completeness and is excluded from workload ratios.
+_The latest full benchmark run is inserted here when the documentation site is built (`./make bench` writes it to `build/bench-reports/latest-results.md`; it is not stored in the repository)._
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 

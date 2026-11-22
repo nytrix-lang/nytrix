@@ -15315,40 +15315,39 @@ static bool bench_append_performance_graph(ny_strbuf_t *output,
       plot_left - 56, plot_top + plot_height / 2, totals[0], totals[1]);
 }
 
+/*
+ * The latest full run is generated output, not documentation source: it goes
+ * to an untracked file under build/ and ny-doc splices it between the
+ * AUTO_BENCHMARK_RESULTS markers of etc/docs/spec/stats.md when it renders
+ * the site. Committed docs never churn with benchmark numbers.
+ * NYTRIX_BENCH_RESULTS_MD overrides the destination.
+ */
+static bool bench_results_md_path(const char *root, char *out, size_t cap) {
+  const char *env_path = getenv("NYTRIX_BENCH_RESULTS_MD");
+  if (env_path && *env_path)
+    return snprintf(out, cap, "%s", env_path) < (int)cap;
+  return snprintf(out, cap, "%s/build/bench-reports/latest-results.md",
+                  root) < (int)cap;
+}
+
 static bool bench_update_measurements(const char *root, const BenchTable *table,
                                       const BenchEnvironment *env,
                                       const char *report_path) {
-  static const char begin_marker[] = "<!-- AUTO_BENCHMARK_RESULTS_BEGIN -->";
-  static const char end_marker[] = "<!-- AUTO_BENCHMARK_RESULTS_END -->";
   if (!root || !table || !env || table->len == 0)
     return false;
 
   char doc_path[PATH_MAX], temporary[PATH_MAX];
-  if (snprintf(doc_path, sizeof(doc_path), "%s/etc/docs/spec/stats.md",
-               root) >= (int)sizeof(doc_path) ||
+  if (!bench_results_md_path(root, doc_path, sizeof(doc_path)) ||
       snprintf(temporary, sizeof(temporary), "%s.tmp", doc_path) >=
           (int)sizeof(temporary))
     return false;
-  char *old = read_whole_file(doc_path);
-  if (!old) {
-    fprintf(stderr, "measurements: cannot read %s\n", doc_path);
+  /* Creates build/bench-reports/ portably; the content is written below. */
+  if (!shape_write_tree_file(temporary, ""))
     return false;
-  }
-  char *begin = strstr(old, begin_marker);
-  char *end =
-      begin ? strstr(begin + sizeof(begin_marker) - 1, end_marker) : NULL;
-  if (!begin || !end) {
-    fprintf(stderr, "measurements: automatic result markers missing in %s\n",
-            doc_path);
-    free(old);
-    return false;
-  }
 
   ny_strbuf_t output;
   ny_strbuf_init(&output);
-  bool ok = ny_strbuf_append_n(&output, old, (size_t)(begin - old)) &&
-            ny_strbuf_append(&output, begin_marker) &&
-            ny_strbuf_append(&output, "\n\n## Latest full benchmark run\n\n");
+  bool ok = ny_strbuf_append(&output, "## Latest full benchmark run\n\n");
   if (ok)
     ok = ny_strbuf_appendf(
         &output,
@@ -15425,15 +15424,7 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
     if (ok && report_path && *report_path)
       ok = ny_strbuf_appendf(&output, "Raw report: `%s`.\n",
                              bench_repo_relative_path(report_path));
-    if (ok)
-      ok = ny_strbuf_append(&output, "\n") &&
-           ny_strbuf_append(&output, end_marker);
   }
-  if (ok) {
-    const char *after = end + sizeof(end_marker) - 1;
-    ok = ny_strbuf_append(&output, after);
-  }
-  free(old);
   if (!ok) {
     ny_strbuf_free(&output);
     return false;
@@ -15468,8 +15459,9 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
   if (!write_ok)
     fprintf(stderr, "measurements: could not replace %s\n", doc_path);
   else
-    printf("Updated latest full benchmark results in "
-           "etc/docs/spec/stats.md\n");
+    printf("Wrote latest full benchmark results to %s (rendered into "
+           "spec/stats.md by ny-doc)\n",
+           bench_repo_relative_path(doc_path));
   return write_ok;
 }
 
@@ -15481,12 +15473,10 @@ static int run_bench_report_selftest(void) {
   if (!mkdtemp(root))
     return 1;
   char path[PATH_MAX];
-  snprintf(path, sizeof(path), "%s/etc/docs/spec/stats.md", root);
+  snprintf(path, sizeof(path), "%s/build/bench-reports/latest-results.md",
+           root);
   BenchRow *rows = calloc(4, sizeof(*rows));
-  bool ok =
-      rows && shape_write_tree_file(
-                  path, "before\n<!-- AUTO_BENCHMARK_RESULTS_BEGIN -->\nold\n"
-                        "<!-- AUTO_BENCHMARK_RESULTS_END -->\nafter\n");
+  bool ok = rows != NULL;
   for (size_t i = 0; rows && i < 4; ++i) {
     rows[i].checksum_ok = 1;
     rows[i].ny_runs = rows[i].llvm_runs = rows[i].c_runs = rows[i].nyc_runs = 3;
@@ -15528,14 +15518,14 @@ static int run_bench_report_selftest(void) {
        strstr(failures, "0/0/0/127") &&
        strstr(failures, "missing   executable") &&
        !strstr(failures, "fast-workload") &&
-       !strstr(failures, "budget-workload") && strstr(report, "before\n") &&
-       strstr(report, "\nafter\n");
+       !strstr(failures, "budget-workload") &&
+       !strstr(report, "AUTO_BENCHMARK_RESULTS");
   free(report);
   free(rows);
   unlink(path);
-  snprintf(path, sizeof(path), "%s/etc/docs/learn", root);
+  snprintf(path, sizeof(path), "%s/build/bench-reports", root);
   rmdir(path);
-  snprintf(path, sizeof(path), "%s/docs", root);
+  snprintf(path, sizeof(path), "%s/build", root);
   rmdir(path);
   rmdir(root);
   fprintf(stderr, "benchmark report selftest: %s\n", ok ? "passed" : "failed");
