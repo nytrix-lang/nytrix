@@ -197,8 +197,7 @@ static void handle_execute_command(const char *id, const char *body) {
   unsigned scope = file ? lsp_scope_for_path(file) : LSP_ON_WORKSPACE;
   if (!c) {
     lsp_send_message_action(id, "Unknown Nytrix command.");
-  } else if (!(c->scope & scope) &&
-             !(file == NULL && (c->scope & LSP_ON_WORKSPACE))) {
+  } else if (!(c->scope & scope) && !(c->scope & LSP_ON_WORKSPACE)) {
     char text[256];
     snprintf(text, sizeof(text), "%s needs an open %s.", c->title,
              (c->scope & LSP_ON_NSHAPE) && !(c->scope & LSP_ON_NY)
@@ -213,8 +212,12 @@ static void handle_execute_command(const char *id, const char *body) {
       if (doc)
         check_document(uri, doc->text);
     }
-    char *cwd = file ? lsp_dirname(file)
-                     : strdup(lsp_workspace_root ? lsp_workspace_root : ".");
+    /* Workspace-only commands (tests) run from the root, not the file's dir. */
+    bool workspace_only = (c->scope & LSP_ON_WORKSPACE) &&
+                          !(c->scope & (LSP_ON_NY | LSP_ON_NSHAPE));
+    char *cwd = (file && !(workspace_only && lsp_workspace_root))
+                    ? lsp_dirname(file)
+                    : strdup(lsp_workspace_root ? lsp_workspace_root : ".");
     sbuf_t b = {0};
     if (!c->tool) {
       const char *base = file ? strrchr(file, '/') : NULL;

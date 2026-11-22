@@ -1684,6 +1684,39 @@ static void append_hover_summary(sbuf_t *value, const char *detail, int kind,
   }
 }
 
+static bool find_local_decl(const char *text, int cursor_line,
+                            const char *name, int *out_line, int *out_col);
+static bool def_ident_at(const char *text, int line, int ch, char **name,
+                         char **prefix, int *start, int *end);
+
+static void send_local_hover(const char *id, const char *text, int dl,
+                             int dc, const char *name, int line, int s, int e) {
+  size_t off = line_offset_for(text, dl);
+  size_t end = off;
+  while (text[end] && text[end] != '\n')
+    end++;
+  while (off < end && (text[off] == ' ' || text[off] == '\t'))
+    off++;
+  char *decl = ny_strndup(text + off, end - off);
+  bool param = decl && (strncmp(decl, "fn ", 3) == 0 || strncmp(decl, "pub fn", 6) == 0);
+  sbuf_t value = {0};
+  sb_append(&value, "```ny\n");
+  sb_append(&value, decl ? decl : name);
+  sb_append(&value, "\n```\n\n- **Kind**: ");
+  sb_append(&value, param ? "Parameter" : "Local");
+  sb_appendf(&value, "\n- **Declared**: line %d", dl + 1);
+  sbuf_t result = {0};
+  sb_append(&result, "{\"contents\":{\"kind\":\"markdown\",\"value\":");
+  sb_append_json(&result, value.data);
+  sb_append(&result, "},\"range\":");
+  append_range(&result, line, s, line, e);
+  sb_append(&result, "}");
+  send_result(id, result.data);
+  free(result.data);
+  free(value.data);
+  free(decl);
+}
+
 static void handle_hover(const char *id, const char *body) {
   char *uri = json_extract_string_near(body, "\"textDocument\"", "uri");
   int line = 0, ch = 0, start = 0, end = 0;
@@ -1691,6 +1724,31 @@ static void handle_hover(const char *id, const char *body) {
   json_extract_int_near(body, "\"position\"", "character", &ch);
   lsp_doc_t *doc = doc_find(uri);
   char *word = word_at_position(doc ? doc->text : NULL, line, ch, &start, &end);
+  {
+    /*
+     * Locals, parameters and fields never resolve to same-named stdlib symbols.
+     */
+    char *name = NULL, *prefix = NULL;
+    int s0 = 0, e0 = 0, dl = 0, dc = 0;
+    if (doc && doc->text && def_ident_at(doc->text, line, ch, &name, &prefix, &s0, &e0)) {
+      bool qualified = prefix && strncmp(prefix, "std", 3) == 0;
+      char *root = prefix ? ny_strndup(prefix, strcspn(prefix, ".")) : NULL;
+      bool local_root = root && !qualified && find_local_decl(doc->text, line, root, &dl, &dc);
+      if (!prefix && find_local_decl(doc->text, line, name, &dl, &dc)) {
+        send_local_hover(id, doc->text, dl, dc, name, line, s0, e0);
+        free(name); free(prefix); free(root); free(word); free(uri);
+        return;
+      }
+      if (local_root) { /* member of a local: no unrelated stdlib hit */
+        send_result(id, "null");
+        free(name); free(prefix); free(root); free(word); free(uri);
+        return;
+      }
+      free(root);
+    }
+    free(name);
+    free(prefix);
+  }
   lsp_symbol_t *sym = find_symbol(word, doc);
   if (!sym)
     sym = find_symbol_in_stdlib(word);
@@ -1726,25 +1784,437 @@ static void handle_hover(const char *id, const char *body) {
   free(uri);
 }
 
+/*
+ * Scope-aware go-to-definition helpers. The symbol index only holds top-level
+ * declarations, so locals, parameters and `for` variables are found by
+ * scanning upward from the cursor through the enclosing function headers.
+ */
+static bool def_is_ident(int c) { return isalnum(c) || c == '_'; }
+
+/*
+ * Column of `name` as a whole word in line[from, to), or -1.
+ */
+static int def_find_word(const char *line, size_t from, size_t to,
+                         const char *name) {
+  size_t n = strlen(name);
+  for (size_t i = from; i + n <= to; ++i) {
+    if (strncmp(line + i, name, n) != 0)
+      continue;
+    if (i > 0 && def_is_ident((unsigned char)line[i - 1]))
+      continue;
+    if (i + n < to && def_is_ident((unsigned char)line[i + n]))
+      continue;
+    return (int)i;
+  }
+  return -1;
+}
+
+static bool def_starts_with_kw(const char *p, const char *kw) {
+  size_t n = strlen(kw);
+  return strncmp(p, kw, n) == 0 && (p[n] == ' ' || p[n] == '\t');
+}
+
+/*
+ * Finds the declaration of local `name` visible at `cursor_line`.
+ */
+static bool find_local_decl(const char *text, int cursor_line,
+                            const char *name, int *out_line, int *out_col) {
+  if (!text || !name || !*name)
+    return false;
+  int nlines = 1;
+  for (const char *p = text; *p; ++p)
+    if (*p == '\n')
+      nlines++;
+  if (cursor_line >= nlines)
+    cursor_line = nlines - 1;
+  const char **starts = malloc((size_t)nlines * sizeof(*starts));
+  size_t *lens = malloc((size_t)nlines * sizeof(*lens));
+  if (!starts || !lens) {
+    free(starts);
+    free(lens);
+    return false;
+  }
+  int li = 0;
+  starts[0] = text;
+  for (const char *p = text;; ++p) {
+    if (*p == '\n' || !*p) {
+      lens[li] = (size_t)(p - starts[li]);
+      if (!*p)
+        break;
+      starts[++li] = p + 1;
+    }
+  }
+  bool found = false;
+  int bound = 1 << 20; /* indent of the innermost fn already inspected */
+  for (int k = cursor_line; k >= 0 && !found; --k) {
+    const char *line = starts[k];
+    size_t len = lens[k];
+    size_t ind = 0;
+    while (ind < len && (line[ind] == ' ' || line[ind] == '\t'))
+      ind++;
+    if (ind >= len || line[ind] == ';')
+      continue;
+    const char *p = line + ind;
+    if (def_starts_with_kw(p, "pub"))
+      p += 4;
+    while (*p == ' ' || *p == '\t')
+      p++;
+    size_t rest = len - (size_t)(p - line);
+    char *scratch = ny_strndup(p, rest);
+    int col = -1;
+    if (def_starts_with_kw(scratch, "def") || def_starts_with_kw(scratch, "mut") ||
+        def_starts_with_kw(scratch, "let") || def_starts_with_kw(scratch, "var")) {
+      char *eq = strchr(scratch, '=');
+      size_t to = eq ? (size_t)(eq - scratch) : strlen(scratch);
+      int c = def_find_word(scratch, 3, to, name);
+      if (c >= 0)
+        col = (int)(p - line) + c;
+    } else if (def_starts_with_kw(scratch, "for")) {
+      char *in = strstr(scratch, " in ");
+      size_t to = in ? (size_t)(in - scratch) : strlen(scratch);
+      int c = def_find_word(scratch, 3, to, name);
+      if (c >= 0)
+        col = (int)(p - line) + c;
+    } else if (def_starts_with_kw(scratch, "fn") ||
+               def_starts_with_kw(scratch, "extern") ||
+               def_starts_with_kw(scratch, "async")) {
+      if ((int)ind < bound) {
+        char *open = strchr(scratch, '(');
+        char *close = open ? strchr(open, ')') : NULL;
+        if (open && close) {
+          int c = def_find_word(scratch, (size_t)(open - scratch) + 1,
+                                (size_t)(close - scratch), name);
+          if (c >= 0)
+            col = (int)(p - line) + c;
+        }
+        bound = (int)ind;
+      }
+    }
+    free(scratch);
+    if (col >= 0) {
+      *out_line = k;
+      *out_col = col;
+      found = true;
+      break;
+    }
+    if (ind == 0)
+      break; /* top-level header: nothing above can be in scope */
+  }
+  free(starts);
+  free(lens);
+  return found;
+}
+
+/*
+ * The identifier under the cursor, with the dotted prefix before it.
+ */
+static bool def_ident_at(const char *text, int line, int ch, char **name,
+                         char **prefix, int *start, int *end) {
+  if (!text || line < 0 || ch < 0)
+    return false;
+  size_t off = line_offset_for(text, line);
+  size_t line_end = off;
+  while (text[line_end] && text[line_end] != '\n')
+    line_end++;
+  size_t pos = off + (size_t)ch;
+  if (pos > line_end)
+    pos = line_end;
+  size_t b = pos, e = pos;
+  while (b > off && def_is_ident((unsigned char)text[b - 1]))
+    b--;
+  while (e < line_end && def_is_ident((unsigned char)text[e]))
+    e++;
+  if (e <= b)
+    return false;
+  size_t pb = b;
+  while (pb > off && (def_is_ident((unsigned char)text[pb - 1]) ||
+                      text[pb - 1] == '.'))
+    pb--;
+  *name = ny_strndup(text + b, e - b);
+  *prefix = (b > pb && text[b - 1] == '.') ? ny_strndup(text + pb, b - 1 - pb)
+                                           : NULL;
+  *start = (int)(b - off);
+  *end = (int)(e - off);
+  return true;
+}
+
+static bool def_on_use_line(const char *text, int line) {
+  size_t off = line_offset_for(text, line);
+  while (text[off] == ' ' || text[off] == '\t')
+    off++;
+  return def_starts_with_kw(text + off, "use");
+}
+
+/*
+ * Source file of a module path such as std.core.alloc or std.os.
+ */
+static char *def_module_file(const char *dotted, const char *doc_uri) {
+  if (!dotted || !*dotted)
+    return NULL;
+  char rel[PATH_MAX];
+  size_t n = 0;
+  const char *p = dotted;
+  if (strncmp(p, "std.", 4) == 0)
+    p += 4;
+  else if (strcmp(p, "std") == 0)
+    p += 3;
+  if (strncmp(p, "core.", 5) == 0)
+    p += 5;
+  else if (strcmp(p, "core") == 0)
+    p += 4;
+  for (; *p && n + 1 < sizeof(rel); ++p)
+    rel[n++] = *p == '.' ? '/' : *p;
+  rel[n] = '\0';
+  const char *roots[3] = {NULL, NULL, NULL};
+  char docdir[PATH_MAX] = {0};
+  char *docpath = doc_uri ? uri_to_path(doc_uri) : NULL;
+  if (docpath) {
+    snprintf(docdir, sizeof(docdir), "%s", docpath);
+    char *slash = strrchr(docdir, '/');
+    if (slash)
+      *slash = '\0';
+    roots[1] = docdir;
+  }
+  free(docpath);
+  bool std = strncmp(dotted, "std", 3) == 0 &&
+             (dotted[3] == '.' || dotted[3] == '\0');
+  char corebuf[PATH_MAX];
+  ny_join_path(corebuf, sizeof(corebuf), ny_src_root(), "core");
+  roots[0] = std ? corebuf : NULL;
+  for (int r = 0; r < 2; ++r) {
+    if (!roots[r])
+      continue;
+    const char *shapes[2] = {"%s/%s.ny", "%s/%s/mod.ny"};
+    for (int sh = 0; sh < 2; ++sh) {
+      char full[PATH_MAX];
+      snprintf(full, sizeof(full), shapes[sh], roots[r], n ? rel : "mod");
+      if (n == 0 && sh == 0)
+        snprintf(full, sizeof(full), "%s/mod.ny", roots[r]);
+      FILE *fp = fopen(full, "rb");
+      if (fp) {
+        fclose(fp);
+        return path_to_file_uri(full);
+      }
+    }
+  }
+  return NULL;
+}
+
+static lsp_symbol_t *def_exact(lsp_doc_t *doc, const char *name) {
+  if (doc)
+    for (size_t i = 0; i < doc->symbols_len; ++i)
+      if (doc->symbols[i].name && strcmp(doc->symbols[i].name, name) == 0)
+        return &doc->symbols[i];
+  for (size_t d = 0; d < g_docs_len; ++d) {
+    if (&g_docs[d] == doc)
+      continue;
+    for (size_t i = 0; i < g_docs[d].symbols_len; ++i)
+      if (g_docs[d].symbols[i].name &&
+          strcmp(g_docs[d].symbols[i].name, name) == 0)
+        return &g_docs[d].symbols[i];
+  }
+  return NULL;
+}
+
+/*
+ * Stdlib symbol called `name`; with a module hint, prefer that module.
+ */
+static lsp_symbol_t *def_stdlib(const char *name, const char *module_hint) {
+  stdlib_index_ensure();
+  lsp_symbol_t *best = NULL;
+  int best_score = -1;
+  char needle_dir[256] = {0}, needle_file[256] = {0};
+  if (module_hint && *module_hint) {
+    const char *tail = strrchr(module_hint, '.');
+    tail = tail ? tail + 1 : module_hint;
+    snprintf(needle_dir, sizeof(needle_dir), "/%s/", tail);
+    snprintf(needle_file, sizeof(needle_file), "/%s.ny", tail);
+  }
+  for (size_t i = 0; i < g_stdlib_symbols_len; ++i) {
+    lsp_symbol_t *s = &g_stdlib_symbols[i];
+    if (!s->name || s->kind == LSP_SK_MODULE)
+      continue;
+    const char *tail = ny_tail_name(s->name);
+    if (strcmp(s->name, name) != 0 && !(tail && strcmp(tail, name) == 0))
+      continue;
+    int score = strcmp(s->name, name) == 0 ? 2 : 1;
+    if (module_hint && s->uri &&
+        (strstr(s->uri, needle_dir) || strstr(s->uri, needle_file)))
+      score += 4;
+    if (score > best_score) {
+      best_score = score;
+      best = s;
+    }
+  }
+  if (!best)
+    return NULL;
+  /*
+   * A hinted lookup must really come from that module.
+   */
+  if (module_hint && best_score < 5)
+    return NULL;
+  symbol_free(&g_stdlib_symbol_hit);
+  stdlib_symbol_hit_set(best);
+  return &g_stdlib_symbol_hit;
+}
+
+/*
+ * Declared field `name` of any struct/layout in the document.
+ */
+static bool def_find_field(lsp_doc_t *doc, const char *name, int *out_line,
+                           int *out_col) {
+  if (!doc || !doc->text)
+    return false;
+  for (size_t i = 0; i < doc->symbols_len; ++i) {
+    lsp_symbol_t *s = &doc->symbols[i];
+    if (s->kind != LSP_SK_STRUCT)
+      continue;
+    for (int ln = s->line; ln <= s->end_line; ++ln) {
+      size_t off = line_offset_for(doc->text, ln);
+      size_t end = off;
+      while (doc->text[end] && doc->text[end] != '\n')
+        end++;
+      size_t from = off;
+      if (ln == s->line) {
+        const char *brace = memchr(doc->text + off, '{', end - off);
+        if (!brace)
+          continue;
+        from = (size_t)(brace - doc->text) + 1;
+      }
+      int c = def_find_word(doc->text + off, from - off, end - off, name);
+      if (c >= 0) {
+        *out_line = ln;
+        *out_col = c;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static void send_location(const char *id, const char *uri, int line, int col,
+                          int len) {
+  sbuf_t result = {0};
+  sb_append(&result, "{\"uri\":");
+  sb_append_json(&result, uri);
+  sb_append(&result, ",\"range\":");
+  append_range(&result, line, col, line, col + len);
+  sb_append(&result, "}");
+  send_result(id, result.data);
+  free(result.data);
+}
+
 static void handle_definition(const char *id, const char *body) {
   char *uri = json_extract_string_near(body, "\"textDocument\"", "uri");
   int line = 0, ch = 0;
   json_extract_int_near(body, "\"position\"", "line", &line);
   json_extract_int_near(body, "\"position\"", "character", &ch);
   lsp_doc_t *doc = doc_find(uri);
-  char *word = word_at_position(doc ? doc->text : NULL, line, ch, NULL, NULL);
-  lsp_symbol_t *sym = find_symbol(word, doc);
-  if (!sym)
-    sym = find_symbol_in_stdlib(word);
-  if (!sym) {
-    send_result(id, "null");
-  } else {
-    sbuf_t result = {0};
-    append_symbol_location(&result, sym->uri ? sym->uri : uri, sym);
-    send_result(id, result.data);
-    free(result.data);
+  const char *text = doc ? doc->text : NULL;
+  char *name = NULL, *prefix = NULL;
+  int s0 = 0, e0 = 0;
+  bool done = false;
+  if (def_ident_at(text, line, ch, &name, &prefix, &s0, &e0)) {
+    /*
+     * `use std.core.alloc`: the module's file.
+     */
+    if (def_on_use_line(text, line)) {
+      size_t off = line_offset_for(text, line);
+      size_t b = off + (size_t)s0, e = off + (size_t)e0;
+      while (b > off && (def_is_ident((unsigned char)text[b - 1]) || text[b - 1] == '.'))
+        b--;
+      while (text[e] && (def_is_ident((unsigned char)text[e]) || text[e] == '.'))
+        e++; /* the whole dotted path, whichever segment was clicked */
+      char *dotted = ny_strndup(text + b, e - b);
+      char *file = def_module_file(dotted, uri);
+      if (file) {
+        send_location(id, file, 0, 0, 0);
+        done = true;
+      }
+      free(file);
+      free(dotted);
+    }
+    /*
+     * A field at its own declaration inside a struct/layout body.
+     */
+    if (!done && !prefix && doc) {
+      for (size_t i = 0; i < doc->symbols_len && !done; ++i) {
+        lsp_symbol_t *st = &doc->symbols[i];
+        if (st->kind == LSP_SK_STRUCT && line >= st->line &&
+            line <= st->end_line && !(line == st->line && s0 <= st->col + (int)strlen(st->name ? st->name : "")) &&
+            line > st->line - 1) {
+          size_t off = line_offset_for(text, line);
+          const char *brace = line == st->line ? memchr(text + off, '{', strlen(text + off)) : NULL;
+          if (line > st->line || (brace && (size_t)(brace - text) < off + (size_t)s0)) {
+            send_location(id, uri, line, s0, e0 - s0);
+            done = true;
+          }
+        }
+      }
+    }
+    if (!done && !prefix) {
+      int dl, dc;
+      if (find_local_decl(text, line, name, &dl, &dc)) {
+        send_location(id, uri, dl, dc, (int)strlen(name));
+        done = true;
+      } else {
+        lsp_symbol_t *sym = def_exact(doc, name);
+        if (!sym)
+          sym = def_stdlib(name, NULL);
+        if (sym) {
+          sbuf_t result = {0};
+          append_symbol_location(&result, sym->uri ? sym->uri : uri, sym);
+          send_result(id, result.data);
+          free(result.data);
+          done = true;
+        }
+      }
+    } else if (!done && prefix) {
+      bool qualified = strncmp(prefix, "std", 3) == 0 &&
+                       (prefix[3] == '.' || prefix[3] == '\0');
+      int dl, dc;
+      char *root_name = ny_strndup(prefix, strcspn(prefix, "."));
+      bool local_root = !qualified && find_local_decl(text, line, root_name, &dl, &dc);
+      free(root_name);
+      if (!local_root) {
+        lsp_symbol_t *sym = def_stdlib(name, prefix);
+        if (!sym) {
+          char *qual = NULL;
+          size_t ql = strlen(prefix) + strlen(name) + 2;
+          qual = malloc(ql);
+          if (qual) {
+            snprintf(qual, ql, "%s.%s", prefix, name);
+            sym = def_exact(doc, qual);
+            free(qual);
+          }
+        }
+        if (sym) {
+          sbuf_t result = {0};
+          append_symbol_location(&result, sym->uri ? sym->uri : uri, sym);
+          send_result(id, result.data);
+          free(result.data);
+          done = true;
+        }
+      }
+      if (!done && def_find_field(doc, name, &dl, &dc)) {
+        send_location(id, uri, dl, dc, (int)strlen(name));
+        done = true;
+      } else if (!done) {
+        lsp_symbol_t *sym = def_exact(doc, name);
+        if (sym && sym->kind == LSP_SK_FUNCTION) {
+          sbuf_t result = {0};
+          append_symbol_location(&result, sym->uri ? sym->uri : uri, sym);
+          send_result(id, result.data);
+          free(result.data);
+          done = true;
+        }
+      }
+    }
   }
-  free(word);
+  if (!done)
+    send_result(id, "null");
+  free(name);
+  free(prefix);
   free(uri);
 }
 
@@ -1981,7 +2451,10 @@ typedef void (*lsp_symbol_visit_fn)(void *context, int line, int col,
 /*
  * Find symbol-path occurrences in code, excluding comments and quoted text.
  * References and rename share this scanner so their result sets stay aligned.
+ * When >= 0, visit_code_symbol only reports occurrences on these lines.
  */
+static int g_visit_from = -1, g_visit_to = -1;
+
 static void visit_code_symbol(const char *text, const char *word,
                               lsp_symbol_visit_fn visit, void *context) {
   if (!text || !word || !*word || !visit)
@@ -2029,7 +2502,8 @@ static void visit_code_symbol(const char *text, const char *word,
     size_t after = i + word_len;
     bool right = fits && (text[after] == '\0' ||
                           !ny_symbol_path_char((unsigned char)text[after]));
-    if (left && fits && strncmp(text + i, word, word_len) == 0 && right)
+    if (left && fits && strncmp(text + i, word, word_len) == 0 && right &&
+        (g_visit_from < 0 || (line >= g_visit_from && line <= g_visit_to)))
       visit(context, line, col, word_len);
     col++;
   }
@@ -2081,6 +2555,51 @@ static void append_text_references(sbuf_t *result, bool *first, const char *uri,
   visit_code_symbol(text, word, append_reference_occurrence, &context);
 }
 
+/*
+ * Lines of the top-level item holding line `decl`: its header through the
+ * line before the next top-level item.
+ */
+static void local_scope_lines(const char *text, int decl, int *from, int *to) {
+  int nl = 0, header = 0, end = -1;
+  const char *p = text;
+  int ln = 0;
+  while (1) {
+    const char *e = strchr(p, '\n');
+    size_t len = e ? (size_t)(e - p) : strlen(p);
+    bool top = len > 0 && p[0] != ' ' && p[0] != '\t' && p[0] != ';' &&
+               p[0] != '}' && p[0] != ')' && p[0] != ']' && p[0] != '\r';
+    if (top) {
+      if (ln <= decl)
+        header = ln;
+      else if (end < 0)
+        end = ln - 1;
+    }
+    nl = ln;
+    if (!e)
+      break;
+    p = e + 1;
+    ln++;
+  }
+  *from = header;
+  *to = end >= 0 ? end : nl;
+}
+
+/*
+ * If `word` at line is a local, restricts visits to its function.
+ */
+static bool begin_local_scope(lsp_doc_t *doc, const char *word, int line) {
+  int dl = 0, dc = 0, f = 0, t = 0;
+  if (!doc || !doc->text || !word || strchr(word, '.') ||
+      !find_local_decl(doc->text, line, word, &dl, &dc))
+    return false;
+  local_scope_lines(doc->text, dl, &f, &t);
+  g_visit_from = f;
+  g_visit_to = t;
+  return true;
+}
+
+static void end_local_scope(void) { g_visit_from = g_visit_to = -1; }
+
 static void handle_references(const char *id, const char *body) {
   char *uri = json_extract_string_near(body, "\"textDocument\"", "uri");
   int line = 0;
@@ -2097,10 +2616,14 @@ static void handle_references(const char *id, const char *body) {
   sbuf_t result = {0};
   bool first = true;
   sb_append(&result, "[");
+  bool local = word && begin_local_scope(doc, word, line);
   for (size_t i = 0; i < g_docs_len; ++i) {
+    if (local && &g_docs[i] != doc)
+      continue;
     append_text_references(&result, &first, g_docs[i].uri, g_docs[i].text,
                            word);
   }
+  end_local_scope();
   sb_append(&result, "]");
   send_result(id, result.data);
   free(result.data);
@@ -2405,7 +2928,10 @@ static void handle_rename(const char *id, const char *body) {
   sbuf_t result = {0};
   sb_append(&result, "{\"changes\":{");
   bool first_uri = true;
+  bool local = word && begin_local_scope(doc, word, line);
   for (size_t d = 0; word && new_name && *new_name && d < g_docs_len; ++d) {
+    if (local && &g_docs[d] != doc)
+      continue;
     sbuf_t edits = {0};
     bool first_edit = true;
     append_rename_edits(&edits, &first_edit, g_docs[d].text, word, new_name);
@@ -2420,6 +2946,7 @@ static void handle_rename(const char *id, const char *body) {
     }
     free(edits.data);
   }
+  end_local_scope();
   sb_append(&result, "}}");
   send_result(id, result.data);
   free(result.data);
