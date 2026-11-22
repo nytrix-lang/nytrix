@@ -16026,6 +16026,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       inline_count++;
     }
     nyr_set_inline_callees(inline_callees, inline_count);
+    nyr_set_symbol_reference_funcs(funcs_out, *func_count);
     /*
      * Bound cross-function inlining work without disabling it for the whole
      * program once stdlib loading pushes the function count over the limit.

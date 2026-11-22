@@ -1067,6 +1067,7 @@ typedef struct {
   const nyr_func_t *func;
 } nyr_inline_callee_t;
 void nyr_set_inline_callees(const nyr_inline_callee_t *callees, size_t count);
+void nyr_set_symbol_reference_funcs(const nyr_func_t *funcs, size_t count);
 /* Thread-local: registry entries with index >= first read their body from
  * snapshot[index] when that slot is non-NULL. Pass NULL to clear. */
 void nyr_inline_set_thread_snapshot(const nyr_func_t *const *snapshot,

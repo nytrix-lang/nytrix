@@ -2154,7 +2154,22 @@ static uint64_t nyr_inline_name_hash(const char *name) {
   return hash;
 }
 
+/*
+ * Every function body of the program, inlinable or not, for symbol-reference
+ * queries. Debug levels keep user functions out of the inline list, but a
+ * global they read must still count as referenced.
+ */
+static const nyr_func_t *nyr_reference_funcs;
+static size_t nyr_reference_func_count;
+
+void nyr_set_symbol_reference_funcs(const nyr_func_t *funcs, size_t count) {
+  nyr_reference_funcs = funcs;
+  nyr_reference_func_count = funcs ? count : 0;
+}
+
 void nyr_set_inline_callees(const nyr_inline_callee_t *callees, size_t count) {
+  if (!callees && count == 0)
+    nyr_set_symbol_reference_funcs(NULL, 0);
   free(nyr_inline_callee_index);
   free(nyr_inline_callee_summaries);
   nyr_inline_callee_index = NULL;
@@ -2262,6 +2277,17 @@ void nyr_inline_set_c_unit_abi(bool enabled) {
 
 bool nyr_inline_callees_reference_symbol(const char *symbol,
                                          const nyr_func_t *exclude) {
+  for (size_t i = 0; i < nyr_reference_func_count; ++i) {
+    const nyr_func_t *callee = &nyr_reference_funcs[i];
+    if (callee == exclude)
+      continue;
+    for (size_t k = 0; k < callee->len; ++k) {
+      const nyr_inst_t *in = &callee->data[k];
+      if (in->op == NYIR_ADDR_SYMBOL && in->symbol &&
+          strcmp(in->symbol, symbol) == 0)
+        return true;
+    }
+  }
   for (size_t i = 0; i < nyr_inline_callee_count; ++i) {
     const nyr_func_t *callee = nyr_inline_entry_func(&nyr_inline_callees[i]);
     if (!callee || callee == exclude)
