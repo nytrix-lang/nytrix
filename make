@@ -2601,11 +2601,11 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     if cli_jobs > 0:
         return cli_jobs
     cpu = os.cpu_count() or 1
-    # Fixture jobs are independent processes, but a large CPU count can make
-    # the desktop unresponsive even when the memory estimate says the suite
-    # fits. Keep the default modest; callers can request more with -j or the
-    # environment override above.
-    auto = min(4, max(1, cpu // 2))
+    # Fixture jobs are independent processes. A quarter of the logical CPUs,
+    # capped at 12, keeps a many-core desktop responsive while using far more
+    # of the machine than the old fixed 4; callers can request more with -j or
+    # the environment override above.
+    auto = max(min(4, max(1, cpu // 2)), min(12, cpu // 4))
     avail_gib = host_available_mem_gib()
     # Keep 8 GiB available for the system and use the heavy-fixture budget for
     # every worker. Some fixtures peak well above the old 0.8 GiB estimate.

@@ -5614,7 +5614,7 @@ static const char *disp_path(const char *p) {
   if (!p)
     return "";
   if (strncmp(p, "etc/labs/tests/", 15) == 0)
-    return p + 10;
+    return p + 15;
   return p;
 }
 
@@ -7516,7 +7516,7 @@ static void print_test_help(void) {
   nyt_subheading("Runner");
   printf("  %s--bin BIN --jobs N --timeout SEC --pattern PAT%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("  Default parallelism: at most 4 workers, further limited by available memory.\n");
+  printf("  Default parallelism: a quarter of the logical CPUs (at most 12 from ny make), further limited by available memory.\n");
 #ifdef __linux__
   printf("  Default Linux fixture memory cap: up to %.0f GiB, based on available RAM.\n",
          NY_TEST_DEFAULT_FIXTURE_RSS_GIB);
