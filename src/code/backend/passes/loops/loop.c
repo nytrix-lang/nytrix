@@ -898,8 +898,7 @@ static bool nir_loop_bit_assembly(nyr_func_t *f) {
  * position of a MUL that has not been rewritten yet (the old approach of
  * bumping cfg.block_end per insertion left the block ranges of every later
  * block stale and silently skipped MULs near block ends).
- */
-/*
+ *
  * Fold a single-block unit-step counted recurrence of the form
  *
  *   for (i = start; i < start + N; i++)
@@ -6634,7 +6633,9 @@ static bool lup_append(nyr_inst_t *out, size_t cap, size_t *len,
   return true;
 }
 
-/* Splice `n` instructions into the instruction stream at `pc`. */
+/*
+ * Splice `n` instructions into the instruction stream at `pc`.
+ */
 static bool lup_insert_insts(nyr_func_t *w, size_t pc, const nyr_inst_t *in,
                              size_t n) {
   if (!w || pc > w->len || !n)
@@ -6647,10 +6648,12 @@ static bool lup_insert_insts(nyr_func_t *w, size_t pc, const nyr_inst_t *in,
   return true;
 }
 
-/* One cloned loop body: values renamed through `map`, blocks relabelled
+/*
+ * One cloned loop body: values renamed through `map`, blocks relabelled
  * through `label`. The header guard is discharged by the caller (it proved
  * the pair is in range), so the copy header falls straight into its body, and
- * the latch leaves through `backedge` (the next copy, or the pair header). */
+ * the latch leaves through `backedge` (the next copy, or the pair header).
+ */
 typedef struct {
   nyr_func_t *w;
   const nyr_cfg_t *cfg;

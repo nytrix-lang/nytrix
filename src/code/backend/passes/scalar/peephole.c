@@ -1701,7 +1701,9 @@ bool nyr_peephole(nyr_func_t *f) {
                  : (!nir_value_single_user(f, in->a, NULL) ||
                     !nir_value_single_user(f, in->b, NULL)))
           continue;
-        /* Case 1: (common & x) op (common & y) -> common & (x op y) */
+        /*
+         * Case 1: (common & x) op (common & y) -> common & (x op y)
+         */
         int common = -1, x = -1, y = -1;
         if (ia->a == ib->a) {
           common = ia->a;
@@ -1761,7 +1763,9 @@ bool nyr_peephole(nyr_func_t *f) {
           in->effects = NYIR_EFFECT_NONE;
           continue;
         }
-        /* Case 2: (e & f) ^/| ((~e) & g) -> ((f ^ g) & e) ^ g */
+        /*
+         * Case 2: (e & f) ^/| ((~e) & g) -> ((f ^ g) & e) ^ g
+         */
         int e_v = -1, f_v = -1, g_v = -1;
         size_t pc_not = SIZE_MAX;
         for (int side = 0; side < 2 && pc_not == SIZE_MAX; ++side) {

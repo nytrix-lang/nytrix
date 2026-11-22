@@ -168,12 +168,16 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
                     in->op == NYIR_VEC4_LOAD_F64 ||
                     in->op == NYIR_VEC8_LOAD_F32) &&
                    in->a == value) {
-          /* Read-only vector load: original stores stay intact. */
+          /*
+           * Read-only vector load: original stores stay intact.
+           */
           continue;
         } else if (is_var && in->op == NYIR_LOAD_I64 && in->a == value &&
                    !(in->effects & NYIR_EFFECT_VOLATILE) &&
                    !(in->flags & NYIR_INST_F_MEM_VOLATILE)) {
-          /* Read-only variable-index scalar load: original stores stay. */
+          /*
+           * Read-only variable-index scalar load: original stores stay.
+           */
           continue;
         } else if (!is_var &&
                    (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&

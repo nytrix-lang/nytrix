@@ -3093,7 +3093,9 @@ typedef struct ny_hm_state_t {
   ny_hm_scheme_list schemes;
   ny_hm_scheme_index_entry_t *scheme_index;
   size_t scheme_index_cap;
-  /* Demand-driven stdlib HM worklist (populated when ctx->lazy_std_inference). */
+  /*
+   * Demand-driven stdlib HM worklist (populated when ctx->lazy_std_inference).
+   */
   const stmt_t **scheme_stmt_keys;
   size_t *scheme_stmt_vals;
   size_t scheme_stmt_cap;

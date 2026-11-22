@@ -898,7 +898,9 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
   if (hbr->op != NYIR_BR_IF || !ifc_boolean_condition(f, defs, hbr->a, 0))
     return false;
   int c1 = hbr->a;
-  /* Check header has no instructions after branch other than optional BR. */
+  /*
+   * Check header has no instructions after branch other than optional BR.
+   */
   size_t h_end = cfg->block_end[header];
   while (h_end > cfg->block_start[header] && f->data[h_end - 1].op == NYIR_NOP)
     --h_end;
@@ -928,7 +930,9 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
     int64_t b2_label = cfg->block_label[b2];
     if (b2_label < 0 && ifc_block_has_phi(f, cfg, common))
       continue;
-    /* Parse b2: LABEL, <= 8 pure non-local ops, BR_IF c2 -> t2, optional BR. */
+    /*
+     * Parse b2: LABEL, <= 8 pure non-local ops, BR_IF c2 -> t2, optional BR.
+     */
     size_t b2_start = cfg->block_start[b2];
     size_t b2_end = cfg->block_end[b2];
     while (b2_end > b2_start && f->data[b2_end - 1].op == NYIR_NOP)
@@ -975,13 +979,17 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
     }
     if (t2 >= cfg->block_count || f2 >= cfg->block_count || t2 == f2)
       continue;
-    /* Resolve empty jump-only bridges (e.g. unlabeled `BR L49` after BR_IF). */
+    /*
+     * Resolve empty jump-only bridges (e.g. unlabeled `BR L49` after BR_IF).
+     */
     size_t common_pred = header, f2_pred = b2, t2_pred = b2;
     size_t r_common =
         ifc_resolve_empty_bridges_pred(f, cfg, header, common, &common_pred);
     size_t r_f2 = ifc_resolve_empty_bridges_pred(f, cfg, b2, f2, &f2_pred);
     size_t r_t2 = ifc_resolve_empty_bridges_pred(f, cfg, b2, t2, &t2_pred);
-    /* Check shared target matches AND, OR, or inverted-c1 AND (!c1 && c2). */
+    /*
+     * Check shared target matches AND, OR, or inverted-c1 AND (!c1 && c2).
+     */
     bool inv_and = false;
     if (!is_or && r_f2 != r_common)
       continue;
@@ -1005,7 +1013,9 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
     if (ifc_block_has_phi(f, cfg, common) ||
         !ifc_phi_edges_agree(f, cfg, r_common, common_pred, b2_common_pred))
       continue;
-    /* Ensure no PHI anywhere references b2_label. */
+    /*
+     * Ensure no PHI anywhere references b2_label.
+     */
     if (b2_label >= 0) {
       bool phi_ref = false;
       for (size_t k = 0; k < f->len && !phi_ref; ++k) {
@@ -1043,10 +1053,14 @@ static bool ifc_try_flatten_short_circuit(nyr_func_t *f, const nyr_cfg_t *cfg,
       moved[k] = f->data[pure_idx[k]];
     if (!nir_ensure_inst_space(f, extra))
       return false;
-    /* Discard b2 instructions BEFORE shifting indices! */
+    /*
+     * Discard b2 instructions BEFORE shifting indices!
+     */
     for (size_t pc = b2_start; pc < b2_end; ++pc)
       nyr_inst_discard(&f->data[pc]);
-    /* Insert pure_count + combine instructions right before `branch`. */
+    /*
+     * Insert pure_count + combine instructions right before `branch`.
+     */
     memmove(&f->data[branch + pre_extra], &f->data[branch],
             (f->len - branch) * sizeof(*f->data));
     f->len += pre_extra;
@@ -1293,7 +1307,9 @@ static bool ifc_sets_loop_exit_flag(const nyr_func_t *f, const nyr_cfg_t *cfg,
       header = next;
       break;
     }
-    /* Follow tracked PHI results across intermediate merge blocks. */
+    /*
+     * Follow tracked PHI results across intermediate merge blocks.
+     */
     int64_t cur_lbl = cfg->block_label[cur];
     if (cur_lbl >= 0) {
       for (size_t pi = cfg->block_start[next]; pi < cfg->block_end[next];

@@ -2182,8 +2182,10 @@ static int compile_source(int argc, char **argv, int source_arg,
      */
     if (ok && driver->optimize_size && !getenv("NYC_DISABLE_SIZE_INLINE")) {
       size_t original_count = inline_callee_count;
-      /* Real-mode calls favor smaller helpers because stack traffic and
-       * wider instruction prefixes make larger clones more expensive. */
+      /*
+       * Real-mode calls favor smaller helpers because stack traffic and
+       * wider instruction prefixes make larger clones more expensive.
+       */
       bool code16 = abi == NYC_ABI_I386 && driver->code16;
       size_t work_limit = code16 ? 96 : 112;
       for (size_t i = 0; i < unit.count; ++i) {
@@ -2223,8 +2225,10 @@ static int compile_source(int argc, char **argv, int source_arg,
             break;
           }
         }
-        /* The isolated body contains the register constraints of inline
-         * assembly and ordinary call boundaries in its own frame. */
+        /*
+         * The isolated body contains the register constraints of inline
+         * assembly and ordinary call boundaries in its own frame.
+         */
         if (code16 && has_asm && has_call)
           continue;
         size_t call_sites = 0;

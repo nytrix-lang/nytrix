@@ -344,8 +344,10 @@ static bool sm_ldv(ny_sm_ctx_t *c, const char *reg, int v) {
     if (bits == 1 || bits == UINT32_MAX)
       return nyr_printf(c->w, "\txorl\t%s, %s\n\t%s\t%s\n", reg, reg,
                         bits == 1 ? "incl" : "decl", reg);
-    /* In setup mode, signed imm8 push plus pop uses five bytes and
-     * preserves flags. The imm32 register move uses six bytes. */
+    /*
+     * In setup mode, signed imm8 push plus pop uses five bytes and
+     * preserves flags. The imm32 register move uses six bytes.
+     */
     if (c->i386_address16 && (int32_t)bits >= INT8_MIN &&
         (int32_t)bits <= INT8_MAX)
       return nyr_printf(c->w, "\tpushl\t$%" PRId32 "\n\tpopl\t%s\n",

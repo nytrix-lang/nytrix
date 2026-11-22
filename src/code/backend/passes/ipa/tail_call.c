@@ -136,7 +136,9 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
   nyr_scalar_class_t n_sc = NYIR_SCALAR_UNKNOWN;
   nyr_debug_loc_t entry_loc = f->data[cfg.block_start[0]].debug;
 
-  /* Validate entry block (block 0): pure param load + compare against 2 + br.if. */
+  /*
+   * Validate entry block (block 0): pure param load + compare against 2 + br.if.
+   */
   for (size_t i = cfg.block_start[0]; i < cfg.block_end[0]; ++i) {
     const nyr_inst_t *in = &f->data[i];
     switch (in->op) {
@@ -241,7 +243,9 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
     return true;
   }
 
-  /* Validate base block: pure `return n`. */
+  /*
+   * Validate base block: pure `return n`.
+   */
   bool base_ret_ok = false;
   nyr_debug_loc_t base_lbl_loc = f->data[cfg.block_start[base_bb]].debug;
   nyr_debug_loc_t base_ret_loc = base_lbl_loc;
@@ -276,7 +280,9 @@ bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name) {
     return true;
   }
 
-  /* Validate recursive block: pure `return f(n - 1) + f(n - 2)`. */
+  /*
+   * Validate recursive block: pure `return f(n - 1) + f(n - 2)`.
+   */
   size_t call1_seen = 0, call2_seen = 0;
   bool rec_ret_ok = false;
   nyr_debug_loc_t rec_lbl_loc = f->data[cfg.block_start[rec_bb]].debug;

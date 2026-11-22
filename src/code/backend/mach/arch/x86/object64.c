@@ -13172,7 +13172,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
   if (!mach_cfg_build(m, &cfg))
     return true;
 
-  /* 1. EdgeBundles union-find over 2*nb half-edges. */
+  /*
+   * 1. EdgeBundles union-find over 2*nb half-edges.
+   */
   size_t *uf = malloc(2 * nb * sizeof(*uf));
   size_t *dense = malloc(2 * nb * sizeof(*dense));
   size_t *in_bundle = malloc(nb * sizeof(*in_bundle));
@@ -13235,7 +13237,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
     out_bundle[b] = dense[mach_eb_find(uf, 2 * b + 1)];
   }
 
-  /* Natural loop depths via dominator backedges. */
+  /*
+   * Natural loop depths via dominator backedges.
+   */
   size_t stamp_id = 0;
   for (size_t b = 0; b < nb; ++b) {
     if (!cfg.reachable[b])
@@ -13286,7 +13290,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
     inst_clobber[pc] =
         (uint16_t)mach_inst_bundle_clobber_mask(e, &m->insts[pc]);
 
-  /* Index segments per block and record loop_gpr occupancy per block. */
+  /*
+   * Index segments per block and record loop_gpr occupancy per block.
+   */
   for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
     const nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
     if (s->block < nb)
@@ -13325,7 +13331,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
     }
   }
 
-  /* Per-value scratch arrays for Hopfield relaxation & soundness proof. */
+  /*
+   * Per-value scratch arrays for Hopfield relaxation & soundness proof.
+   */
   int *in_color = malloc(nb * sizeof(*in_color));
   int *out_color = malloc(nb * sizeof(*out_color));
   bool *self_seeds = malloc(nb * sizeof(*self_seeds));
@@ -13441,7 +13449,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
           break;
       }
 
-      /* Compute per-block entry/exit color and transfer properties. */
+      /*
+       * Compute per-block entry/exit color and transfer properties.
+       */
       bool any_live_in = false;
       for (size_t b = 0; b < nb; ++b) {
         in_color[b] = -1;
@@ -13488,7 +13498,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
           if (def_after_exit || last_def < seg_out->start)
             continue;
           const nyr_mach_inst_t *def_in = &m->insts[last_def];
-          /* Guard against SIB-folded LEA that elides its register write. */
+          /*
+           * Guard against SIB-folded LEA that elides its register write.
+           */
           if (def_in->opcode == NYR_MACH_LEA &&
               def_in->src0.kind == NYR_MACH_OPERAND_VREG &&
               def_in->src1.kind == NYR_MACH_OPERAND_VREG &&
@@ -13552,7 +13564,9 @@ static bool mach_compute_bundle_residency(nyr_x64_mach_enc_t *e,
       if (!any_live_in)
         continue;
 
-      /* 2. LLVM SpillPlacement Hopfield relaxation over EdgeBundles. */
+      /*
+       * 2. LLVM SpillPlacement Hopfield relaxation over EdgeBundles.
+       */
       memset(bias_p, 0, num_bundles * sizeof(*bias_p));
       memset(bias_n, 0, num_bundles * sizeof(*bias_n));
       memset(bval, 0, num_bundles * sizeof(*bval));
@@ -17218,7 +17232,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 (!mach_rex(e, true, false, false, true) || !mach_u8(e, 0x89) ||
                  !mach_u8(e, 0xc2)))
               return false;
-            /* movabs r9, magic; mul r9 -> t = rdx */
+            /*
+             * movabs r9, magic; mul r9 -> t = rdx
+             */
             if (!mach_rex(e, true, false, false, true) || !mach_u8(e, 0xb9) ||
                 !mach_i64(e, (int64_t)magic) ||
                 !mach_rex(e, true, false, false, true) || !mach_u8(e, 0xf7) ||
@@ -17231,7 +17247,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                    !mach_u8(e, (unsigned char)post_sh)))
                 return false;
             } else {
-              /* rax = r10 - rdx; rax >>= 1; rdx += rax; rdx >>= (post_sh - 1) */
+              /*
+               * rax = r10 - rdx; rax >>= 1; rdx += rax; rdx >>= (post_sh - 1)
+               */
               if (!mach_rex(e, true, true, false, false) || !mach_u8(e, 0x89) ||
                   !mach_u8(e, 0xd0) ||
                   !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x29) ||
@@ -17248,12 +17266,16 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 return false;
             }
             if (in->opcode == NYR_MACH_DIV) {
-              /* mov rax, rdx */
+              /*
+               * mov rax, rdx
+               */
               if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x89) ||
                   !mach_u8(e, 0xd0))
                 return false;
             } else {
-              /* rdx = q * ud; rax = r10 - rdx */
+              /*
+               * rdx = q * ud; rax = r10 - rdx
+               */
               if (ud <= (uint64_t)INT32_MAX) {
                 if (!mach_rex(e, true, false, false, false) ||
                     !mach_u8(e, 0x69) || !mach_u8(e, 0xd2) ||

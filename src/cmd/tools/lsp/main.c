@@ -8,6 +8,7 @@
 #include "base/intern.h"
 #include "base/loader.h"
 #include "base/strbuf.h"
+#include "base/subprocess.h"
 #include "base/util.h"
 #include "code/lang/ny/parser/parser.h"
 #include <ctype.h>
@@ -22,6 +23,9 @@
 #ifndef _WIN32
 #include <strings.h>
 #include <unistd.h>
+#else
+#include <io.h>
+#include <windows.h>
 #endif
 
 #ifndef PATH_MAX
@@ -581,7 +585,14 @@ static char *path_to_file_uri(const char *path) {
     return NULL;
   sbuf_t b = {0};
   sb_append(&b, "file://");
+#ifdef _WIN32
+  if (isalpha((unsigned char)path[0]) && path[1] == ':')
+    sb_append(&b, "/");
+  for (const char *p = path; *p; ++p)
+    sb_append_n(&b, *p == '\\' ? "/" : p, 1);
+#else
   sb_append(&b, path);
+#endif
   return b.data;
 }
 
@@ -2340,27 +2351,16 @@ static void handle_code_actions(const char *id, const char *body) {
     sb_append(&result, "[{\"title\":\"Check document with Nytrix\","
                        "\"kind\":\"source\",\"command\":{\"title\":"
                        "\"ny check\",\"command\":\"nytrix.check\","
-                       "\"arguments\":[");
+                       "\"arguments\":[{\"uri\":");
     sb_append_json(&result, uri);
-    sb_append(&result, "]}}]");
+    sb_append(&result, "}]}}]");
     send_result(id, result.data);
     free(result.data);
   }
   free(uri);
 }
 
-static void handle_execute_command(const char *id, const char *body) {
-  char *command = json_extract_string(body, "command");
-  char *uri = json_extract_string(body, "arguments");
-  if (command && strcmp(command, "nytrix.check") == 0 && uri) {
-    lsp_doc_t *doc = doc_find(uri);
-    if (doc)
-      check_document(uri, doc->text);
-  }
-  send_result(id, "null");
-  free(command);
-  free(uri);
-}
+#include "commands.h"
 
 typedef struct {
   sbuf_t *edits;
@@ -2465,8 +2465,11 @@ static void handle_request(const char *body) {
     return;
   }
   if (strcmp(method, "initialize") == 0) {
-    send_result(
-        id,
+    lsp_commands_set_root(body);
+    sbuf_t ids = {0};
+    lsp_append_command_ids(&ids);
+    sbuf_t caps = {0};
+    sb_appendf(&caps,
         "{\"capabilities\":{"
         "\"textDocumentSync\":{\"openClose\":true,\"change\":1,"
         "\"save\":{\"includeText\":true}},"
@@ -2475,7 +2478,9 @@ static void handle_request(const char *body) {
         "true},"
         "\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,"
         "\"codeActionProvider\":{\"codeActionKinds\":[\"source\"]},"
-        "\"executeCommandProvider\":{\"commands\":[\"nytrix.check\"]},"
+        "\"executeCommandProvider\":{\"commands\":[%s]},"
+        "\"codeLensProvider\":{\"resolveProvider\":false},"
+        "\"documentFormattingProvider\":true,"
         "\"foldingRangeProvider\":true,\"inlayHintProvider\":true,"
         "\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"namespace\","
         "\"type\",\"class\",\"enum\",\"interface\",\"struct\","
@@ -2488,7 +2493,11 @@ static void handle_request(const char *body) {
         "\"full\":true},"
         "\"completionProvider\":{\"resolveProvider\":false,"
         "\"triggerCharacters\":[\".\"]},"
-        "\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]}}}");
+        "\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]}}}",
+        ids.data ? ids.data : "");
+    send_result(id, caps.data);
+    free(caps.data);
+    free(ids.data);
   } else if (strcmp(method, "textDocument/didOpen") == 0 ||
              strcmp(method, "textDocument/didChange") == 0) {
     char *uri = json_extract_string_near(body, "\"textDocument\"", "uri");
@@ -2546,6 +2555,12 @@ static void handle_request(const char *body) {
     handle_code_actions(id, body);
   } else if (strcmp(method, "workspace/executeCommand") == 0) {
     handle_execute_command(id, body);
+  } else if (strcmp(method, "nytrix/commands") == 0) {
+    handle_command_list(id);
+  } else if (strcmp(method, "textDocument/codeLens") == 0) {
+    handle_code_lens(id, body);
+  } else if (strcmp(method, "textDocument/formatting") == 0) {
+    handle_formatting(id, body);
   } else if (strcmp(method, "textDocument/completion") == 0) {
     handle_completion(id);
   } else if (strcmp(method, "textDocument/signatureHelp") == 0) {
@@ -2566,6 +2581,13 @@ static void handle_request(const char *body) {
 }
 
 int main(void) {
+#ifdef _WIN32
+  /*
+   * LSP framing counts bytes: no CRLF translation on the pipes.
+   */
+  _setmode(_fileno(stdin), _O_BINARY);
+  _setmode(_fileno(stdout), _O_BINARY);
+#endif
   setvbuf(stdout, NULL, _IONBF, 0);
   ny_intern_init();
   while (1) {

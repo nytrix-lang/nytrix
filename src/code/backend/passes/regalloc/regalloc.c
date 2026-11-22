@@ -2491,7 +2491,9 @@ static bool vector_latch_def_reads_phi_ok(const nyr_mach_func_t *mach,
                                           uint32_t phi) {
   if (def->args_len)
     return false;
-  /* VBLENDVPD reads all three vector operands before writing its destination. */
+  /*
+   * VBLENDVPD reads all three vector operands before writing its destination.
+   */
   if (def->opcode == NYR_MACH_SELECT &&
       def->dst.kind == NYR_MACH_OPERAND_VREG &&
       def->dst.as.reg < mach->vreg_len &&

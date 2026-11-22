@@ -26,7 +26,7 @@
 static size_t c_pack_cap_align(size_t align, unsigned pack_align);
 
 static ny_ctok_t cempty_tok(void) {
-  return (ny_ctok_t){NY_CTOK_EOF, "", 0, 0, 0, NULL, false};
+  return (ny_ctok_t){NY_CTOK_EOF, "", 0, 0, 0, NULL, false, false};
 }
 
 const char *ny_ctype_kind_name(ny_ctype_kind_t kind) {
@@ -1126,7 +1126,7 @@ static void parser_note_define(ny_parser_t *p, const char *name,
     return;
   }
   p->define_names[p->define_count] =
-      (ny_ctok_t){NY_CTOK_IDENT, name, name_len, 0, 0, NULL, false};
+      (ny_ctok_t){NY_CTOK_IDENT, name, name_len, 0, 0, NULL, false, false};
   p->define_values[p->define_count] = value;
   p->define_count++;
 }
@@ -1185,7 +1185,7 @@ static void parser_note_str_define(ny_parser_t *p, const char *name,
     return;
   }
   p->str_define_names[p->str_define_count] =
-      (ny_ctok_t){NY_CTOK_IDENT, name, name_len, 0, 0, NULL, false};
+      (ny_ctok_t){NY_CTOK_IDENT, name, name_len, 0, 0, NULL, false, false};
   memcpy(p->str_define_values[p->str_define_count], value, value_len);
   p->str_define_values[p->str_define_count][value_len] = '\0';
   p->str_define_count++;
@@ -1231,7 +1231,7 @@ static void parser_note_func_macro(ny_parser_t *p, const char *name,
   }
   unsigned idx = p->func_macro_count;
   p->func_macro_names[idx] =
-      (ny_ctok_t){NY_CTOK_IDENT, name, name_len, 0, 0, NULL, false};
+      (ny_ctok_t){NY_CTOK_IDENT, name, name_len, 0, 0, NULL, false, false};
   p->func_macro_is_variadic[idx] = is_variadic;
   p->func_macro_param_count[idx] = 0;
   if (params_str && params_len > 0) {
@@ -4312,7 +4312,7 @@ static void ny_c_count_preproc_lines(const char *src, size_t len,
           line_end++;
         }
         ny_ctok_t preproc_tok = {
-            NY_CTOK_PREPROC, src + j, line_end - j, 0, 0, NULL, false};
+            NY_CTOK_PREPROC, src + j, line_end - j, 0, 0, NULL, false, false};
         j++;
         macro_skip_ws(src, line_end, &j);
         size_t word_len = ny_c_preproc_word_len(src, len, j);

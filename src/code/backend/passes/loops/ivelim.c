@@ -1977,7 +1977,9 @@ static bool iv_affine_in_loop(const iv_affine_ctx_t *c, int v) {
          c->member[c->cfg->inst_block[(size_t)c->defs[v]]];
 }
 
-/* Coefficient of the IV in `v`, or false when `v` is not affine in it. */
+/*
+ * Coefficient of the IV in `v`, or false when `v` is not affine in it.
+ */
 static bool iv_affine_coeff(const iv_affine_ctx_t *c, int v, unsigned depth,
                             int64_t *coeff) {
   if (v < 0 || v >= c->f->next_value || depth > 12)
@@ -2065,27 +2067,33 @@ static bool iv_affine_plan(const iv_affine_ctx_t *c, int v, iv_affine_plan_t *p,
   return true;
 }
 
-/* Insert the planned copy at `*at`; returns the value standing for `root`. */
+/*
+ * The value standing for `x` in the planned copy: init for the IV, the new
+ * definition for a planned node, `x` itself for loop-invariant leaves.
+ */
+static int iv_affine_mapped(const iv_affine_plan_t *p, const int *mapped,
+                            size_t done, int iv, int init, int x) {
+  for (size_t k = 0; k < done; ++k)
+    if (p->value[k] == x)
+      return mapped[k];
+  return x == iv ? init : x;
+}
+
+/*
+ * Insert the planned copy at `*at`; returns the value standing for `root`.
+ */
 static int iv_affine_emit(nyr_func_t *f, const iv_affine_plan_t *p, int iv,
                           int init, int root, size_t *at) {
   int mapped[24];
-#define IV_AFFINE_MAP(x)                                                       \
-  ({                                                                           \
-    int _x = (x), _r = _x == iv ? init : _x;                                   \
-    for (size_t _k = 0; _k < p->len; ++_k)                                     \
-      if (p->value[_k] == _x)                                                  \
-        _r = mapped[_k];                                                       \
-    _r;                                                                        \
-  })
   for (size_t k = 0; k < p->len; ++k) {
     nyr_inst_t in = p->inst[k];
     if (in.op == NYIR_COPY) {
-      mapped[k] = IV_AFFINE_MAP(in.a);
+      mapped[k] = iv_affine_mapped(p, mapped, k, iv, init, in.a);
       continue;
     }
     if (in.op != NYIR_CONST_I64) {
-      in.a = IV_AFFINE_MAP(in.a);
-      in.b = IV_AFFINE_MAP(in.b);
+      in.a = iv_affine_mapped(p, mapped, k, iv, init, in.a);
+      in.b = iv_affine_mapped(p, mapped, k, iv, init, in.b);
     }
     in.dst = f->next_value++;
     in.flags &= ~NYIR_INST_F_EFFECTS_KNOWN;
@@ -2097,8 +2105,7 @@ static int iv_affine_emit(nyr_func_t *f, const iv_affine_plan_t *p, int iv,
     ++*at;
     mapped[k] = in.dst;
   }
-  return IV_AFFINE_MAP(root);
-#undef IV_AFFINE_MAP
+  return iv_affine_mapped(p, mapped, p->len, iv, init, root);
 }
 
 static int affine_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
@@ -2115,7 +2122,9 @@ static int affine_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
     free(member);
     return -1;
   }
-  /* Register pressure guard: every reduction adds a loop-carried value. */
+  /*
+   * Register pressure guard: every reduction adds a loop-carried value.
+   */
   size_t header_phis = 0;
   for (size_t i = cfg->block_start[lp->header_block];
        i < cfg->block_end[lp->header_block]; ++i)
@@ -2140,7 +2149,9 @@ static int affine_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         continue;
       if (uses.offsets[in->dst] == uses.offsets[in->dst + 1])
         continue;
-      /* `iv * C` with a constant init is the plain rewrite's job. */
+      /*
+       * `iv * C` with a constant init is the plain rewrite's job.
+       */
       int ra = iv_root_copy(f, defs, in->a), rb = iv_root_copy(f, defs, in->b);
       if (iv->init_is_const && (ra == iv->iv || rb == iv->iv))
         continue;
@@ -2179,7 +2190,9 @@ static int affine_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         continue;
       nyr_inst_t proto = *in;
       int64_t step = wrap_mul64(coeff, iv->step);
-      /* All analysis reads above are done; the function mutates now. */
+      /*
+       * All analysis reads above are done; the function mutates now.
+       */
       int x0 = iv_affine_emit(f, &plan, iv->iv, iv->init_v, old_dst, &pre_at);
       int step_c = f->next_value++;
       int wphi = f->next_value++;
@@ -2515,7 +2528,9 @@ bool nyr_iv_elim(nyr_func_t *f) {
       nyr_ir_func_free(&candidate);
       break; /* reject this conservative opportunity */
     }
-    /* Drop products an affine rewrite left dead before the next round. */
+    /*
+     * Drop products an affine rewrite left dead before the next round.
+     */
     (void)nyr_dce(&candidate);
     nyr_ir_func_free(&work);
     work = candidate;

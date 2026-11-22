@@ -15996,6 +15996,16 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
           all_fns[i]->as.fn.attr_noinline)
         continue;
       /*
+       * -O0 is the debugging level: a user function keeps its own body and
+       * call sites, so breakpoints, stepping and stack frames land where the
+       * source says. Explicit @inline functions and the standard library
+       * still inline, as they would past the inlining work bound below.
+       */
+      if (opt_level <= 0 && i < all_fn_count && all_fns[i] &&
+          all_fns[i]->kind == NY_S_FUNC && !all_fns[i]->as.fn.attr_inline &&
+          !ny_is_stdlib_tok(all_fns[i]->tok))
+        continue;
+      /*
        * Bodies with any-to-scalar decodes
        * (`rt_any_to_i64`/`rt_any_to_f64`)
        * are inline candidates like any

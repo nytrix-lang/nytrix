@@ -700,16 +700,16 @@ static int is_dir(const char *path) {
 
 /*
  * Test paths are allowed to be materialized under a temporary root.  Keep
- * suite selection independent of that root so reorganizing etc/tests does not
+ * suite selection independent of that root so reorganizing etc/labs/tests does not
  * silently turn explicit fixtures into an unselected stdlib bucket.
  */
 static int test_path_in(const char *path, const char *root) {
   if (!path || !root)
     return 0;
-  const char *p = strstr(path, "etc/tests/");
+  const char *p = strstr(path, "etc/labs/tests/");
   if (!p)
     return 0;
-  p += strlen("etc/tests/");
+  p += strlen("etc/labs/tests/");
   return strncmp(p, root, strlen(root)) == 0;
 }
 
@@ -1581,7 +1581,7 @@ static void export_shape_fixture_tools_for(const char *bin) {
     if (root_slash) {
       *root_slash = '\0';
       char tests_dir[PATH_MAX];
-      snprintf(tests_dir, sizeof(tests_dir), "%s/etc/tests", root);
+      snprintf(tests_dir, sizeof(tests_dir), "%s/etc/labs/tests", root);
       if (!getenv("NYTRIX_ROOT") && is_dir(tests_dir))
         ny_setenv("NYTRIX_ROOT", root, 0);
     }
@@ -1839,7 +1839,7 @@ static void test_collect_fixture_archive_sources(const char *archive_path,
       *p = '-';
 
   char source_dir[PATH_MAX];
-  snprintf(source_dir, sizeof(source_dir), "etc/tests/code/formats/%s",
+  snprintf(source_dir, sizeof(source_dir), "etc/labs/tests/code/formats/%s",
            arch_name);
   char exact[PATH_MAX];
   snprintf(exact, sizeof(exact), "%s/%s.c", source_dir, stem);
@@ -3795,7 +3795,7 @@ static int test_debugger_for_rc(int rc) {
 }
 
 static int test_is_ownership_error_path(const char *path) {
-  return path && strstr(path, "etc/tests/lang/errors/ownership/") != NULL;
+  return path && strstr(path, "etc/labs/tests/lang/errors/ownership/") != NULL;
 }
 
 static int test_is_optional_system_stdlib(const char *path) {
@@ -4990,8 +4990,8 @@ static int run_error_case(const char *bin, const char *path,
     trim_inplace(flags_buf);
   }
   bool ownership_case =
-      path && (strstr(path, "etc/tests/lang/errors/ownership/") != NULL ||
-               strstr(path, "etc/tests/lang/memory/") != NULL);
+      path && (strstr(path, "etc/labs/tests/lang/errors/ownership/") != NULL ||
+               strstr(path, "etc/labs/tests/lang/memory/") != NULL);
   char *flagv[32];
   int flagc = split_words(flags_buf, flagv, 32);
 
@@ -5613,7 +5613,7 @@ static void cache_save(CacheDb *db, const char *path) {
 static const char *disp_path(const char *p) {
   if (!p)
     return "";
-  if (strncmp(p, "etc/tests/", 10) == 0)
+  if (strncmp(p, "etc/labs/tests/", 15) == 0)
     return p + 10;
   return p;
 }
@@ -5957,7 +5957,7 @@ static int path_is_probe_test(const char *p) {
   }
   /*
    * Discovery may hand us a repository-relative display path, an absolute
-   * path, or a materialized `.../etc/tests/...` path. Keep all probe spellings
+   * path, or a materialized `.../etc/labs/tests/...` path. Keep all probe spellings
    * on the native probe route instead of letting the initial execution fall
    * back to the legacy JIT while replay uses a different backend.
    */
@@ -6173,12 +6173,12 @@ static int path_duration_hint(CacheDb *cache, const char *p) {
     return 40000;
   if (test_path_is_benchmark(p))
     return 5000;
-  if (strstr(p, "etc/tests/lang/values/bigint.nshape") ||
-      strstr(p, "etc/tests/lang/types/inference/attr.nshape") ||
-      strstr(p, "etc/tests/lang/interop/ny/sizeof.nshape") ||
-      strstr(p, "etc/tests/lang/interop/ny/asm.nshape"))
+  if (strstr(p, "etc/labs/tests/lang/values/bigint.nshape") ||
+      strstr(p, "etc/labs/tests/lang/types/inference/attr.nshape") ||
+      strstr(p, "etc/labs/tests/lang/interop/ny/sizeof.nshape") ||
+      strstr(p, "etc/labs/tests/lang/interop/ny/asm.nshape"))
     return 5000;
-  if (strstr(p, "etc/tests/lang/comptime/comptime.nshape"))
+  if (strstr(p, "etc/labs/tests/lang/comptime/comptime.nshape"))
     return 3500;
   if (shape_path_is_nshape(p)) {
     int variants = test_flag_matrix_count(p);
@@ -7172,7 +7172,7 @@ static char *atoms_block_field(const char *block, const char *block_end,
 
 static int run_reader_atoms_nshape(const char *bin, const char *path) {
   if (!path || !*path)
-    path = "etc/tests/lang/parsing/atoms.nshape";
+    path = "etc/labs/tests/lang/parsing/atoms.nshape";
   char *data = read_small_file(path);
   if (!data) {
     fprintf(stderr, "reader-atoms: cannot open %s\n", path);
@@ -7461,7 +7461,7 @@ static int run_list_bench(const char *root_dir) {
     root = ".";
   StrVec shapes = {0};
   char bench_dir[PATH_MAX];
-  snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench",
+  snprintf(bench_dir, sizeof(bench_dir), "%s/etc/labs/tests/bench",
            root_dir && *root_dir ? root_dir : root);
   if (!test_collect_native(bench_dir, &shapes, true)) {
     nyt_err("ny-test",
@@ -7487,7 +7487,7 @@ static int run_list_bench(const char *root_dir) {
 
 static int run_list_meta(const char *root_dir) {
   StrVec shapes = {0};
-  const char *root = root_dir && *root_dir ? root_dir : "etc/tests/";
+  const char *root = root_dir && *root_dir ? root_dir : "etc/labs/tests/";
   if (!test_collect_native(root, &shapes, false)) {
     nyt_err("ny-test",
             "native fixture discovery failed for metadata directory: %s", root);
@@ -7572,7 +7572,7 @@ static void print_test_help(void) {
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   nyt_subheading("Notes");
   nyt_kv("timeout", "all fixtures default to 60s; override with --timeout");
-  nyt_kv("errors", "fixtures live under etc/tests/errors");
+  nyt_kv("errors", "fixtures live under etc/labs/tests/errors");
 }
 
 int ny_test_main(int argc, char **argv) {
@@ -7776,7 +7776,7 @@ int ny_test_main(int argc, char **argv) {
     else if (!strcmp(a, "--list-bench"))
       return run_list_bench(i + 1 < argc ? argv[++i] : NULL);
     else if (!strcmp(a, "--list-meta"))
-      return run_list_meta(i + 1 < argc ? argv[++i] : "etc/tests/");
+      return run_list_meta(i + 1 < argc ? argv[++i] : "etc/labs/tests/");
     else if (!strcmp(a, "--debug-failures") || !strcmp(a, "--with-replay"))
       ny_setenv("NYTRIX_TEST_DEBUG_FAILURES", "1", 1);
     else if (!strcmp(a, "--no-debug-failures"))
@@ -8046,7 +8046,7 @@ int ny_test_main(int argc, char **argv) {
      * The corpus is organized by concern now; collect the single root so new
      * categories are automatically covered without another path allow-list.
      */
-    if (!test_collect_native("etc/tests", &files, false) ||
+    if (!test_collect_native("etc/labs/tests", &files, false) ||
         (with_stdlib && !test_collect_native("core", &files, false))) {
       nyt_err("ny-test",
               "native fixture discovery failed while discovering tests");
@@ -8188,28 +8188,28 @@ int ny_test_main(int argc, char **argv) {
      */
     if (!loopback_bind_available &&
         (strcmp(p,
-                "etc/tests/lang/modules/http-server-request-reading.nshape") ==
+                "etc/labs/tests/lang/modules/http-server-request-reading.nshape") ==
              0 ||
-         strcmp(p, "etc/tests/code/probes/os/remote-socket.nshape") == 0)) {
+         strcmp(p, "etc/labs/tests/code/probes/os/remote-socket.nshape") == 0)) {
       skipped_loopback++;
       timings_push(&timings, p, 0, "Skipped", "skip");
     } else if (!audio_service_available &&
                (strcmp(
                     p,
-                    "etc/tests/code/probes/os/platform-audio-unavailable.ny") ==
+                    "etc/labs/tests/code/probes/os/platform-audio-unavailable.ny") ==
                     0 ||
                 strcmp(p,
-                       "etc/tests/code/probes/os/platform-audio-playback.ny") ==
+                       "etc/labs/tests/code/probes/os/platform-audio-playback.ny") ==
                     0)) {
       skipped_audio++;
       timings_push(&timings, p, 0, "Skipped", "skip");
-    } else if (strcmp(p, "etc/tests/lang/comptime/reflection/"
+    } else if (strcmp(p, "etc/labs/tests/lang/comptime/reflection/"
                          "semantic-effect-artifact.ny") == 0 ||
-               strcmp(p, "etc/tests/code/formats/coff64/"
+               strcmp(p, "etc/labs/tests/code/formats/coff64/"
                          "aggregate-call-probe.ny") == 0) {
       skipped_cmake_helper_sources++;
       timings_push(&timings, p, 0, "Skipped", "skip");
-    } else if (strcmp(p, "etc/tests/code/formats/coff64/"
+    } else if (strcmp(p, "etc/labs/tests/code/formats/coff64/"
                          "win64-aggregate-runtime.nshape") == 0 &&
                (!getenv("NYTRIX_TEST_WIN64_CC") ||
                 !*getenv("NYTRIX_TEST_WIN64_CC") ||
@@ -8220,7 +8220,7 @@ int ny_test_main(int argc, char **argv) {
        */
       skipped_optional_win64++;
       timings_push(&timings, p, 0, "Skipped", "skip");
-    } else if (strcmp(p, "etc/tests/code/probes/cache/"
+    } else if (strcmp(p, "etc/labs/tests/code/probes/cache/"
                          "core-bc-cache-selector.nshape") == 0 &&
                (!getenv("NYTRIX_TEST_CORE_BC_CHECKER") ||
                 !*getenv("NYTRIX_TEST_CORE_BC_CHECKER"))) {
@@ -8291,7 +8291,7 @@ int ny_test_main(int argc, char **argv) {
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_ci);
   if (skipped_web_browser > 0)
     printf("%s[note]%s skipped %zu browser-only fixtures under "
-           "etc/tests/lang/interop/web (run via ./make web-test)\n",
+           "etc/labs/tests/lang/interop/web (run via ./make web-test)\n",
            nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), skipped_web_browser);
   if (skipped_cmake_helper_sources > 0)
     printf("%s[note]%s skipped %zu CMake-only fixture sources\n",
@@ -8777,13 +8777,13 @@ static const char *bench_dir_root(void) {
     if (!e || !*e)
       continue;
     char probe[PATH_MAX];
-    snprintf(probe, sizeof(probe), "%s/etc/tests/bench", e);
+    snprintf(probe, sizeof(probe), "%s/etc/labs/tests/bench", e);
     if (is_dir(probe)) {
       nyt_path_copy(root, sizeof(root), e);
       return root;
     }
   }
-  if (is_dir("etc/tests/bench")) {
+  if (is_dir("etc/labs/tests/bench")) {
     if (getcwd(root, sizeof(root)))
       return root;
     return ".";
@@ -9800,7 +9800,9 @@ static int bench_find_gcc(char *out, size_t cap) {
     char version[256];
     char *ver_argv[] = {candidate, "--version", NULL};
     bench_capture_first_line(ver_argv, version, sizeof(version));
-    /* On macOS, /usr/bin/gcc is an Apple Clang shim; require GNU GCC. */
+    /*
+     * On macOS, /usr/bin/gcc is an Apple Clang shim; require GNU GCC.
+     */
     if (bench_str_contains_ci(version, "clang"))
       continue;
     nyt_path_copy(bench_gcc_cached_path, sizeof(bench_gcc_cached_path),
@@ -12282,7 +12284,9 @@ static int bench_table_width(void) {
       return (int)ws.ws_col;
   }
 #endif
-  /* Non-TTY or default 80x24 PTY keeps the full wide table unless COLUMNS is set. */
+  /*
+   * Non-TTY or default 80x24 PTY keeps the full wide table unless COLUMNS is set.
+   */
   return 160;
 }
 
@@ -12302,6 +12306,13 @@ typedef struct {
   int ratio_gcc;
   int ratio_wide;
 } BenchUiLayout;
+
+/*
+ * GCC is an optional reference. When the comparison is off or no GNU GCC is
+ * installed (common on Windows and macOS), its columns are left out of every
+ * table instead of printing a column of dashes.
+ */
+static int bench_gcc_shown = 1;
 
 static BenchUiLayout bench_ui_layout(void) {
   int width = bench_table_width();
@@ -12632,6 +12643,16 @@ static void bench_live_fixture_result(const char *name,
   bench_live_cell(c_cell, sizeof(c_cell), c_host, l.c_host, NYT_RESET);
   bench_live_cell(gcc_cell, sizeof(gcc_cell), gcc, l.gcc, NYT_RESET);
   bench_live_cell(nyc_cell, sizeof(nyc_cell), nyc, l.nyc, NYT_GRAY);
+  /*
+   * The GCC cells carry their own separator so a run without GCC drops the
+   * columns entirely instead of leaving a gap.
+   */
+  char c_gcc_sp[72] = "", gcc_sp[72] = "", ng_sp[72] = "";
+  if (bench_gcc_shown) {
+    snprintf(c_gcc_sp, sizeof(c_gcc_sp), " %s", c_gcc_cell);
+    snprintf(gcc_sp, sizeof(gcc_sp), " %s", gcc_cell);
+    snprintf(ng_sp, sizeof(ng_sp), " %s", ng_cell);
+  }
   char line[1536];
   int n = snprintf(line, sizeof(line), "%s%s%s%s%*s %s%s%s%*s",
                    nyt_clr(NYT_BOLD), nyt_clr(NYT_CYAN), label,
@@ -12642,23 +12663,23 @@ static void bench_live_fixture_result(const char *name,
     int added;
     if (l.tier == 0)
       added = snprintf(line + n, sizeof(line) - (size_t)n,
-                       " %s %s %s %s %s %s %s\n", native_cell, llvm_cell,
-                       c_cell, gcc_cell, nyc_cell, nc_cell, ng_cell);
+                       " %s %s %s%s %s %s%s\n", native_cell, llvm_cell,
+                       c_cell, gcc_sp, nyc_cell, nc_cell, ng_sp);
     else if (l.tier == 1)
       added = snprintf(line + n, sizeof(line) - (size_t)n,
-                       " %s %s %s %s %s %s %s %s %s %s\n", c_ny_cell,
-                       c_llvm_cell, c_gcc_cell, native_cell, llvm_cell, c_cell,
-                       gcc_cell, nyc_cell, nc_cell, ng_cell);
+                       " %s %s%s %s %s %s%s %s %s%s\n", c_ny_cell,
+                       c_llvm_cell, c_gcc_sp, native_cell, llvm_cell, c_cell,
+                       gcc_sp, nyc_cell, nc_cell, ng_sp);
     else if (l.tier == 2)
       added = snprintf(line + n, sizeof(line) - (size_t)n,
-                       " %s %s %s %s %s %s %s %s %s %s %s\n", c_ny_cell,
-                       c_llvm_cell, c_gcc_cell, native_cell, llvm_cell, c_cell,
-                       gcc_cell, nyc_cell, nc_cell, ng_cell, nl_cell);
+                       " %s %s%s %s %s %s%s %s %s%s %s\n", c_ny_cell,
+                       c_llvm_cell, c_gcc_sp, native_cell, llvm_cell, c_cell,
+                       gcc_sp, nyc_cell, nc_cell, ng_sp, nl_cell);
     else
       added = snprintf(line + n, sizeof(line) - (size_t)n,
-                       " %s %s %s %s %s %s %s %s %s %s %s %s %s\n", c_ny_cell,
-                       c_llvm_cell, c_gcc_cell, native_cell, llvm_cell, c_cell,
-                       gcc_cell, nyc_cell, nc_cell, ng_cell, lc_cell, nl_cell,
+                       " %s %s%s %s %s %s%s %s %s%s %s %s %s\n", c_ny_cell,
+                       c_llvm_cell, c_gcc_sp, native_cell, llvm_cell, c_cell,
+                       gcc_sp, nyc_cell, nc_cell, ng_sp, lc_cell, nl_cell,
                        cn_cell);
     if (added > 0)
       n += added;
@@ -13359,8 +13380,10 @@ static void bench_print_header(void) {
     bench_header_right("c:NYR", l.compile_ny);
     putchar(' ');
     bench_header_right("c:LLVM", l.compile_llvm);
-    putchar(' ');
-    bench_header_right("c:GCC", l.compile_gcc);
+    if (bench_gcc_shown) {
+      putchar(' ');
+      bench_header_right("c:GCC", l.compile_gcc);
+    }
   }
   putchar(' ');
   bench_header_right("NYR", l.native);
@@ -13368,14 +13391,18 @@ static void bench_print_header(void) {
   bench_header_right("LLVM", l.llvm);
   putchar(' ');
   bench_header_right("C", l.c_host);
-  putchar(' ');
-  bench_header_right("GCC", l.gcc);
+  if (bench_gcc_shown) {
+    putchar(' ');
+    bench_header_right("GCC", l.gcc);
+  }
   putchar(' ');
   bench_header_right("NYC", l.nyc);
   putchar(' ');
   bench_header_right("NYR/C", l.ratio);
-  putchar(' ');
-  bench_header_right("NYR/GCC", l.ratio_gcc);
+  if (bench_gcc_shown) {
+    putchar(' ');
+    bench_header_right("NYR/GCC", l.ratio_gcc);
+  }
   if (l.tier >= 3) {
     putchar(' ');
     bench_header_right("LLVM/C", l.ratio);
@@ -13517,8 +13544,10 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
     bench_right(compile_ny, l.compile_ny);
     putchar(' ');
     bench_right(compile_llvm, l.compile_llvm);
-    putchar(' ');
-    bench_right(compile_gcc, l.compile_gcc);
+    if (bench_gcc_shown) {
+      putchar(' ');
+      bench_right(compile_gcc, l.compile_gcc);
+    }
     printf("%s", nyt_clr(NYT_RESET));
   }
   putchar(' ');
@@ -13527,8 +13556,10 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
   bench_right(llvm, l.llvm);
   putchar(' ');
   bench_right(c_host, l.c_host);
-  putchar(' ');
-  bench_right(gcc, l.gcc);
+  if (bench_gcc_shown) {
+    putchar(' ');
+    bench_right(gcc, l.gcc);
+  }
   putchar(' ');
   printf("%s", nyt_clr(NYT_GRAY));
   bench_right(nyc, l.nyc);
@@ -13536,9 +13567,11 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
   putchar(' ');
   bench_print_ratio(native_ratio, native_ratio_valid, l.ratio,
                     bench_timer_floor_name(r->name));
-  putchar(' ');
-  bench_print_ratio(native_gcc_ratio, native_gcc_ratio_valid, l.ratio_gcc,
-                    bench_timer_floor_name(r->name));
+  if (bench_gcc_shown) {
+    putchar(' ');
+    bench_print_ratio(native_gcc_ratio, native_gcc_ratio_valid, l.ratio_gcc,
+                      bench_timer_floor_name(r->name));
+  }
   if (l.tier >= 3) {
     putchar(' ');
     bench_print_ratio(llvm_ratio, llvm_ratio_valid, l.ratio,
@@ -13619,10 +13652,15 @@ static void bench_print_hotspots(const BenchTable *t) {
                 compile_gcc != NULL, gcc_ct, sizeof(gcc_ct));
   bench_ms_text(runtime ? runtime->ny_ms : 0.0, runtime != NULL, rt,
                 sizeof(rt));
-  nyt_kv("slowest compile", "NYR %s (%s) · LLVM %s (%s) · GCC %s (%s)",
-         compile_ny ? compile_ny->name : "—", ny_ct,
-         compile_llvm ? compile_llvm->name : "—", llvm_ct,
-         compile_gcc ? compile_gcc->name : "—", gcc_ct);
+  if (bench_gcc_shown)
+    nyt_kv("slowest compile", "NYR %s (%s) · LLVM %s (%s) · GCC %s (%s)",
+           compile_ny ? compile_ny->name : "—", ny_ct,
+           compile_llvm ? compile_llvm->name : "—", llvm_ct,
+           compile_gcc ? compile_gcc->name : "—", gcc_ct);
+  else
+    nyt_kv("slowest compile", "NYR %s (%s) · LLVM %s (%s)",
+           compile_ny ? compile_ny->name : "—", ny_ct,
+           compile_llvm ? compile_llvm->name : "—", llvm_ct);
   nyt_kv("slowest runtime", "%s (%s)", runtime ? runtime->name : "—", rt);
   if (ratio) {
     double gap = ratio->ny_ms / ratio->c_ms;
@@ -13636,7 +13674,7 @@ static void bench_print_hotspots(const BenchTable *t) {
     char text[32];
     bench_ratio_text(text, sizeof(text), gap);
     nyt_kv("NYR/GCC gap", "%s (%s)", gcc_gap->name, text);
-  } else
+  } else if (bench_gcc_shown)
     nyt_kv("NYR/GCC gap", "— (no comparable samples)");
   if (llvm_gap) {
     double gap = llvm_gap->ny_ms / llvm_gap->llvm_ms;
@@ -13705,8 +13743,12 @@ static void bench_print_singular_stats(const BenchRow *r,
   if (!r_used)
     snprintf(ratios, sizeof(ratios), "no reference comparison");
 
-  nyt_kv("timings", "NYR %s (%s) · LLVM %s · C %s · GCC %s · NYC %s", native,
-         ratios, llvm, c_host, gcc, nyc);
+  if (bench_gcc_shown)
+    nyt_kv("timings", "NYR %s (%s) · LLVM %s · C %s · GCC %s · NYC %s",
+           native, ratios, llvm, c_host, gcc, nyc);
+  else
+    nyt_kv("timings", "NYR %s (%s) · LLVM %s · C %s · NYC %s", native, ratios,
+           llvm, c_host, nyc);
   if (r->ny_runs > 1) {
     nyt_kv("stability", "%d runs · min %s · max %s · noise %.1f%% (%s)",
            r->ny_runs, ny_min, ny_max, r->ny_noise_pct,
@@ -13715,10 +13757,15 @@ static void bench_print_singular_stats(const BenchRow *r,
   if (r->ny_compile_ms > 0.0 || r->llvm_compile_ms > 0.0 ||
       r->c_compile_ms > 0.0 || r->gcc_compile_ms > 0.0 ||
       r->nyc_compile_ms > 0.0) {
-    nyt_kv("compile times",
-           "NYR %s · LLVM %s · C %s · GCC %s · NYC %s (cache %s)", compile_ny,
-           compile_llvm, compile_c, compile_gcc, compile_nyc,
-           env && env->cache[0] ? env->cache : bench_cache_state());
+    if (bench_gcc_shown)
+      nyt_kv("compile times",
+             "NYR %s · LLVM %s · C %s · GCC %s · NYC %s (cache %s)",
+             compile_ny, compile_llvm, compile_c, compile_gcc, compile_nyc,
+             env && env->cache[0] ? env->cache : bench_cache_state());
+    else
+      nyt_kv("compile times", "NYR %s · LLVM %s · C %s · NYC %s (cache %s)",
+             compile_ny, compile_llvm, compile_c, compile_nyc,
+             env && env->cache[0] ? env->cache : bench_cache_state());
     if (r->ny_opt_ms > 0.0 || r->ny_jit_compile_ms > 0.0 ||
         r->ny_link_ms > 0.0 || r->llvm_opt_ms > 0.0 ||
         r->llvm_jit_compile_ms > 0.0) {
@@ -13885,7 +13932,7 @@ static const char *bench_row_class(const BenchRow *r, char *out, size_t cap) {
     return "?";
   /*
    * Class is the bench directory holding the fixture, e.g. `startup` in
-   * `etc/tests/bench/startup/escape-loop.nshape`.
+   * `etc/labs/tests/bench/startup/escape-loop.nshape`.
    */
   const char *slash = strrchr(r->path, '/');
 #ifdef _WIN32
@@ -13911,9 +13958,16 @@ static const char *bench_row_class(const BenchRow *r, char *out, size_t cap) {
   return out;
 }
 
+/*
+ * Column the grid helpers leave out (the GCC column when GCC is absent).
+ */
+static size_t bench_grid_skip = SIZE_MAX;
+
 static void bench_grid_rule(const size_t *widths, size_t count) {
   printf("  +");
   for (size_t col = 0; col < count; ++col) {
+    if (col == bench_grid_skip)
+      continue;
     for (size_t i = 0; i < widths[col] + 2; ++i)
       putchar('-');
     putchar('+');
@@ -13925,6 +13979,8 @@ static void bench_grid_row(const char *const *cells, const size_t *widths,
                            size_t count) {
   printf("  |");
   for (size_t col = 0; col < count; ++col) {
+    if (col == bench_grid_skip)
+      continue;
     putchar(' ');
     bench_left(cells[col] ? cells[col] : "", (int)widths[col]);
     printf(" |");
@@ -13980,7 +14036,8 @@ static void bench_print_compile_summary(const BenchTable *t,
   char heading[160];
   const char *cache = env && env->cache[0] ? env->cache : bench_cache_state();
   snprintf(heading, sizeof(heading),
-           "Compile times · NYR/LLVM cache %s · C/GCC/NYC fresh build", cache);
+           "Compile times · NYR/LLVM cache %s · %s fresh build", cache,
+           bench_gcc_shown ? "C/GCC/NYC" : "C/NYC");
   nyt_subheading(heading);
   const char *headers[] = {"compiler", "n", "total", "median", "geomean",
                            "slowest (fixture)"};
@@ -14021,6 +14078,8 @@ static void bench_print_compile_summary(const BenchTable *t,
   bench_grid_row(headers, widths, 6);
   bench_grid_rule(widths, 6);
   for (size_t k = 0; k < 5; ++k) {
+    if (k == 3 && !bench_gcc_shown) /* stats[3] is GCC */
+      continue;
     const char *row_cells[6] = {stats[k].label, cell_n[k],   cell_total[k],
                                 cell_med[k],    cell_geo[k], cell_max[k]};
     bench_grid_row(row_cells, widths, 6);
@@ -14206,6 +14265,7 @@ static int bench_print_geomean(const BenchTable *t, bool enforce_budgets) {
     if (w > gm_widths[col])
       gm_widths[col] = w;
   }
+  bench_grid_skip = bench_gcc_shown ? SIZE_MAX : 2;
   bench_grid_rule(gm_widths, 5);
   bench_grid_row(gm_headers, gm_widths, 5);
   bench_grid_rule(gm_widths, 5);
@@ -14217,7 +14277,13 @@ static int bench_print_geomean(const BenchTable *t, bool enforce_budgets) {
   bench_grid_rule(gm_widths, 5);
   bench_grid_row(all_cells, gm_widths, 5);
   bench_grid_rule(gm_widths, 5);
-  if (all_gc_n > 0 || all_nyc_n > 0) {
+  bench_grid_skip = SIZE_MAX;
+  if (!bench_gcc_shown && all_nyc_n > 0) {
+    char nyc_all_s[32], nyc_big_s[32];
+    bench_geomean_text(nyc_all_s, sizeof(nyc_all_s), all_nyc, all_nyc_n);
+    bench_geomean_text(nyc_big_s, sizeof(nyc_big_s), big_nyc, big_nyc_n);
+    printf("  reference overall: NYC/C %s | >=1ms %s\n", nyc_all_s, nyc_big_s);
+  } else if (all_gc_n > 0 || all_nyc_n > 0) {
     char gc_all_s[32], gc_big_s[32], nyc_all_s[32], nyc_big_s[32];
     bench_geomean_text(gc_all_s, sizeof(gc_all_s), all_gc, all_gc_n);
     bench_geomean_text(gc_big_s, sizeof(gc_big_s), big_gc, big_gc_n);
@@ -14462,6 +14528,7 @@ static void bench_print_floor_adjusted_geomean(const BenchTable *t) {
   const size_t floor_widths[] = {15, 18, 18, 18, 18};
   const char *floor_headers[] = {"class", "NYR/C", "NYR/GCC", "LLVM/C",
                                  "NYR/LLVM"};
+  bench_grid_skip = bench_gcc_shown ? SIZE_MAX : 2;
   bench_grid_rule(floor_widths, 5);
   bench_grid_row(floor_headers, floor_widths, 5);
   bench_grid_rule(floor_widths, 5);
@@ -14494,6 +14561,7 @@ static void bench_print_floor_adjusted_geomean(const BenchTable *t) {
   bench_grid_rule(floor_widths, 5);
   bench_grid_row(all_cells, floor_widths, 5);
   bench_grid_rule(floor_widths, 5);
+  bench_grid_skip = SIZE_MAX;
 }
 
 static void bench_print_hw_counters(const BenchTable *t) {
@@ -15341,29 +15409,33 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
       snprintf(temporary, sizeof(temporary), "%s.tmp", doc_path) >=
           (int)sizeof(temporary))
     return false;
-  /* Creates build/bench-reports/ portably; the content is written below. */
+  /*
+   * Creates build/bench-reports/ portably; the content is written below.
+   */
   if (!shape_write_tree_file(temporary, ""))
     return false;
 
   ny_strbuf_t output;
   ny_strbuf_init(&output);
   bool ok = ny_strbuf_append(&output, "## Latest full benchmark run\n\n");
+  char gcc_note[512] = "";
+  if (bench_gcc_shown)
+    snprintf(gcc_note, sizeof(gcc_note), " GCC: %s; flags `%s`.",
+             env->gcc_compiler_version,
+             env->gcc_flags[0] ? env->gcc_flags : env->c_flags);
   if (ok)
     ok = ny_strbuf_appendf(
         &output,
         "Generated automatically by the full `ny-test --bench` run.\n"
         "Host: %s; target `%s`; compiler `%s`.\n"
         "NYR: `-%s`, profile `%s`, tier `%s`, engine `%s`, cache `%s`.\n"
-        "C: %s; flags `%s`. GCC: %s; flags `%s`. NYC flags `%s`.\n"
+        "C: %s; flags `%s`.%s NYC flags `%s`.\n"
         "Samples: %d plus %d warm-up; fixture workers %d, route workers %d.\n",
         env->cpu_model, env->target, env->compiler_binary_fnv64,
         env->opt_level, env->profile, env->tier,
         bench_engine_label(env->engine), env->cache, env->c_compiler_version,
-        env->c_flags,
-        env->gcc_compiler_version[0] ? env->gcc_compiler_version
-                                     : "unavailable",
-        env->gcc_flags[0] ? env->gcc_flags : env->c_flags, env->nyc_flags,
-        env->samples, env->warmups, env->fixture_workers, env->route_workers);
+        env->c_flags, gcc_note, env->nyc_flags, env->samples, env->warmups,
+        env->fixture_workers, env->route_workers);
 
   size_t passed = 0, failed = 0, controls = 0, low = 0, noisy = 0, budgets = 0;
   for (size_t i = 0; i < table->len; ++i) {
@@ -15601,7 +15673,7 @@ static void bench_write_full_report(const char *path, const BenchTable *table,
 static int bench_collect_shapes(const char *root, StrVec *files,
                                 StrVec *shapes) {
   char bench_dir[PATH_MAX];
-  snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench", root);
+  snprintf(bench_dir, sizeof(bench_dir), "%s/etc/labs/tests/bench", root);
   StrVec all = {0};
   if (!test_collect_native(bench_dir, &all, true)) {
     nyt_err("ny-test",
@@ -16000,13 +16072,15 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
   BenchEnvironment bench_env;
   bench_collect_environment(root, bin, target, opt_level, tier, engine, runs,
                             warmup, compile_profile, &bench_env);
+  bench_gcc_shown =
+      compare_gcc && strcmp(bench_env.gcc_compiler, "unavailable") != 0;
 
   StrVec shapes = {0};
   if (!bench_collect_shapes(root, files, &shapes))
     return 2;
   StrVec all_shapes = {0};
   char full_bench_dir[PATH_MAX];
-  if (snprintf(full_bench_dir, sizeof(full_bench_dir), "%s/etc/tests/bench",
+  if (snprintf(full_bench_dir, sizeof(full_bench_dir), "%s/etc/labs/tests/bench",
                root) >= (int)sizeof(full_bench_dir) ||
       !test_collect_native(full_bench_dir, &all_shapes, true)) {
     sv_free(&shapes);
@@ -16089,12 +16163,18 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
            warmup, warmup == 1 ? "" : "s");
     nyt_kv("NYC", "C workload runtime · %s · build and warm-up excluded",
            bench_env.nyc_flags);
-    nyt_kv("C compilers", "C: %s · GCC: %s · NYC: %s",
-           bench_env.c_compiler_version, bench_env.gcc_compiler_version,
-           bench_env.nyc_compiler_version);
+    if (bench_gcc_shown)
+      nyt_kv("C compilers", "C: %s · GCC: %s · NYC: %s",
+             bench_env.c_compiler_version, bench_env.gcc_compiler_version,
+             bench_env.nyc_compiler_version);
+    else
+      nyt_kv("C compilers", "C: %s · NYC: %s (GCC %s, columns hidden)",
+             bench_env.c_compiler_version, bench_env.nyc_compiler_version,
+             compare_gcc ? "not found" : "comparison off");
     nyt_kv("legend",
-           "c:NYR/c:LLVM/c:GCC = compile time (--bench-cache cold for uncached "
-           "NYR/LLVM) · LOW = <100ns · ~ = timer fallback · — = unavailable");
+           "%s = compile time (--bench-cache cold for uncached NYR/LLVM) · "
+           "LOW = <100ns · ~ = timer fallback · — = unavailable",
+           bench_gcc_shown ? "c:NYR/c:LLVM/c:GCC" : "c:NYR/c:LLVM");
     putchar('\n');
     bench_print_header();
     fflush(stdout);

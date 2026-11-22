@@ -21662,7 +21662,9 @@ static bool retain_hidden_declaration(c_parser_t *p, nyc_unit_t *unit,
       in->flags |= NYIR_INST_F_SYMBOL_NONPREEMPTIBLE;
       unit->has_hidden_references = true;
     }
-  /* Instruction emitters annotate surviving references after optimization. */
+  /*
+   * Instruction emitters annotate surviving references after optimization.
+   */
   for (size_t d = 0; !needs_directive && d < unit->data_count; ++d)
     for (size_t i = 0; i < unit->data[d].reloc_count; ++i) {
       const char *symbol =

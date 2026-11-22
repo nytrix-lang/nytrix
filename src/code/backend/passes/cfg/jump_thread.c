@@ -77,7 +77,9 @@ typedef struct {
   nyr_cmp_t cmp_op;
   int64_t cmp_const;
   bool phi_on_right;
-  /* -1 = any evaluated result determines branch; 0 = only result==0 forces false; 1 = only result!=0 forces true */
+  /*
+   * -1 = any evaluated result determines branch; 0 = only result==0 forces false; 1 = only result!=0 forces true
+   */
   int forced_polarity;
 } jt_cond_term_t;
 
@@ -624,7 +626,9 @@ static size_t jt_pick_target(const nyr_func_t *f, const nyr_cfg_t *cfg,
     int block = block_for_label(cfg, term->imm);
     return block >= 0 ? (size_t)block : SIZE_MAX;
   }
-  /* Check for explicit trailing BR right after BR_IF in the same block. */
+  /*
+   * Check for explicit trailing BR right after BR_IF in the same block.
+   */
   size_t bend = nyr_block_last_non_nop(f, cfg, through);
   if (term_i + 1 < bend && f->data[bend - 1].op == NYIR_BR) {
     int block = block_for_label(cfg, f->data[bend - 1].imm);
@@ -803,7 +807,9 @@ bool nyr_jump_thread(nyr_func_t *f) {
           if (f->data[(size_t)defs[inc_val]].op != NYIR_PHI ||
               !jt_block_is_phi_only_bridge(f, &cfg, mid))
             continue;
-          /* Verify mid reaches pred exclusively through empty bridges. */
+          /*
+           * Verify mid reaches pred exclusively through empty bridges.
+           */
           size_t walk = mid;
           bool reaches_pred = (walk == pred);
           for (unsigned hops = 0; !reaches_pred && hops < 4; ++hops) {

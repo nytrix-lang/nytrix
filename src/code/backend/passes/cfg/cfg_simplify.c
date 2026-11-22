@@ -489,7 +489,9 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
       int64_t s_label = mcfg.block_label[s];
       if (s_label < 0)
         continue;
-      /* Target block must begin with LABEL s_label and contain no PHIs. */
+      /*
+       * Target block must begin with LABEL s_label and contain no PHIs.
+       */
       size_t s_start = mcfg.block_start[s];
       size_t s_end = mcfg.block_end[s];
       if (s_start >= s_end || f->data[s_start].op != NYIR_LABEL ||
@@ -498,14 +500,18 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
       size_t s_first = nir_next_non_nop(f, s_start + 1);
       if (s_first < s_end && f->data[s_first].op == NYIR_PHI)
         continue;
-      /* Check block b ends with an unconditional BR s_label. */
+      /*
+       * Check block b ends with an unconditional BR s_label.
+       */
       size_t b_end = nyr_block_last_non_nop(f, &mcfg, b);
       if (b_end <= mcfg.block_start[b])
         continue;
       size_t br_pc = b_end - 1;
       if (f->data[br_pc].op != NYIR_BR || f->data[br_pc].imm != s_label)
         continue;
-      /* Ensure no other BR/BR_IF anywhere targets s_label (even dead ones). */
+      /*
+       * Ensure no other BR/BR_IF anywhere targets s_label (even dead ones).
+       */
       bool other_ref = false;
       bool phi_ref = false;
       for (size_t k = 0; k < f->len; ++k) {
@@ -529,7 +535,9 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
       if (phi_ref && b_label < 0)
         continue;
       if (phi_ref) {
-        /* Refuse if any PHI referencing s_label already has b_label. */
+        /*
+         * Refuse if any PHI referencing s_label already has b_label.
+         */
         bool dup = false;
         for (size_t k = 0; k < f->len && !dup; ++k) {
           const nyr_inst_t *ki = &f->data[k];

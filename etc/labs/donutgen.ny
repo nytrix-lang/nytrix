@@ -10,9 +10,12 @@
 ;; usage: donutgen.ny [-W WIDTH] [-H HEIGHT] [--pose A B] [--margin N]
 ;;                    [--fill F] [--mask] [--preview] [--stats]
 ;;                    [--out PATH] [--dry-run]
+
 use core
 use core.str as sx
-use core.os (file_write)
+use core.os (file_write, file_read, file_exists)
+use core.os.subprocess (run_capture)
+use core.os.time (now_ms)
 
 def HEADER = "#!/usr/bin/env ny\n" +
    ";; Keywords: cli terminal donut\n" +
@@ -20,49 +23,51 @@ def HEADER = "#!/usr/bin/env ny\n" +
    "\n"
 
 ;; The input program (golfed, not the art): the generator packs this.
-def PROG = "use core\n" +
-   "use core.term\n" +
-   "mut A,B=.55,.35\n" +
-   "fn R(u,v,a,b,c,d,L,M,N){\n" +
-   " g=4.41-u*u-v*v\n" +
-   " if g<=0{return}\n" +
-   " mut t=sqrt(g)+.01\n" +
-   " for _ in 0..56{\n" +
-   "  p=c*u+d*t x=d*u-c*t\n" +
-   "  y=b*v+a*p z=b*p-a*v\n" +
-   "  r=sqrt(x*x+y*y)\n" +
-   "  q=r-1.48\n" +
-   "  e=sqrt(q*q+z*z)\n" +
-   "  if e<.632{\n" +
-   "   l=q*(x*L+y*M)+z*N*r\n" +
-   "   return l<.2*e*r?1:l<.65*e*r?2:3\n" +
-   "  }\n" +
-   "  t-=e-.62\n" +
-   " }\n" +
-   " 0\n" +
-   "}\n" +
-   "fn D(any c,z,w,h)int{\n" +
-   " def i,j=int(w),int(h)\n" +
-   " a,b,d,e=sin(A),cos(A),sin(B),cos(B)\n" +
-   " z=.65*e-.45*d\n" +
-   " L,M,N=-.45*e-.65*d,.65*b+z*a,z*b-.65*a\n" +
-   " mut f64 s=min(i+1,j*2+1)\n" +
-   " s*=.18\n" +
-   " v=(j-1)/s\n" +
-   " for y in 0..j{\n" +
-   "  u=(1-i)*.5/s\n" +
-   "  for x in 0..i{\n" +
-   "   k=R(u,v,a,b,d,e,L,M,N)\n" +
-   "   canvas_set(c,x,y,\" ░▒▓\"[k],[0,4,5,7][k],k/3)\n" +
-   "   u+=1/s\n" +
-   "  }\n" +
-   "  v-=2/s\n" +
-   " }\n" +
-   " canvas_refresh(c)\n" +
-   " A+=.035 B+=.021\n" +
-   " 0\n" +
-   "}\n" +
-   "tui_canvas_loop(D)\n"
+def PROG = """
+use core
+use core.term
+mut A,B=.55,.35
+fn R(u,v,a,b,c,d,L,M,N){
+ g=4.41-u*u-v*v
+ if g<=0{return}
+ mut t=sqrt(g)+.01
+ for _ in 0..56{
+  p=c*u+d*t x=d*u-c*t
+  y=b*v+a*p z=b*p-a*v
+  r=sqrt(x*x+y*y)
+  q=r-1.48
+  e=sqrt(q*q+z*z)
+  if e<.632{
+   l=q*(x*L+y*M)+z*N*r
+   return l<.2*e*r?1:l<.65*e*r?2:3
+  }
+  t-=e-.62
+ }
+ 0
+}
+fn D(any c,z,w,h)int{
+ def i,j=int(w),int(h)
+ a,b,d,e=sin(A),cos(A),sin(B),cos(B)
+ z=.65*e-.45*d
+ L,M,N=-.45*e-.65*d,.65*b+z*a,z*b-.65*a
+ mut f64 s=min(i+1,j*2+1)
+ s*=.18
+ v=(j-1)/s
+ for y in 0..j{
+  u=(1-i)*.5/s
+  for x in 0..i{
+   k=R(u,v,a,b,d,e,L,M,N)
+   canvas_set(c,x,y," ░▒▓"[k],[0,4,5,7][k],k/3)
+   u+=1/s
+  }
+  v-=2/s
+ }
+ canvas_refresh(c)
+ A+=.035 B+=.021
+ 0
+}
+tui_canvas_loop(D)
+"""
 
 def PALETTE = {1: ".", 2: "-", 3: "="}
 def SEP = " "
@@ -863,6 +868,238 @@ fn attempt(list stmts, int w, int h, f64 A, f64 B, int margin, f64 fill) dict {
    r
 }
 
+;; ---------------------------------------------------------------- optimize
+;; Coarse (A,B) search for filled donuts with a visible, closed hole.
+fn pose_candidates(int cw, int ch, int margin, f64 fill, int keep) list {
+   mut scored = []
+   mut ai = 12
+   while ai < 25 {
+      mut bi = -2
+      while bi < 6 {
+         def A = float(ai) * 0.05
+         def B = float(bi) * 0.05
+         def g = render_mask(cw, ch, A, B, margin, fill)
+         if g.len > 0 {
+            def st = mask_stats(g)
+            def ink = int(st.get(0, 0))
+            def hole = int(st.get(1, 0))
+            def bb = st.get(2, [])
+            if bb.len == 4 && hole >= MIN_HOLE {
+               def area = (int(bb.get(2, 0)) - int(bb.get(0, 0)) + 1) *
+                          (int(bb.get(3, 0)) - int(bb.get(1, 0)) + 1)
+               if area > 0 && float(hole) / float(area) <= 0.25 {
+                  scored = scored.append([ink, A, B])
+               }
+            }
+         }
+         bi += 1
+      }
+      ai += 1
+   }
+   mut used = {}
+   mut out = []
+   while out.len < keep && out.len < scored.len {
+      mut best_i = -1
+      mut best_ink = -1
+      mut j = 0
+      while j < scored.len {
+         if int(used.get(to_str(j), 0)) == 0 {
+            def ink = int(scored.get(j, []).get(0, 0))
+            if ink > best_ink {
+               best_ink = ink
+               best_i = j
+            }
+         }
+         j += 1
+      }
+      if best_i >= 0 {
+         used[to_str(best_i)] = 1
+         def e = scored.get(best_i, [])
+         out = out.append([e.get(1, 0.0), e.get(2, 0.0)])
+      }
+   }
+   out
+}
+
+fn optimize(list stmts, int w, int h, int margin, f64 fill_hint, int budget_s) dict {
+   mut poses = [[0.85, 0.0], [0.90, 0.0], [0.90, 0.05], [0.915, 0.0],
+                [0.936, 0.0], [0.95, -0.05], [0.95, 0.0], [0.95, 0.05],
+                [0.95, 0.10], [1.00, 0.0], [1.00, 0.05], [1.00, 0.10],
+                [1.05, 0.0], [1.05, 0.05], [1.10, 0.0], [1.10, 0.05],
+                [1.10, 0.10]]
+   def extra = pose_candidates(48, 24, margin, fill_hint, 8)
+   mut p = 0
+   while p < extra.len {
+      poses = poses.append(extra.get(p, []))
+      p += 1
+   }
+   mut seen_pose = {}
+   mut uniq = []
+   p = 0
+   while p < poses.len {
+      def e = poses.get(p, [])
+      def key = to_str(e.get(0, 0.0)) + "," + to_str(e.get(1, 0.0))
+      if int(seen_pose.get(key, 0)) == 0 {
+         seen_pose[key] = 1
+         uniq = uniq.append(e)
+      }
+      p += 1
+   }
+   mut fills = []
+   mut i = 0
+   while i < 46 {
+      fills = fills.append(0.55 + float(i) * 0.01)
+      i += 1
+   }
+   fills = fills.append(0.6715)
+   fills = fills.append(0.7025)
+   def deadline = now_ms() + budget_s * 1000
+   mut results = []
+   mut seen_text = {}
+   mut tried = 0
+   mut stop = false
+   mut pi = 0
+   while pi < uniq.len && !stop {
+      def pe = uniq.get(pi, [])
+      def A = float(pe.get(0, 0.0))
+      def B = float(pe.get(1, 0.0))
+      mut fi = 0
+      while fi < fills.len && !stop {
+         if now_ms() >= deadline { stop = true }
+         if !stop {
+            def r = attempt(stmts, w, h, A, B, margin, float(fills.get(fi, 0.55)))
+            tried += 1
+            if r.len > 0 {
+               def t = to_str(r.get("text", ""))
+               if int(seen_text.get(t, 0)) == 0 {
+                  seen_text[t] = 1
+                  results = results.append(r)
+               }
+            }
+         }
+         fi += 1
+      }
+      pi += 1
+   }
+   print(to_str(results.len) + " feasible layouts on " + to_str(w) + "x" + to_str(h) +
+         " (" + to_str(tried) + " tried, " + to_str(budget_s) + "s budget):")
+   mut used = {}
+   mut ordered = []
+   mut k = 0
+   while k < 10 && k < results.len {
+      mut best_i = -1
+      mut best_bytes = 0
+      mut best_ink = 0
+      mut j = 0
+      while j < results.len {
+         if int(used.get(to_str(j), 0)) == 0 {
+            def rr = results.get(j, {})
+            def b = int(rr.get("bytes", 0))
+            def ink = int(rr.get("ink", 0))
+            if best_i < 0 || b < best_bytes || (b == best_bytes && ink < best_ink) {
+               best_i = j
+               best_bytes = b
+               best_ink = ink
+            }
+         }
+         j += 1
+      }
+      if best_i < 0 { break }
+      used[to_str(best_i)] = 1
+      def rr = results.get(best_i, {})
+      ordered = ordered.append(rr)
+      print("  " + to_str(int(rr.get("width", 0))) + "x" + to_str(int(rr.get("rows", 0))) +
+            " A=" + fmt(rr.get("A", 0.0)) + " B=" + fmt(rr.get("B", 0.0)) +
+            " fill=" + fmt4(rr.get("fill", 0.0)) +
+            " bytes=" + to_str(int(rr.get("bytes", 0))) +
+            " ink=" + to_str(int(rr.get("ink", 0))) +
+            " hole=" + to_str(int(rr.get("hole", 0))) +
+            " holeRows=" + to_str(int(rr.get("hole_rows", 0))))
+      k += 1
+   }
+   if ordered.len == 0 { return {} }
+   ordered.get(0, {})
+}
+
+;; ------------------------------------------------------------------ verify
+fn same_tokens(list a, list b) bool {
+   if a.len != b.len { return false }
+   mut i = 0
+   while i < a.len {
+      if to_str(a.get(i, "")) != to_str(b.get(i, "")) { return false }
+      i += 1
+   }
+   true
+}
+
+;; Fillers are comments (`;[art];` or a trailing `;`), and the program never
+;; uses ';', so dropping each comment segment leaves exactly the code tokens.
+fn strip_fillers(str line) str {
+   def n = clen(line)
+   mut out = ""
+   mut i = 0
+   while i < n {
+      def ch = to_str(slice(line, i, i + 1))
+      if ch == ";" {
+         i += 1
+         while i < n && to_str(slice(line, i, i + 1)) != ";" { i += 1 }
+         i += 1
+      } else {
+         out = out + ch
+         i += 1
+      }
+   }
+   out
+}
+
+fn prog_tokens(str text) list {
+   def lines = sx.split(text, "\n")
+   mut stmts = []
+   mut i = 0
+   while i < lines.len {
+      def l = sx.strip(to_str(lines.get(i, "")))
+      if l.len > 0 {
+         def c = to_str(slice(l, 0, 1))
+         if c != "#" && c != ";" {
+            def code = sx.strip(strip_fillers(l))
+            if code.len > 0 { stmts = stmts.append(lex_line(code)) }
+         }
+      }
+      i += 1
+   }
+   token_stream(stmts).get(0, [])
+}
+
+fn verify_text(str text, str ref) dict {
+   def got = prog_tokens(text)
+   def want = prog_tokens(ref)
+   mut out = {}
+   out["tokens_equal"] = same_tokens(got, want) ? 1 : 0
+   out["token_count"] = want.len
+   out["got_count"] = got.len
+   out
+}
+
+fn verify_compile(str path) dict {
+   mut r = run_capture(["ny", "--run=none", path], [], nil, false)
+   mut code = int(r.get("code", 1))
+   if code != 0 && file_exists("build/release/ny") {
+      r = run_capture(["build/release/ny", "--run=none", path], [], nil, false)
+      code = int(r.get("code", 1))
+   }
+   mut lines = 0
+   def err = sx.split(to_str(r.get("stderr", "")), "\n")
+   mut i = 0
+   while i < err.len {
+      if to_str(err.get(i, "")).len > 0 { lines += 1 }
+      i += 1
+   }
+   mut out = {}
+   out["code"] = code
+   out["lines"] = lines
+   out
+}
+
 ;; --------------------------------------------------------------------- CLI
 fn die(str msg) any {
    print("donutgen: " + msg)
@@ -872,7 +1109,7 @@ fn die(str msg) any {
 fn usage() {
    print("usage: donutgen.ny [-W WIDTH] [-H HEIGHT] [--pose A B] [--margin N]")
    print("                   [--fill F] [--mask] [--preview] [--stats]")
-   print("                   [--out PATH] [--dry-run]")
+   print("                   [--verify] [--optimize] [--budget N] [--out PATH] [--dry-run]")
 }
 
 fn main() int {
@@ -889,6 +1126,9 @@ fn main() int {
    mut do_mask = false
    mut do_preview = false
    mut do_stats = false
+   mut do_verify = false
+   mut do_optimize = false
+   mut opt_budget = 60
    mut out_path = OUT_DEFAULT
    mut dry = false
    mut i = 1
@@ -916,6 +1156,13 @@ fn main() int {
          do_preview = true
       } elif a == "--stats" {
          do_stats = true
+      } elif a == "--verify" {
+         do_verify = true
+      } elif a == "--optimize" {
+         do_optimize = true
+      } elif a == "--budget" && i + 1 < argc() {
+         i += 1
+         opt_budget = int(str.atof(argv(i)))
       } elif a == "--out" && i + 1 < argc() {
          i += 1
          out_path = argv(i)
@@ -930,11 +1177,20 @@ fn main() int {
       i += 1
    }
    def stmts = build_stmts(PROG)
-   def r = attempt(stmts, opt_w, opt_h, pose_a, pose_b, margin, fill)
-   if r.len == 0 {
-      print("no feasible packing at " + to_str(opt_w) + "x" + to_str(opt_h) +
-            " for the requested pose")
-      return 1
+   mut r = {}
+   if do_optimize {
+      r = optimize(stmts, opt_w, opt_h, margin, fill, opt_budget)
+      if r.len == 0 {
+         print("no feasible combo found")
+         return 1
+      }
+   } else {
+      r = attempt(stmts, opt_w, opt_h, pose_a, pose_b, margin, fill)
+      if r.len == 0 {
+         print("no feasible packing at " + to_str(opt_w) + "x" + to_str(opt_h) +
+               " for the requested pose; try --optimize")
+         return 1
+      }
    }
    if do_mask {
       def grid = r.get("grid", [])
@@ -967,7 +1223,38 @@ fn main() int {
       print("wrote " + out_path + " (" + to_str(int(r.get("bytes", 0))) + " bytes, " +
             to_str(int(r.get("width", 0))) + "x" + to_str(int(r.get("rows", 0))) + ")")
    }
+   if do_verify {
+      def text = to_str(r.get("text", ""))
+      mut vpath = out_path
+      if dry {
+         vpath = "/tmp/donutgen-verify.ny"
+         file_write(vpath, text)
+      }
+      def vt = verify_text(text, PROG)
+      def vc = verify_compile(vpath)
+      def code = int(vc.get("code", 1))
+      def teq = int(vt.get("tokens_equal", 0))
+      print("verify: compile rc=" + to_str(code) +
+            " stderr_lines=" + to_str(int(vc.get("lines", 0))))
+      print("verify: tokens_equal=" + (teq == 1 ? "true" : "false") +
+            " (" + to_str(int(vt.get("got_count", 0))) + "/" +
+            to_str(int(vt.get("token_count", 0))) + " tokens)")
+      if code != 0 || teq == 0 {
+         print("verify: FAILED")
+         return 1
+      }
+      print("verify: OK")
+   }
    0
+}
+
+fn fmt4(any v) str {
+   def x = float(v)
+   def q = int(x * 10000.0 + (x < 0.0 ? -0.5 : 0.5))
+   mut s = to_str(q)
+   while s.len < 5 { s = "0" + s }
+   def n = s.len
+   to_str(slice(s, 0, n - 4)) + "." + to_str(slice(s, n - 4, n))
 }
 
 fn fmt(any v) str {

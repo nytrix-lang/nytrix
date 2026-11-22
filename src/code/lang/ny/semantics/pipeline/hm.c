@@ -9621,7 +9621,9 @@ static _Thread_local struct {
   hm_sem_rep_cache_slot_t *slots;
   size_t cap;
   size_t len;
-  /* Pre-indexed set of impl owner names from hm->ctx->funcs. */
+  /*
+   * Pre-indexed set of impl owner names from hm->ctx->funcs.
+   */
   const char **impl_owners;
   uint64_t *impl_owner_hashes;
   size_t impl_owner_cap;

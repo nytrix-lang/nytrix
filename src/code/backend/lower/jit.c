@@ -749,7 +749,7 @@ static bool nyr_native_jit_materialize_x64(
     void *target_ptr = NULL;
     bool plt = relocs[i].type == NY_RELOC_PLT32;
     nyr_jit_reloc_memo_t *slot = NULL;
-    if (memo && relocs[i].symbol) {
+    if (memo && relocs[i].symbol[0]) {
       uint64_t h = UINT64_C(1469598103934665603) ^ (uint64_t)plt;
       for (const char *c = relocs[i].symbol; *c; ++c)
         h = (h ^ (unsigned char)*c) * UINT64_C(1099511628211);
