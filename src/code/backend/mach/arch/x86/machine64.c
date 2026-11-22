@@ -8553,6 +8553,11 @@ static int nyr_x64_mach_emit_multiarg_leaf(
   int rhs_regs[NY_X64_NIR_MAX_SLOTS];
   int64_t rhs_immediates[NY_X64_NIR_MAX_SLOTS];
   size_t op_count = 0;
+  /*
+   * %rax holds only the most recent result; an older accumulator value that
+   * is read again has already been overwritten, so the chain must not match.
+   */
+  size_t acc_vreg = SIZE_MAX;
   for (size_t i = mach->param_count; i < ret_index; ++i) {
     const nyr_mach_inst_t *in = &mach->insts[i];
     if (nyr_x64_mach_is_imm_copy(mach, in)) {
@@ -8571,7 +8576,9 @@ static int nyr_x64_mach_emit_multiarg_leaf(
         in->src0.kind != NYR_MACH_OPERAND_VREG ||
         in->dst.as.reg >= mach->vreg_len || in->src0.as.reg >= mach->vreg_len ||
         mach->vreg_types[in->dst.as.reg] != NYR_MACH_TYPE_I64 ||
-        arg_for_vreg[in->src0.as.reg] == -1 || op_count >= NY_X64_NIR_MAX_SLOTS)
+        arg_for_vreg[in->src0.as.reg] == -1 || op_count >= NY_X64_NIR_MAX_SLOTS ||
+        (arg_for_vreg[in->src0.as.reg] == -2 &&
+         in->src0.as.reg != acc_vreg))
       return 0;
     rhs_regs[op_count] = -1;
     rhs_immediates[op_count] = 0;
@@ -8588,6 +8595,9 @@ static int nyr_x64_mach_emit_multiarg_leaf(
             (arg_for_vreg[in->src1.as.reg] == -2 &&
              arg_for_vreg[in->src0.as.reg] != -2))
           return 0;
+        if (arg_for_vreg[in->src1.as.reg] == -2 &&
+            in->src1.as.reg != acc_vreg)
+          return 0;
         rhs_regs[op_count] = arg_for_vreg[in->src1.as.reg];
       }
     } else if (in->src1.kind == NYR_MACH_OPERAND_IMM &&
@@ -8599,8 +8609,10 @@ static int nyr_x64_mach_emit_multiarg_leaf(
     opcodes[op_count++] = opcode;
     const_known[in->dst.as.reg] = false;
     arg_for_vreg[in->dst.as.reg] = -2;
+    acc_vreg = in->dst.as.reg;
   }
-  if (op_count == 0 || arg_for_vreg[ret->src0.as.reg] == -1)
+  if (op_count == 0 || arg_for_vreg[ret->src0.as.reg] == -1 ||
+      (arg_for_vreg[ret->src0.as.reg] == -2 && ret->src0.as.reg != acc_vreg))
     return 0;
 
   const char *sym = target->symbol_prefix ? target->symbol_prefix : "";
