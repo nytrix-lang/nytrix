@@ -5,7 +5,7 @@
 
 # Nytrix
 
-[![Version](https://img.shields.io/badge/version-0.11.0-2f6fed)](etc/docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.0-2f6fed)](etc/docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
 
@@ -69,7 +69,7 @@ Or build a native executable:
 Source can also be run directly from a URL:
 
 ```bash
-./make ny https://raw.githubusercontent.com/nytrix-lang/nytrix/refs/heads/main/etc/labs/xtool.ny
+./make ny https://raw.githubusercontent.com/nytrix-lang/nytrix/refs/heads/main/etc/labs/ytool.ny
 ```
 
 ## Install

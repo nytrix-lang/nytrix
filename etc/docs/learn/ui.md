@@ -179,7 +179,7 @@ ny-test --bin build/release/ny etc/tests/code/probes/ui/wayland-compositor-input
 client that binds `zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`, and
 `zwp_input_method_v2`, and replays a step script. Without it the probe skips.
 The repository driver is [`etc/labs/ytool.ny`](../../../etc/labs/ytool.ny),
-which merges the Wayland seat driver with the X11 `xtool` command set in one
+which merges the Wayland seat driver with the X11 automation command set in one
 file and picks a backend at runtime. When the driver name ends in `.ny` the
 probe runs it with the test compiler named by `NYTRIX_TEST_NY_FULL_BIN` (or
 `ny` on `PATH`); other names are executed directly, so the Python reference
