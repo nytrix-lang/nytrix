@@ -20110,7 +20110,10 @@ outlined_functions_done:;
     mach_enc_dispose(&enc);
     return false;
   }
-  mach_free_remat_maps(&enc);
+  /*
+   * The entry's instruction offsets feed the line table below.
+   */
+  mach_free_remat_maps_preserving_offsets(&enc);
   if (!nyr_obj_emit(code, enc.code.data, enc.code.len) ||
       *def_count >= NY_NATIVE_MAX_DEFS) {
     mach_enc_dispose(&enc);
