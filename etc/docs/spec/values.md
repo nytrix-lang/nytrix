@@ -75,9 +75,9 @@ fixtures call, while programs keep the `is_nil`/`is_int` predicates. The
 C-string helpers take raw FFI-pointer `cstr` values, not managed `str`s.
 Application code keeps using the operators, predicates, and
 conversion APIs; these helpers exist for the runtime, FFI boundaries, and
-ABI debugging. The fixtures `etc/tests/lang/values/dynamic-float-arithmetic-abi.nshape`,
-`etc/tests/lang/values/bigint.nshape`, `etc/tests/lang/values/bigint-pidigits.nshape`,
-and `etc/tests/lang/values/intrinsic-conversion-render.nshape` pin the
+ABI debugging. The fixtures `etc/labs/tests/lang/values/dynamic-float-arithmetic-abi.nshape`,
+`etc/labs/tests/lang/values/bigint.nshape`, `etc/labs/tests/lang/values/bigint-pidigits.nshape`,
+and `etc/labs/tests/lang/values/intrinsic-conversion-render.nshape` pin the
 visible behaviors on both execution routes.
 
 ## Nil
@@ -103,7 +103,7 @@ rather than the integer payload.
 
 The dynamic-transport contract example below passes on the current build and
 is the gate fixture
-`etc/tests/lang/values/nil-dynamic-identity.nshape`; it stays a regression
+`etc/labs/tests/lang/values/nil-dynamic-identity.nshape`; it stays a regression
 check for any transport that changes the word conventions of dynamic values.
 
 ```ny

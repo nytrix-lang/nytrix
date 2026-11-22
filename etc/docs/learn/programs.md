@@ -81,7 +81,7 @@ Examples under [`etc/labs/`](../../../etc/labs/) are complete programs.
 ## Runnable projects
 
 The checkout keeps runnable examples under `etc/labs/` and focused runtime
-checks under `etc/tests/`.
+checks under `etc/labs/tests/`.
 
 | Area | Projects |
 | --- | --- |
@@ -104,15 +104,15 @@ runner. Load a `.wasm` file from the page, or add browser-ready entries to
 
 ## Focused checks
 
-Fixtures under `etc/tests/` exercise one language surface or runtime boundary:
+Fixtures under `etc/labs/tests/` exercise one language surface or runtime boundary:
 
 | Topic | Fixtures |
 | --- | --- |
-| ADTs and matching | [adt.nshape](../../../etc/tests/lang/types/aggregates/adt.nshape), [match.nshape](../../../etc/tests/lang/patterns/match.nshape) |
-| Concurrency and threads | [concurrency.nshape](../../../etc/tests/lang/concurrency/concurrency.nshape), [thread.nshape](../../../etc/tests/lang/concurrency/thread.nshape) |
-| Comptime | [comptime.nshape](../../../etc/tests/lang/comptime/comptime.nshape), [table.nshape](../../../etc/tests/lang/values/table.nshape) |
-| Native boundary | [ffi.nshape](../../../etc/tests/lang/interop/ny/ffi.nshape), [extern.nshape](../../../etc/tests/lang/interop/ny/extern.nshape), [asm.nshape](../../../etc/tests/lang/interop/ny/asm.nshape) |
-| Ownership and safety | [ownership.nshape](../../../etc/tests/lang/memory/ownership.nshape), [safe.nshape](../../../etc/tests/lang/memory/safe.nshape), [memory.nshape](../../../etc/tests/lang/memory/memory.nshape) |
+| ADTs and matching | [adt.nshape](../../../etc/labs/tests/lang/types/aggregates/adt.nshape), [match.nshape](../../../etc/labs/tests/lang/patterns/match.nshape) |
+| Concurrency and threads | [concurrency.nshape](../../../etc/labs/tests/lang/concurrency/concurrency.nshape), [thread.nshape](../../../etc/labs/tests/lang/concurrency/thread.nshape) |
+| Comptime | [comptime.nshape](../../../etc/labs/tests/lang/comptime/comptime.nshape), [table.nshape](../../../etc/labs/tests/lang/values/table.nshape) |
+| Native boundary | [ffi.nshape](../../../etc/labs/tests/lang/interop/ny/ffi.nshape), [extern.nshape](../../../etc/labs/tests/lang/interop/ny/extern.nshape), [asm.nshape](../../../etc/labs/tests/lang/interop/ny/asm.nshape) |
+| Ownership and safety | [ownership.nshape](../../../etc/labs/tests/lang/memory/ownership.nshape), [safe.nshape](../../../etc/labs/tests/lang/memory/safe.nshape), [memory.nshape](../../../etc/labs/tests/lang/memory/memory.nshape) |
 
 Run a focused test by pattern:
 
@@ -121,7 +121,7 @@ ny test --pattern comptime
 ny test --pattern ownership
 ```
 
-Bench fixtures live under `etc/tests/bench/`; run them through `ny perf` or
+Bench fixtures live under `etc/labs/tests/bench/`; run them through `ny perf` or
 `ny test --pattern sieve`. A single fixture run checks correctness, while
 comparative measurements require the flags and checksums in the
 [performance guide](performance.md).

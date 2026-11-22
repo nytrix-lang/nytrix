@@ -119,20 +119,20 @@ typedef struct {
 enum { PERF_MAX_EXEC_TARGETS = 64 };
 
 static const PerfCase k_cases[] = {
-    {"etc/tests/bench/algorithms/binary.nshape", "compile"},
-    {"etc/tests/bench/concurrency/calls.nshape", "speed"},
-    {"etc/tests/bench/datastructures/dict.nshape", "balanced"},
-    {"etc/tests/bench/numeric/fibonacci.nshape", "speed"},
-    {"etc/tests/bench/numeric/float.nshape", "speed"},
-    {"etc/tests/bench/numeric/intops.nshape", "speed"},
-    {"etc/tests/bench/datastructures/iter.nshape", "balanced"},
-    {"etc/tests/bench/datastructures/list.nshape", "balanced"},
-    {"etc/tests/bench/algorithms/mandelbrot.nshape", "speed"},
-    {"etc/tests/bench/numeric/matrix.nshape", "speed"},
-    {"etc/tests/bench/algorithms/sieve.nshape", "size"},
-    {"etc/tests/bench/algorithms/spectral.nshape", "speed"},
-    {"etc/tests/bench/string/string.nshape", "balanced"},
-    {"etc/tests/bench/datastructures/vector.nshape", "speed"},
+    {"etc/labs/tests/bench/algorithms/binary.nshape", "compile"},
+    {"etc/labs/tests/bench/concurrency/calls.nshape", "speed"},
+    {"etc/labs/tests/bench/datastructures/dict.nshape", "balanced"},
+    {"etc/labs/tests/bench/numeric/fibonacci.nshape", "speed"},
+    {"etc/labs/tests/bench/numeric/float.nshape", "speed"},
+    {"etc/labs/tests/bench/numeric/intops.nshape", "speed"},
+    {"etc/labs/tests/bench/datastructures/iter.nshape", "balanced"},
+    {"etc/labs/tests/bench/datastructures/list.nshape", "balanced"},
+    {"etc/labs/tests/bench/algorithms/mandelbrot.nshape", "speed"},
+    {"etc/labs/tests/bench/numeric/matrix.nshape", "speed"},
+    {"etc/labs/tests/bench/algorithms/sieve.nshape", "size"},
+    {"etc/labs/tests/bench/algorithms/spectral.nshape", "speed"},
+    {"etc/labs/tests/bench/string/string.nshape", "balanced"},
+    {"etc/labs/tests/bench/datastructures/vector.nshape", "speed"},
 };
 
 enum { PERF_CASE_COUNT = (int)(sizeof(k_cases) / sizeof(k_cases[0])) };
@@ -2066,7 +2066,7 @@ static void usage(void) {
          nyt_clr(NYT_RESET));
   printf("  %sNYTRIX_PERF_COLD=1 ny perf gate%s\n", nyt_clr(NYT_CYAN),
          nyt_clr(NYT_RESET));
-  printf("  %sny perf profile etc/tests/bench/algorithms/sieve.nshape -- "
+  printf("  %sny perf profile etc/labs/tests/bench/algorithms/sieve.nshape -- "
          "--bench%s\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf("  %sny perf compare --target old=./bench-old --target "

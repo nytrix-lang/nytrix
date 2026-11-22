@@ -150,7 +150,7 @@ Compiler contributors can start with the [contribution guide](etc/docs/CONTRIBUT
 | --------------- | ---------------------------------------------------- |
 | `src/`          | Compiler, runtime, native backend, and tools         |
 | `core/`         | Standard library                                     |
-| `etc/tests/`    | Tests, fixtures, and benchmarks                      |
+| `etc/labs/tests/`    | Tests, fixtures, and benchmarks                      |
 | `etc/labs/` | Examples and larger projects                         |
 | `etc/docs/`         | Manual, guides, specification, and API documentation |
 

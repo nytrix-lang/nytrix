@@ -124,7 +124,7 @@ spellings.
 
 See the [currying guide](../learn/currying.md) for complete examples and the
 explicit binary `core.functional.curry` / `uncurry` adapters. The regression
-`etc/tests/lang/execution/currying.nshape` exercises escaped and repeated
+`etc/labs/tests/lang/execution/currying.nshape` exercises escaped and repeated
 partials, grouping, evaluation order, scalar ABI boundaries, and recursion.
 Additional fixtures cover residual defaults, dependent indices, capture
 reuse, consuming-parameter rejection, variadic and foreign boundaries, `fnptr`
@@ -170,11 +170,11 @@ template-defined markers. Behavior attaches only to the recognized forms
 above. `@pure` and `@consteval` imply the full contract set
 (`@readnone`, `@nounwind`, `@willreturn`, `@mustprogress`); the backend
 lowers the contracts it models into optimizer facts on each route. The fixtures
-`etc/tests/lang/types/inference/attr.nshape` (memory and termination
+`etc/labs/tests/lang/types/inference/attr.nshape` (memory and termination
 contracts preserve program behavior),
-`etc/tests/lang/comptime/comptime.nshape` (template
+`etc/labs/tests/lang/comptime/comptime.nshape` (template
 expansion preserves attributes), and
-`etc/tests/lang/comptime/reflection/reflect-metadata.nshape` (reflection
+`etc/labs/tests/lang/comptime/reflection/reflect-metadata.nshape` (reflection
 sees `@trace` and `@memoize(3)` as parsed attribute names) verify the
 contract and reflection halves.
 

@@ -107,7 +107,7 @@ static int fmt_migrate_operator_files(const StrVec *files, int assume_legacy,
 
 static int run_migrate_operators_mode(const FmtOpts *opts) {
   StrVec files = {0};
-  const char *roots[] = {"src", "core", "etc/tests"};
+  const char *roots[] = {"src", "core", "etc/labs/tests"};
   const char *const *collect_roots =
       opts->paths.len ? (const char *const *)opts->paths.items : roots;
   size_t root_count = opts->paths.len ? opts->paths.len : 3;
@@ -646,7 +646,7 @@ static int is_expected_error_fixture(const char *path) {
   char rel[PATH_MAX];
   if (!normalized_repo_path(path, rel, sizeof(rel)))
     return 0;
-  static const char prefix[] = "etc/tests/lang/errors/";
+  static const char prefix[] = "etc/labs/tests/lang/errors/";
   return strncmp(rel, prefix, sizeof(prefix) - 1) == 0;
 }
 
@@ -9645,7 +9645,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
   StrVec scan = {0};
 
   if (paths->len == 0) {
-    const char *roots[] = {"core", "src", "etc/labs", "etc/tests"};
+    const char *roots[] = {"core", "src", "etc/labs", "etc/labs/tests"};
     if (!fmt_collect_via_library(roots, sizeof(roots) / sizeof(roots[0]),
                                  "code", &scan)) {
       nyt_err("ny-fmt", "Ny source collection failed; audit aborted");
@@ -10007,7 +10007,7 @@ static int run_analyze_simple(StrVec *paths, int json_mode, int limit) {
   AnalyzeStats stats = {0};
   StrVec files = {0};
   if (paths->len == 0) {
-    const char *roots[] = {"src", "core", "etc/tests"};
+    const char *roots[] = {"src", "core", "etc/labs/tests"};
     if (!fmt_collect_via_library(roots, sizeof(roots) / sizeof(roots[0]),
                                  "code", &files)) {
       nyt_err("ny-fmt", "Ny source collection failed; analysis aborted");
@@ -10143,7 +10143,7 @@ static int cloc_bucket_from_path(const char *path) {
     return CLOC_BUCKET_SRC;
   if (strncmp(p, "core/", 5) == 0 || strstr(p, "/core/"))
     return CLOC_BUCKET_LIB;
-  if (strncmp(p, "etc/tests/", 10) == 0 || strstr(p, "/etc/tests/"))
+  if (strncmp(p, "etc/labs/tests/", 15) == 0 || strstr(p, "/etc/labs/tests/"))
     return CLOC_BUCKET_TESTS;
   return CLOC_BUCKET_OTHER;
 }
@@ -10395,7 +10395,7 @@ static void cloc_attach_git_diff(const char *repo_root, ClocStats *stats,
   const char *argv[] = {
       "git",          "-C",        repo_root, "diff", "--numstat",
       "--no-renames", "HEAD",      "--",      "src",  "core",
-      "etc/labs", "etc/tests", NULL};
+      "etc/labs", "etc/labs/tests", NULL};
   char *out = NULL;
   if (ny_process_capture(argv, &out, false) != 0 || !out) {
     free(out);
@@ -10482,7 +10482,7 @@ static void print_cloc_json(const ClocStats *s, const ClocRow *rows,
 }
 static int run_cloc_mode(const FmtOpts *o) {
   static const char *default_roots[] = {"src", "core", "etc/labs",
-                                        "etc/tests", NULL};
+                                        "etc/labs/tests", NULL};
   StrVec files = {0};
   ClocStats stats = {0};
 

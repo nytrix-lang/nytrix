@@ -43,7 +43,7 @@ static char *find_benchmark_shape_in(const char *dir, const char *stem) {
 
 static char *find_benchmark_shape(const char *root, const char *stem) {
   char dir[4096];
-  snprintf(dir, sizeof(dir), "%s/etc/tests/bench", root && *root ? root : ".");
+  snprintf(dir, sizeof(dir), "%s/etc/labs/tests/bench", root && *root ? root : ".");
   return find_benchmark_shape_in(dir, stem);
 }
 
@@ -60,7 +60,7 @@ static int cmd_public_selftest_synth_print(int argc, char **argv) {
     cc = "cc";
   char *shape_dir = NULL, *work_dir = NULL;
   bool path_ok =
-      nytrix_asprintf(&shape_dir, "etc/tests/shapes") >= 0 &&
+      nytrix_asprintf(&shape_dir, "etc/labs/tests/shapes") >= 0 &&
       (work_dir = nytrix_scratch_pathf(NULL, "selftest_synth_print_%ld",
                                        (long)getpid())) != NULL;
   string_list_t rows = {0}, failures = {0};
@@ -375,7 +375,7 @@ static int synth_schedule_run_batch(const char *root, const char *work_dir,
                leaf ? leaf : "batch") < 0)
     return 2;
   char *argv[] = {g_self_path,   "generate-batch",
-                  "--shape-dir", "etc/tests/shapes",
+                  "--shape-dir", "etc/labs/tests/shapes",
                   "--profile",   "optimizer",
                   "--generator", "mixed",
                   "--schedule",  (char *)(schedule ? schedule : "smart"),
@@ -416,7 +416,7 @@ static int cmd_public_selftest_synth_schedule(int argc, char **argv) {
                                            "scratch workdir failed"));
   } else {
     char *list_argv[] = {
-        g_self_path,  "generate-batch", "--shape-dir", "etc/tests/shapes",
+        g_self_path,  "generate-batch", "--shape-dir", "etc/labs/tests/shapes",
         "--profile",  "optimizer",      "--generator", "mixed",
         "--schedule", "smart",          "--list",      NULL};
     proc_result_t list_pr = run_proc(list_argv, root, 30.0);
@@ -427,11 +427,11 @@ static int cmd_public_selftest_synth_schedule(int argc, char **argv) {
     int pool_count = list_ok ? (int)pool_count_d : 0;
     int pool_unique_shapes = list_ok
                                  ? json_array_unique_string_field_count(
-                                       list_pr.out, "etc/tests/shapes", "name")
+                                       list_pr.out, "etc/labs/tests/shapes", "name")
                                  : 0;
     int pool_unique_generators =
         list_ok ? json_array_unique_string_field_count(
-                      list_pr.out, "etc/tests/shapes", "generator")
+                      list_pr.out, "etc/labs/tests/shapes", "generator")
                 : 0;
     list_ok = list_ok && pool_unique_shapes == pool_count &&
               pool_unique_generators >= 4;
@@ -1127,7 +1127,7 @@ static int cmd_public_compiler_smoke(int argc, char **argv) {
     timeout_s = 90.0;
   string_list_t rows = {0}, failures = {0};
   compiler_smoke_add_case(root, ny_bin, selector, "type",
-                          "etc/tests/lang/types/inference/type.nshape",
+                          "etc/labs/tests/lang/types/inference/type.nshape",
                           timeout_s, &rows, &failures);
   compiler_smoke_add_case(root, ny_bin, selector, "simmd", "core/math/simmd.ny",
                           timeout_s, &rows, &failures);
@@ -1626,24 +1626,24 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
   if (out_root)
     ny_ensure_dir_recursive(out_root);
   /*
-   * Canonical regression sources stay in etc/tests; this tool writes only
+   * Canonical regression sources stay in etc/labs/tests; this tool writes only
    * replay artifacts below build/repro and must never depend on stale copies.
    */
   static const compiler_known_bug_t specs[] = {
       {"NY-008", "peak profile stale def snapshot after mutable source update",
-       "etc/tests/code/probes/stress/"
+       "etc/labs/tests/code/probes/stress/"
        "peak-def-snapshot.nshape",
        "-1", "0", "o3_peak"}};
   static const compiler_known_process_bug_t process_specs[] = {
       {"NY-006", "core.os.args.argv out-of-range runtime crash",
-       "etc/tests/code/probes/cli/argv-oob.nshape", "crash", NULL, NULL, 8.0},
+       "etc/labs/tests/code/probes/cli/argv-oob.nshape", "crash", NULL, NULL, 8.0},
       {"NY-007", "core.math.parse.syntax CMake tokenizer timeout on tiny seed",
-       "etc/tests/lang/parsing/cmake-tokenizer-hang.nshape", "timeout", NULL,
+       "etc/labs/tests/lang/parsing/cmake-tokenizer-hang.nshape", "timeout", NULL,
        NULL, 5.0},
       {"NY-005", "bare core.dict import fails without prior core import",
-       "etc/tests/lang/modules/bare-dict-import.nshape", "compile_error",
+       "etc/labs/tests/lang/modules/bare-dict-import.nshape", "compile_error",
        "Could not load core.ny or standard library source files",
-       "etc/tests/lang/modules/bare-dict-import-baseline.nshape", 8.0}};
+       "etc/labs/tests/lang/modules/bare-dict-import-baseline.nshape", 8.0}};
   string_list_t rows = {0}, failures = {0};
   int matched = 0, reproduced = 0, fixed = 0, lost = 0, baseline_failed = 0;
   for (int i = 0; i < (int)(sizeof(specs) / sizeof(specs[0])); ++i) {
@@ -2130,7 +2130,7 @@ static char *audit_runtime_next_inspect_command_dup(
   (void)path_join(lib_dir, sizeof(lib_dir), nytrix_root ? nytrix_root : "",
                   "core");
   (void)path_join(rt_dir, sizeof(rt_dir), nytrix_root ? nytrix_root : "",
-                  "etc/tests/runtime");
+                  "etc/labs/tests/runtime");
   char *defs_rel = repo_or_sibling_rel_path_dup(
       artifact_root ? artifact_root : "", defs_path ? defs_path : "");
   char *lib_rel =
@@ -2575,7 +2575,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   char *defs_path = NULL, *lib_dir = NULL, *rt_dir = NULL;
   (void)asprintf(&defs_path, "%s/src/code/backend/runtime/defs.h", root);
   (void)asprintf(&lib_dir, "%s/core", root);
-  (void)asprintf(&rt_dir, "%s/etc/tests/runtime", root);
+  (void)asprintf(&rt_dir, "%s/etc/labs/tests/runtime", root);
   file_buf_t defs_file = {0};
   bool ok = defs_path && read_file(defs_path, &defs_file);
   if (ok) {
@@ -2587,7 +2587,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   if (lib_dir && !collect_regular_files_recursive(lib_dir, &files))
     (void)string_list_push_copy(&scan_errors, "core");
   if (rt_dir && !collect_regular_files_recursive(rt_dir, &files))
-    (void)string_list_push_copy(&scan_errors, "etc/tests/runtime");
+    (void)string_list_push_copy(&scan_errors, "etc/labs/tests/runtime");
   qsort(files.items, (size_t)files.count, sizeof(char *), cmp_cstr);
   int ny_files = 0;
   for (int i = 0; i < files.count; ++i) {
@@ -6087,12 +6087,12 @@ static int cmd_public_corpus_real_db(int argc, char **argv, const char *kind) {
   }
   const char *json_path = value_after(argc, argv, 3, "--json", "");
   string_list_t rows = {0}, failures = {0}, files = {0};
-  const char *scan_dir = "etc/tests/runtime";
+  const char *scan_dir = "etc/labs/tests/runtime";
   if (strcmp(kind, "functions") == 0)
     scan_dir = "core";
   char *dir = NULL, *default_corpus = NULL;
   if (strcmp(kind, "mined-hosts") == 0) {
-    (void)nytrix_asprintf(&dir, "etc/tests/runtime");
+    (void)nytrix_asprintf(&dir, "etc/labs/tests/runtime");
   } else {
     (void)asprintf(&dir, "%s/%s", root, scan_dir);
   }
@@ -6834,7 +6834,7 @@ static int cmd_public_fuzz_frontend(int argc, char **argv) {
   double timeout_s = atof(value_after(argc, argv, 3, "--timeout-s", "20"));
   string_list_t rows = {0}, failures = {0}, files = {0};
   char *dir = NULL, *replay_dir = NULL;
-  (void)nytrix_asprintf(&dir, "etc/tests/runtime");
+  (void)nytrix_asprintf(&dir, "etc/labs/tests/runtime");
   replay_dir = nytrix_cache_replay_dir();
   char *legacy_replay_dir = NULL;
   (void)nytrix_asprintf(&legacy_replay_dir, "etc/assets/dict/work/replay");
@@ -7792,7 +7792,7 @@ static const char *SELFTEST_GC_CAMPAIGN_COMPACT[] = {"fuzz",
                                                      "1",
                                                      "--json",
                                                      "$JSON"};
-static const char *SELFTEST_SHAPES[] = {"etc/tests/shapes", "audit", "--json",
+static const char *SELFTEST_SHAPES[] = {"etc/labs/tests/shapes", "audit", "--json",
                                         "$JSON"};
 static const char *SELFTEST_CHILD_TMP_ENV[] = {"selftest", "child-tmp-env",
                                                "--json", "$JSON"};

@@ -103,7 +103,7 @@ closures retain their separate heap closure and environment representation.
 The proof checker validates the certificate digest before parsing, rejects
 non-canonical encodings, and applies node, variable-metadata, depth, step, and
 working-set limits. Its ABI is exercised by
-`etc/tests/lang/types/proofs/proof-runtime-abi.nshape` on the NYIR VM,
+`etc/labs/tests/lang/types/proofs/proof-runtime-abi.nshape` on the NYIR VM,
 native NYIR, and legacy LLVM paths.
 
 The compatibility `rt_list_len` implementation can read both legacy managed
@@ -299,7 +299,7 @@ and read-until operations.
 On the browser target, `core.os.time.msleep(ms)` uses the runner's Asyncify
 bridge to yield to the browser event loop and resume the suspended Wasm stack
 after the delay. It does not block the browser thread. The fixture
-`etc/tests/lang/interop/web/time.nshape:test_time_sleep` verifies this behavior.
+`etc/labs/tests/lang/interop/web/time.nshape:test_time_sleep` verifies this behavior.
 
 ### Threads and mutexes
 
@@ -396,7 +396,7 @@ atomic.atomic_free(counter)
 
 `atomic_add`, `atomic_sub`, and `atomic_exchange` return the previous value.
 Use `atomic_load` to read the updated cell. This contract example is the gate
-fixture `etc/tests/lang/memory/atomic-cell-contract.nshape`.
+fixture `etc/labs/tests/lang/memory/atomic-cell-contract.nshape`.
 
 ## Attributes and effects
 

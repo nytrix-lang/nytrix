@@ -4700,7 +4700,7 @@ fn end_window() any {
 ;; numeric drag fields, tables, drag and drop, layout scopes, themes.
 ;;
 ;; Widget contract (every entry has a mock probe in
-;; etc/tests/code/probes/ui/gui-toolkit-*.nshape):
+;; etc/labs/tests/code/probes/ui/gui-toolkit-*.nshape):
 ;;
 ;;   windows            begin_window / end_window (move, resize, collapse, close, scroll)
 ;;   menu bar, menus    begin_menu_bar, begin_menu (nests as submenus), menu_item, menu_separator

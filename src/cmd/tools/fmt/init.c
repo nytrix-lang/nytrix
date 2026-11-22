@@ -3510,7 +3510,7 @@ static int run_check_mode(const FmtOpts *opts) {
         roots[i] = opts->paths.items[i];
     } else {
       roots[0] = "core";
-      roots[1] = "etc/tests";
+      roots[1] = "etc/labs/tests";
     }
   }
   int collected =
@@ -3757,7 +3757,7 @@ int ny_fmt_main(int argc, char **argv) {
   if (opts.plan & FMT_PLAN_REWRITE) {
     StrVec files = {0};
     if (opts.paths.len == 0) {
-      const char *roots[] = {"src", "core", "etc/tests"};
+      const char *roots[] = {"src", "core", "etc/labs/tests"};
       if (!fmt_collect_via_library(roots, 3, "fmt", &files)) {
         nyt_err("ny-fmt", "Ny source collection failed; formatting aborted");
         sv_free(&files);
@@ -3855,7 +3855,7 @@ int ny_fmt_main(int argc, char **argv) {
   if (opts.plan & FMT_PLAN_OPTIMIZE) {
     StrVec files = {0};
     if (opts.paths.len == 0) {
-      const char *roots[] = {"src", "core", "etc/tests"};
+      const char *roots[] = {"src", "core", "etc/labs/tests"};
       if (!fmt_collect_via_library(roots, 3, "ny", &files)) {
         nyt_err("ny-fmt", "Ny source collection failed; optimization aborted");
         sv_free(&files);

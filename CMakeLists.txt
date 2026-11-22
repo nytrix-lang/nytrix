@@ -1834,7 +1834,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
         "-DNY_FULL=$<TARGET_FILE:ny-full>"
         "-DWORK_DIR=${CMAKE_BINARY_DIR}/native-from-nyr-test"
         "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
-        -P "${NYTRIX_ROOT}/etc/tests/code/intermediate/ny/native-from-nyr.cmake"
+        -P "${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/ny/native-from-nyr.cmake"
     )
     set_tests_properties(ny-native-from-nyr PROPERTIES
       WORKING_DIRECTORY "${NYTRIX_ROOT}"
@@ -1843,7 +1843,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   endif()
   nytrix_add_nshape_test(
     repl-cold-stdlib-imports
-    etc/tests/code/probes/repl/repl-cold-imports.nshape
+    etc/labs/tests/code/probes/repl/repl-cold-imports.nshape
     240
   )
   if(UNIX)
@@ -1852,7 +1852,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
     )
     nytrix_add_nshape_test(
       repl-cold-process-tube
-      etc/tests/code/probes/repl/repl-cold-process-tube.nshape
+      etc/labs/tests/code/probes/repl/repl-cold-process-tube.nshape
     )
     set_property(TEST repl-cold-process-tube APPEND PROPERTY ENVIRONMENT
       "NYTRIX_TEST_UNIX=1"
@@ -1860,22 +1860,22 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   endif()
   nytrix_add_nshape_test(
     ny-cold-start-budget
-    etc/tests/code/probes/performance/cold-start-budget.nshape
+    etc/labs/tests/code/probes/performance/cold-start-budget.nshape
     900
   )
   nytrix_add_nshape_test(
     repl-doc-resolution
-    etc/tests/code/probes/repl/repl-doc-resolution.nshape
+    etc/labs/tests/code/probes/repl/repl-doc-resolution.nshape
     60
   )
   nytrix_add_nshape_test(
     repl-run-state
-    etc/tests/code/probes/repl/repl-run-state.nshape
+    etc/labs/tests/code/probes/repl/repl-run-state.nshape
     60
   )
   nytrix_add_nshape_test(
     repl-snapshot-state
-    etc/tests/code/probes/repl/repl-snapshot-state.nshape
+    etc/labs/tests/code/probes/repl/repl-snapshot-state.nshape
     60
   )
   set_property(TEST repl-doc-resolution repl-run-state repl-snapshot-state
@@ -1884,7 +1884,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   )
   nytrix_add_nshape_test(
     semantic-effect-artifact
-    etc/tests/lang/comptime/reflection/semantic-effect-artifact.nshape
+    etc/labs/tests/lang/comptime/reflection/semantic-effect-artifact.nshape
     360
   )
   set_property(TEST semantic-effect-artifact APPEND PROPERTY ENVIRONMENT
@@ -1892,29 +1892,29 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   )
   nytrix_add_nshape_test(
     refinement-interface
-    etc/tests/lang/comptime/reflection/refinement-interface.nshape
+    etc/labs/tests/lang/comptime/reflection/refinement-interface.nshape
   )
   nytrix_add_nshape_test(
     effect-interface
-    etc/tests/lang/comptime/reflection/effect-interface.nshape
+    etc/labs/tests/lang/comptime/reflection/effect-interface.nshape
   )
   nytrix_add_nshape_test(
     legacy-derive-expansion
-    etc/tests/code/probes/tools/legacy-derive-expansion.nshape
+    etc/labs/tests/code/probes/tools/legacy-derive-expansion.nshape
   )
   nytrix_add_nshape_test(
     module-cache-equivalence
-    etc/tests/code/probes/cache/module-cache-equivalence.nshape
+    etc/labs/tests/code/probes/cache/module-cache-equivalence.nshape
     600
   )
   nytrix_add_nshape_test(
     std-source-cache-reuse
-    etc/tests/code/probes/cache/std-source-cache-reuse.nshape
+    etc/labs/tests/code/probes/cache/std-source-cache-reuse.nshape
   )
   if(NYTRIX_CORE_BC_CHECKER)
     nytrix_add_nshape_test(
       core-bc-cache-selector
-      etc/tests/code/probes/cache/core-bc-cache-selector.nshape
+      etc/labs/tests/code/probes/cache/core-bc-cache-selector.nshape
     )
     set_property(TEST core-bc-cache-selector APPEND PROPERTY ENVIRONMENT
       "NYTRIX_TEST_CORE_BC_CHECKER=${NYTRIX_CORE_BC_CHECKER}"
@@ -1923,7 +1923,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   if(UNIX AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
     nytrix_add_nshape_test(
       native-image-cache
-      etc/tests/code/probes/cache/native-image-cache.nshape
+      etc/labs/tests/code/probes/cache/native-image-cache.nshape
       600
     )
     set_property(TEST native-image-cache APPEND PROPERTY ENVIRONMENT
@@ -1932,12 +1932,12 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   endif()
   nytrix_add_nshape_test(
     aot-cache-comptime-identity
-    etc/tests/code/probes/cache/aot-cache-comptime-identity.nshape
+    etc/labs/tests/code/probes/cache/aot-cache-comptime-identity.nshape
     900
   )
   nytrix_add_nshape_test(
     ny-doc-search-ny-discovery
-    etc/tests/code/probes/tools/ny-doc-search-ny-discovery.nshape
+    etc/labs/tests/code/probes/tools/ny-doc-search-ny-discovery.nshape
   )
   set_property(TEST ny-doc-search-ny-discovery APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_DOC_BIN=$<TARGET_FILE:ny-doc>"
@@ -1954,61 +1954,61 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   )
   nytrix_add_nshape_test(
     ny-fmt-format-parity
-    etc/tests/code/probes/tools/fmt-format-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-format-parity.nshape
   )
   set_property(TEST ny-fmt-format-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-structure-parity
-    etc/tests/code/probes/tools/fmt-structure-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-structure-parity.nshape
   )
   set_property(TEST ny-fmt-structure-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-cli-parity
-    etc/tests/code/probes/tools/fmt-cli-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-cli-parity.nshape
   )
   set_property(TEST ny-fmt-cli-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-operator-migration
-    etc/tests/code/probes/tools/fmt-operator-migration.nshape
+    etc/labs/tests/code/probes/tools/fmt-operator-migration.nshape
   )
   nytrix_add_nshape_test(
     ny-operator-surface
-    etc/tests/code/probes/tools/operator-surface.nshape
+    etc/labs/tests/code/probes/tools/operator-surface.nshape
   )
   nytrix_add_nshape_test(
     ny-unified-dispatch-parity
-    etc/tests/code/probes/tools/ny-unified-dispatch-parity.nshape
+    etc/labs/tests/code/probes/tools/ny-unified-dispatch-parity.nshape
   )
   nytrix_add_nshape_test(
     ny-fmt-audit-methods-parity
-    etc/tests/code/probes/tools/fmt-audit-methods-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-audit-methods-parity.nshape
   )
   set_property(TEST ny-fmt-audit-methods-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-variadic-free-parity
-    etc/tests/code/probes/tools/fmt-variadic-free-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-variadic-free-parity.nshape
   )
   set_property(TEST ny-fmt-variadic-free-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-repeated-literal-get-parity
-    etc/tests/code/probes/tools/fmt-repeated-literal-get-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-repeated-literal-get-parity.nshape
   )
   set_property(TEST ny-fmt-repeated-literal-get-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-case-dispatch-parity
-    etc/tests/code/probes/tools/fmt-case-dispatch-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-case-dispatch-parity.nshape
   )
   set_property(TEST ny-fmt-case-dispatch-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
@@ -2016,7 +2016,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   foreach(_fmt_test IN ITEMS layout-audit trim-pressure)
     nytrix_add_nshape_test(
       ny-fmt-${_fmt_test}-parity
-      etc/tests/code/probes/tools/fmt-${_fmt_test}-parity.nshape
+      etc/labs/tests/code/probes/tools/fmt-${_fmt_test}-parity.nshape
     )
     set_property(TEST ny-fmt-${_fmt_test}-parity APPEND PROPERTY ENVIRONMENT
       "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
@@ -2024,7 +2024,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   endforeach()
   nytrix_add_nshape_test(
     ny-fmt-layout-boundary-parity
-    etc/tests/code/probes/tools/fmt-layout-boundary-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-layout-boundary-parity.nshape
     120
   )
   set_property(TEST ny-fmt-layout-boundary-parity APPEND PROPERTY ENVIRONMENT
@@ -2032,14 +2032,14 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   )
   nytrix_add_nshape_test(
     ny-fmt-audit-duplicate-syntax-parity
-    etc/tests/code/probes/tools/fmt-audit-duplicate-syntax-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-audit-duplicate-syntax-parity.nshape
   )
   set_property(TEST ny-fmt-audit-duplicate-syntax-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
   )
   nytrix_add_nshape_test(
     ny-fmt-audit-overwrite-parity
-    etc/tests/code/probes/tools/fmt-audit-overwrite-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-audit-overwrite-parity.nshape
   )
   set_property(TEST ny-fmt-audit-overwrite-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
@@ -2048,7 +2048,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
       value-semantics literal-hazards branch-hazards)
     nytrix_add_nshape_test(
       ny-fmt-audit-${_fmt_audit_test}-parity
-      etc/tests/code/probes/tools/fmt-audit-${_fmt_audit_test}-parity.nshape
+      etc/labs/tests/code/probes/tools/fmt-audit-${_fmt_audit_test}-parity.nshape
     )
     set_property(TEST ny-fmt-audit-${_fmt_audit_test}-parity APPEND PROPERTY ENVIRONMENT
       "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
@@ -2056,7 +2056,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   endforeach()
   nytrix_add_nshape_test(
     ny-fmt-c-family-parity
-    etc/tests/code/probes/tools/fmt-c-family-parity.nshape
+    etc/labs/tests/code/probes/tools/fmt-c-family-parity.nshape
   )
   set_property(TEST ny-fmt-c-family-parity APPEND PROPERTY ENVIRONMENT
     "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
@@ -2065,7 +2065,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
       c-analysis c-unsafe-audit c-battery-audit audit-corpus)
     nytrix_add_nshape_test(
       ny-fmt-${_fmt_test}-parity
-      etc/tests/code/probes/tools/fmt-${_fmt_test}-parity.nshape
+      etc/labs/tests/code/probes/tools/fmt-${_fmt_test}-parity.nshape
       180
     )
     set_property(TEST ny-fmt-${_fmt_test}-parity APPEND PROPERTY ENVIRONMENT
@@ -2075,7 +2075,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   foreach(_fmt_test IN ITEMS c-method-audit c-pressure-audit)
     nytrix_add_nshape_test(
       ny-fmt-${_fmt_test}-parity
-      etc/tests/code/probes/tools/fmt-${_fmt_test}-parity.nshape
+      etc/labs/tests/code/probes/tools/fmt-${_fmt_test}-parity.nshape
     )
     set_property(TEST ny-fmt-${_fmt_test}-parity APPEND PROPERTY ENVIRONMENT
       "NYTRIX_TEST_FMT_BIN=$<TARGET_FILE:ny-fmt>"
@@ -2276,6 +2276,7 @@ endif()
 
 add_executable(ny-dap
   "${NYTRIX_ROOT}/src/cmd/tools/dap/main.c"
+  "${NYTRIX_ROOT}/src/base/process.c"
   "${NYTRIX_ROOT}/src/base/util.c"
   "${NYTRIX_ROOT}/src/base/sha256.c"
   "${NYTRIX_ROOT}/src/base/curl.c"
@@ -3020,22 +3021,22 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     set_tests_properties(nyr-c-frontend PROPERTIES TIMEOUT 120)
     nytrix_add_nshape_test(
       nyr-benchmark-knucleotide
-      etc/tests/bench/algorithms/knucleotide.nshape
+      etc/labs/tests/bench/algorithms/knucleotide.nshape
       120
     )
     nytrix_add_nshape_test(
       nyr-benchmark-nqueens
-      etc/tests/bench/algorithms/nqueens.nshape
+      etc/labs/tests/bench/algorithms/nqueens.nshape
       120
     )
     nytrix_add_nshape_test(
       nyr-benchmark-pbkdf2
-      etc/tests/bench/algorithms/pbkdf2.nshape
+      etc/labs/tests/bench/algorithms/pbkdf2.nshape
       120
     )
     nytrix_add_nshape_test(
       nyr-benchmark-sha256
-      etc/tests/bench/algorithms/sha256.nshape
+      etc/labs/tests/bench/algorithms/sha256.nshape
       120
     )
     add_executable(ny-c-lexer-test
@@ -3052,7 +3053,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     if(NYR_WIN64_CC AND NYR_WIN64_RUNNER)
       nytrix_add_nshape_test(
         nyr-ny-full-win64-aggregate
-        etc/tests/code/formats/coff64/win64-aggregate-runtime.nshape
+        etc/labs/tests/code/formats/coff64/win64-aggregate-runtime.nshape
         120
       )
       set_property(TEST nyr-ny-full-win64-aggregate APPEND PROPERTY ENVIRONMENT
@@ -3135,7 +3136,7 @@ if (NYTRIX_ENABLE_BOLT AND UNIX AND NOT APPLE)
     message(STATUS "BOLT enabled: ${LLVM_BOLT}, perf: ${PERF}")
     set(NY_BOLT_PROFILE "${CMAKE_BINARY_DIR}/bolt-profile.data" CACHE STRING "Path to perf.data for BOLT optimization")
     set(NY_BOLT_OPT_LEVEL "2" CACHE STRING "BOLT optimization level: 0|1|2|3")
-    set(NY_BOLT_WORKLOAD "etc/tests/bench" CACHE STRING "Path to benchmark workload for profiling")
+    set(NY_BOLT_WORKLOAD "etc/labs/tests/bench" CACHE STRING "Path to benchmark workload for profiling")
 
     # Step 1: Instrument binary for profiling
     add_custom_target(bolt_instrument

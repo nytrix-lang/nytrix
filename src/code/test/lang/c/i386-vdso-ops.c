@@ -4,7 +4,9 @@
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
-/* Keep the division body visible to the assembly checks. */
+/*
+ * Keep the division body visible to the assembly checks.
+ */
 __attribute__((noinline)) u64 nyc_i386_division(u64 dividend, u64 divisor) {
   return dividend / divisor + dividend % divisor;
 }

@@ -1,0 +1,39 @@
+shape gltf_vertex_attributes {
+  family "runtime-ui"
+  generator "embedded"
+  features [gltf renderer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_message "GLTF-VERTEX-ATTRIBUTES-OK"
+  source ny <<'NY'
+use core
+use core.math.parse.3d.gltf.load as gltf
+use core.math.parse.3d.gltf as facade
+
+;; NORMAL and TEXCOORD_0 live at non-zero buffer offsets. Both used to pack
+;; as zeros (only an attribute at offset 0 survived), so textured scenes such
+;; as BarramundiFish loaded but drew nothing.
+def model = gltf.load_gltf_file("etc/labs/tests/code/probes/ui/fixtures/ui-triangle-attrs.gltf")
+assert(is_dict(model) && !model.contains("error"), "loads the attribute fixture")
+def group = facade.gltf_to_mesh_group_indexed(model, 0, 0)
+def parts = group.get("parts", [])
+assert(is_list(parts) && parts.len == 1, "one primitive emits one part")
+def any part = parts.get(0, 0)
+assert(int(part.get("vcnt", 0)) == 3, "three packed vertices")
+def ptr v = part.get("vptr", 0)
+assert(load32_f32(v, 0) == -0.5 && load32_f32(v, 4) == -0.5, "position at offset 0")
+assert(load32_f32(v, 64 + 12) == 1.0 && load32_f32(v, 64 + 16) == 0.0, "texcoord at a non-zero offset")
+assert(load32_f32(v, 128 + 12) == 0.5 && load32_f32(v, 128 + 16) == 1.0, "third texcoord")
+assert(load32_f32(v, 24) == 0.0 && load32_f32(v, 28) == 0.0 && load32_f32(v, 32) == 1.0,
+   "normal at a non-zero offset is read and normalized")
+;; Material ids and words pass through dict copies inside the glTF module.
+;; A raw int stored there untagged read back halved (texture 7 bound as 3,
+;; colour 0xffffffff became 0x7fffffff), so GL drew the wrong texture.
+def textured = facade.gltf_to_mesh_group_indexed(model, 0, [7])
+def any tpart = textured.get("parts", []).get(0, 0)
+assert(int(tpart.get("tex_id", -1)) == 7, "material texture id survives the part build")
+assert(int(tpart.get("base_color_u32", 0)) == 0xffffffff, "opaque colour word survives the part build")
+print("GLTF-VERTEX-ATTRIBUTES-OK")
+NY
+}

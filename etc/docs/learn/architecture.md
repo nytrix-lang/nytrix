@@ -177,7 +177,7 @@ current generated files use Clang/LLD 23.1.1 and llvm-objcopy. Generation
 rejects absolute or page-relative relocations, unresolved symbols, and mutable
 data. AArch64 uses the tiny code model so embedding at any instruction offset
 does not invalidate ADRP page calculations. The
-`etc/tests/code/intermediate/ny/bare/runtime-ops.nshape` fixture compares both
+`etc/labs/tests/code/intermediate/ny/bare/runtime-ops.nshape` fixture compares both
 architectures with VM output while setting `CC=/nonexistent`, and
 `asm-artifacts.nshape` checks emitted artifacts and unsupported targets. The
 `runtime-payload.c` regression executes embedded code at a non-page-aligned
@@ -186,7 +186,7 @@ and self-aliasing, and float output against `snprintf("%g")`. Build and run it
 on the host with:
 
 ```bash
-cc -O2 -Isrc etc/tests/code/intermediate/ny/bare/runtime-payload.c \
+cc -O2 -Isrc etc/labs/tests/code/intermediate/ny/bare/runtime-payload.c \
   -o /tmp/nyr-bare-payload
 /tmp/nyr-bare-payload 1000000
 ```
@@ -195,7 +195,7 @@ For AArch64, cross-build and run under QEMU:
 
 ```bash
 aarch64-linux-gnu-gcc -O2 -Isrc \
-  etc/tests/code/intermediate/ny/bare/runtime-payload.c \
+  etc/labs/tests/code/intermediate/ny/bare/runtime-payload.c \
   -o /tmp/nyr-bare-payload-a64
 qemu-aarch64 -L /usr/aarch64-linux-gnu \
   /tmp/nyr-bare-payload-a64 100000

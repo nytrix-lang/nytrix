@@ -4,49 +4,49 @@
     "title": "Bench Fibonacci",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/numeric/fibonacci.nshape"
+    "source": "etc/labs/tests/bench/numeric/fibonacci.nshape"
   },
   {
     "id": "bench-intops",
     "title": "Bench Intops",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/numeric/intops.nshape"
+    "source": "etc/labs/tests/bench/numeric/intops.nshape"
   },
   {
     "id": "bench-float",
     "title": "Bench Float",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/numeric/float.nshape"
+    "source": "etc/labs/tests/bench/numeric/float.nshape"
   },
   {
     "id": "bench-sieve",
     "title": "Bench Sieve",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/algorithms/sieve.nshape"
+    "source": "etc/labs/tests/bench/algorithms/sieve.nshape"
   },
   {
     "id": "bench-list",
     "title": "Bench List",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/datastructures/list.nshape"
+    "source": "etc/labs/tests/bench/datastructures/list.nshape"
   },
   {
     "id": "bench-mandelbrot",
     "title": "Bench Mandelbrot",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/algorithms/mandelbrot.nshape"
+    "source": "etc/labs/tests/bench/algorithms/mandelbrot.nshape"
   },
   {
     "id": "bench-vector",
     "title": "Bench Vector",
     "area": "TEST",
     "mode": "bench",
-    "source": "etc/tests/bench/datastructures/vector.nshape"
+    "source": "etc/labs/tests/bench/datastructures/vector.nshape"
   },
   {
     "id": "ui-pong",

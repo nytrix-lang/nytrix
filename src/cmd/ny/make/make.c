@@ -212,10 +212,10 @@ static const char *default_fuzz_shape_dir(void) {
   struct stat st;
   if (stat("build/cache/tests/shapes", &st) == 0)
     return "build/cache/tests/shapes";
-  if (stat("etc/tests/code/probes", &st) == 0)
-    return "etc/tests/code/probes";
-  if (stat("etc/tests", &st) == 0)
-    return "etc/tests";
+  if (stat("etc/labs/tests/code/probes", &st) == 0)
+    return "etc/labs/tests/code/probes";
+  if (stat("etc/labs/tests", &st) == 0)
+    return "etc/labs/tests";
   return "build/cache/tests/fuzz/shapes";
 }
 
@@ -1205,7 +1205,6 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
   static const char *bench[] = {"ny", "ny-full", "nyc", "ny-test"};
   static const char *bench_shared_std[] = {"ny",  "ny-full", "nyc",
                                            "ny-test", "std", "std_bc"};
-  static const char *fuzz[] = {"ny", "ny-test"};
   static const char *user_fuzz[] = {"ny-full", "ny-test"};
   static const char *fmt[] = {"ny-fmt"};
   static const char *docs[] = {"ny", "std", "ny-doc"};
@@ -1680,7 +1679,7 @@ int ny_make_main(int argc, char **argv) {
     } else if (strcmp(cmd, "optcheck") == 0) {
       char opt_dir[PATH_MAX];
       nyt_path_join(opt_dir, sizeof(opt_dir), root,
-                    "etc/tests/code/intermediate/opt");
+                    "etc/labs/tests/code/intermediate/opt");
       if (ny_access(opt_dir, R_OK) != 0) {
         nyt_err("ny-make", "optcheck: missing fixture directory %s", opt_dir);
         return 2;

@@ -204,7 +204,7 @@ link through the default driver while still selecting the native backend:
 
 ```bash
 awk "/source ny <<'NY'/{f=1;next} /^NY$/{f=0} f" \
-  etc/tests/bench/algorithms/binary.nshape > /tmp/nytrix-probes/binary.ny
+  etc/labs/tests/bench/algorithms/binary.nshape > /tmp/nytrix-probes/binary.ny
 build/release/ny -O3 --native-backend x86_64 --run=none \
   --output=/tmp/nytrix-probes/binary /tmp/nytrix-probes/binary.ny
 /tmp/nytrix-probes/binary                          # checksum and elapsed_ns

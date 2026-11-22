@@ -279,9 +279,9 @@ knows: a typed-buffer handle, a dictionary map, or a readable heap
 allocation. It returns false for `0` and unknown addresses. These helpers
 exist for diagnostics, comptime reflection, and fixture assertions;
 application code should use type predicates and conversion APIs instead of
-tag words. The fixtures `etc/tests/lang/values/bigfloat.nshape`,
-`etc/tests/lang/values/bigint-pidigits.nshape`, and
-`etc/tests/lang/types/inference/stale_handle_validation.nshape`
+tag words. The fixtures `etc/labs/tests/lang/values/bigfloat.nshape`,
+`etc/labs/tests/lang/values/bigint-pidigits.nshape`, and
+`etc/labs/tests/lang/types/inference/stale_handle_validation.nshape`
 verify these behaviors.
 
 ## Inline assembly

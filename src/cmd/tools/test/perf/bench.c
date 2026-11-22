@@ -812,7 +812,7 @@ int ny_perf_bench_main(int argc, char **argv) {
     ny_mkdir_p(asm_cache);
 
     char fixtures_dir[PATH_MAX];
-    snprintf(fixtures_dir, sizeof(fixtures_dir), "%s/etc/tests/bench", root);
+    snprintf(fixtures_dir, sizeof(fixtures_dir), "%s/etc/labs/tests/bench", root);
 
     /*
      * Discover fixtures for assembly evidence.

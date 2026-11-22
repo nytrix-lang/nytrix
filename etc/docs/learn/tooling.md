@@ -225,7 +225,7 @@ declared `rest` field. A response-file argument such as `@flags.txt` expands
 before the boundary; `@...` after `--` remains program data.
 
 See the executable regression example in
-[`cli-parser.nshape`](../../../etc/tests/code/intermediate/ny/cli-parser.nshape)
+[`cli-parser.nshape`](../../../etc/labs/tests/code/intermediate/ny/cli-parser.nshape)
 for short clusters, families, `--no-` booleans, value validation, generated
 help/completions, subcommands, repeatable options, conflicts, and response
 file boundaries.

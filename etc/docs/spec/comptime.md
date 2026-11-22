@@ -612,7 +612,7 @@ query:
 ## Embedded files
 
 ```ny
-def text = embed("etc/tests/lang/language/embed.nshape")
+def text = embed("etc/labs/tests/lang/language/embed.nshape")
 ```
 
 `embed(path)` reads a file into the compiled program. Paths are resolved from the source checkout or active source root used by the compiler.

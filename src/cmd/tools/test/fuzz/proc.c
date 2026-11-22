@@ -47,7 +47,7 @@ static bool proc_looks_like_nytrix_root(const char *path) {
   ny_join_path(cmake, sizeof(cmake), path, "CMakeLists.txt");
   ny_join_path(src, sizeof(src), path, "src");
   ny_join_path(fuzz, sizeof(fuzz), path, "src/cmd/tools/test/fuzz");
-  ny_join_path(tests, sizeof(tests), path, "etc/tests");
+  ny_join_path(tests, sizeof(tests), path, "etc/labs/tests");
   ny_join_path(readme, sizeof(readme), path, "README.md");
   return proc_path_exists(cmake) && proc_path_exists(src) &&
          proc_path_exists(fuzz) && proc_path_exists(tests) &&

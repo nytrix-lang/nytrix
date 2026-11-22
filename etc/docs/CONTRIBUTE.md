@@ -64,7 +64,7 @@ under `build/` are not source files.
 ### Generated files
 
 Keep build products and retained reports under the build root, which may be
-deleted at any time. Permanent regression fixtures belong in `etc/tests/` or
+deleted at any time. Permanent regression fixtures belong in `etc/labs/tests/` or
 their owning source test directory. A clean checkout must not require local
 scratch files or unpublished assets.
 
@@ -322,10 +322,10 @@ Fixtures live under these roots:
 
 | Path | Coverage |
 | --- | --- |
-| `etc/tests/lang/` | Source semantics, types, modules, runtime, and interop |
-| `etc/tests/lang/errors/` | Rejected source and expected diagnostics |
-| `etc/tests/code/` | IR, backend, ABI, target, format, and compiler probes |
-| `etc/tests/bench/` | Benchmark fixtures, including paired C/Ny workloads |
+| `etc/labs/tests/lang/` | Source semantics, types, modules, runtime, and interop |
+| `etc/labs/tests/lang/errors/` | Rejected source and expected diagnostics |
+| `etc/labs/tests/code/` | IR, backend, ABI, target, format, and compiler probes |
+| `etc/labs/tests/bench/` | Benchmark fixtures, including paired C/Ny workloads |
 | `core/` | Module-local `#main` checks |
 
 Test observable results, errors, boundaries, cleanup, and state transitions.
@@ -350,7 +350,7 @@ Core bitcode generation defaults to 16 standard-library loader threads. Set
 memory-constrained host; this changes only the core bitcode precompile, not
 fixture worker parallelism.
 
-The wrapper hashes `etc/tests/` and `core/` before a test or benchmark gate and
+The wrapper hashes `etc/labs/tests/` and `core/` before a test or benchmark gate and
 checks them again before reporting its verdict. If either tree changes, or an
 input cannot be read for the recheck, the result is `INVALIDATED` (exit 2),
 not a pass or failure. Rerun after source edits stop.
@@ -360,7 +360,7 @@ The standalone runner accepts fixture paths:
 ```bash
 NYTRIX_TEST_CACHE=0 NYTRIX_NO_PROGRESS=1 \
   build/release/ny-test --bin build/release/ny --timeout 300 \
-  etc/tests/lang/types/refinements/refinements.nshape
+  etc/labs/tests/lang/types/refinements/refinements.nshape
 ```
 
 Put backend flags in a fixture's `flags` or `flags_matrix`; `.nshape` metadata
@@ -500,7 +500,7 @@ Native window and renderer checks are described in
 [UI verification](learn/ui.md#verification); browser execution has a
 different host contract.
 
-`./make web-test` reads `etc/tests/lang/interop/web/tests.json`. Each fixture
+`./make web-test` reads `etc/labs/tests/lang/interop/web/tests.json`. Each fixture
 needs an observable browser result and a bounded virtual-time budget. The
 maintained `wasm-bare` path and the separate Emscripten adapter have different
 build/import contracts. Check WebGL2, Asyncify, assets, persisted VFS, and other

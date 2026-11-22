@@ -140,7 +140,7 @@ static const MakeHelp commands[] = {
          "shapes.\nafl -- ARGS|Launch afl-fuzz.\n<args>|Pass arguments to "
          "ny-test fuzz.\n"
          "[Examples]\n./make fuzz|Validate default shapes.\n./make fuzz "
-         "validate-shapes etc/tests/code/probes|Select a shape directory."),
+         "validate-shapes etc/labs/tests/code/probes|Select a shape directory."),
     HELP("asan", "./make asan", "Build with AddressSanitizer and run tests.",
          ""),
     HELP("ubsan", "./make ubsan",
@@ -170,7 +170,7 @@ static const MakeHelp commands[] = {
          "source run."),
     HELP("optcheck", "./make optcheck",
          "Run native optimizer correctness fixtures.",
-         "[Fixtures]\nDirectory|etc/tests/code/intermediate/opt/.\nOracle|Add "
+         "[Fixtures]\nDirectory|etc/labs/tests/code/intermediate/opt/.\nOracle|Add "
          ".nshape cases with --native-result-oracle."),
     HELP("docs", "./make docs [ny-doc args]", "Build the documentation portal.",
          "[Options]\n-o DIR|Select the output directory (default build/docs).\n"

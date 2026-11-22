@@ -138,8 +138,8 @@ assert(show(pt) == "Point", "trait dispatch")
 - Trait calls support free-function syntax (`show(value)`) as well as
   `value.show()`. Resolution ties the value type to a visible `impl Trait for Type`.
 
-Fixtures: `etc/tests/lang/types/aggregates/types.nshape` (ADT methods),
-`etc/tests/lang/types/refinements/refinements.nshape` (trait + law + `requires` samples).
+Fixtures: `etc/labs/tests/lang/types/aggregates/types.nshape` (ADT methods),
+`etc/labs/tests/lang/types/refinements/refinements.nshape` (trait + law + `requires` samples).
 
 ## Law blocks
 
@@ -168,9 +168,9 @@ Verification order:
    regardless of whether the owner is a struct or enum.
 
 Failure otherwise: **`law verification failed in 'impl Trait for Type'`**.
-Positive cross-backend fixture: `etc/tests/lang/types/traits/impl-law-portable.nshape`.
+Positive cross-backend fixture: `etc/labs/tests/lang/types/traits/impl-law-portable.nshape`.
 Negative cross-backend fixtures:
-`etc/tests/lang/errors/type/impl-law-failed.nshape`.
+`etc/labs/tests/lang/errors/type/impl-law-failed.nshape`.
 
 ## Operator declarations
 
@@ -226,7 +226,7 @@ They are not dynamic trait objects:
 fn len_of(sequence xs) int { len(xs) }
 ```
 
-See `etc/tests/lang/types/aggregates/types.nshape` and [Types](types.md).
+See `etc/labs/tests/lang/types/aggregates/types.nshape` and [Types](types.md).
 
 ## Diagnostic cheat sheet
 

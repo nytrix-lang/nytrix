@@ -138,7 +138,7 @@ static void replay_env(const char *app, int width, int height) {
     char path[PATH_MAX];
     snprintf(
         path, sizeof(path),
-        "%s/etc/tests/code/probes/ui/fixtures/ui-triangle/ui-triangle.gltf",
+        "%s/etc/labs/tests/code/probes/ui/fixtures/ui-triangle/ui-triangle.gltf",
         root);
     setenv("NY_UI_BOOT_SCENE", path, 1);
     setenv("NY_UI_POST_LOAD_CMD", "select; translate 0.25 0.0 0.0", 1);

@@ -1413,8 +1413,8 @@ static int docs_origin_is_lib(const char *root, const char *orig) {
   while (rel[0] == '.' && rel[1] == '/')
     rel += 2;
   if (strncmp(rel, "etc/labs/", 13) == 0 ||
-      strncmp(rel, "etc/tests/", 10) == 0 || strstr(rel, "/etc/labs/") ||
-      strstr(rel, "/etc/tests/"))
+      strncmp(rel, "etc/labs/tests/", 15) == 0 || strstr(rel, "/etc/labs/") ||
+      strstr(rel, "/etc/labs/tests/"))
     return 0;
   char core_dir[PATH_MAX];
   if (join_path(core_dir, sizeof(core_dir), root, "core")) {

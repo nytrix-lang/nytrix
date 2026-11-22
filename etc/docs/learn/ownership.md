@@ -21,7 +21,7 @@ assert_eq(len(source), 3, "owner remains available")
 ```
 
 This behavior is also covered by
-[`ownership.nshape`](../../../etc/tests/lang/memory/ownership.nshape).
+[`ownership.nshape`](../../../etc/labs/tests/lang/memory/ownership.nshape).
 
 ## Choose the contract
 

@@ -1,0 +1,186 @@
+shape gltf_embedded_buffer {
+  family "runtime-ui"
+  generator "embedded"
+  features [gltf base64 binary renderer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "GLTF-EMBEDDED-BUFFER-OK"
+  source ny <<'NY'
+use core
+use core.os (file_read)
+use core.math.parse.3d.gltf.shared as shared
+use core.math.parse.3d.gltf.load as gltf
+use core.math.parse.3d.gltf as facade
+use core.math.parse.3d.gltf.mesh as mesh
+use core.math.parse.3d.gltf.material as material
+
+def source = "prefixPAYLOADsuffix"
+def copied = shared._gltf_copy_bytes(source, 6, 7)
+assert(copied == "PAYLOAD", "copies the requested nonzero offset")
+def blob = gltf._gltf_data_uri_decode("data:application/octet-stream;base64,AAECA/8=")
+assert(is_dict(blob) && int(blob.get("len", 0)) == 5, "embedded binary has its decoded length")
+def data = blob.get("ptr", 0)
+assert(load8(data, 0) == 0 && load8(data, 1) == 1 && load8(data, 2) == 2 &&
+   load8(data, 3) == 3 && load8(data, 4) == 255, "embedded binary preserves zero and high bytes")
+free(data)
+def external = gltf._gltf_load_buffer_uri("ui-buffer.bin", "etc/labs/tests/code/probes/ui/fixtures")
+assert(is_dict(external) && int(external.get("len", 0)) == 5, "loads external binary data")
+def external_data = external.get("ptr", 0)
+assert(load8(external_data, 0) == 0 && load8(external_data, 4) == 255, "external buffer preserves binary bytes")
+free(external_data)
+def model = gltf.load_gltf_file("etc/labs/tests/code/probes/ui/fixtures/ui-triangle.gltf")
+assert(is_dict(model) && !model.contains("error"), "loads a glTF file")
+assert(int(facade.gltf_mesh_count(model)) == 1, "loaded file contains its triangle mesh")
+def binary = model.get("buffer_data", []).get(0, {})
+assert(int(binary.get("len", 0)) == 42, "file loader preserves the embedded buffer")
+def document = model.get("gltf", {})
+def primitive = document.get("meshes", []).get(0, {}).get("primitives", []).get(0, {})
+def meta = mesh._gltf_prim_meta(primitive, document.get("accessors", []))
+assert(bool(meta.get("has_idx", false)), "indexed primitive retains its index accessor")
+def packed = mesh._gltf_pack_indices(document, model.get("binary_data", 0), meta)
+assert(is_dict(packed) && int(packed.get("count", 0)) == 3, "packs three triangle indices")
+def indices = packed.get("ptr", 0)
+assert(load16(indices, 0) == 0 && load16(indices, 2) == 1 && load16(indices, 4) == 2,
+   "packed indices preserve their values")
+free(indices)
+def group = facade.gltf_to_mesh_group_indexed(model, 0, 0)
+assert(is_dict(group), "builds a mesh group")
+def parts = group.get("parts", [])
+assert(is_list(parts) && parts.len == 1, "one non-instanced triangle emits one part")
+def part = parts[0]
+assert(int(part.get("vcnt", 0)) == 3 && int(part.get("icnt", 0)) == 3,
+   "mesh part retains the triangle vertex and index counts")
+assert(bool(part.get("visible", false)), "a node without visibility overrides is visible")
+def node = document.get("nodes", [])[0]
+node["extensions"] = {"KHR_node_visibility": {"visible": false}}
+def hidden_group = facade.gltf_to_mesh_group_indexed(model, 0, 0)
+def hidden_parts = hidden_group.get("parts", [])
+assert(hidden_parts.len == 1 && !bool(hidden_parts[0].get("visible", true)),
+   "an explicitly hidden node stays hidden")
+def empty_bounds = material._gltf_scene_bounds_result(material._gltf_scene_bounds_new())
+assert(float(empty_bounds[0][0]) == -1.0 && float(empty_bounds[1][0]) == 1.0,
+   "empty bounds use finite default extents")
+def accumulated = material._gltf_scene_bounds_accum(material._gltf_scene_bounds_new(),
+   -0.5, -0.5, 0.0, 0.5, 0.5, 0.0)
+def bounds = material._gltf_scene_bounds_result(accumulated)
+assert(float(bounds[0][0]) == -0.5 && float(bounds[1][0]) == 0.5,
+   "accumulated bounds preserve floating point values")
+gltf.gltf_free_data(model)
+def text = unwrap(file_read("etc/labs/tests/code/probes/ui/fixtures/ui-triangle.gltf"))
+def parsed = facade.parse_gltf_str(text)
+assert(is_dict(parsed) && !parsed.contains("error"), "public parser returns a glTF dictionary")
+assert(int(facade.gltf_mesh_count(parsed)) == 1, "public parser preserves the mesh")
+gltf.gltf_free_data(parsed)
+print("GLTF-EMBEDDED-BUFFER-OK")
+NY
+}
+
+shape gltf_triangle_bounds {
+  family "runtime-ui"
+  generator "embedded"
+  features [gltf scene bounds]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "GLTF-TRIANGLE-BOUNDS-OK"
+  source ny <<'NY'
+use core
+use core.math.parse.3d.gltf as gltf
+def model = gltf.load_gltf_file("etc/labs/tests/code/probes/ui/fixtures/ui-triangle.gltf")
+def group = gltf.gltf_to_mesh_group_indexed(model, 0, 0)
+def low = group.get("min", [])
+def high = group.get("max", [])
+assert(float(low[0]) == -0.5 && float(low[1]) == -0.5 && float(low[2]) == 0.0,
+   "scene minimum bounds match the triangle")
+assert(float(high[0]) == 0.5 && float(high[1]) == 0.5 && float(high[2]) == 0.0,
+   "scene maximum bounds match the triangle")
+print("GLTF-TRIANGLE-BOUNDS-OK")
+NY
+}
+
+shape gltf_morph_instances {
+  family "runtime-ui"
+  generator "embedded"
+  features [gltf scene morph instances]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "GLTF-MORPH-INSTANCES-OK"
+  source ny <<'NY'
+use core
+use core.math.parse.3d.gltf as gltf
+def model = gltf.load_gltf_file("etc/labs/tests/code/probes/ui/fixtures/ui-triangle-instances.gltf")
+def group = gltf.gltf_to_mesh_group_indexed(model, 0, 0)
+def parts = group.get("parts", [])
+assert(parts.len == 2, "each scene node emits one morphable mesh part")
+def first = parts[0]
+def second = parts[1]
+assert(int(first.get("node_idx", -1)) == 0 && int(second.get("node_idx", -1)) == 1,
+   "parts retain distinct node identities")
+assert(float(first.get("model", [])[12]) == 0.0 && float(second.get("model", [])[12]) == 2.0,
+   "parts retain distinct node transforms")
+print("GLTF-MORPH-INSTANCES-OK")
+NY
+}
+
+shape gltf-index-modes {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.parse.3d.gltf.mesh as gltf_mesh
+use core.math.parse.3d.gltf.shared as gltf_shared
+use core.math.parse.3d.gltf as gltf
+
+def src = malloc(8)
+def out = malloc(36)
+assert(src != 0 && out != 0, "index fixture allocation")
+store16(src, 2, 0)
+store16(src, 0, 2)
+store16(src, 3, 4)
+store16(src, 1, 6)
+def fan_count = gltf_mesh._gltf_pack_triangle_fan_indices(out, false, true, src, 2, 5123, 4)
+assert(fan_count == 6, "triangle fan expanded index count")
+assert(load16(out, 0) == 2 && load16(out, 2) == 0 && load16(out, 4) == 3, "triangle fan first index order")
+assert(load16(out, 6) == 2 && load16(out, 8) == 3 && load16(out, 10) == 1, "triangle fan second index order")
+def strip_count = gltf_mesh._gltf_pack_triangle_strip_indices(out, false, true, src, 2, 5123, 4)
+assert(strip_count == 6, "triangle strip expanded index count")
+assert(load16(out, 0) == 2 && load16(out, 2) == 0 && load16(out, 4) == 3, "triangle strip first index order")
+assert(load16(out, 6) == 3 && load16(out, 8) == 0 && load16(out, 10) == 1, "triangle strip second index order")
+free(src)
+free(out)
+def caps = gltf_shared.gltf_supported_extension_caps()
+assert(caps.get("KHR_texture_transform", "") == "parse+shader", "extension caps known shader status")
+assert(caps.get("KHR_draco_mesh_compression", "") == "unsupported", "extension caps unsupported status")
+def float_ptr = malloc(4)
+store32(float_ptr, 0x3fc00000, 0)
+assert(gltf._gltf_read_f32_fast(float_ptr, 0, gltf.GLTF_COMP_FLOAT) == 1.5,
+       "GLTF float component reader widens binary32")
+free(float_ptr)
+print("gltf_index_modes_probe ok")
+NY
+}
+
+shape ui_gltf_catalog {
+  family "runtime/ui"
+  generator "regression"
+  features [ny ui assets gltf]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect_stdout "UI-GLTF-CATALOG-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.assets.catalog as catalog
+def rows = catalog.gltf_catalog_scan(["etc/labs/tests/code/probes/ui/fixtures/ui-triangle"])
+def names = rows.get(0, [])
+def paths = rows.get(1, {})
+assert(len(names) == 1 && names.get(0, "") == "ui-triangle", "catalog discovers glTF fixture")
+assert(paths.get("ui-triangle", "") == "etc/labs/tests/code/probes/ui/fixtures/ui-triangle/ui-triangle.gltf", "catalog retains model path")
+print("UI-GLTF-CATALOG-OK")
+NY
+}

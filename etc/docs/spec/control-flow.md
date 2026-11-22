@@ -199,8 +199,8 @@ Panic unwinding stores and restores control state through a platform
 size and alignment, and `__get_backtrace(n)` returns up to `n` captured call
 frames, newest first, each a `[file, line, function]` list (`0` or an
 over-large count returns every frame). The fixtures
-`etc/tests/lang/control-flow/control.nshape` and
-`etc/tests/lang/execution/panic.nshape` verify the positive sizes and the
+`etc/labs/tests/lang/control-flow/control.nshape` and
+`etc/labs/tests/lang/execution/panic.nshape` verify the positive sizes and the
 list shape.
 
 ## Defer
@@ -233,7 +233,7 @@ fn deferred_order() str {
 assert(deferred_order() == "ba", "defers run LIFO at scope exit")
 ```
 
-This example is the gate fixture `etc/tests/lang/control-flow/control.nshape`.
+This example is the gate fixture `etc/labs/tests/lang/control-flow/control.nshape`.
 
 A `defer` runs when its enclosing scope exits, whether by falling through, an
 early `return`, a `goto` that leaves the scope, or panic unwinding. Defers do
@@ -245,7 +245,7 @@ stack, `__pop_run_defer()` pops and runs one entry, and
 `__run_defers_to(depth)` runs entries down to `depth` and clears them.
 Empty stacks and null callbacks report `nil`. Use `defer` for scope work;
 these helpers are runtime diagnostics, not a scheduling API. The
-fixture `etc/tests/lang/control-flow/control.nshape` asserts the
+fixture `etc/labs/tests/lang/control-flow/control.nshape` asserts the
 empty-stack and null-callback edge cases.
 
 ## Labels and goto

@@ -124,7 +124,7 @@ do not turn a timeout into a pass by waiting indefinitely.
 ### Wayland compositor support
 
 Measured on 2026-11-17 against a private headless sway 1.12 (wlroots), with
-`etc/tests/code/probes/ui/wayland-compositor-input.nshape`. Every cell is the
+`etc/labs/tests/code/probes/ui/wayland-compositor-input.nshape`. Every cell is the
 whole probe: a virtual-pointer click on a button, virtual-keyboard typing into a
 field, an input-method composition (preedit, commit, cancel, and a
 delete-surrounding edit of a CJK commit), and the clipboard both ways.
@@ -172,7 +172,7 @@ the probes serially (the runner already serializes `probes/ui/wayland-*`):
 printf 'output HEADLESS-1 resolution 1500x900 scale 1.5\ndefault_border none\n' > /tmp/sway.cfg
 WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway -c /tmp/sway.cfg &
 # WAYLAND_DISPLAY = the new wayland-N socket in $XDG_RUNTIME_DIR
-ny-test --bin build/release/ny etc/tests/code/probes/ui/wayland-compositor-input.nshape
+ny-test --bin build/release/ny etc/labs/tests/code/probes/ui/wayland-compositor-input.nshape
 ```
 
 `NY_WAYLAND_SEAT_DRIVER` names the seat driver: a dependency-free Wayland

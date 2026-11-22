@@ -94,7 +94,7 @@ that all ownership shapes or runtime services have identical backend support.
 
 ## Verification
 
-Focused positive and negative fixtures live under `etc/tests/lang/ownership/`.
+Focused positive and negative fixtures live under `etc/labs/tests/lang/ownership/`.
 For a safety-sensitive API, run the fixture with the same ownership options and
 execution route used by the application. See [Ownership guide](../learn/ownership.md)
 for practical API design.

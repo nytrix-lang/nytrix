@@ -183,8 +183,8 @@ The defer regression fixtures exercise the live routes with the same source:
 
 | Fixture | Routes | Invariants checked |
 | --- | --- | --- |
-| `etc/tests/lang/execution/defer.nshape` | `--run=native`, `--native-only`, LLVM MCJIT, LLVM ORC, `--nyr-run-profile` | LIFO scope cleanup, mutable captures, integer and float homes, panic unwinding, and null callbacks |
-| `etc/tests/lang/execution/defer-loop-capture.nshape` | Same five routes | Deferred loop reads capture the registration-time value |
+| `etc/labs/tests/lang/execution/defer.nshape` | `--run=native`, `--native-only`, LLVM MCJIT, LLVM ORC, `--nyr-run-profile` | LIFO scope cleanup, mutable captures, integer and float homes, panic unwinding, and null callbacks |
+| `etc/labs/tests/lang/execution/defer-loop-capture.nshape` | Same five routes | Deferred loop reads capture the registration-time value |
 
 These are semantic route checks, not performance comparisons. Keep them
 aligned when changing shared lowering or a backend consumer.

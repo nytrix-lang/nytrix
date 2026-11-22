@@ -50,7 +50,7 @@ tests.
 
 ## Add a regression
 
-- Put language and runtime fixtures under `etc/tests/` using the existing
+- Put language and runtime fixtures under `etc/labs/tests/` using the existing
   `.nshape` conventions.
 - Make the fixture assert the user-visible result or expected diagnostic, not
   an implementation detail that does not affect the contract.
