@@ -73,7 +73,7 @@ int main(void) {
   if (!strstr(listing, "24576\tmov\tbyte ptr [rdi], 0x0\t3\t") ||
       !strstr(listing, "24579\tmov\tal, byte ptr [rsi]\t2\t") ||
       !strstr(listing, "24581\tmov\tbyte ptr [rdi], al\t2\t") ||
-      !strstr(listing, "24583\tcmp\tbyte ptr [rdx*1+rsi], 0x0\t5\t") ||
+      !strstr(listing, "24583\tcmp\tbyte ptr [rsi+rdx], 0x0\t5\t") ||
       !strstr(listing, "24588\tmov\tbyte ptr [r8], 0xff\t4\t") ||
       !strstr(listing, "24592\tcmp\tbyte ptr [rax], 0x80\t4\t") ||
       strstr(listing, "\tunsupported\t")) {
@@ -88,7 +88,7 @@ int main(void) {
   listing = nyr_internal_x64_disasm(sign_extend_forms,
                                     (int64_t)sizeof(sign_extend_forms), 0x6800);
   if (!strstr(listing, "26624\tmovsxd\trax, edx\t3\t") ||
-      !strstr(listing, "26627\tmovsxd\tr13, dword ptr [rbp*4+r13-608]\t8\t") ||
+      !strstr(listing, "26627\tmovsxd\tr13, dword ptr [r13+rbp*4-608]\t8\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] MOVSXD form mismatch:\n%s", listing);
     return 1;
@@ -147,7 +147,7 @@ int main(void) {
   };
   listing = nyr_internal_x64_disasm(shift_forms, sizeof(shift_forms), 0x9000);
   if (!strstr(listing, "36864\tsar\trdx, 0x3f\t4\t") ||
-      !strstr(listing, "36868\tshl\trax, 1\t3\t") ||
+      !strstr(listing, "36868\tshl\trax\t3\t") ||
       !strstr(listing, "36871\tsar\trax, cl\t3\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] emitted shift form mismatch:\n%s",
@@ -326,6 +326,43 @@ int main(void) {
       !strstr(listing, "61448\tdec\tdword ptr [rdi]\t2\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] INC/DEC group mismatch:\n%s", listing);
+    return 1;
+  }
+  static const unsigned char vex_scalar_convert_forms[] = {
+      0xc4, 0xe1, 0xf3, 0x2a, 0xc8, /* vcvtsi2sd xmm1, xmm1, rax */
+      0xc4, 0xe1, 0xeb, 0x2a, 0xd0, /* vcvtsi2sd xmm2, xmm2, rax */
+      0xc4, 0xe1, 0x6a, 0x2a, 0xd0, /* vcvtsi2ss xmm2, xmm2, eax */
+      0xc4, 0xe1, 0xfb, 0x2c, 0xc0, /* vcvttsd2si rax, xmm0 */
+      0xc4, 0xe1, 0x7a, 0x2d, 0xc0, /* vcvtss2si eax, xmm0 */
+      0xc4, 0xe1, 0x7a, 0x5a, 0xc1, /* vcvtss2sd xmm0, xmm0, xmm1 */
+      0xc4, 0xe1, 0x7b, 0x5a, 0xc1, /* vcvtsd2ss xmm0, xmm0, xmm1 */
+  };
+  listing = nyr_internal_x64_disasm(vex_scalar_convert_forms,
+                                    sizeof(vex_scalar_convert_forms), 0x10000);
+  static const char *const vex_scalar_convert_expected[] = {
+      "\tvcvtsi2sd\txmm1, xmm1, rax\t",
+      "\tvcvtsi2sd\txmm2, xmm2, rax\t",
+      "\tvcvtsi2ss\txmm2, xmm2, eax\t",
+      "\tvcvttsd2si\trax, xmm0\t",
+      "\tvcvtss2si\teax, xmm0\t",
+      "\tvcvtss2sd\txmm0, xmm0, xmm1\t",
+      "\tvcvtsd2ss\txmm0, xmm0, xmm1\t",
+  };
+  for (size_t i = 0;
+       i < sizeof(vex_scalar_convert_expected) /
+               sizeof(vex_scalar_convert_expected[0]);
+       ++i) {
+    if (!strstr(listing, vex_scalar_convert_expected[i])) {
+      fprintf(stderr,
+              "[x64-disasm-scalar] VEX scalar conversion mismatch:\n%s",
+              listing);
+      return 1;
+    }
+  }
+  if (strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr,
+            "[x64-disasm-scalar] VEX scalar conversion rejected:\n%s",
+            listing);
     return 1;
   }
   puts("[x64-disasm-scalar] scalar C-function forms decode exactly");

@@ -94,15 +94,27 @@ static int nyr_x64_rm(const unsigned char *b, int64_t n, int64_t *ip,
     unsigned index = ((sib >> 3) & 7) | ((rex & 2) ? 8 : 0);
     unsigned base = (sib & 7) | ((rex & 1) ? 8 : 0);
     unsigned scale = 1u << (sib >> 6);
-    if (((sib >> 3) & 7) != 4 || (rex & 2))
-      snprintf(expr, sizeof(expr), "%s*%u", regs64[index], scale);
-    if (mod == 0 && (sib & 7) == 5 && !(rex & 1)) {
-      disp_size = 4;
-    } else {
-      if (expr[0])
+    int has_index = ((sib >> 3) & 7) != 4 || (rex & 2);
+    int has_base = !(mod == 0 && (sib & 7) == 5 && !(rex & 1));
+    if (has_base) {
+      DIS_SET(expr, regs64[base]);
+      if (has_index) {
+        char idx[32];
+        if (scale != 1)
+          snprintf(idx, sizeof(idx), "%s*%u", regs64[index], scale);
+        else
+          snprintf(idx, sizeof(idx), "%s", regs64[index]);
         strncat(expr, "+", sizeof(expr) - strlen(expr) - 1);
-      strncat(expr, regs64[base], sizeof(expr) - strlen(expr) - 1);
+        strncat(expr, idx, sizeof(expr) - strlen(expr) - 1);
+      }
+    } else if (has_index) {
+      if (scale != 1)
+        snprintf(expr, sizeof(expr), "%s*%u", regs64[index], scale);
+      else
+        snprintf(expr, sizeof(expr), "%s", regs64[index]);
     }
+    if (!has_base)
+      disp_size = 4;
   } else if (rip_relative) {
     DIS_SET(expr, "rip");
     disp_size = 4;
@@ -893,6 +905,46 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           snprintf(args, sizeof(args), "%s, %s", rmb, vreg);
         goto decoded;
       }
+      /*
+       * VEX scalar <-> general-purpose conversions (VCVTSI2SS/SD,
+       * VCVTTSS2SI/SD, VCVTSS2SI/SD).  The native backend emits the
+       * three-operand VCVTSI2SD form for int-to-double, which the legacy
+       * 0F path decoded but the VEX path used to reject.
+       */
+      if (map == 1 && (opcode == 0x2a || opcode == 0x2c || opcode == 0x2d) &&
+          (pp == 2 || pp == 3)) {
+        unsigned wide = (vex3 & 0x80) ? 8 : 4;
+        unsigned vreg_n = ((mr >> 3) & 7) + ((vex_rex & 4) ? 8 : 0);
+        unsigned rmw = opcode == 0x2a ? wide : (pp == 2 ? 4 : 8);
+        char vreg[16], vvvv_name[16], rmb[192];
+        unsigned rm_n = (mr & 7) + ((vex_rex & 1) ? 8 : 0);
+        snprintf(vreg, sizeof(vreg), "xmm%u", vreg_n);
+        if ((mr >> 6) == 3) {
+          if (opcode == 0x2a)
+            snprintf(rmb, sizeof(rmb), "%s",
+                     nyr_x64_reg(rm_n, rmw, (vex_rex & 1)));
+          else
+            snprintf(rmb, sizeof(rmb), "xmm%u", rm_n);
+        } else if (!nyr_x64_rm(b, n, &i, mr,
+                              (unsigned)(vex_rex & 1) |
+                                  (opcode == 0x2a ? (wide == 8 ? 8 : 0) : 0),
+                              rmw, rmb, sizeof(rmb))) {
+          goto unsupported;
+        }
+        if (opcode == 0x2a) {
+          snprintf(vvvv_name, sizeof(vvvv_name), "xmm%u",
+                   (unsigned)(~vex3 >> 3) & 15);
+          DIS_SET(m, pp == 2 ? "vcvtsi2ss" : "vcvtsi2sd");
+          snprintf(args, sizeof(args), "%s, %s, %s", vreg, vvvv_name, rmb);
+        } else {
+          DIS_SET(m, opcode == 0x2c
+                         ? (pp == 2 ? "vcvttss2si" : "vcvttsd2si")
+                         : (pp == 2 ? "vcvtss2si" : "vcvtsd2si"));
+          snprintf(args, sizeof(args), "%s, %s",
+                   nyr_x64_reg(vreg_n, wide, vex_rex), rmb);
+        }
+        goto decoded;
+      }
       unsigned vector_reg = ((mr >> 3) & 7) + ((vex_rex & 4) ? 8 : 0);
       unsigned vector_width = (vex3 & 4) ? 256 : 128;
       unsigned vector_vvvv = (unsigned)(~vex3 >> 3) & 15;
@@ -913,6 +965,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                   (pp == 2 || pp == 3)
               ? (pp == 2 ? 4 : 8)
           : map == 1 && opcode == 0x51 && (pp == 2 || pp == 3)
+              ? (pp == 2 ? 4 : 8)
+          : map == 1 && opcode == 0x5a && (pp == 2 || pp == 3)
               ? (pp == 2 ? 4 : 8)
               : 0;
       if ((mr >> 6) == 3) {
@@ -1091,6 +1145,16 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         } else {
           snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
         }
+      } else if (map == 1 && opcode == 0x5a && (pp == 2 || pp == 3) &&
+                 vector_width == 128) {
+        /*
+         * VEX.F3/F2.0F 5A: scalar single <-> double conversion.
+         */
+        char vvvv_name[16];
+        snprintf(vvvv_name, sizeof(vvvv_name), "xmm%u", vector_vvvv);
+        DIS_SET(m, pp == 2 ? "vcvtss2sd" : "vcvtsd2ss");
+        snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                 rm_name);
       } else if (map == 2 && pp == 1 && (vex3 & 0x80) && opcode == 0x59 &&
                  (vex3 & 0x78) == 0x78 && vector_width == 256) {
         DIS_SET(m, "vpbroadcastq");
@@ -1159,8 +1223,15 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       if (i + imm > n)
         goto unsupported;
       DIS_SET(m, "mov");
-      snprintf(args, sizeof(args), "%s, 0x%" PRIx64,
-               (rex & 8 ? regs64 : regs32)[(op & 7) + rb], rd(b + i, imm));
+      {
+        uint64_t iv = rd(b + i, imm);
+        if (imm == 8 && (iv >> 63))
+          snprintf(args, sizeof(args), "%s, -0x%" PRIx64, regs64[(op & 7) + rb],
+                   (uint64_t)0 - iv);
+        else
+          snprintf(args, sizeof(args), "%s, 0x%" PRIx64,
+                   (rex & 8 ? regs64 : regs32)[(op & 7) + rb], iv);
+      }
       i += imm;
     } else if (op == 0x68 || op == 0x6a) {
       imm = op == 0x6a ? 1 : 4;
@@ -1378,7 +1449,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         } else if (op == 0xd2 || op == 0xd3) {
           snprintf(args, sizeof(args), "%s, cl", dst);
         } else {
-          snprintf(args, sizeof(args), "%s, 1", dst);
+          snprintf(args, sizeof(args), "%s", dst);
         }
       } else if (op == 0x80 || op == 0x81 || op == 0x83 || op == 0xc6 ||
                  op == 0xc7) {

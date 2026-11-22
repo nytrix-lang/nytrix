@@ -175,9 +175,15 @@ WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway -c /tmp/sway.cfg &
 ny-test --bin build/release/ny etc/tests/code/probes/ui/wayland-compositor-input.nshape
 ```
 
-`fixtures/wl_seat_driver.py` is the seat: a dependency-free Wayland client that
-binds `zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`, and
-`zwp_input_method_v2`, and replays a step script.
+`NY_WAYLAND_SEAT_DRIVER` names the seat driver: a dependency-free Wayland
+client that binds `zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`, and
+`zwp_input_method_v2`, and replays a step script. Without it the probe skips.
+The repository driver is [`etc/labs/wtool.ny`](../../../etc/labs/wtool.ny).
+When the name ends in `.ny` the probe runs it with the test compiler named by
+`NYTRIX_TEST_NY_FULL_BIN` (or `ny` on `PATH`); other names are executed
+directly, so the Python reference helper also works. `wtool.ny probe` reports
+whether the compositor offers the protocols, and `wtool.ny selftest` checks the
+wire encoding without a compositor.
 
 ### Backend parity
 

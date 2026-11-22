@@ -81,13 +81,21 @@ fn centre(list r) list {
 }
 
 def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
+;; A .ny driver runs under the test compiler; anything else is executed
+;; directly (the Python reference helper is executable already).
+def str nyrun = common.env_trim("NYTRIX_TEST_NY_FULL_BIN")
+if nyrun.len == 0 { nyrun = "ny" }
+mut str driver_cmd = driver
+if driver.len > 3 && slice(driver, driver.len - 3, driver.len) == ".ny" {
+   driver_cmd = nyrun + " " + driver
+}
 mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
 if usable && !file_exists(driver) {
    print("skip: seat driver " + driver + " is not available")
    usable = false
 }
 if usable {
-   def probe = run_capture(["python3", driver, "probe"], [], nil, false)
+   def probe = run_capture(["/bin/sh", "-c", driver_cmd + " probe"], [], nil, false)
    usable = int(probe.get("code", 1)) == 0
    if !usable { print("skip: compositor lacks a virtual seat / input method: " + to_str(probe.get("stdout", ""))) }
 } else {
@@ -143,7 +151,7 @@ if usable {
       "sleep 0.5\n")
    def str log = dir + "/driver.log"
    run_capture(["sh", "-c", "NY_DRIVER_OUTPUT_W=" + to_str(ws.get(0, 640)) + " NY_DRIVER_OUTPUT_H=" +
-      to_str(ws.get(1, 360)) + " python3 " + driver + " run " + script + " > " + log + " 2>&1 &"], [], nil, false)
+      to_str(ws.get(1, 360)) + " " + driver_cmd + " run " + script + " > " + log + " 2>&1 &"], [], nil, false)
    file_write(ready, "1")
    mut int n = 0
    mut bool done = false
@@ -288,13 +296,21 @@ fn centre(list r) list {
 }
 
 def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
+;; A .ny driver runs under the test compiler; anything else is executed
+;; directly (the Python reference helper is executable already).
+def str nyrun = common.env_trim("NYTRIX_TEST_NY_FULL_BIN")
+if nyrun.len == 0 { nyrun = "ny" }
+mut str driver_cmd = driver
+if driver.len > 3 && slice(driver, driver.len - 3, driver.len) == ".ny" {
+   driver_cmd = nyrun + " " + driver
+}
 mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
 if usable && !file_exists(driver) {
    print("skip: seat driver " + driver + " is not available")
    usable = false
 }
 if usable {
-   def probe = run_capture(["python3", driver, "probe"], [], nil, false)
+   def probe = run_capture(["/bin/sh", "-c", driver_cmd + " probe"], [], nil, false)
    usable = int(probe.get("code", 1)) == 0
    if !usable { print("skip: compositor lacks a virtual seat / input method: " + to_str(probe.get("stdout", ""))) }
 } else {
@@ -350,7 +366,7 @@ if usable {
       "sleep 0.5\n")
    def str log = dir + "/driver.log"
    run_capture(["sh", "-c", "NY_DRIVER_OUTPUT_W=" + to_str(ws.get(0, 640)) + " NY_DRIVER_OUTPUT_H=" +
-      to_str(ws.get(1, 360)) + " python3 " + driver + " run " + script + " > " + log + " 2>&1 &"], [], nil, false)
+      to_str(ws.get(1, 360)) + " " + driver_cmd + " run " + script + " > " + log + " 2>&1 &"], [], nil, false)
    file_write(ready, "1")
    mut int n = 0
    mut bool done = false
