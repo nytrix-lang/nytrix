@@ -178,12 +178,17 @@ ny-test --bin build/release/ny etc/tests/code/probes/ui/wayland-compositor-input
 `NY_WAYLAND_SEAT_DRIVER` names the seat driver: a dependency-free Wayland
 client that binds `zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`, and
 `zwp_input_method_v2`, and replays a step script. Without it the probe skips.
-The repository driver is [`etc/labs/wtool.ny`](../../../etc/labs/wtool.ny).
-When the name ends in `.ny` the probe runs it with the test compiler named by
-`NYTRIX_TEST_NY_FULL_BIN` (or `ny` on `PATH`); other names are executed
-directly, so the Python reference helper also works. `wtool.ny probe` reports
-whether the compositor offers the protocols, and `wtool.ny selftest` checks the
-wire encoding without a compositor.
+The repository driver is [`etc/labs/ytool.ny`](../../../etc/labs/ytool.ny),
+which merges the Wayland seat driver with the X11 `xtool` command set in one
+file and picks a backend at runtime. When the driver name ends in `.ny` the
+probe runs it with the test compiler named by `NYTRIX_TEST_NY_FULL_BIN` (or
+`ny` on `PATH`); other names are executed directly, so the Python reference
+helper also works. `ytool probe` reports both backends, `ytool env` shows the
+session, `ytool selftest` checks the wire encoding without a compositor, and
+`ytool run SCRIPT` replays a step script. Pointer and keyboard commands
+(`type`, `key`, `move`, `click`) use the X11 backend when a display is
+reachable and otherwise replay through the virtual seat; prefix a command with
+`x11` or `wayland` to force a backend.
 
 ### Backend parity
 
