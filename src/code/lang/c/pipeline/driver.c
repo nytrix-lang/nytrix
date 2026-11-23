@@ -2310,9 +2310,10 @@ static void nyc_drop_code_after_trap(nyr_func_t *f) {
  * symbol for objtool and loses its retpoline thunk. Only the plain case is
  * handled: a register-argument call without aggregate or i386 metadata.
  */
-static void nyc_fold_indirect_calls(nyr_func_t *f) {
+static bool nyc_fold_indirect_calls(nyr_func_t *f) {
+  bool folded = false;
   if (!f || !f->len || f->next_value <= 0)
-    return;
+    return false;
   const nyr_inst_t **defs = NULL;
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *call = &f->data[i];
@@ -2323,7 +2324,7 @@ static void nyc_fold_indirect_calls(nyr_func_t *f) {
     if (!defs) {
       defs = calloc((size_t)f->next_value, sizeof(*defs));
       if (!defs)
-        return;
+        return false;
       for (size_t d = 0; d < f->len; ++d)
         if (f->data[d].dst >= 0 && f->data[d].dst < f->next_value)
           defs[f->data[d].dst] = &f->data[d];
@@ -2362,8 +2363,12 @@ static void nyc_fold_indirect_calls(nyr_func_t *f) {
       nyr_call_arg_class_set(direct.arg_scalar_classes, k - 1,
                              nyr_call_arg_class_get(call, k));
     *call = direct;
+    folded = true;
+    /* The inliner skips functions that report no symbol calls. */
+    f->has_symbol_calls = true;
   }
   free(defs);
+  return folded;
 }
 
 static bool write_c_unit_assembly(
@@ -3173,6 +3178,24 @@ static int compile_source(int argc, char **argv, int source_arg,
                      "%.360s",
                      unit.names[i], detail[0] ? detail : "optimization failed");
             ok = false;
+          }
+          /*
+           * Inlining an always_inline caller such as bsearch() turns its
+           * comparison callback into a call through a known function; make
+           * it direct and give the targeted inliner a second look.
+           */
+          if (ok && abi == NYC_ABI_SYSV_X86_64 && driver->optimization >= 1 &&
+              !getenv("NYC_NO_FOLD_INDIRECT_CALLS") &&
+              nyc_fold_indirect_calls(&unit.funcs[i])) {
+            if (!nyr_inline_general(&unit.funcs[i]) ||
+                !nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
+                                           opt_options, err, sizeof(err)) ||
+                !nyr_verify(&unit.funcs[i], err, sizeof(err))) {
+              snprintf(err, sizeof(err),
+                       "NYIR cleanup after folding indirect calls in %s",
+                       unit.names[i]);
+              ok = false;
+            }
           }
         }
       }

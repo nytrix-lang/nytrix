@@ -2884,27 +2884,36 @@ run directory under `/tmp`.
   included. `ny-stdlib-debug-path` and `nytrix-addr-probe-device` fail the same
   way on an unmodified `HEAD` build (checked in a private worktree).
 - Diagnostics after noreturn inference (2026-11-23). The final clean
-  `nyc-kernel-boot` log (`bzImage` plus modules) has 15 objtool diagnostics
-  and no modpost warnings, against about 450 at the start of the day: 0
-  "unreachable instruction" and 0 "missing __noreturn" (from 181 and 45), 0
-  "call with UACCESS enabled", 0 modpost section mismatches (from 17), 9
-  "redundant UACCESS disable" (all in `.altinstr_replacement`: objtool follows
-  the `nop` original of a `stac` alternative and then reaches a `clac`
-  replacement with UACCESS still off; the verbose trace through
-  `rseq_update_user_cs` shows it; cause not found), 3 "call leaves
-  `.noinstr.text`" (`default_idle` and `acpi_safe_halt` through paravirt
-  calls, `smp_text_poke_int3_handler` into `patch_cmp`), 2 "return with
-  UACCESS enabled" (`snd_pcm_sync_ptr` and its compat twin; the path leaves
-  through a `goto` after the `stac` slot; plain `cleanup` attribute scopes
-  with `goto` and `return` run their handlers, so the cause is not that),
-  and 1 "unsupported instruction" (`ljmp` in
-  `native_machine_emergency_restart`). A `_Bool` argument of an indirect call
-  is still not converted: the frontend stores only a function pointer's
-  result type, never its parameter types, at about fifteen propagation sites.
-  The three `smp_ops` modpost mismatches came from a zero-length local object
-  (`__nyc_static_599` in `cpuid.o`) sitting at the end of `.data`, at the
-  address of the next object's first byte; zero-length local objects now go
-  to `.bss` (`zero-length-static` fixture).
+  `nyc-kernel-boot` log (`bzImage` plus 12 modules) has 3 objtool diagnostics
+  and no modpost warnings, against about 450 at the start of the day (0
+  "unreachable instruction", 0 "missing __noreturn", 0 UACCESS diagnostics):
+  - `native_machine_emergency_restart`: an `ljmp` ("unsupported instruction
+    in callable function"); not investigated.
+  - `default_idle` and `acpi_safe_halt`: "call to {dynamic}() leaves
+    `.noinstr.text`". NYC lowers the kernel's paravirt call asm
+    (`ANNOTATE_RETPOLINE_SAFE; call *pv_ops+off(%rip)` inside an
+    `ALTERNATIVE`) to a load of the member and a call through
+    `__x86_indirect_thunk_r11`; objtool recognises a paravirt call only by a
+    relocation against `pv_ops` on the call itself. Emitting the memory-
+    indirect call with its `retpoline_safe` annotation would clear them.
+  The UACCESS diagnostics came from three NYC differences from GCC, found by
+  building the same translation units with GCC and by `objtool --trace`:
+  the scoped user access macros are three nested `for (done = false; !done;
+  done = true)` loops whose `!done` test NYC kept after the cleanup (they now
+  lower without a back edge, when the body only ever stores 1 to the flag);
+  jump threading declined a branch-only block that held a leftover constant
+  (such constants now move to the entry block), and the branch the threaded
+  edge left behind (`br.if const == const`) was not decided (it is now,
+  before emission). An indirect call through a function symbol is folded to a
+  direct call and, after targeted inlining, inlined (the `bsearch()` callback
+  `patch_cmp`). A `_Bool` argument of an indirect call is still not
+  converted: the frontend stores only a function pointer's result type, never
+  its parameter types, at about fifteen propagation sites. The three
+  `smp_ops` modpost mismatches came from a zero-length local object
+  (`__nyc_static_599` in `cpuid.o`) sitting at the end of `.data`; zero-length
+  local objects now go to `.bss` (`zero-length-static` fixture). Fixtures for
+  the above: `scoped-once-loops`, `jump-thread-implied-branch`,
+  `indirect-call-folding`, `zero-length-static`.
   Changes behind these numbers:
   - A function whose every path ends in a noreturn call or an endless loop is
     inferred noreturn within the unit (as GCC does for visible callers); its
