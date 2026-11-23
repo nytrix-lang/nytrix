@@ -2239,6 +2239,7 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
     p->indirect_result_type = global_callee->function_result_type;
     p->indirect_result_agg = global_callee->agg;
     p->has_indirect_result_signature = true;
+    p->indirect_bool_params = global_callee->function_bool_params;
     return parse_indirect_call(p, (c_value_t){target, C_FUNC_PTR, NULL});
   }
   c_function_t *fn = find_function(p, name);

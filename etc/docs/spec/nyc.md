@@ -2992,6 +2992,8 @@ run directory under `/tmp`.
   (a `_Generic`-selected call to `kmem_cache_create` inherited the mask of an
   earlier pointer and turned its `flags` into 1, which failed the boot), and a
   typedef's recorded bool flag can be stale, so only `_Bool` and `bool` count.
-  Function-pointer globals and typedef'd pointer types do not carry the mask
-  yet.
+  The same mask comes from typedef'd function-pointer types and reaches
+  globals, fields, locals and parameters declared with them (the fixture
+  covers `bool_fn_t` in each position). Arrays of function pointers and
+  function-pointer returns do not carry it.
 </details>

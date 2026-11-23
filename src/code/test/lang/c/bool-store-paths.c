@@ -31,3 +31,13 @@ int st_indirect_local(int v) {
   bool (*cb)(bool) = local_take;
   return cb(v);
 }
+typedef bool (*bool_fn_t)(bool);
+struct bool_typedef_ops { bool_fn_t take; };
+static bool_fn_t bool_global_fn = local_take;
+int st_indirect_global(int v) { return bool_global_fn(v); }
+int st_indirect_typedef_param(bool_fn_t cb, int v) { return cb(v); }
+int st_indirect_typedef_local(int v) {
+  bool_fn_t cb = local_take;
+  return cb(v);
+}
+int st_indirect_typedef_field(struct bool_typedef_ops *o, int v) { return o->take(v); }

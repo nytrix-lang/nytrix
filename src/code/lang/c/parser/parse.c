@@ -127,6 +127,7 @@ typedef struct {
   bool is_long_long;
   bool function_type;
   size_t function_signature_start;
+  uint64_t function_bool_params;
   bool function_void_params;
   bool is_const;
   bool is_bool;
@@ -207,6 +208,8 @@ typedef struct {
   bool is_bool;
   /* Pointer to `_Bool`: stores through it convert to 0 or 1. */
   bool pointee_bool;
+  /* Function-pointer object: bit i set when parameter i is a _Bool. */
+  uint64_t function_bool_params;
   /*
    * C_SEG_* qualifier on the object a global pointer addresses.
    */
@@ -2791,6 +2794,7 @@ static bool parse_field_declarator(c_parser_t *p, c_type_t type,
     field->function_result_agg = p->last_type_function_result_agg;
     field->has_function_signature = true;
     field->size = pointer_size;
+    field->function_bool_params = p->last_function_pointer_bool_params;
     field->align = pointer_size;
     return true;
   }
@@ -2831,6 +2835,7 @@ static bool parse_field_declarator(c_parser_t *p, c_type_t type,
       field->function_result_agg = p->last_type_function_result_agg;
       field->has_function_signature =
           p->last_type_function_result_type != C_BAD;
+      field->function_bool_params = p->last_function_pointer_bool_params;
     }
     field->elem_char_pointer = type == C_CHAR_PTR_PTR;
     field->elem_size = field->elem_pointer                      ? pointer_size
@@ -4025,6 +4030,7 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
         p->last_type_function_result_agg = alias->function_result_agg;
         p->last_type_function_type =
             alias->function_type || alias->type == C_FUNC_PTR;
+        p->last_function_pointer_bool_params = alias->function_bool_params;
         p->last_type_is_function_type_alias = alias->function_type;
         p->last_type_function_void_params = alias->function_void_params;
         p->last_type_array_size = alias->array_size;
@@ -4714,6 +4720,9 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
        is_double = false, is_long = false, is_long_long = false, is_int = false,
        is_void = false, is_char = false, is_short = false, is_complex = false,
        is_long_double = false;
+  /* The mask belongs to the type being parsed; an alias or a function-pointer
+     declarator sets it below. */
+  p->last_function_pointer_bool_params = 0;
   bool typeof_resolved = false;
   p->last_type_const = false;
   p->last_type_const_pointer = false;
@@ -5015,6 +5024,7 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       p->last_type_function_result_agg = alias->function_result_agg;
       p->last_type_function_type =
           alias->function_type || alias->type == C_FUNC_PTR;
+      p->last_function_pointer_bool_params = alias->function_bool_params;
       p->last_type_is_function_type_alias = alias->function_type;
       p->last_type_function_void_params = alias->function_void_params;
       ++p->pos;
@@ -14888,6 +14898,7 @@ static bool try_collect_function_pointer_global(c_parser_t *p, bool *matched) {
       c_type_t result_type = p->last_type_function_result_type;
       c_agg_type_t *result_agg = p->last_type_function_result_agg;
       section = p->last_type_section;
+      uint64_t result_bool_params = p->last_function_pointer_bool_params;
       if (!parse_name(p, &name))
         return false;
       ny_ctok_t declarator_section = {0};
@@ -14996,6 +15007,7 @@ static bool try_collect_function_pointer_global(c_parser_t *p, bool *matched) {
                            .reloc_capacity = reloc_count,
                            .type = C_FUNC_PTR,
                            .function_result_type = result_type,
+                           .function_bool_params = result_bool_params,
                            .agg = result_agg,
                            .is_const = is_const,
                            .is_external = is_external,
@@ -16365,6 +16377,8 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
         uint64_t param_function_bool_params = 0;
         if (!parse_type(p, &type, true))
           goto error;
+        if (type == C_FUNC_PTR)
+          param_function_bool_params = p->last_function_pointer_bool_params;
         bool is_bool_param = p->last_type_bool;
         c_type_t pointer_base_type = p->last_type_base_type;
         unsigned pointer_depth = p->last_type_pointer_count;
@@ -17115,6 +17129,10 @@ static bool collect_functions(c_parser_t *p) {
           .is_long_long = p->last_type_long_long,
           .function_type = function_type,
           .function_signature_start = function_type ? typedef_start + 1 : 0,
+          .function_bool_params =
+              function_pointer
+                  ? function_pointer_probe.last_function_pointer_bool_params
+                  : 0,
           .function_void_params = function_void_params,
           .is_const = is_const,
           .alignment = type_alignment};

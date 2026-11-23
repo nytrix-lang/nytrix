@@ -12,6 +12,10 @@ struct bool_ops {
 };
 int st_indirect_field(struct bool_ops *, int), st_indirect_mix(struct bool_ops *, int);
 int st_indirect_param(bool (*)(bool), int), st_indirect_local(int);
+typedef bool (*bool_fn_t)(bool);
+struct bool_typedef_ops { bool_fn_t take; };
+int st_indirect_global(int), st_indirect_typedef_param(bool_fn_t, int), st_indirect_typedef_local(int);
+int st_indirect_typedef_field(struct bool_typedef_ops *, int);
 /* The callees read the argument register as a GCC-built function would. */
 static bool take_bool(bool b) { return b; }
 static int mix_bool(int a, bool b, long c) { return a + b * 100 + (int)c; }
@@ -28,7 +32,10 @@ int main(void) {
   struct bool_ops ops = {take_bool, mix_bool};
   ok = ok && st_indirect_field(&ops, 0x200) == 1 && st_indirect_mix(&ops, 0x300) == 7 + 100 + 9 &&
        st_indirect_mix(&ops, 0) == 7 + 9 &&
-       st_indirect_param(take_bool, 0x200) == 1 && st_indirect_local(0x400) == 1;
+       st_indirect_param(take_bool, 0x200) == 1 && st_indirect_local(0x400) == 1 &&
+       st_indirect_global(0x800) == 1 && st_indirect_typedef_param(take_bool, 0x1000) == 1 &&
+       st_indirect_typedef_local(0x2000) == 1 &&
+       st_indirect_typedef_field(&(struct bool_typedef_ops){take_bool}, 0x4000) == 1;
   /* A zero value must still store 0. */
   ok = ok && st_ptr(0) == 0 && st_global(0) == 0 && st_member(&h, 0) == 0;
   return !ok;

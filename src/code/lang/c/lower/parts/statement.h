@@ -2107,6 +2107,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         decl_typedef_array = false;
       bool decl_is_bool = p->last_type_bool;
       c_type_t decl_function_result_type = p->last_type_function_result_type;
+      uint64_t decl_function_bool_params = p->last_function_pointer_bool_params;
       c_agg_type_t *decl_function_result_agg = p->last_type_function_result_agg;
       /*
        * Array brackets on a function-pointer typedef can clear the result
@@ -2734,6 +2735,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->pointee_volatile = pointee_volatile;
           local->pointee_seg = pointee_seg;
           local->function_result_type = decl_function_result_type;
+          local->function_bool_params = decl_function_bool_params;
           if (decl_function_result_agg)
             local->agg = decl_function_result_agg;
           local->address_taken = true;
@@ -2982,6 +2984,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
               (type == C_AGG_PTR || type == C_AGG_PTR_PTR))
             local->agg = decl_agg;
           local->function_result_type = decl_function_result_type;
+          local->function_bool_params = decl_function_bool_params;
           local->is_bool = decl_is_bool && !c_type_is_pointer(type);
           local->pointee_bool = decl_is_bool && type == C_CHAR_PTR;
           if (decl_function_result_agg)
@@ -3137,6 +3140,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
               (type == C_AGG_PTR || type == C_AGG_PTR_PTR))
             local->agg = decl_agg;
           local->function_result_type = decl_function_result_type;
+          local->function_bool_params = decl_function_bool_params;
           local->is_bool = decl_is_bool && !c_type_is_pointer(type);
           local->pointee_bool = decl_is_bool && type == C_CHAR_PTR;
           if (decl_function_result_agg)
