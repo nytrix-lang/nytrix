@@ -2970,4 +2970,14 @@ run directory under `/tmp`.
     Linux writes `static_call()`) is folded to a direct call, as GCC does; the
     `indirect-call-folding` fixture checks the result and that no indirect
     thunk remains. Two "{dynamic}" noinstr diagnostics went away with it.
+- P0 harness (2026-11-23), first piece. The C frontend helpers
+  (`nyc_execute_ok`, `nyc_execute_output`, `nyc_require_artifact`,
+  `nyc_remove_artifact`) moved to `src/code/test/lang/harness.cmake`, and
+  `nyr-c-harness-fault-injection` runs each against an injected fault in a
+  child process and requires it to fail: a nonzero exit, a crash (SIGABRT), a
+  timeout, source that does not compile, a link failure, a missing, an empty
+  and a stale artifact. Disabling the failure check in the helper makes the
+  test fail, so it is not vacuous. The rest of P0 (false positives in the
+  differential and benchmark lanes, silent exclusions, expected-failure
+  fragility, duplication) is not audited.
 </details>

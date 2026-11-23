@@ -3019,6 +3019,16 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         -P "${NYR_C_TEST_DIR}/run.cmake"
     )
     set_tests_properties(nyr-c-frontend PROPERTIES TIMEOUT 120)
+    add_test(
+      NAME nyr-c-harness-fault-injection
+      COMMAND "${CMAKE_COMMAND}"
+        "-DNYC=$<TARGET_FILE:nyc>"
+        "-DCC=${CMAKE_C_COMPILER}"
+        "-DSOURCE_DIR=${NYR_C_TEST_DIR}"
+        "-DBINARY_DIR=${NYR_C_TEST_OUTPUT_DIR}/fault-injection"
+        -P "${NYR_C_TEST_DIR}/harness-fault-injection.cmake"
+    )
+    set_tests_properties(nyr-c-harness-fault-injection PROPERTIES TIMEOUT 60)
     # Kernel acceptance: build Linux with NYC and boot it in QEMU. It takes
     # about fifteen minutes, so it is registered only when a Linux source tree
     # is named with -DNYC_LINUX_SRC=/path/to/linux-7.3.
