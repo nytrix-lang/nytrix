@@ -346,6 +346,61 @@ fail:
   return false;
 }
 
+/*
+ * `pv_ops.irq.safe_halt` reaches the IR as a load from `symbol + offset`.
+ * Recover that address so the paravirt call can name it in its own assembly
+ * (objtool recognises a paravirt call by the `pv_ops` relocation on the call).
+ */
+static bool paravirt_member_address(const c_parser_t *p, int value,
+                                    char *symbol, size_t symbol_size,
+                                    int64_t *offset) {
+  const nyr_func_t *f = p->out;
+  const nyr_inst_t *load = NULL, *base = NULL;
+  int64_t total = 0;
+  for (size_t i = f->len; i-- > 0;)
+    if (f->data[i].dst == value) {
+      load = &f->data[i];
+      break;
+    }
+  if (!load || load->op != NYIR_LOAD_I64 || load->a < 0)
+    return false;
+  total = load->imm;
+  const nyr_inst_t *address = NULL;
+  for (size_t i = f->len; i-- > 0;)
+    if (f->data[i].dst == load->a) {
+      address = &f->data[i];
+      break;
+    }
+  if (!address)
+    return false;
+  if (address->op == NYIR_ADD_I64 && address->a >= 0 && address->b >= 0) {
+    const nyr_inst_t *left = NULL, *right = NULL;
+    for (size_t i = f->len; i-- > 0 && (!left || !right);) {
+      if (f->data[i].dst == address->a)
+        left = &f->data[i];
+      if (f->data[i].dst == address->b)
+        right = &f->data[i];
+    }
+    if (!left || !right || right->op != NYIR_CONST_I64)
+      return false;
+    total += right->imm;
+    base = left;
+  } else {
+    base = address;
+  }
+  static const char extern_prefix[] = "__nyc_extern_";
+  if (base->op != NYIR_ADDR_SYMBOL || !base->symbol ||
+      strncmp(base->symbol, extern_prefix, sizeof(extern_prefix) - 1) != 0 ||
+      total < INT32_MIN / 2 || total > INT32_MAX / 2)
+    return false;
+  const char *name = base->symbol + sizeof(extern_prefix) - 1;
+  if (!*name || strlen(name) >= symbol_size)
+    return false;
+  strcpy(symbol, name);
+  *offset = total;
+  return true;
+}
+
 static bool defer_unsupported_asm(c_parser_t *p, size_t open,
                                   unsigned char *assembly) {
   if (p->err && p->err_len)
@@ -5067,6 +5122,42 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
       free(assembly);
       return false;
     }
+    /*
+     * Keep the kernel's own call-plus-alternative text when the called slot
+     * is a plain `symbol + offset`: the call then carries the `pv_ops`
+     * relocation objtool wants, and boot-time patching turns it into a direct
+     * call. Otherwise fall back to a call through the loaded pointer.
+     */
+    char *pv_text = NULL;
+    {
+      char member[96];
+      int64_t member_offset = 0;
+      static const char placeholder[] = "%[paravirt_opptr]";
+      const char *at = assembly ? strstr((const char *)assembly, placeholder)
+                                : NULL;
+      if (at && !getenv("NYC_NO_PV_TEMPLATE") && p->abi != NYC_ABI_I386 &&
+          paravirt_member_address(p, target.value, member, sizeof(member),
+                                  &member_offset)) {
+        char operand[160];
+        if (member_offset)
+          snprintf(operand, sizeof(operand), "%s+%lld(%%rip)", member,
+                   (long long)member_offset);
+        else
+          snprintf(operand, sizeof(operand), "%s(%%rip)", member);
+        size_t head = (size_t)(at - (const char *)assembly);
+        size_t tail = strlen(at + sizeof(placeholder) - 1);
+        pv_text = malloc(head + strlen(operand) + tail + 1);
+        if (pv_text) {
+          memcpy(pv_text, assembly, head);
+          strcpy(pv_text + head, operand);
+          strcpy(pv_text + head + strlen(operand), at + sizeof(placeholder) - 1);
+          if (strchr(pv_text, '%') && strstr(pv_text, "%[")) {
+            free(pv_text);
+            pv_text = NULL;
+          }
+        }
+      }
+    }
     free(assembly);
     nyr_inst_t call = {.op = NYIR_CALL,
                        .dst = -1,
@@ -5084,7 +5175,13 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     for (size_t i = 0; i < call_argc; ++i)
       nyr_call_arg_class_set(call.arg_scalar_classes, i + 1,
                              NYIR_SCALAR_I64_RAW);
-    return emit(p, call, NULL);
+    if (pv_text) {
+      call.symbol = pv_text;
+      call.flags |= NYIR_INST_F_PV_TEMPLATE;
+    }
+    bool emitted_call = emit(p, call, NULL);
+    free(pv_text);
+    return emitted_call;
   }
   if (!asm_goto && wrmsr_alternative_template) {
     if (!expect(p, ":") || !expect(p, ":") ||

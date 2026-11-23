@@ -4825,7 +4825,11 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
         !nyr_printf(c->w, "\tsubq\t$%zu, %%rsp\n",
                     c->target->shadow_space_bytes))
       return false;
-    if (indirect) {
+    if (indirect && (in->flags & NYIR_INST_F_PV_TEMPLATE) && in->symbol) {
+      /* The kernel's own call and alternative entry, printed as written. */
+      if (!nyr_put(c->w, in->symbol) || !nyr_put(c->w, "\n"))
+        return false;
+    } else if (indirect) {
       if (!ny_x64_nir_load_value(c, arg_vals[0]) ||
           !nyr_put(c->w, "\tmovq\t%rax, %r11\n"))
         return false;

@@ -5302,6 +5302,10 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
   for (size_t i = 0; i < nyir->param_count; ++i)
     has_aggregate_param |= nyir->param_types[i] == NYIR_PARAM_AGGREGATE;
   if (nyir->param_count) {
+    if (in->op == NYIR_CALL && (in->flags & NYIR_INST_F_PV_TEMPLATE))
+      return nyr_err(err, err_len,
+                     "machine lower: a paravirt call template requires the "
+                     "NYIR emitter");
     lowered.param_types =
         ny_malloc_array(nyir->param_count, sizeof(*lowered.param_types));
     lowered.param_abi =

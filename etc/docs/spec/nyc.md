@@ -2884,19 +2884,21 @@ run directory under `/tmp`.
   included. `ny-stdlib-debug-path` and `nytrix-addr-probe-device` fail the same
   way on an unmodified `HEAD` build (checked in a private worktree).
 - Diagnostics after noreturn inference (2026-11-23). The final clean
-  `nyc-kernel-boot` log (`bzImage` plus 12 modules) has 2 objtool diagnostics
-  and no modpost warnings, against about 450 at the start of the day (0
-  "unreachable instruction", 0 "missing __noreturn", 0 UACCESS diagnostics):
+  `nyc-kernel-boot` log (`bzImage` plus 12 modules) has no objtool, modpost or
+  other warnings at all (about 450 at the start of the day), and both `/init`
+  boots pass.
   - `native_machine_emergency_restart`: the `ljmp` of `machine_real_restart`
-    was inlined into a callable function. noreturn functions are now kept out
-    of line, as GCC does, and the diagnostic is gone.
-  - `default_idle` and `acpi_safe_halt`: "call to {dynamic}() leaves
-    `.noinstr.text`". NYC lowers the kernel's paravirt call asm
-    (`ANNOTATE_RETPOLINE_SAFE; call *pv_ops+off(%rip)` inside an
-    `ALTERNATIVE`) to a load of the member and a call through
-    `__x86_indirect_thunk_r11`; objtool recognises a paravirt call only by a
-    relocation against `pv_ops` on the call itself. Emitting the memory-
-    indirect call with its `retpoline_safe` annotation would clear them.
+    was inlined into a callable function; noreturn functions are now kept out
+    of line, as GCC does.
+  - `default_idle` and `acpi_safe_halt`: NYC used to lower the kernel's
+    paravirt call asm to a load of the member and a call through the retpoline
+    thunk, so the call carried no `pv_ops` relocation, which is how objtool
+    recognises a paravirt call. The call now keeps the kernel's own text
+    (`call *pv_ops+off(%rip)` with its retpoline-safe annotation and its
+    `ALT_CALL_ALWAYS` alternative entry), so boot-time patching turns it into
+    a direct call as with GCC. The member must be a plain `symbol + offset`;
+    other shapes keep the thunk call. The machine-form emitter declines such a
+    call and the function goes through the NYIR emitter.
   The UACCESS diagnostics came from three NYC differences from GCC, found by
   building the same translation units with GCC and by `objtool --trace`:
   the scoped user access macros are three nested `for (done = false; !done;

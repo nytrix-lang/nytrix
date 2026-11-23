@@ -253,6 +253,9 @@ typedef enum {
  * observed at the mask boundary. Do not set on a potentially negative value
  * unless a proven mask makes the 32-bit result exact. */
 #define NYIR_INST_F_NARROW32 64u
+/* NYIR_CALL to the hosted C library's malloc/free (not -fno-builtin, not
+ * defined or renamed in the translation unit): its semantics are known. */
+#define NYIR_INST_F_LIBC_ALLOC (1u << 28)
 /*
  * Set on NYIR_CALL by the native builder after interprocedural effect
  * inference when the callee is a user function whose full observable effect
@@ -290,6 +293,11 @@ typedef enum {
    inlined region, so frame layout may share its storage with other
    scope-local allocas whose references do not overlap. */
 #define NYIR_INST_F_SCOPE_LOCAL (1u << 26)
+/* An indirect call whose `symbol` holds the assembly template that replaces
+   the call instruction (Linux's paravirt call with its alternative entry).
+   The template names the called pointer as `%[paravirt_opptr]`; `imm` stays
+   the argument count. Emitters that cannot print it use the pointer value. */
+#define NYIR_INST_F_PV_TEMPLATE (1u << 27)
 /* i386 integer/pointer argument registers: EAX, EDX, ECX. */
 #define NYIR_INST_F_I386_REGPARM_SHIFT 14u
 #define NYIR_INST_F_I386_REGPARM_MASK (3u << NYIR_INST_F_I386_REGPARM_SHIFT)
@@ -1059,6 +1067,8 @@ bool ny_isle_apply_nir(nyr_func_t *f);
 bool nyr_algebraic_combine(nyr_func_t *f);
 bool nyr_double_neg(nyr_func_t *f);
 bool nyr_reassoc_add(nyr_func_t *f);
+bool nyr_addr_reassoc(nyr_func_t *f);
+bool nyr_dead_alloc_elim(nyr_func_t *f);
 bool nyr_rewrite_fuel(nyr_func_t *f);
 /** Equality-saturation e-graph over pure scalar integer ops (see opt/egraph.c).
  */

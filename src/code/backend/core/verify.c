@@ -222,7 +222,8 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
               NYIR_INST_F_SRET |
               NYIR_INST_F_EFFECTS_KNOWN | NYIR_INST_F_NOALIAS |
               NYIR_INST_F_INDIRECT | NYIR_INST_F_VARIADIC |
-              NYIR_INST_F_I386_REGPARM_MASK | NYIR_INST_F_I386_C_ABI;
+              NYIR_INST_F_I386_REGPARM_MASK | NYIR_INST_F_I386_C_ABI |
+              NYIR_INST_F_PV_TEMPLATE | NYIR_INST_F_LIBC_ALLOC;
     if ((in->flags & NYIR_INST_F_EXTERN) &&
         !(in->flags & NYIR_INST_F_INDIRECT) && in->dst >= 0 && in->imm == 1 &&
         in->symbol &&
