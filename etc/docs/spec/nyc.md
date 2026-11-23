@@ -2934,8 +2934,15 @@ run directory under `/tmp`.
     `sound/core/pcm_native.c` compiled with GCC from the same Kbuild command
     line (`-fms-extensions` in place of `-fms-anonymous-structs`) gives an
     object with no objtool diagnostics at all, while the NYC object reports
-    both. The difference is in how the `stac` block and the error exits are
-    laid out, and is not yet explained.
+    both. The nine "redundant UACCESS disable" diagnostics are NYC-specific
+    in the same way: the six objects that carry them (`net/socket`,
+    `sys_ia32`, `signal_32`, `entry/common`, `futex/core`, `rseq`) are clean
+    when built with GCC. A concrete lead: `net/socket.o` has three `stac`/
+    `clac` replacement instructions with GCC and four with NYC. In
+    `move_addr_to_user` (`scoped_user_rw_access_size` with `goto efault_end`)
+    the final IR holds three separate `clac` blocks (loop exit, and one clone
+    per faulting-access error edge), where GCC merges the error exits into
+    one. objtool reaches one of the extra clones with UACCESS already off.
   - An indirect call whose target is the address of a named function (how
     Linux writes `static_call()`) is folded to a direct call, as GCC does; the
     `indirect-call-folding` fixture checks the result and that no indirect
