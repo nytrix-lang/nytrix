@@ -140,6 +140,45 @@ static bool lower_cleanup_range(c_parser_t *p, size_t first, size_t last) {
 /* Route only the taken edge through the cleanups. Compare expansion order;
  * macro-generated spellings can come from different backing buffers. */
 static int lower_cleanup_edge(c_parser_t *p, const c_label_t *target) {
+  /*
+   * Every edge that leaves the same scopes toward the same label runs the
+   * same cleanups; share one trampoline, as GCC merges those exits. Without
+   * this each faulting access of a scoped user access gets its own copy of
+   * the `clac`, and objtool sees a copy reachable with UACCESS already off.
+   */
+  size_t pending[NYC_CLEANUP_CACHE_LOCALS], pending_slots[NYC_CLEANUP_CACHE_LOCALS];
+  size_t pending_count = 0;
+  bool cacheable = true;
+  {
+    const c_cleanup_scope_t *probe = p->cleanup_scope;
+    for (size_t i = p->local_count; i-- > p->param_count;) {
+      const c_local_t *local = &p->locals[i];
+      if (!local->cleanup.len)
+        continue;
+      while (probe && i < probe->first_local)
+        probe = probe->parent;
+      if ((!probe || target->token_pos < probe->end) &&
+          target->token_pos >= local->declaration_pos)
+        continue;
+      if (pending_count == NYC_CLEANUP_CACHE_LOCALS) {
+        cacheable = false;
+        break;
+      }
+      pending[pending_count] = i;
+      pending_slots[pending_count++] = (size_t)local->slot;
+    }
+  }
+  if (cacheable && pending_count) {
+    for (size_t e = 0; e < p->cleanup_cache_count; ++e) {
+      const c_cleanup_cache_entry_t *entry = &p->cleanup_cache[e];
+      if (entry->target == (int64_t)target->id &&
+          entry->count == pending_count &&
+          !memcmp(entry->locals, pending, pending_count * sizeof(size_t)) &&
+          !memcmp(entry->slots, pending_slots,
+                  pending_count * sizeof(size_t)))
+        return entry->trampoline;
+    }
+  }
   const c_cleanup_scope_t *scope = p->cleanup_scope;
   int trampoline = -1, resume = -1;
   for (size_t i = p->local_count; i-- > p->param_count;) {
@@ -168,6 +207,16 @@ static int lower_cleanup_edge(c_parser_t *p, const c_label_t *target) {
     return (int)target->id;
   if (!emit_branch(p, (int64_t)target->id) || !emit_label(p, resume))
     return -1;
+  if (cacheable && pending_count &&
+      p->cleanup_cache_count < NYC_CLEANUP_CACHE_ENTRIES) {
+    c_cleanup_cache_entry_t *entry =
+        &p->cleanup_cache[p->cleanup_cache_count++];
+    entry->target = (int64_t)target->id;
+    entry->count = pending_count;
+    memcpy(entry->locals, pending, pending_count * sizeof(size_t));
+    memcpy(entry->slots, pending_slots, pending_count * sizeof(size_t));
+    entry->trampoline = trampoline;
+  }
   return trampoline;
 }
 

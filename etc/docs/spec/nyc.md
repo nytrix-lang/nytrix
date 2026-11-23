@@ -2937,12 +2937,25 @@ run directory under `/tmp`.
     both. The nine "redundant UACCESS disable" diagnostics are NYC-specific
     in the same way: the six objects that carry them (`net/socket`,
     `sys_ia32`, `signal_32`, `entry/common`, `futex/core`, `rseq`) are clean
-    when built with GCC. A concrete lead: `net/socket.o` has three `stac`/
-    `clac` replacement instructions with GCC and four with NYC. In
-    `move_addr_to_user` (`scoped_user_rw_access_size` with `goto efault_end`)
-    the final IR holds three separate `clac` blocks (loop exit, and one clone
-    per faulting-access error edge), where GCC merges the error exits into
-    one. objtool reaches one of the extra clones with UACCESS already off.
+    when built with GCC. Root cause found with
+    `objtool --trace=<function>`: the kernel's `scoped_user_*_access()` is
+    three nested `for (bool done = false; !done; done = true)` loops, the
+    innermost declaring the `__cleanup` variable. After the body, the
+    cleanup (`clac`) runs and control goes through `done = true` and the
+    `!done` test. GCC folds that test (the loop runs once, and the exit
+    skips the loop header); NYC leaves it, so objtool follows the infeasible
+    path that loops back into the body, reaches a second `clac` with UACCESS
+    already off ("redundant UACCESS disable"), and in `snd_pcm_sync_ptr` a
+    `return` on a path that skipped the `clac` ("return with UACCESS
+    enabled"). The runtime behaviour is correct (a counting `cleanup`
+    fixture runs the handler exactly once for normal exit, `return` and
+    `goto`). The fix is in jump threading: the latch edge carries the
+    constant `done = 1`, but the loop header holds more phis whose values are
+    used after the exit, and `thread_edge_ex` declines when a skipped block
+    defines values used later. Threading must instead forward each such phi's
+    incoming value from the latch (a new phi in the exit block). Sharing one
+    cleanup trampoline per target and scope set, which is in the tree, did
+    not change the counts.
   - An indirect call whose target is the address of a named function (how
     Linux writes `static_call()`) is folded to a direct call, as GCC does; the
     `indirect-call-folding` fixture checks the result and that no indirect

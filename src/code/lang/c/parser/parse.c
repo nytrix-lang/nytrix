@@ -229,6 +229,16 @@ typedef struct {
   bool address_taken;
 } c_label_t;
 
+#define NYC_CLEANUP_CACHE_LOCALS 4
+#define NYC_CLEANUP_CACHE_ENTRIES 16
+typedef struct {
+  int64_t target;
+  size_t count;
+  size_t locals[NYC_CLEANUP_CACHE_LOCALS];
+  size_t slots[NYC_CLEANUP_CACHE_LOCALS];
+  int trampoline;
+} c_cleanup_cache_entry_t;
+
 typedef struct c_cleanup_scope {
   const struct c_cleanup_scope *parent;
   size_t first_local;
@@ -443,6 +453,9 @@ typedef struct {
    * be safely inlined due to stack slot remapping issues with ALLOCA.
    */
   bool has_auto_arrays;
+  /* Shared cleanup trampolines for edges that leave the same scopes. */
+  c_cleanup_cache_entry_t cleanup_cache[NYC_CLEANUP_CACHE_ENTRIES];
+  size_t cleanup_cache_count;
   /*
    * Entry-block aggregate storage area. agg_base is the ALLOCA result value;
    * declarations and temporaries carve 8-byte-aligned chunks from it.

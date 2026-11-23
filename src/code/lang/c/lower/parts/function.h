@@ -158,6 +158,7 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
   parser->lvalue_count = 0;
   parser->va_save_area = -1;
   parser->has_auto_arrays = false;
+  parser->cleanup_cache_count = 0;
   /*
    * Complex values use the SysV two-SSE form. Lower the declared signature as
    * the equivalent synthetic aggregate so parameter passing, register return
