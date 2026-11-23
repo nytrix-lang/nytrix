@@ -108,6 +108,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
           (c_agg_type_t *)field->function_result_agg;
       p->last_type_function_void_params = false;
       p->last_type_function_type = true;
+      p->indirect_bool_params = 0; /* set below only for sources that know it */
       p->indirect_result_type = (c_type_t)field->function_result_type;
       p->indirect_result_agg = (c_agg_type_t *)field->function_result_agg;
       p->has_indirect_result_signature = true;
@@ -540,6 +541,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
             : stride == 4         ? (field->elem_unsigned ? C_U32 : C_I32)
                                   : (field->elem_unsigned ? C_U64 : C_I64);
         if (field->has_function_signature) {
+          p->indirect_bool_params = 0; /* set below only for sources that know it */
           p->indirect_result_type = (c_type_t)field->function_result_type;
           p->indirect_result_agg = field->function_result_agg;
           p->has_indirect_result_signature = true;
@@ -581,6 +583,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
         return false;
       p->lvalues[p->lvalue_count - 1].agg = field->agg;
       if (field->has_function_signature) {
+        p->indirect_bool_params = 0; /* set below only for sources that know it */
         p->indirect_result_type = (c_type_t)field->function_result_type;
         p->indirect_result_agg = field->function_result_agg;
         p->has_indirect_result_signature = true;
@@ -2193,9 +2196,11 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
   c_local_t *callee = find_local(p, name);
   if (callee && callee->type == C_FUNC_PTR) {
     int target = lower_local_load(p, callee);
+    p->indirect_bool_params = 0; /* set below only for sources that know it */
     p->indirect_result_type = callee->function_result_type;
     p->indirect_result_agg = callee->agg;
     p->has_indirect_result_signature = true;
+    p->indirect_bool_params = callee->function_bool_params;
     return parse_indirect_call(p, (c_value_t){target, C_FUNC_PTR, NULL});
   }
   c_global_t *global_callee = find_global(p, name);
@@ -2230,6 +2235,7 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
                                                     NYIR_EFFECT_MAY_TRAP,
                                          .scalar_class = NYIR_SCALAR_I64_RAW})
             : -1;
+    p->indirect_bool_params = 0; /* set below only for sources that know it */
     p->indirect_result_type = global_callee->function_result_type;
     p->indirect_result_agg = global_callee->agg;
     p->has_indirect_result_signature = true;
@@ -2664,13 +2670,13 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
   const c_agg_type_t *indirect_result_agg = p->indirect_result_agg;
   p->has_indirect_result_signature = false;
   p->indirect_result_agg = NULL;
+  uint64_t bool_params = has_result_signature ? p->indirect_bool_params : 0;
+  p->indirect_bool_params = 0;
+  size_t first_param_arg = 0;
   if (target.value < 0 || !c_type_is_pointer(target.type)) {
     fail(p, "indirect C call requires a function pointer");
     return (c_value_t){-1, C_BAD, NULL};
   }
-  uint64_t bool_params = p->indirect_bool_params;
-  p->indirect_bool_params = 0;
-  size_t first_param_arg = 0;
   bool empty_agg_result =
       indirect_result_type == C_AGG && indirect_result_agg &&
       indirect_result_agg->complete && indirect_result_agg->size == 0;
@@ -2702,20 +2708,16 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
     args[argc] = result_addr;
     classes[argc++] = NYIR_SCALAR_I64_RAW;
   }
+  first_param_arg = argc;
   if (!accept(p, ")")) {
     for (;;) {
       if (argc == NYIR_CALL_MAX_ARGS) {
         fail(p, "indirect call exceeds the NYIR limit of 63 arguments");
-  first_param_arg = argc;
         return (c_value_t){-1, C_BAD, NULL};
       }
       c_value_t value = parse_expr(p, 1);
       if (value.value < 0)
         return (c_value_t){-1, C_BAD, NULL};
-      args[argc] = value.value;
-      if (p->abi == NYC_ABI_I386 && c_type_is_integer(value.type) &&
-          c_type_size(p->abi, value.type) == 8)
-        wide_args |= UINT64_C(1) << argc;
       /* A _Bool parameter receives 0 or 1, not the low byte of the value. */
       size_t param_index = argc - first_param_arg;
       if (param_index < 64 && (bool_params >> param_index & 1u) &&
@@ -2726,6 +2728,10 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
           return (c_value_t){-1, C_BAD, NULL};
         value = (c_value_t){boolean, C_I64, NULL};
       }
+      args[argc] = value.value;
+      if (p->abi == NYC_ABI_I386 && c_type_is_integer(value.type) &&
+          c_type_size(p->abi, value.type) == 8)
+        wide_args |= UINT64_C(1) << argc;
       classes[argc] = c_type_is_float(value.type)
                           ? c_float_scalar_class(value.type)
                           : NYIR_SCALAR_I64_RAW;
@@ -3923,6 +3929,7 @@ static c_value_t parse_generic_selection(c_parser_t *p) {
     p->last_type_function_result_agg = selected_function->result_agg;
     p->last_type_function_void_params =
         selected_function->param_count == 0 && !selected_function->variadic;
+    p->indirect_bool_params = 0; /* set below only for sources that know it */
     p->indirect_result_type = selected_function->result;
     p->indirect_result_agg = selected_function->result_agg;
     p->has_indirect_result_signature = true;
@@ -3931,6 +3938,7 @@ static c_value_t parse_generic_selection(c_parser_t *p) {
     p->last_type_function_result_type = selected_function_result_type;
     p->last_type_function_result_agg = selected_function_result_agg;
     p->last_type_function_void_params = selected_function_void_params;
+    p->indirect_bool_params = 0; /* set below only for sources that know it */
     p->indirect_result_type = selected_function_result_type;
     p->indirect_result_agg = selected_function_result_agg;
     p->has_indirect_result_signature = true;
@@ -4611,6 +4619,7 @@ static c_value_t parse_primary(c_parser_t *p) {
       }
       if ((cast_type == C_FUNC_PTR || cast_type == C_FUNC_PTR_PTR) &&
           function_pointer_result_type != C_BAD) {
+        p->indirect_bool_params = 0; /* set below only for sources that know it */
         p->indirect_result_type = function_pointer_result_type;
         p->indirect_result_agg =
             function_pointer_result_type == C_AGG_PTR
@@ -4714,6 +4723,7 @@ static c_value_t parse_primary(c_parser_t *p) {
       }
       if (c_type_is_pointer(cast_type) && c_type_is_pointer(operand.type)) {
         if (cast_type == C_FUNC_PTR && function_pointer_result_type != C_BAD) {
+          p->indirect_bool_params = 0; /* set below only for sources that know it */
           p->indirect_result_type = function_pointer_result_type;
           p->indirect_result_agg =
               function_pointer_result_type == C_AGG_PTR ? cast_agg : NULL;
@@ -5094,9 +5104,11 @@ static c_value_t parse_primary(c_parser_t *p) {
       ++p->pos;
       ++p->pos;
       int target = lower_local_load(p, callee);
+      p->indirect_bool_params = 0; /* set below only for sources that know it */
       p->indirect_result_type = callee->function_result_type;
       p->indirect_result_agg = callee->agg;
       p->has_indirect_result_signature = true;
+      p->indirect_bool_params = callee->function_bool_params;
       return parse_indirect_call(p, (c_value_t){target, C_FUNC_PTR, NULL});
     }
     if (tok_same(tok, (ny_ctok_t){.start = "NULL", .len = 4}) && !callee &&
@@ -5985,9 +5997,11 @@ static c_value_t parse_primary(c_parser_t *p) {
        * an implicit int result.
        */
       if (local->type == C_FUNC_PTR) {
+        p->indirect_bool_params = 0; /* set below only for sources that know it */
         p->indirect_result_type = local->function_result_type;
         p->indirect_result_agg = local->agg;
         p->has_indirect_result_signature = local->function_result_type != C_BAD;
+        p->indirect_bool_params = local->function_bool_params;
         p->last_type_function_result_type = local->function_result_type;
         p->last_type_function_result_agg = local->agg;
         p->last_type_function_type = true;
@@ -6392,9 +6406,11 @@ static c_value_t parse_primary(c_parser_t *p) {
       return lower_pointer_index_rvalue(p, member);
     }
     if (local->type == C_FUNC_PTR) {
+      p->indirect_bool_params = 0; /* set below only for sources that know it */
       p->indirect_result_type = local->function_result_type;
       p->indirect_result_agg = local->agg;
       p->has_indirect_result_signature = local->function_result_type != C_BAD;
+      p->indirect_bool_params = local->function_bool_params;
       p->last_type_function_result_type = local->function_result_type;
       p->last_type_function_result_agg = local->agg;
       p->last_type_function_type = true;
@@ -7209,6 +7225,7 @@ static c_value_t parse_unary(c_parser_t *p) {
       if (address < 0)
         return (c_value_t){-1, C_BAD, NULL};
       ++p->pos;
+      p->indirect_bool_params = 0; /* set below only for sources that know it */
       p->indirect_result_type = signature->result;
       p->indirect_result_agg = signature->result_agg;
       p->has_indirect_result_signature = true;

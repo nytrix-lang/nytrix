@@ -25,3 +25,9 @@ struct bool_ops {
 };
 int st_indirect_field(struct bool_ops *o, int v) { return o->take(v); }
 int st_indirect_mix(struct bool_ops *o, int v) { return o->mix(7, v, 9L); }
+static bool local_take(bool b) { return b; }
+int st_indirect_param(bool (*cb)(bool), int v) { return cb(v); }
+int st_indirect_local(int v) {
+  bool (*cb)(bool) = local_take;
+  return cb(v);
+}

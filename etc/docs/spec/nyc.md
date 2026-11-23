@@ -2982,12 +2982,16 @@ run directory under `/tmp`.
   test fail, so it is not vacuous. The rest of P0 (false positives in the
   differential and benchmark lanes, silent exclusions, expected-failure
   fragility, duplication) is not audited.
-- Indirect-call `_Bool` arguments (2026-11-23). A call through a struct member
-  function pointer now converts a `_Bool` parameter's argument to 0 or 1: the
-  parameter list of a function-pointer declarator is scanned for plain `_Bool`
-  (or typedef-of-`_Bool`) parameters and the mask travels with the field to
-  the call. The `bool-store-paths` fixture calls through such members with
-  `0x200` and `0x300`. Function-pointer locals, globals, parameters and
-  typedef'd pointer types do not carry the mask yet and still pass the raw
-  value.
+- Indirect-call `_Bool` arguments (2026-11-23). A call through a function
+  pointer converts a `_Bool` parameter's argument to 0 or 1 when the pointer is
+  a struct member, a local variable or a function parameter: the parameter list
+  of the declarator is scanned for plain `_Bool` or `bool` parameters, and the
+  mask travels with the declaration to the call. The `bool-store-paths`
+  fixture calls through all three with `0x200`, `0x300` and `0x400`. Two traps
+  found on the way: the mask must be reset wherever a call's signature is set
+  (a `_Generic`-selected call to `kmem_cache_create` inherited the mask of an
+  earlier pointer and turned its `flags` into 1, which failed the boot), and a
+  typedef's recorded bool flag can be stale, so only `_Bool` and `bool` count.
+  Function-pointer globals and typedef'd pointer types do not carry the mask
+  yet.
 </details>

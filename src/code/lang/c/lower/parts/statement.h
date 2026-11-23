@@ -2196,6 +2196,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           break;
         c_local_t *function_pointer = find_local(p, function_pointer_name);
         function_pointer->function_result_type = type;
+        function_pointer->function_bool_params =
+            p->last_function_pointer_bool_params;
         if (accept(p, "=")) {
           c_value_t value = parse_expr(p, 1);
           bool compatible = value.type == C_FUNC_PTR ||

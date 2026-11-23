@@ -38,6 +38,7 @@ typedef struct {
   bool is_const;
   bool is_bool;
   bool pointee_bool;
+  uint64_t function_bool_params;
   bool pointee_const;
   bool is_volatile;
   bool pointee_volatile;
@@ -91,6 +92,7 @@ typedef struct {
   bool is_const;
   bool is_bool;
   bool pointee_bool;
+  uint64_t function_bool_params;
   bool has_integer_constant;
   int64_t integer_constant;
   bool pointee_const;
@@ -5458,7 +5460,9 @@ static uint64_t function_pointer_bool_mask(c_parser_t *p, size_t start,
       disqualified = true;
     else if (tok_is(p, at, "_Bool"))
       is_bool = true;
-    else if (tok_ident(p->tokens[at])) {
+    else if (tok_is(p, at, "bool")) {
+      /* Only the standard spelling: other typedefs record a bool flag that
+         can be stale, and a wrong bit would turn a pointer into 0 or 1. */
       const c_typedef_t *alias = find_typedef(p, p->tokens[at]);
       if (alias && alias->is_bool && !alias->is_array)
         is_bool = true;
@@ -16358,6 +16362,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
           break;
         }
         c_type_t type;
+        uint64_t param_function_bool_params = 0;
         if (!parse_type(p, &type, true))
           goto error;
         bool is_bool_param = p->last_type_bool;
@@ -16407,6 +16412,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
           type = nested_function_pointers == 2 ? C_FUNC_PTR_PTR : C_OPAQUE_PTR;
         } else if (parse_function_pointer_declarator(p, &param_name)) {
           type = C_FUNC_PTR;
+          param_function_bool_params = p->last_function_pointer_bool_params;
         } else {
           unsigned decl_ptr_depth = 0;
           if (parse_parenthesized_pointer_array_declarator(p, &param_name,
@@ -16567,6 +16573,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             .is_const = is_const,
             .is_bool = is_bool_param && !c_type_is_pointer(type),
             .pointee_bool = is_bool_param && type == C_CHAR_PTR,
+            .function_bool_params = param_function_bool_params,
             .pointee_const = c_type_is_pointer(type) && p->last_type_const,
             .is_volatile = is_volatile,
             .pointee_volatile = pointee_volatile,
