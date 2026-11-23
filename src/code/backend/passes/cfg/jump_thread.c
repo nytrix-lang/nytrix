@@ -252,6 +252,51 @@ static int jt_strip_local_copies(const nyr_func_t *f, const nyr_cfg_t *cfg,
   return v;
 }
 
+/*
+ * Value of `v` along the edge from `pred` into `to`, when a conditional
+ * branch on `v` decides that edge: 0 when the edge is taken only for zero, 1
+ * when only for nonzero, -1 when unknown. Walks up single-predecessor chains
+ * (a block that only holds side effects, such as an inline asm, between the
+ * decision and the join), at most four blocks.
+ */
+static int jt_branch_fact(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                          const int *defs, size_t pred, size_t to, int v) {
+  for (unsigned hop = 0; hop < 5; ++hop) {
+    size_t start = cfg->block_start[pred];
+    size_t end = nyr_block_last_non_nop(f, cfg, pred);
+    if (end > start) {
+      size_t last = end - 1;
+      size_t br_if = SIZE_MAX;
+      bool trailing_br_to_target = false;
+      if (f->data[last].op == NYIR_BR_IF) {
+        br_if = last;
+      } else if (f->data[last].op == NYIR_BR && last > start &&
+                 f->data[last - 1].op == NYIR_BR_IF) {
+        br_if = last - 1;
+        trailing_br_to_target =
+            block_for_label(cfg, f->data[last].imm) == (int)to;
+      }
+      if (br_if != SIZE_MAX &&
+          jt_strip_local_copies(f, cfg, defs, pred, f->data[br_if].a) == v) {
+        bool taken = block_for_label(cfg, f->data[br_if].imm) == (int)to;
+        bool falls = trailing_br_to_target ||
+                     (f->data[last].op == NYIR_BR_IF && to == pred + 1);
+        if (taken && !falls)
+          return 1;
+        if (falls && !taken)
+          return 0;
+        return -1;
+      }
+    }
+    size_t pc = cfg->pred_offsets[pred + 1] - cfg->pred_offsets[pred];
+    if (pc != 1)
+      return -1;
+    to = pred;
+    pred = cfg->pred_blocks[cfg->pred_offsets[pred]];
+  }
+  return -1;
+}
+
 static bool jt_block_is_phi_only_bridge(const nyr_func_t *f,
                                         const nyr_cfg_t *cfg, size_t block) {
   if (block >= cfg->block_count)
@@ -692,6 +737,10 @@ bool nyr_jump_thread(nyr_func_t *f) {
       bool direct_constant = false;
       jt_cond_term_t terms[8];
       size_t term_count = 0;
+      /* `v == const` decided by a dominating branch on v itself. */
+      int implied_value = -1;
+      nyr_cmp_t implied_cmp = NYIR_CMP_EQ;
+      int64_t implied_const = 0;
       if (pure_tree) {
         jt_collect_cond_terms(f, &cfg, defs, known, values, through, term->a,
                               -1, 0, terms, &term_count, 8);
@@ -741,6 +790,12 @@ bool nyr_jump_thread(nyr_func_t *f) {
               .phi_on_right = true,
               .forced_polarity = -1,
           };
+        } else if (kb && !ka && la >= 0 &&
+                   (cmp->cmp == NYIR_CMP_EQ || cmp->cmp == NYIR_CMP_NE) &&
+                   cb == 0) {
+          implied_value = la;
+          implied_cmp = cmp->cmp;
+          implied_const = cb;
         } else {
           continue;
         }
@@ -759,6 +814,27 @@ bool nyr_jump_thread(nyr_func_t *f) {
                   "accept edge b%zu -> b%zu -> b%zu: predecessor-specific "
                   "constant %lld selects target",
                   pred, through, target, (long long)cond_value);
+            threaded = true;
+          }
+          continue;
+        }
+        if (implied_value >= 0) {
+          int fact = jt_branch_fact(f, &cfg, defs, pred, through, implied_value);
+          if (fact < 0)
+            continue;
+          int64_t path_value =
+              fact == 0 ? jt_eval_cmp(implied_cmp, 0, implied_const)
+                        : (implied_cmp == NYIR_CMP_NE ? 1 : 0);
+          size_t target = jt_pick_target(f, &cfg, through, term_i, path_value);
+          if (target != SIZE_MAX && target != through && target != pred &&
+              thread_edge_ex(f, &cfg, defs, pred, pred, SIZE_MAX, through,
+                             target)) {
+            if (jump_thread_trace_enabled())
+              ny_dbg_heuristic_event(
+                  "JUMP_THREAD",
+                  "accept edge b%zu -> b%zu -> b%zu: dominating branch "
+                  "fixes the tested value to %s",
+                  pred, through, target, fact ? "nonzero" : "zero");
             threaded = true;
           }
           continue;

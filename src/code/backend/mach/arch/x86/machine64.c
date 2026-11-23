@@ -84,6 +84,8 @@ typedef struct {
   int frame_bytes;
   int max_local_slot;
   int alloca_offset;
+  int alloca_base; /* frame_bytes when the alloca region was sized */
+  int *alloca_off; /* per-instruction frame offset for shared allocas */
   bool value_f64[NY_X64_NIR_MAX_SLOTS];
   bool value_f32[NY_X64_NIR_MAX_SLOTS];
   bool value_i64v2[NY_X64_NIR_MAX_SLOTS];
@@ -219,6 +221,209 @@ static void ny_x64_nir_root_sift(size_t *order, size_t start, size_t count,
   }
 }
 
+/*
+ * Exact per-instruction occupancy of value homes. A value occupies position i
+ * when it is read at i, defined at i, or live after i. Backward dataflow over
+ * the basic blocks gives live-out sets; stack homes are then shared between
+ * values whose occupancy bitsets are disjoint, which is much tighter than a
+ * first-to-last-use interval. Returns false (leaving the interval scheme in
+ * charge) for PHI input, address-taken labels, or very large functions.
+ * `bits` receives tracked*words words.
+ */
+static bool ny_x64_nir_value_occupancy(const nyr_func_t *f, int tracked,
+                                       const size_t *hull_last, uint64_t **bits,
+                                       size_t *words_out) {
+  size_t len = f->len;
+  if (!len || tracked <= 0)
+    return false;
+  size_t V = (size_t)tracked;
+  size_t words = (len + 63) / 64;
+  size_t vwords = (V + 63) / 64;
+  if (V * words > (size_t)16 * 1024 * 1024 || V * len > (size_t)400 * 1000 * 1000)
+    return false;
+  int64_t max_label = -1;
+  for (size_t i = 0; i < len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_PHI ||
+        (in->op == NYIR_LABEL && (in->flags & NYIR_INST_F_LABEL_ADDRESS_TAKEN)))
+      return false;
+    if (in->op == NYIR_LABEL && in->imm > max_label)
+      max_label = in->imm;
+  }
+  if (max_label < 0 || max_label > (int64_t)len * 4)
+    return false;
+  size_t *block_of = malloc(len * sizeof(*block_of));
+  size_t *label_block = malloc(((size_t)max_label + 1) * sizeof(*label_block));
+  size_t *block_start = malloc((len + 1) * sizeof(*block_start));
+  if (!block_of || !label_block || !block_start) {
+    free(block_of);
+    free(label_block);
+    free(block_start);
+    return false;
+  }
+  size_t nb = 0;
+  bool new_block = true;
+  for (size_t i = 0; i < len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_LABEL)
+      new_block = new_block || true;
+    if (in->op == NYIR_LABEL && (i == 0 || f->data[i - 1].op != NYIR_LABEL))
+      new_block = true;
+    if (new_block) {
+      block_start[nb++] = i;
+      new_block = false;
+    }
+    block_of[i] = nb - 1;
+    if (in->op == NYIR_LABEL)
+      label_block[in->imm] = nb - 1;
+    bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                    (in->imm == -14 || in->imm == -82 || in->imm == -83);
+    if (in->op == NYIR_BR || in->op == NYIR_BR_IF || in->op == NYIR_RET ||
+        asm_goto)
+      new_block = true;
+  }
+  block_start[nb] = len;
+  uint64_t *use = calloc(nb * vwords, sizeof(uint64_t));
+  uint64_t *def = calloc(nb * vwords, sizeof(uint64_t));
+  uint64_t *lin = calloc(nb * vwords, sizeof(uint64_t));
+  uint64_t *lout = calloc(nb * vwords, sizeof(uint64_t));
+  uint64_t *out_bits = calloc(V * words, sizeof(uint64_t));
+  uint64_t *cur = calloc(vwords, sizeof(uint64_t));
+  bool ok = use && def && lin && lout && out_bits && cur;
+  if (ok) {
+#define NY_BIT(arr, row, w, v) ((arr)[(row) * (w) + (v) / 64] >> ((v) % 64) & 1u)
+#define NY_SET(arr, row, w, v) ((arr)[(row) * (w) + (v) / 64] |= (uint64_t)1 << ((v) % 64))
+    for (size_t b = 0; b < nb; ++b)
+      for (size_t i = block_start[b]; i < block_start[b + 1]; ++i) {
+        const nyr_inst_t *in = &f->data[i];
+        bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                        (in->imm == -14 || in->imm == -82 || in->imm == -83);
+        int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+        for (size_t k = 0; k < 6; ++k) {
+          if (asm_goto && k == 2)
+            continue;
+          if (ops[k] >= 0 && ops[k] < tracked && !NY_BIT(def, b, vwords, (size_t)ops[k]))
+            NY_SET(use, b, vwords, (size_t)ops[k]);
+        }
+        for (size_t k = 0; k < in->extra_args_len; ++k) {
+          int a = in->extra_args[k];
+          if (a >= 0 && a < tracked && !NY_BIT(def, b, vwords, (size_t)a))
+            NY_SET(use, b, vwords, (size_t)a);
+        }
+        if (in->dst >= 0 && in->dst < tracked)
+          NY_SET(def, b, vwords, (size_t)in->dst);
+      }
+    bool changed = true;
+    for (int round = 0; changed && round < 200; ++round) {
+      changed = false;
+      for (size_t bi = nb; bi-- > 0;) {
+        const nyr_inst_t *last = &f->data[block_start[bi + 1] - 1];
+        size_t succ[2];
+        size_t ns = 0;
+        bool asm_goto = last->op == NYIR_INLINE_ASM &&
+                        (last->imm == -14 || last->imm == -82 || last->imm == -83);
+        if (last->op == NYIR_BR) {
+          if (last->imm >= 0 && last->imm <= max_label)
+            succ[ns++] = label_block[last->imm];
+        } else if (last->op == NYIR_BR_IF || asm_goto) {
+          int64_t t = asm_goto ? last->c : last->imm;
+          if (t >= 0 && t <= max_label)
+            succ[ns++] = label_block[t];
+          if (bi + 1 < nb)
+            succ[ns++] = bi + 1;
+        } else if (last->op != NYIR_RET && bi + 1 < nb) {
+          succ[ns++] = bi + 1;
+        }
+        for (size_t w = 0; w < vwords; ++w) {
+          uint64_t o = 0;
+          for (size_t k = 0; k < ns; ++k)
+            o |= lin[succ[k] * vwords + w];
+          uint64_t in_w = use[bi * vwords + w] | (o & ~def[bi * vwords + w]);
+          if (o != lout[bi * vwords + w] || in_w != lin[bi * vwords + w])
+            changed = true;
+          lout[bi * vwords + w] = o;
+          lin[bi * vwords + w] = in_w;
+        }
+      }
+    }
+    if (changed)
+      ok = false; /* did not converge */
+  }
+  if (ok) {
+    for (size_t b = 0; b < nb; ++b) {
+      memcpy(cur, lout + b * vwords, vwords * sizeof(uint64_t));
+      for (size_t i = block_start[b + 1]; i-- > block_start[b];) {
+        const nyr_inst_t *in = &f->data[i];
+        bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                        (in->imm == -14 || in->imm == -82 || in->imm == -83);
+        /* occupancy(i) = live-after(i) + defs(i) + uses(i) */
+        for (size_t w = 0; w < vwords; ++w) {
+          uint64_t m = cur[w];
+          while (m) {
+            size_t v = w * 64 + (size_t)__builtin_ctzll(m);
+            m &= m - 1;
+            out_bits[v * words + i / 64] |= (uint64_t)1 << (i % 64);
+          }
+        }
+        if (in->dst >= 0 && in->dst < tracked) {
+          size_t v = (size_t)in->dst;
+          out_bits[v * words + i / 64] |= (uint64_t)1 << (i % 64);
+          cur[v / 64] &= ~((uint64_t)1 << (v % 64));
+        }
+        int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+        for (size_t k = 0; k < 6; ++k) {
+          if (asm_goto && k == 2)
+            continue;
+          if (ops[k] >= 0 && ops[k] < tracked) {
+            size_t v = (size_t)ops[k];
+            out_bits[v * words + i / 64] |= (uint64_t)1 << (i % 64);
+            cur[v / 64] |= (uint64_t)1 << (v % 64);
+          }
+        }
+        for (size_t k = 0; k < in->extra_args_len; ++k) {
+          int a = in->extra_args[k];
+          if (a >= 0 && a < tracked) {
+            size_t v = (size_t)a;
+            out_bits[v * words + i / 64] |= (uint64_t)1 << (i % 64);
+            cur[v / 64] |= (uint64_t)1 << (v % 64);
+          }
+        }
+      }
+    }
+    /* Fusion keeps some values live past their IR uses; honor those. */
+    for (size_t v = 0; v < V; ++v) {
+      size_t top = 0;
+      bool any = false;
+      for (size_t w = words; w-- > 0;)
+        if (out_bits[v * words + w]) {
+          top = w * 64 + 63 - (size_t)__builtin_clzll(out_bits[v * words + w]);
+          any = true;
+          break;
+        }
+      if (any && hull_last[v] != SIZE_MAX && hull_last[v] > top && hull_last[v] < len)
+        for (size_t i = top + 1; i <= hull_last[v]; ++i)
+          out_bits[v * words + i / 64] |= (uint64_t)1 << (i % 64);
+    }
+#undef NY_BIT
+#undef NY_SET
+  }
+  free(block_of);
+  free(label_block);
+  free(block_start);
+  free(use);
+  free(def);
+  free(lin);
+  free(lout);
+  free(cur);
+  if (!ok) {
+    free(out_bits);
+    return false;
+  }
+  *bits = out_bits;
+  *words_out = words;
+  return true;
+}
+
 static void ny_x64_nir_sort_roots(size_t *order, size_t count,
                                   const size_t *first) {
   for (size_t start = count / 2; start > 0;)
@@ -230,6 +435,28 @@ static void ny_x64_nir_sort_roots(size_t *order, size_t count,
     order[end] = tmp;
     ny_x64_nir_root_sift(order, 0, end, first);
   }
+}
+
+/* Parses the `nyc_slots=a,b,c` suffix the C frontend attaches to templates
+   that store results into C locals. Returns the number of slots found. */
+static size_t ny_x64_asm_slot_list(const char *symbol, int *slots,
+                                   size_t capacity) {
+  size_t count = 0;
+  const char *at = symbol ? strstr(symbol, "nyc_slots=") : NULL;
+  if (!at)
+    return 0;
+  at += sizeof("nyc_slots=") - 1;
+  while (count < capacity) {
+    char *end = NULL;
+    long value = strtol(at, &end, 10);
+    if (end == at || value < 0 || value > INT_MAX)
+      break;
+    slots[count++] = (int)value;
+    if (*end != ',')
+      break;
+    at = end + 1;
+  }
+  return count;
 }
 
 static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
@@ -288,6 +515,13 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
       max_local = (int)in->imm;
     if (in->op == NYIR_INLINE_ASM && in->imm > 0 && in->imm - 1 > max_local)
       max_local = (int)(in->imm - 1);
+    if (in->op == NYIR_INLINE_ASM) {
+      int slots[8];
+      size_t count = ny_x64_asm_slot_list(in->symbol, slots, 8);
+      for (size_t k = 0; k < count; ++k)
+        if (slots[k] > max_local)
+          max_local = slots[k];
+    }
     if (in->op == NYIR_INLINE_ASM && in->imm == NY_X64_ASM_GET_USER) {
       int return_slot = -1;
       int value_slot = -1;
@@ -860,6 +1094,112 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
       if (in->op == NYIR_BR || in->op == NYIR_BR_IF || in->op == NYIR_RET)
         ++current_block;
     }
+    /*
+     * Single-definition values that cross blocks need not be pinned for the
+     * whole function. The definition dominates every use (a use textually
+     * before it pins the value below), so the live range is the interval from
+     * the definition to the last use, extended to the end of every loop that
+     * contains that use while the definition lies outside it. Such values
+     * share the sentinel block SIZE_MAX - 2 and are colored by that interval.
+     */
+    bool *interval_ok = calloc((size_t)tracked_val_count + 1, sizeof(bool));
+    {
+      size_t len = c->nyir->len;
+      int64_t max_label = -1;
+      for (size_t i = 0; i < len; ++i)
+        if (c->nyir->data[i].op == NYIR_LABEL && c->nyir->data[i].imm > max_label)
+          max_label = c->nyir->data[i].imm;
+      size_t *label_at = NULL;
+      size_t *loop_head = NULL, *loop_tail = NULL;
+      size_t loop_count = 0;
+      bool *phi_pinned = calloc((size_t)tracked_val_count + 1, sizeof(bool));
+      bool ok = phi_pinned && max_label >= 0 && max_label < (int64_t)(len + 1) * 4;
+      if (ok) {
+        label_at = malloc(((size_t)max_label + 1) * sizeof(*label_at));
+        loop_head = malloc((len + 1) * sizeof(*loop_head));
+        loop_tail = malloc((len + 1) * sizeof(*loop_tail));
+        ok = label_at && loop_head && loop_tail;
+      }
+      if (ok) {
+        for (size_t l = 0; l <= (size_t)max_label; ++l)
+          label_at[l] = SIZE_MAX;
+        for (size_t i = 0; i < len; ++i)
+          if (c->nyir->data[i].op == NYIR_LABEL)
+            label_at[c->nyir->data[i].imm] = i;
+        for (size_t i = 0; i < len; ++i) {
+          const nyr_inst_t *in = &c->nyir->data[i];
+          if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm >= 0 &&
+              in->imm <= max_label && label_at[in->imm] != SIZE_MAX &&
+              label_at[in->imm] <= i) {
+            loop_head[loop_count] = label_at[in->imm];
+            loop_tail[loop_count] = i;
+            ++loop_count;
+          }
+          for (size_t a = 0; a < in->phi_incoming_len; ++a) {
+            int value = in->phi_incoming[a].value;
+            if (value >= 0 && value < tracked_val_count)
+              phi_pinned[value] = true;
+          }
+        }
+        for (int v = 0; v < tracked_val_count && interval_ok; ++v) {
+          if (home_block[v] != SIZE_MAX - 1 || phi_pinned[v] ||
+              home_first_def[v] == SIZE_MAX)
+            continue;
+          if (c->def_count[v] != 1 ||
+              (home_first_use[v] != SIZE_MAX &&
+               home_first_use[v] < home_first_def[v])) {
+            /*
+             * Several definitions (copies from PHI elimination) or a
+             * textual use before the first definition: the value may be
+             * carried around a loop, so its interval covers every loop it
+             * touches in full.
+             */
+            size_t lo = home_first_def[v];
+            if (home_first_use[v] != SIZE_MAX && home_first_use[v] < lo)
+              lo = home_first_use[v];
+            size_t hi = home_last_use[v];
+            if (home_last_def[v] != SIZE_MAX && home_last_def[v] > hi)
+              hi = home_last_def[v];
+            bool grew = true;
+            while (grew) {
+              grew = false;
+              for (size_t k = 0; k < loop_count; ++k)
+                if (loop_head[k] <= hi && loop_tail[k] >= lo &&
+                    (loop_head[k] < lo || loop_tail[k] > hi)) {
+                  if (loop_head[k] < lo)
+                    lo = loop_head[k];
+                  if (loop_tail[k] > hi)
+                    hi = loop_tail[k];
+                  grew = true;
+                }
+            }
+            home_first_def[v] = lo;
+            home_last_use[v] = hi;
+            home_block[v] = SIZE_MAX - 2;
+            interval_ok[v] = true;
+            continue;
+          }
+          size_t last = home_last_use[v];
+          bool grew = true;
+          while (grew) {
+            grew = false;
+            for (size_t k = 0; k < loop_count; ++k)
+              if (home_first_def[v] < loop_head[k] && last >= loop_head[k] &&
+                  last < loop_tail[k]) {
+                last = loop_tail[k];
+                grew = true;
+              }
+          }
+          home_last_use[v] = last;
+          home_block[v] = SIZE_MAX - 2;
+          interval_ok[v] = true;
+        }
+      }
+      free(phi_pinned);
+      free(label_at);
+      free(loop_head);
+      free(loop_tail);
+    }
     for (int v = 0; v < tracked_val_count; ++v) {
       int root = c->value_home_root[v];
       if (root < 0 || root >= max_val)
@@ -871,9 +1211,10 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         root_block[r] = home_block[v];
       else if (root_block[r] != home_block[v])
         root_pinned[r] = true;
-      if (c->def_count[v] != 1 || home_first_def[v] == SIZE_MAX ||
-          (home_first_use[v] != SIZE_MAX &&
-           home_first_use[v] < home_first_def[v]))
+      if (!(interval_ok && interval_ok[v]) &&
+          (c->def_count[v] != 1 || home_first_def[v] == SIZE_MAX ||
+           (home_first_use[v] != SIZE_MAX &&
+            home_first_use[v] < home_first_def[v])))
         root_pinned[r] = true;
       size_t first = home_first_def[v];
       if (first == SIZE_MAX)
@@ -902,6 +1243,36 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
     size_t scalar_color_count = 0;
     size_t vector_color_count = 0;
     /*
+     * Exact occupancy when available: root bitsets (members of a COPY chain
+     * merge) and one bitset per color. Falls back to intervals otherwise.
+     */
+    uint64_t *occupancy = NULL;
+    uint64_t *color_bits = NULL;
+    size_t occ_words = 0;
+    if (!getenv("NYC_NO_EXACT_HOMES") &&
+        ny_x64_nir_value_occupancy(c->nyir, tracked_val_count, home_last_use,
+                                   &occupancy, &occ_words)) {
+      for (int v = 0; v < tracked_val_count; ++v) {
+        int root = c->value_home_root[v];
+        if (root < 0 || root >= tracked_val_count || root == v)
+          continue;
+        for (size_t w = 0; w < occ_words; ++w)
+          occupancy[(size_t)root * occ_words + w] |=
+              occupancy[(size_t)v * occ_words + w];
+      }
+      for (size_t i = 0; i < root_count; ++i) {
+        size_t rr = root_order[i];
+        if (root_pinned[rr])
+          memset(occupancy + rr * occ_words, 0xff,
+                 occ_words * sizeof(uint64_t));
+      }
+      color_bits = calloc((root_count + 1) * occ_words, sizeof(uint64_t));
+      if (!color_bits) {
+        free(occupancy);
+        occupancy = NULL;
+      }
+    }
+    /*
      * Scalar values need one stack word. Values marked for vector spilling
      * retain a four-word home. Color the two widths independently, then pack
      * the vector homes after the scalar region so no scalar home overlaps a
@@ -919,12 +1290,31 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
           continue;
         size_t color_base = vector_home_pass ? scalar_color_count : 0;
         size_t color = 0;
-        while (color < *color_count &&
-               color_last[color_base + color] >= root_first[root])
-          ++color;
+        if (occupancy) {
+          while (color < *color_count) {
+            const uint64_t *cb = color_bits + (color_base + color) * occ_words;
+            const uint64_t *rb = occupancy + root * occ_words;
+            bool clash = false;
+            for (size_t w = 0; w < occ_words && !clash; ++w)
+              clash = (cb[w] & rb[w]) != 0;
+            if (!clash)
+              break;
+            ++color;
+          }
+        } else {
+          while (color < *color_count &&
+                 color_last[color_base + color] >= root_first[root])
+            ++color;
+        }
         if (color == *color_count)
           ++*color_count;
         color_last[color_base + color] = root_last[root];
+        if (occupancy) {
+          uint64_t *cb = color_bits + (color_base + color) * occ_words;
+          const uint64_t *rb = occupancy + root * occ_words;
+          for (size_t w = 0; w < occ_words; ++w)
+            cb[w] |= rb[w];
+        }
         /*
          * ny_x64_nir_slot maps a vector base to the four words ending at
          * base+4. Leave three index words between scalar and vector colors
@@ -935,14 +1325,28 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         c->value_home_index[root] = (int)word_offset;
       }
     }
+    free(occupancy);
+    free(color_bits);
     size_t total_words = scalar_color_count + (vector_color_count ? 3 : 0) +
                          vector_color_count * 4;
+    if (getenv("NYC_FRAME_STATS")) {
+      size_t pinned = 0, blocklocal = 0;
+      for (size_t i = 0; i < root_count; ++i) {
+        size_t rr = root_order[i];
+        pinned += root_pinned[rr];
+        blocklocal += !root_pinned[rr];
+      }
+      fprintf(stderr, "FRAMESTAT %s locals=%d roots=%zu pinned=%zu colors=%zu len=%zu\n",
+              c->epilogue_label, c->max_local_slot, root_count, pinned, scalar_color_count,
+              c->nyir->len);
+    }
     c->value_home_count = (int)total_words;
     for (int v = 0; v < tracked_val_count; ++v) {
       int root = c->value_home_root[v];
       if (root >= 0 && root < max_val)
         c->value_home_index[v] = c->value_home_index[root];
     }
+    free(interval_ok);
   }
   free(scratch);
   if (!home_reuse_ready) {
@@ -1034,23 +1438,166 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
    */
   int alloca_bytes = 0;
   if (!c->is_leaf) {
-    for (size_t i = 0; i < c->nyir->len; ++i) {
-      const nyr_inst_t *in = &c->nyir->data[i];
-      if (in->op == NYIR_ALLOCA && in->imm > 0) {
-        int64_t sz = in->imm;
-        sz = (sz + 15) & ~15;
-        if (sz > INT_MAX - alloca_bytes)
-          sz = INT_MAX - alloca_bytes;
-        alloca_bytes += (int)sz;
+    size_t len = c->nyir->len;
+    size_t n_vals = c->nyir->next_value > 0 ? (size_t)c->nyir->next_value : 0;
+    size_t *first_ref = calloc(len ? len : 1, sizeof(size_t));
+    size_t *last_ref = calloc(len ? len : 1, sizeof(size_t));
+    bool *pinned = calloc(len ? len : 1, sizeof(bool));
+    int *owner = n_vals ? malloc(n_vals * sizeof(int)) : NULL; /* alloca idx */
+    c->alloca_off = calloc(len ? len : 1, sizeof(int));
+    {
+      /* One array per thread stays reachable until the next function. */
+      static _Thread_local int *cache;
+      free(cache);
+      cache = c->alloca_off;
+    }
+    bool share = first_ref && last_ref && pinned && c->alloca_off &&
+                 (owner || !n_vals);
+    for (size_t v = 0; share && v < n_vals; ++v)
+      owner[v] = -1;
+    if (share) {
+      for (size_t i = 0; i < len; ++i) {
+        first_ref[i] = SIZE_MAX;
+        const nyr_inst_t *in = &c->nyir->data[i];
+        if (in->op == NYIR_ALLOCA && in->imm > 0 && in->dst >= 0 &&
+            (size_t)in->dst < n_vals) {
+          if (in->flags & NYIR_INST_F_SCOPE_LOCAL)
+            owner[in->dst] = (int)i;
+          else
+            pinned[i] = true;
+        }
+      }
+      /*
+       * Propagate pointers derived from a scope-local alloca (address
+       * arithmetic, copies, call results) and record where they are touched.
+       * A derived pointer that is stored to memory or merged through a PHI
+       * keeps the alloca private for the whole function.
+       */
+      for (int round = 0; round < 3; ++round)
+        for (size_t i = 0; i < len; ++i) {
+          const nyr_inst_t *in = &c->nyir->data[i];
+          if (in->op == NYIR_ALLOCA)
+            continue;
+          int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+          int touched = -1;
+          for (size_t k = 0; k < 6; ++k)
+            if (ops[k] >= 0 && (size_t)ops[k] < n_vals && owner[ops[k]] >= 0) {
+              int al = owner[ops[k]];
+              if (first_ref[al] == SIZE_MAX || i < first_ref[al])
+                first_ref[al] = i;
+              if (i > last_ref[al] || first_ref[al] == i)
+                last_ref[al] = i > last_ref[al] ? i : last_ref[al];
+              if (in->op == NYIR_PHI || (in->op == NYIR_STORE_I64 && k == 2) ||
+                  in->op == NYIR_RET)
+                pinned[al] = true;
+              touched = al;
+            }
+          for (size_t k = 0; k < in->extra_args_len; ++k) {
+            int a = in->extra_args[k];
+            if (a >= 0 && (size_t)a < n_vals && owner[a] >= 0) {
+              int al = owner[a];
+              if (first_ref[al] == SIZE_MAX || i < first_ref[al])
+                first_ref[al] = i;
+              if (i > last_ref[al])
+                last_ref[al] = i;
+              touched = al;
+            }
+          }
+          for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+            int a = in->phi_incoming[k].value;
+            if (a >= 0 && (size_t)a < n_vals && owner[a] >= 0)
+              pinned[owner[a]] = true;
+          }
+          if (touched >= 0 && in->dst >= 0 && (size_t)in->dst < n_vals &&
+              owner[in->dst] < 0 && in->op != NYIR_LOAD_I64 &&
+              in->op != NYIR_CMP_I64)
+            owner[in->dst] = touched;
+          if (in->dst >= 0 && (size_t)in->dst < n_vals &&
+              owner[in->dst] >= 0 && touched < 0)
+            ; /* alloca value itself defined here */
+        }
+    }
+    if (getenv("NYC_FRAME_STATS") && share)
+      for (size_t i = 0; i < len; ++i)
+        if (c->nyir->data[i].op == NYIR_ALLOCA)
+          fprintf(stderr, "ALLOCA %s #%lld scope=%d pinned=%d first=%zd last=%zu\n",
+                  c->epilogue_label, (long long)c->nyir->data[i].imm,
+                  !!(c->nyir->data[i].flags & NYIR_INST_F_SCOPE_LOCAL),
+                  (int)pinned[i], first_ref[i] == SIZE_MAX ? (ssize_t)-1 : (ssize_t)first_ref[i], last_ref[i]);
+    /* bins: offsets handed out in the same downward order as before. */
+    size_t cap = len ? len : 1;
+    int *bin_size = calloc(cap, sizeof(int));
+    size_t *bin_end = calloc(cap, sizeof(size_t));
+    int *bin_off = calloc(cap, sizeof(int));
+    size_t bins = 0;
+    if (bin_size && bin_end && bin_off) {
+      /* order candidates by first reference */
+      for (size_t pass = 0; pass < 2; ++pass)
+        for (size_t i = 0; i < len; ++i) {
+          const nyr_inst_t *in = &c->nyir->data[i];
+          if (in->op != NYIR_ALLOCA || in->imm <= 0)
+            continue;
+          int64_t sz64 = (in->imm + 15) & ~(int64_t)15;
+          if (sz64 > INT_MAX / 2)
+            sz64 = INT_MAX / 2;
+          int sz = (int)sz64;
+          bool sharable = share && !pinned[i] && first_ref[i] != SIZE_MAX;
+          if ((pass == 0) == sharable)
+            continue; /* pass 0 places private allocas, pass 1 shared ones */
+          size_t chosen = SIZE_MAX;
+          if (sharable)
+            for (size_t b = 0; b < bins; ++b)
+              if (bin_size[b] == sz && bin_end[b] != SIZE_MAX &&
+                  bin_end[b] < first_ref[i]) {
+                chosen = b;
+                break;
+              }
+          if (chosen == SIZE_MAX) {
+            chosen = bins++;
+            bin_size[chosen] = sz;
+            bin_off[chosen] = 0;
+            if (sz > INT_MAX - alloca_bytes)
+              sz = INT_MAX - alloca_bytes;
+            alloca_bytes += sz;
+            bin_off[chosen] = alloca_bytes; /* distance below the frame top */
+          }
+          bin_end[chosen] = sharable ? last_ref[i] : SIZE_MAX;
+          c->alloca_off[i] = bin_off[chosen];
+        }
+    }
+    if (!(bin_size && bin_end && bin_off)) {
+      free(c->alloca_off);
+      c->alloca_off = NULL;
+      alloca_bytes = 0;
+      for (size_t i = 0; i < len; ++i) {
+        const nyr_inst_t *in = &c->nyir->data[i];
+        if (in->op == NYIR_ALLOCA && in->imm > 0) {
+          int64_t sz = (in->imm + 15) & ~(int64_t)15;
+          if (sz > INT_MAX - alloca_bytes)
+            sz = INT_MAX - alloca_bytes;
+          alloca_bytes += (int)sz;
+        }
       }
     }
+    free(bin_size);
+    free(bin_end);
+    free(bin_off);
+    free(first_ref);
+    free(last_ref);
+    free(pinned);
+    free(owner);
   }
+  if (getenv("NYC_FRAME_STATS"))
+    fprintf(stderr, "FRAMEPARTS %s frame_slots=%d homes=%d deepest=%d alloca=%d guard=%d\n",
+            c->epilogue_label, c->frame_slots, c->value_home_count, deepest,
+            alloca_bytes, c->stack_guard);
   int raw = deepest + alloca_bytes;
   /*
    * Keep the frame size 16-byte aligned for nested calls.
    */
   c->frame_bytes = (raw + 15) & ~15;
   c->alloca_offset = c->frame_bytes;
+  c->alloca_base = c->frame_bytes;
 }
 
 static void ny_x64_nir_slot_str(ny_x64_nir_ctx_t *c, int slot, char *buf,
@@ -1125,6 +1672,15 @@ static void ny_x64_nir_assign_loop_regs(ny_x64_nir_ctx_t *c) {
     if (in->op == NYIR_INLINE_ASM && in->imm > 0 &&
         in->imm - 1 < c->max_local_slot)
       address_taken[in->imm - 1] = true;
+    if (in->op == NYIR_INLINE_ASM) {
+      /* Helper-style templates write their result slots outside normal
+         stores, so those slots must stay in memory. */
+      int slots[8];
+      size_t count = ny_x64_asm_slot_list(in->symbol, slots, 8);
+      for (size_t k = 0; k < count; ++k)
+        if (slots[k] < c->max_local_slot)
+          address_taken[slots[k]] = true;
+    }
     if (in->op == NYIR_INLINE_ASM && in->imm == NY_X64_ASM_GET_USER) {
       int return_slot = -1;
       int value_slot = -1;
@@ -2735,6 +3291,11 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       sz = (sz + 15) & ~15;
       int off = c->alloca_offset;
       c->alloca_offset -= (int)sz;
+      if (c->alloca_off) {
+        size_t at = (size_t)(in - c->nyir->data);
+        if (c->alloca_off[at] > 0)
+          off = c->alloca_base - c->alloca_off[at] + (int)sz;
+      }
       return nyr_printf(c->w, "\tleaq\t-%d(%%rbp), %%rax\n", off) &&
              ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     }
@@ -4066,6 +4627,23 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
             NY_NATIVE_RUNTIME_OP_LINUX_SYSCALL &&
         c->target->syscalls.available)
       return nyr_x64_emit_linux_syscall(c, in, arg_vals, argc);
+    /*
+     * Linux's clear-user helper keeps its length in %rcx and returns the
+     * residue there. It is called directly (not through a C-ABI thunk) so the
+     * kernel's objtool allowlist for UACCESS-enabled calls applies.
+     */
+    if (!indirect && argc == 2 && in->symbol &&
+        strcmp(in->symbol, "rep_stos_alternative") == 0) {
+      c->rax_cached_slot = -1;
+      if (!ny_x64_nir_load_value(c, arg_vals[0]) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rdi\n") ||
+          !ny_x64_nir_load_value(c, arg_vals[1]) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rcx\n\txorl\t%eax, %eax\n") ||
+          !nyr_printf(c->w, "\tcall\t%s\n\tmovq\t%%rcx, %%rax\n", sym_name))
+        return false;
+      c->rax_cached_slot = -1;
+      return in->dst < 0 || ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+    }
     if (c->use_avx_vector && !nyr_put(c->w, "\tvzeroupper\n"))
       return false;
     bool arg_f64[NYIR_CALL_MAX_ARGS] = {0};
@@ -7474,6 +8052,7 @@ static bool ny_x64_emit_ir_with_linkage(
   while (ctx.frame_bytes < deepest_slot)
     ctx.frame_bytes += 16;
   ctx.alloca_offset = ctx.frame_bytes;
+  ctx.alloca_base = ctx.frame_bytes;
   int parameter_frame_bytes = ctx.frame_bytes;
   int aggregate_parameter_bytes = 0;
   if (nyir->param_types && nyir->param_abi) {

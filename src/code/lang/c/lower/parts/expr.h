@@ -1860,6 +1860,8 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
       fail(p, "__builtin_unreachable takes no arguments");
       return (c_value_t){-1, C_BAD, NULL};
     }
+    if (!emit_noreturn_marker(p))
+      return (c_value_t){-1, C_BAD, NULL};
     return (c_value_t){-1, C_BAD, NULL};
   }
   if (ny_ctok_eq(name, "__has_attribute")) {
@@ -2503,7 +2505,13 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
         if (value.type == C_AGG && param->type == C_AGG_PTR &&
             value.agg == param->agg)
           value.type = param->type;
-        if (param->is_bool && c_type_is_pointer(value.type)) {
+        /*
+         * A _Bool parameter is a one-byte 0/1 value: converting any non-zero
+         * integer argument to it must yield 1, not its low byte
+         * (`f(flags & 0x200)` passed 0x200, which the callee read as 0).
+         */
+        if (param->is_bool && !c_type_is_float(value.type) &&
+            (c_type_is_pointer(value.type) || c_type_is_integer(value.type))) {
           int zero = emit_value(
               p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = 0});
           value.value = zero < 0
@@ -2599,7 +2607,8 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
   int result_id = -1;
   bool emitted;
   if (fn->no_return) {
-    emitted = emit(p, call, NULL);
+    call.dst = -1;
+    emitted = emit(p, call, NULL) && emit_noreturn_marker(p);
   } else if (!sret && !has_agg_result &&
              (fn->result == C_BAD || empty_agg_result)) {
     emitted = emit(p, call, NULL);
@@ -9429,6 +9438,14 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
         p->last_value_pointee_const = false;
         continue;
       }
+      /* The true arm is already stored in a slot of its own class, so a
+         mixed floating/integer pair converts the false arm to the true
+         arm's floating type (`c ? 1.5 : 0`). */
+      if (c_type_is_float(true_value.type) && false_value.value >= 0 &&
+          false_value.type != true_value.type &&
+          (c_type_is_integer(false_value.type) ||
+           c_type_is_float(false_value.type)))
+        false_value = convert_numeric_float(p, false_value, true_value.type);
       c_type_t result_type = true_value.type;
       bool compatible = true_value.type == false_value.type ||
                         (c_type_is_integer(true_value.type) &&
@@ -10294,7 +10311,9 @@ static int lower_increment(c_parser_t *p, c_local_t *local, bool decrement,
                        .scalar_class = c_type_is_float(local->type)
                                            ? c_float_scalar_class(local->type)
                                            : NYIR_SCALAR_I64_RAW});
-  if (updated >= 0 && c_type_is_integer(local->type))
+  if (updated >= 0 && local->is_bool && c_type_is_integer(local->type))
+    updated = lower_bool_value(p, updated);
+  else if (updated >= 0 && c_type_is_integer(local->type))
     updated = normalize_integer(p, local->type, updated);
   if (updated < 0 || !lower_local_store(p, local, updated))
     return -1;

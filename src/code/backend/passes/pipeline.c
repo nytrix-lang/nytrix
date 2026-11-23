@@ -2178,7 +2178,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
        * does not become the first point where load/store chains disappear.
        */
       nyr_run_seq(f, pre_slp, 7, stats, dump, &ok);
-      if (ok && !nyr_pass_stopped)
+      /* memcombine is the SLP vectorizer, so it honors the same switch. */
+      if (ok && !nyr_pass_stopped &&
+          !(options & NYR_IR_OPT_DISABLE_VECTORIZATION))
         nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
     }
     if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
@@ -2409,7 +2411,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
         static bool (*const late_chain_fold[])(nyr_func_t *) = {
             nyr_select_chain_fold, nyr_copy_prop, nyr_const_fold, nyr_dce};
         nyr_run_seq(f, late_chain_fold, 4, stats, dump, &ok);
-        if (ok && !nyr_pass_stopped)
+        if (ok && !nyr_pass_stopped &&
+            !(options & NYR_IR_OPT_DISABLE_VECTORIZATION))
           nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
       }
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&

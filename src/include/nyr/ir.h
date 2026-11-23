@@ -286,6 +286,10 @@ typedef enum {
 /* Symbol is marked non-preemptible (e.g., protected visibility or internal
  * linkage). The emitter can bind directly without going through PLT/GOT. */
 #define NYIR_INST_F_SYMBOL_NONPREEMPTIBLE (1u << 25)
+/* An alloca spliced in from an inlined callee: the object cannot outlive the
+   inlined region, so frame layout may share its storage with other
+   scope-local allocas whose references do not overlap. */
+#define NYIR_INST_F_SCOPE_LOCAL (1u << 26)
 /* i386 integer/pointer argument registers: EAX, EDX, ECX. */
 #define NYIR_INST_F_I386_REGPARM_SHIFT 14u
 #define NYIR_INST_F_I386_REGPARM_MASK (3u << NYIR_INST_F_I386_REGPARM_SHIFT)
@@ -1065,6 +1069,8 @@ void nyr_egraph_stats(unsigned long long *runs,
 typedef struct {
   const char *name;
   const nyr_func_t *func;
+  /* always_inline: skip the size/pressure cost model (legality still applies). */
+  bool force;
 } nyr_inline_callee_t;
 void nyr_set_inline_callees(const nyr_inline_callee_t *callees, size_t count);
 void nyr_set_symbol_reference_funcs(const nyr_func_t *funcs, size_t count);

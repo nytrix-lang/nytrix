@@ -214,6 +214,9 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
   case NYIR_LABEL:
     allowed = NYIR_INST_F_LABEL_ADDRESS_TAKEN;
     break;
+  case NYIR_ALLOCA:
+    allowed = NYIR_INST_F_SCOPE_LOCAL;
+    break;
   case NYIR_CALL:
     allowed = NYIR_INST_F_EXTERN | NYIR_INST_F_SYMBOL_NONPREEMPTIBLE |
               NYIR_INST_F_SRET |

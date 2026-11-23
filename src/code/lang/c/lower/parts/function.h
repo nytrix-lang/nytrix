@@ -307,6 +307,8 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
                     .function_result_type = param.function_result_type,
                     .slot = (int)slot,
                     .is_const = param.is_const,
+                    .is_bool = param.is_bool,
+                    .pointee_bool = param.pointee_bool,
                     .pointee_const = param.pointee_const,
                     .is_volatile = param.is_volatile,
                     .pointee_volatile = param.pointee_volatile,
@@ -497,7 +499,12 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
   parser->enum_tag_count = saved_enum_tag_count;
   parser->tag_scope_id = saved_tag_scope_id;
   parser->tag_scope_depth = saved_tag_scope_depth;
-  if (parser->has_auto_arrays)
+  /*
+   * Cloned allocas are scope-local (their storage is shared by sibling
+   * inlined bodies), so a function with automatic arrays can be inlined.
+   * Keep that off by default; honour always_inline as GCC does.
+   */
+  if (parser->has_auto_arrays && !fn->always_inline)
     fn->noinline = true;
   return true;
 fail:

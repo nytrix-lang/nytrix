@@ -1302,7 +1302,16 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
          !nyr_printf(writer, ",%zu", data->section_entsize)) ||
         !nyr_put(writer, "\n"))
       return false;
-  } else if (!nyr_put(writer, "\t.data\n")) {
+  } else if (!nyr_put(writer,
+                      /*
+                       * A zero-length local object has nothing to put in
+                       * .data; a symbol at the end of that section would
+                       * share an address with the next object's first byte
+                       * and modpost reports references from it by this name.
+                       */
+                      data->len == 0 && data->is_local && !data->reloc_count
+                          ? "\t.bss\n"
+                          : "\t.data\n")) {
     return false;
   }
   size_t alignment = data->alignment ? data->alignment : 1;
@@ -1410,10 +1419,101 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
                     data->name, target->symbol_prefix, data->name);
 }
 
+static bool write_c_function_assembly_text(
+    nyr_writer_t *assembly, const char *function_assembly, const char *name,
+    const nyr_func_t *function, bool cf_protection_branch, bool is_x86_64);
+
+/*
+ * The marker that follows a noreturn call only steers the optimizer. Leave it
+ * out of the assembly: GCC emits nothing behind such a call, and objtool
+ * reports any instruction there as unreachable.
+ */
 static bool
 write_c_function_assembly(nyr_writer_t *assembly, const char *function_assembly,
                           const char *name, const nyr_func_t *function,
                           bool cf_protection_branch, bool is_x86_64) {
+  static const char marker[] = "\tud2 # noreturn\n";
+  static const char *const epilogue_prefixes[] = {".Lny_mach_epilogue_",
+                                                  ".Lnyir_epilogue_"};
+  size_t length = strlen(function_assembly);
+  char *stripped = malloc(length + 1);
+  if (!stripped)
+    return false;
+  size_t out = 0;
+  for (const char *at = function_assembly; *at;) {
+    if (!strncmp(at, marker, sizeof(marker) - 1)) {
+      at += sizeof(marker) - 1;
+      /*
+       * Inlining can leave straight-line instructions behind the marker
+       * (the `jmp` that joins an inlined BUG() to its caller). Control never
+       * reaches them before the next label, so leave them out too; keep
+       * directives, which may switch sections for other output.
+       */
+      while (*at == '\t' && at[1] != '.' && at[1] != '\0') {
+        const char *line_end = strchr(at, '\n');
+        if (!line_end)
+          break;
+        at = line_end + 1;
+      }
+      continue;
+    }
+    stripped[out++] = *at++;
+  }
+  stripped[out] = '\0';
+  /*
+   * An epilogue nothing jumps to (every path ends in a noreturn call or
+   * loops forever) is dead code; GCC does not emit it and objtool flags it.
+   */
+  size_t name_len = strlen(name);
+  for (size_t k = 0; k < 2; ++k) {
+    size_t prefix_len = strlen(epilogue_prefixes[k]);
+    char *label = malloc(prefix_len + name_len + 3);
+    if (!label) {
+      free(stripped);
+      return false;
+    }
+    memcpy(label, epilogue_prefixes[k], prefix_len);
+    memcpy(label + prefix_len, name, name_len);
+    label[prefix_len + name_len] = '\0';
+    size_t uses = 0;
+    for (const char *at = stripped; (at = strstr(at, label));
+         at += prefix_len + name_len) {
+      char after = at[prefix_len + name_len];
+      if (after != '_' && after != '.' && !(after >= '0' && after <= '9') &&
+          !(after >= 'a' && after <= 'z') && !(after >= 'A' && after <= 'Z'))
+        ++uses;
+    }
+    if (uses == 1) {
+      char *definition = malloc(prefix_len + name_len + 4);
+      if (definition) {
+        snprintf(definition, prefix_len + name_len + 4, "\n%s:\n", label);
+        char *at = strstr(stripped, definition);
+        if (at) {
+          char *keep = at + 1;
+          char *line = at + strlen(definition);
+          /* Drop the label and the instruction lines after it. */
+          while (*line == '\t' && line[1] != '.' && line[1] != '\0') {
+            char *line_end = strchr(line, '\n');
+            if (!line_end)
+              break;
+            line = line_end + 1;
+          }
+          memmove(keep, line, strlen(line) + 1);
+        }
+        free(definition);
+      }
+    }
+    free(label);
+  }
+  bool ok = write_c_function_assembly_text(assembly, stripped, name, function,
+                                           cf_protection_branch, is_x86_64);
+  free(stripped);
+  return ok;
+}
+
+static bool write_c_function_assembly_text(
+    nyr_writer_t *assembly, const char *function_assembly, const char *name,
+    const nyr_func_t *function, bool cf_protection_branch, bool is_x86_64) {
   if (!cf_protection_branch)
     return nyr_put(assembly, function_assembly);
   size_t name_len = strlen(name);
@@ -1490,6 +1590,730 @@ write_c_function_assembly(nyr_writer_t *assembly, const char *function_assembly,
   return ok && found_entry;
 }
 
+/*
+ * Text peephole for i386 function bodies: a `movl %reg, mem` that is
+ * immediately followed by `movl mem, %reg` leaves the register already
+ * holding the value. Adjacent lines only, so no label or branch target can
+ * sit between them. Returns the new length of the NUL-terminated text.
+ */
+static size_t nyc_i386_text_peephole(char *text) {
+  char *in = text, *out = text;
+  char *prev_start = NULL;
+  size_t prev_len = 0;
+  while (*in) {
+    char *eol = strchr(in, '\n');
+    size_t len = eol ? (size_t)(eol - in) + 1 : strlen(in);
+    bool drop = false;
+    if (prev_start && prev_len > 8 && len > 8 &&
+        memcmp(prev_start, "\tmovl\t%", 7) == 0 &&
+        memcmp(in, "\tmovl\t", 6) == 0) {
+      /* prev: "\tmovl\t%R, M\n"; this: "\tmovl\tM, %R\n" */
+      const char *r = prev_start + 6;
+      const char *comma = memchr(r, ',', prev_len);
+      if (comma && comma[1] == ' ') {
+        size_t rlen = (size_t)(comma - r);
+        const char *m = comma + 2;
+        size_t mlen = prev_len - (size_t)(m - prev_start) - 1;
+        const char *cur_m = in + 6;
+        if (len >= 6 + mlen + 2 + rlen + 1 && memcmp(cur_m, m, mlen) == 0 &&
+            cur_m[mlen] == ',' && cur_m[mlen + 1] == ' ' &&
+            memcmp(cur_m + mlen + 2, r, rlen) == 0 &&
+            cur_m[mlen + 2 + rlen] == '\n' &&
+            (memchr(m, '(', mlen) || memchr(m, '$', mlen) == NULL))
+          drop = true;
+      }
+    }
+    /* "movl $sym, %r" + "addl $imm, %r" -> "movl $sym+imm, %r". */
+    if (!drop && prev_start && prev_len > 10 &&
+        memcmp(prev_start, "\tmovl\t$", 7) == 0 &&
+        memcmp(in, "\taddl\t$0x", 9) == 0) {
+      char *pcomma = memchr(prev_start, ',', prev_len);
+      char *icomma = memchr(in, ',', len);
+      if (pcomma && icomma && pcomma[1] == ' ' && icomma[1] == ' ') {
+        size_t sym_len = (size_t)(pcomma - (prev_start + 7));
+        const char *pr = pcomma + 2, *ir = icomma + 2;
+        size_t prlen = prev_len - (size_t)(pr - prev_start) - 1;
+        size_t irlen = len - (size_t)(ir - in) - 1;
+        char *end = NULL;
+        unsigned long value = strtoul(in + 9, &end, 16);
+        const char *sym = prev_start + 7;
+        bool ident = sym_len > 0 && !(sym[0] >= '0' && sym[0] <= '9');
+        for (size_t k = 0; ident && k < sym_len; ++k)
+          ident = (sym[k] >= 'a' && sym[k] <= 'z') ||
+                  (sym[k] >= 'A' && sym[k] <= 'Z') ||
+                  (sym[k] >= '0' && sym[k] <= '9') || sym[k] == '_' ||
+                  sym[k] == '.';
+        if (ident && end == icomma && value < 0x7fffffffUL && prlen == irlen &&
+            memcmp(pr, ir, prlen) == 0 && in[len - 1] == '\n') {
+          char fused[256];
+          int written = snprintf(fused, sizeof(fused),
+                                 "\tmovl\t$%.*s+%lu, %.*s\n", (int)sym_len,
+                                 sym, value, (int)prlen, pr);
+          if (written > 0 && (size_t)written < sizeof(fused) &&
+              (size_t)written <= prev_len + len) {
+            memcpy(out - prev_len, fused, (size_t)written);
+            out = out - prev_len + (size_t)written;
+            prev_len = (size_t)written;
+            in += len;
+            continue;
+          }
+        }
+      }
+    }
+    if (!drop) {
+      memmove(out, in, len);
+      prev_start = out;
+      prev_len = len;
+      out += len;
+    }
+    in += len;
+  }
+  *out = '\0';
+  return (size_t)(out - text);
+}
+
+/*
+ * The stack encoder gives every C local slot its own frame word, and the
+ * frontend allocates one per declaration, temporary, and inlined formal. After
+ * optimization many stay live only briefly. Give slots that are only ever
+ * loaded and stored (never addressed, never named by an inline-asm template)
+ * the same interval coloring the encoder applies to value homes, and renumber
+ * the slots densely so the frame shrinks. Loops extend an interval to the
+ * whole loop it touches because a slot can carry a value around a back edge.
+ */
+static void nyc_rewrite_slot_list(nyr_func_t *f, nyr_inst_t *in,
+                                  const int *remap, int remap_len) {
+  const char *sym = in->symbol;
+  if (!sym)
+    return;
+  const char *tag = strstr(sym, "nyc_slots=");
+  size_t tag_len = sizeof("nyc_slots=") - 1;
+  if (!tag) {
+    tag = strstr(sym, "nyc_slot=");
+    tag_len = sizeof("nyc_slot=") - 1;
+  }
+  if (!tag)
+    return;
+  char out[512];
+  size_t prefix = (size_t)(tag - sym) + tag_len;
+  if (prefix >= sizeof(out))
+    return;
+  memcpy(out, sym, prefix);
+  size_t n = prefix;
+  const char *cur = sym + prefix;
+  char *end = NULL;
+  for (;;) {
+    long v = strtol(cur, &end, 10);
+    if (end == cur || v < 0 || v >= remap_len)
+      return;
+    int w = snprintf(out + n, sizeof(out) - n, "%d", remap[v]);
+    if (w < 0 || (size_t)w >= sizeof(out) - n)
+      return;
+    n += (size_t)w;
+    if (*end != ',')
+      break;
+    out[n++] = ',';
+    cur = end + 1;
+  }
+  size_t rest = strlen(end);
+  if (n + rest + 1 > sizeof(out))
+    return;
+  memcpy(out + n, end, rest + 1);
+  const char *owned = nyr_func_own_symbol_copy(f, out);
+  if (owned)
+    in->symbol = owned;
+}
+
+static void nyc_compact_local_slots(nyr_func_t *f) {
+  if (!f || !f->len)
+    { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 1\n"); return; }
+  int max_slot = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    switch (in->op) {
+    case NYIR_LOAD_LOCAL:
+    case NYIR_STORE_LOCAL:
+    case NYIR_ADDR_LOCAL:
+      if (in->imm > max_slot)
+        max_slot = (int)in->imm;
+      break;
+    case NYIR_VA_SAVE:
+    case NYIR_VA_START:
+    case NYIR_VA_ARG:
+      { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 2\n"); return; }
+    case NYIR_LABEL:
+      if (in->flags & NYIR_INST_F_LABEL_ADDRESS_TAKEN)
+        { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 3\n"); return; }
+      break;
+    case NYIR_ADDR_SYMBOL:
+      if (in->symbol && strncmp(in->symbol, "__nyc_local_label_", 18) == 0)
+        { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 4\n"); return; }
+      break;
+    case NYIR_INLINE_ASM:
+      if (in->symbol && strstr(in->symbol, "kvm_vmmcall"))
+        { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 5\n"); return; }
+      if (in->imm > 0 && (int)in->imm - 1 > max_slot)
+        max_slot = (int)in->imm - 1;
+      break;
+    default:
+      break;
+    }
+  }
+  if (max_slot < 0 || max_slot > 4000)
+    { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 6\n"); return; }
+  for (size_t i = 0; i < f->param_count; ++i)
+    if (f->param_types && f->param_types[i] == NYIR_PARAM_AGGREGATE)
+      { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 7\n"); return; }
+  size_t slots = (size_t)max_slot + 1;
+  size_t params = f->param_count < slots ? f->param_count : slots;
+  size_t len = f->len;
+  bool *fixed = calloc(slots, sizeof(bool));
+  size_t *first = malloc(slots * sizeof(size_t));
+  size_t *last = calloc(slots, sizeof(size_t));
+  int *remap = malloc(slots * sizeof(int));
+  size_t *loop_head = malloc((len + 1) * sizeof(size_t));
+  size_t *loop_tail = malloc((len + 1) * sizeof(size_t));
+  int64_t max_label = -1;
+  for (size_t i = 0; i < len; ++i)
+    if (f->data[i].op == NYIR_LABEL && f->data[i].imm > max_label)
+      max_label = f->data[i].imm;
+  size_t *label_at =
+      max_label >= 0 && max_label < (int64_t)(len + 1) * 4
+          ? malloc(((size_t)max_label + 1) * sizeof(size_t))
+          : NULL;
+  if (!fixed || !first || !last || !remap || !loop_head || !loop_tail ||
+      !label_at) {
+    free(fixed);
+    free(first);
+    free(last);
+    free(remap);
+    free(loop_head);
+    free(loop_tail);
+    free(label_at);
+    { if (getenv("NYC_FRAME_STATS")) fprintf(stderr, "SLOTCOLOR bail 8\n"); return; }
+  }
+  for (size_t s = 0; s < slots; ++s) {
+    first[s] = SIZE_MAX;
+    fixed[s] = s < params;
+  }
+  for (int64_t l = 0; l <= max_label; ++l)
+    label_at[l] = SIZE_MAX;
+  for (size_t i = 0; i < len; ++i)
+    if (f->data[i].op == NYIR_LABEL)
+      label_at[f->data[i].imm] = i;
+  size_t loops = 0;
+  for (size_t i = 0; i < len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    {
+      /* asm goto transfers control to the label in operand c like a branch */
+      int64_t target = -1;
+      if (in->op == NYIR_BR || in->op == NYIR_BR_IF)
+        target = in->imm;
+      else if (in->op == NYIR_INLINE_ASM &&
+               (in->imm == -14 || in->imm == -82 || in->imm == -83))
+        target = in->c;
+      if (target >= 0 && target <= max_label && label_at[target] != SIZE_MAX &&
+          label_at[target] <= i) {
+        loop_head[loops] = label_at[target];
+        loop_tail[loops] = i;
+        ++loops;
+      }
+    }
+    int slot = -1;
+    if (in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL)
+      slot = (int)in->imm;
+    else if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 && in->imm < (int64_t)slots)
+      fixed[in->imm] = true;
+    else if (in->op == NYIR_INLINE_ASM && in->imm > 0)
+      fixed[in->imm - 1] = true;
+    if (in->op == NYIR_INLINE_ASM && in->symbol) {
+      const char *tag = strstr(in->symbol, "nyc_slots=");
+      size_t tl = sizeof("nyc_slots=") - 1;
+      if (!tag) {
+        tag = strstr(in->symbol, "nyc_slot=");
+        tl = sizeof("nyc_slot=") - 1;
+      }
+      if (tag) {
+        const char *cur = tag + tl;
+        for (;;) {
+          char *end = NULL;
+          long v = strtol(cur, &end, 10);
+          if (end == cur || v < 0 || v >= (long)slots)
+            break;
+          fixed[v] = true;
+          if (*end != ',')
+            break;
+          cur = end + 1;
+        }
+      }
+    }
+    if (slot >= 0 && (size_t)slot < slots) {
+      if (first[slot] == SIZE_MAX)
+        first[slot] = i;
+      last[slot] = i;
+    }
+  }
+  /* Intervals, widened over every loop they touch. */
+  for (size_t s = params; s < slots; ++s) {
+    if (fixed[s] || first[s] == SIZE_MAX)
+      continue;
+    size_t lo = first[s], hi = last[s];
+    bool grew = true;
+    while (grew) {
+      grew = false;
+      for (size_t k = 0; k < loops; ++k)
+        if (loop_head[k] <= hi && loop_tail[k] >= lo &&
+            (loop_head[k] < lo || loop_tail[k] > hi)) {
+          if (loop_head[k] < lo)
+            lo = loop_head[k];
+          if (loop_tail[k] > hi)
+            hi = loop_tail[k];
+          grew = true;
+        }
+    }
+    first[s] = lo;
+    last[s] = hi;
+  }
+  /* Renumber: params keep their ids, then fixed slots, then colors. */
+  int next = (int)params;
+  for (size_t s = 0; s < slots; ++s)
+    remap[s] = -1;
+  for (size_t s = 0; s < params; ++s)
+    remap[s] = (int)s;
+  for (size_t s = params; s < slots; ++s)
+    if (fixed[s] || first[s] == SIZE_MAX)
+      remap[s] = next++;
+  int color_base = next;
+  size_t *color_last = calloc(slots + 1, sizeof(size_t));
+  size_t colors = 0;
+  if (color_last) {
+    /* order eligible slots by first use (slots are few: simple selection) */
+    bool *done = calloc(slots, sizeof(bool));
+    if (done) {
+      for (;;) {
+        size_t best = SIZE_MAX;
+        for (size_t s = params; s < slots; ++s)
+          if (remap[s] < 0 && !done[s] &&
+              (best == SIZE_MAX || first[s] < first[best]))
+            best = s;
+        if (best == SIZE_MAX)
+          break;
+        done[best] = true;
+        size_t c = 0;
+        while (c < colors && color_last[c] >= first[best])
+          ++c;
+        if (c == colors)
+          ++colors;
+        color_last[c] = last[best];
+        remap[best] = color_base + (int)c;
+      }
+      free(done);
+    }
+    free(color_last);
+  }
+  bool complete = true;
+  for (size_t s = 0; s < slots; ++s)
+    if (remap[s] < 0)
+      complete = false;
+  if (complete && color_base + (int)colors < (int)slots) {
+    for (size_t i = 0; i < len; ++i) {
+      nyr_inst_t *in = &f->data[i];
+      if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
+           in->op == NYIR_ADDR_LOCAL) &&
+          in->imm >= 0 && (size_t)in->imm < slots)
+        in->imm = remap[in->imm];
+      else if (in->op == NYIR_INLINE_ASM) {
+        if (in->imm > 0 && (size_t)in->imm - 1 < slots)
+          in->imm = remap[in->imm - 1] + 1;
+        nyc_rewrite_slot_list(f, in, remap, (int)slots);
+      }
+    }
+  }
+  free(fixed);
+  free(first);
+  free(last);
+  free(remap);
+  free(loop_head);
+  free(loop_tail);
+  free(label_at);
+}
+
+static uint64_t nyc_edge_key(int64_t from, int64_t to, size_t labels) {
+  return (uint64_t)from * (uint64_t)labels + (uint64_t)to;
+}
+
+int nyc_edge_compare(const void *a, const void *b) {
+  uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+  return x < y ? -1 : x > y;
+}
+
+/*
+ * True when no RET can be reached in `f`, treating the noreturn marker and a
+ * call to any function in `names` as the end of a path. Functions with
+ * computed jumps or address-taken labels are assumed to return.
+ */
+static bool nyc_function_never_returns(const nyr_func_t *f,
+                                       const char *const *names,
+                                       size_t name_count) {
+  if (!f || !f->len)
+    return false;
+  int64_t max_label = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_INLINE_ASM) {
+      if (in->imm == -157 || in->imm == -146)
+        return false;
+      if ((in->imm == -14 || in->imm == -82 || in->imm == -83) &&
+          in->c > max_label)
+        max_label = in->c;
+    }
+    if (in->op == NYIR_LABEL) {
+      if (in->flags & NYIR_INST_F_LABEL_ADDRESS_TAKEN)
+        return false;
+      if (in->imm > max_label)
+        max_label = in->imm;
+    }
+    if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm > max_label)
+      max_label = in->imm;
+  }
+  if (max_label > (int64_t)f->len * 4)
+    return false;
+  size_t labels = max_label < 0 ? 1 : (size_t)max_label + 1;
+  bool *label_reached = calloc(labels, sizeof(*label_reached));
+  if (!label_reached)
+    return false;
+  bool returns = false;
+  for (bool changed = true; changed && !returns;) {
+    changed = false;
+    bool live = true;
+    for (size_t i = 0; i < f->len && !returns; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_LABEL && in->imm >= 0 && label_reached[in->imm])
+        live = true;
+      if (!live)
+        continue;
+      if (in->op == NYIR_RET) {
+        returns = true;
+        break;
+      }
+      int64_t targets[2] = {-1, -1};
+      if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm >= 0)
+        targets[0] = in->imm;
+      if (in->op == NYIR_INLINE_ASM &&
+          (in->imm == -14 || in->imm == -82 || in->imm == -83) && in->c >= 0)
+        targets[1] = in->c;
+      for (int t = 0; t < 2; ++t)
+        if (targets[t] >= 0 && !label_reached[targets[t]]) {
+          label_reached[targets[t]] = true;
+          changed = true;
+        }
+      bool ends = in->op == NYIR_BR ||
+                  (in->op == NYIR_INLINE_ASM && in->symbol &&
+                   !strcmp(in->symbol, "ud2 # noreturn"));
+      if (in->op == NYIR_CALL && in->symbol)
+        for (size_t k = 0; k < name_count && !ends; ++k)
+          ends = !strcmp(in->symbol, names[k]);
+      if (ends)
+        live = false;
+    }
+  }
+  free(label_reached);
+  return !returns;
+}
+
+/*
+ * Follow every call to a function in `names` with the noreturn marker, the
+ * way a call to a declared noreturn function is lowered. Returns false when
+ * the instruction buffer could not be rebuilt (the function is unchanged).
+ */
+static bool nyc_mark_noreturn_calls(nyr_func_t *f, const char *const *names,
+                                    size_t name_count) {
+  size_t marks = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_CALL || !in->symbol)
+      continue;
+    for (size_t k = 0; k < name_count; ++k)
+      if (!strcmp(in->symbol, names[k])) {
+        ++marks;
+        break;
+      }
+  }
+  if (!marks)
+    return true;
+  nyr_inst_t *data = malloc((f->len + marks) * sizeof(*data));
+  if (!data)
+    return false;
+  size_t len = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    data[len++] = f->data[i];
+    const nyr_inst_t *in = &f->data[i];
+    bool noreturn_call = false;
+    if (in->op == NYIR_CALL && in->symbol)
+      for (size_t k = 0; k < name_count && !noreturn_call; ++k)
+        noreturn_call = !strcmp(in->symbol, names[k]);
+    if (!noreturn_call)
+      continue;
+    nyr_inst_t marker = {.op = NYIR_INLINE_ASM,
+                         .dst = -1,
+                         .a = -1,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .symbol = "ud2 # noreturn",
+                         /* What the verifier derives for inline assembly. */
+                         .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_VOLATILE |
+                                    NYIR_EFFECT_UNKNOWN_SIDE_EFFECT};
+    bool already = i + 1 < f->len && f->data[i + 1].op == NYIR_INLINE_ASM &&
+                   f->data[i + 1].symbol &&
+                   !strcmp(f->data[i + 1].symbol, "ud2 # noreturn");
+    if (already)
+      continue;
+    data[len - 1].dst = -1;
+    data[len++] = marker;
+  }
+  free(f->data);
+  f->data = data;
+  f->len = len;
+  f->cap = f->len + marks;
+  return true;
+}
+
+/*
+ * Calls to noreturn functions and `__builtin_unreachable()` are followed by a
+ * `ud2 # noreturn` marker that ends the path. Remove every instruction that
+ * no path reaches any more (the rest of the block, and blocks whose only
+ * predecessors were removed), so the object carries no code objtool would
+ * report as unreachable. This runs before SSA construction, where the only
+ * edges are BR, BR_IF and fallthrough. A function with computed jumps or
+ * asm goto is left alone, since its label edges are not all visible here.
+ */
+static void nyc_drop_code_after_trap(nyr_func_t *f) {
+  if (!f || !f->len)
+    return;
+  bool has_marker = false;
+  int64_t max_label = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_INLINE_ASM) {
+      if (in->imm == -157 || in->imm == -146) {
+        if (getenv("NYC_DEBUG_PRUNE"))
+          fprintf(stderr, "prune: skipped (indirect jump asm %lld)\n",
+                  (long long)in->imm);
+        return;
+      }
+      if ((in->imm == -14 || in->imm == -82 || in->imm == -83) &&
+          in->c > max_label)
+        max_label = in->c;
+      if (in->symbol && !strcmp(in->symbol, "ud2 # noreturn"))
+        has_marker = true;
+    }
+    if (in->op == NYIR_LABEL) {
+      if (in->flags & NYIR_INST_F_LABEL_ADDRESS_TAKEN) {
+        if (getenv("NYC_DEBUG_PRUNE"))
+          fprintf(stderr, "prune: skipped (address-taken label)\n");
+        return;
+      }
+      if (in->imm > max_label)
+        max_label = in->imm;
+    }
+    if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm > max_label)
+      max_label = in->imm;
+  }
+  if (getenv("NYC_DEBUG_PRUNE"))
+    fprintf(stderr, "prune: marker=%d labels=%lld len=%zu\n", has_marker,
+            (long long)max_label, f->len);
+  (void)has_marker;
+  if (max_label < 0 || max_label > (int64_t)f->len * 4)
+    return;
+  size_t labels = (size_t)max_label + 1;
+  bool *label_reached = calloc(labels, sizeof(*label_reached));
+  bool *reachable = calloc(f->len, sizeof(*reachable));
+  if (!label_reached || !reachable) {
+    free(label_reached);
+    free(reachable);
+    return;
+  }
+  for (bool changed = true; changed;) {
+    changed = false;
+    bool live = true;
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_LABEL && in->imm >= 0 && label_reached[in->imm])
+        live = true;
+      if (!live)
+        continue;
+      if (!reachable[i]) {
+        reachable[i] = true;
+        changed = true;
+      }
+      if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm >= 0 &&
+          !label_reached[in->imm]) {
+        label_reached[in->imm] = true;
+        changed = true;
+      }
+      /* asm goto and faulting accesses may also transfer to label `c`. */
+      if (in->op == NYIR_INLINE_ASM &&
+          (in->imm == -14 || in->imm == -82 || in->imm == -83) &&
+          in->c >= 0 && !label_reached[in->c]) {
+        label_reached[in->c] = true;
+        changed = true;
+      }
+      if (in->op == NYIR_BR || in->op == NYIR_RET ||
+          (in->op == NYIR_INLINE_ASM && in->symbol &&
+           !strcmp(in->symbol, "ud2 # noreturn")))
+        live = false;
+    }
+  }
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *in = &f->data[i];
+    if (reachable[i] || in->op == NYIR_LABEL || in->op == NYIR_NOP)
+      continue;
+    nyr_inst_t nop = {.op = NYIR_NOP, .dst = -1, .a = -1, .b = -1,
+                      .c = -1, .d = -1, .e = -1, .f = -1};
+    *in = nop;
+  }
+  /*
+   * Phi incoming values name the predecessor block. An edge whose branch was
+   * removed (or whose block is gone) no longer exists; drop those pairs.
+   */
+  bool has_phi = false;
+  for (size_t i = 0; i < f->len && !has_phi; ++i)
+    has_phi = f->data[i].op == NYIR_PHI;
+  if (has_phi) {
+    uint64_t *edges = malloc((f->len + 1) * sizeof(*edges));
+    size_t edge_count = 0;
+    bool *label_exists = calloc(labels, sizeof(*label_exists));
+    if (!edges || !label_exists) {
+      free(edges);
+      free(label_exists);
+      free(label_reached);
+      free(reachable);
+      return;
+    }
+    int64_t current = -2;
+    bool falls = true;
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_LABEL && in->imm >= 0) {
+        label_exists[in->imm] = true;
+        if (reachable[i] && falls && current >= 0 && edge_count <= f->len)
+          edges[edge_count++] = nyc_edge_key(current, in->imm, labels);
+        current = in->imm;
+        falls = reachable[i];
+        continue;
+      }
+      if (!reachable[i] || in->op == NYIR_NOP)
+        continue;
+      if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm >= 0 &&
+          current >= 0 && edge_count <= f->len)
+        edges[edge_count++] = nyc_edge_key(current, in->imm, labels);
+      if (in->op == NYIR_INLINE_ASM &&
+          (in->imm == -14 || in->imm == -82 || in->imm == -83) &&
+          in->c >= 0 && current >= 0 && edge_count <= f->len)
+        edges[edge_count++] = nyc_edge_key(current, in->c, labels);
+      if (in->op == NYIR_BR || in->op == NYIR_RET ||
+          (in->op == NYIR_INLINE_ASM && in->symbol &&
+           !strcmp(in->symbol, "ud2 # noreturn")))
+        falls = false;
+    }
+    int nyc_edge_compare(const void *a, const void *b);
+    qsort(edges, edge_count, sizeof(*edges), nyc_edge_compare);
+    current = -2;
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_LABEL && in->imm >= 0) {
+        current = in->imm;
+        continue;
+      }
+      if (in->op != NYIR_PHI || current < 0 || !in->phi_incoming)
+        continue;
+      size_t kept = 0;
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int64_t pred = in->phi_incoming[k].predecessor_label;
+        bool drop = false;
+        if (pred >= 0 && (size_t)pred < labels && label_exists[pred]) {
+          uint64_t key = nyc_edge_key(pred, current, labels);
+          drop = !bsearch(&key, edges, edge_count, sizeof(*edges),
+                          nyc_edge_compare);
+        }
+        if (!drop)
+          in->phi_incoming[kept++] = in->phi_incoming[k];
+      }
+      in->phi_incoming_len = kept;
+    }
+    free(edges);
+    free(label_exists);
+  }
+  free(label_reached);
+  free(reachable);
+}
+
+/*
+ * `((T *)&function)(args)` reaches NYIR as an indirect call whose target is the
+ * address of a named function (this is how static_call() in Linux is
+ * written). GCC folds it to a direct call; do the same, so the call keeps its
+ * symbol for objtool and loses its retpoline thunk. Only the plain case is
+ * handled: a register-argument call without aggregate or i386 metadata.
+ */
+static void nyc_fold_indirect_calls(nyr_func_t *f) {
+  if (!f || !f->len || f->next_value <= 0)
+    return;
+  const nyr_inst_t **defs = NULL;
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *call = &f->data[i];
+    if (call->op != NYIR_CALL || !(call->flags & NYIR_INST_F_INDIRECT) ||
+        (call->flags & NYIR_INST_F_SRET) || call->imm < 1 || call->imm > 7 ||
+        call->extra_args_len || call->arg_sizes || call->a < 0)
+      continue;
+    if (!defs) {
+      defs = calloc((size_t)f->next_value, sizeof(*defs));
+      if (!defs)
+        return;
+      for (size_t d = 0; d < f->len; ++d)
+        if (f->data[d].dst >= 0 && f->data[d].dst < f->next_value)
+          defs[f->data[d].dst] = &f->data[d];
+    }
+    const nyr_inst_t *def = call->a < f->next_value ? defs[call->a] : NULL;
+    while (def && def->op == NYIR_COPY && def->a >= 0 && def->a < f->next_value)
+      def = defs[def->a];
+    if (!def || def->op != NYIR_ADDR_SYMBOL || !def->symbol)
+      continue;
+    static const char extern_prefix[] = "__nyc_extern_";
+    bool is_extern =
+        !strncmp(def->symbol, extern_prefix, sizeof(extern_prefix) - 1);
+    /* A function defined in this unit is addressed as ny_fn_NAME. */
+    bool is_unit_function = !strncmp(def->symbol, "ny_fn_", 6);
+    if (!is_extern && !is_unit_function && !strncmp(def->symbol, "__nyc_", 6))
+      continue; /* data, string or label address */
+    nyr_inst_t direct = *call;
+    int args[7] = {call->a, call->b, call->c, call->d, call->e, call->f, -1};
+    size_t argc = (size_t)call->imm;
+    direct.symbol = is_extern         ? def->symbol + sizeof(extern_prefix) - 1
+                    : is_unit_function ? def->symbol + 6
+                                       : def->symbol;
+    /* C calls name their target directly; the EXTERN flag keeps the symbol
+       from being rewritten to an ny_fn_ label. */
+    direct.flags = (call->flags & ~NYIR_INST_F_INDIRECT) |
+                   NYIR_INST_F_EXTERN;
+    direct.imm = (int64_t)(argc - 1);
+    direct.a = args[1];
+    direct.b = args[2];
+    direct.c = args[3];
+    direct.d = args[4];
+    direct.e = args[5];
+    direct.f = args[6];
+    memset(direct.arg_scalar_classes, 0, sizeof(direct.arg_scalar_classes));
+    for (size_t k = 1; k < argc; ++k)
+      nyr_call_arg_class_set(direct.arg_scalar_classes, k - 1,
+                             nyr_call_arg_class_get(call, k));
+    *call = direct;
+  }
+  free(defs);
+}
+
 static bool write_c_unit_assembly(
     const nyc_unit_t *unit, const ny_native_target_info_t *target,
     const char *path, bool verbose, bool code16, bool code16_low_stack,
@@ -1506,6 +2330,38 @@ static bool write_c_unit_assembly(
   for (size_t i = 0; ok && i < unit->data_count; ++i) {
     ok = write_assembly_data(&assembly, &unit->data[i], target, err, err_len);
   }
+  /*
+   * Functions in this unit that cannot return (every path ends in a noreturn
+   * call or an endless loop). GCC infers this for callers it can see, and
+   * emits nothing behind such a call.
+   */
+  const char **never_names = NULL;
+  size_t never_count = 0;
+  if (ok && !getenv("NYC_NO_NORETURN_INFERENCE") && unit->count) {
+    never_names = calloc(unit->count, sizeof(*never_names));
+    bool *never_marked = calloc(unit->count, sizeof(*never_marked));
+    if (never_names && never_marked) {
+      for (unsigned round = 0; round < 8; ++round) {
+        bool changed = false;
+        for (size_t i = 0; i < unit->count; ++i) {
+          bool binds_locally =
+              (unit->function_local && unit->function_local[i]) ||
+              (!position_independent &&
+               !(unit->function_weak && unit->function_weak[i]));
+          if (never_marked[i] || !binds_locally ||
+              !nyc_function_never_returns(&unit->funcs[i], never_names,
+                                          never_count))
+            continue;
+          never_marked[i] = true;
+          never_names[never_count++] = unit->names[i];
+          changed = true;
+        }
+        if (!changed)
+          break;
+      }
+    }
+    free(never_marked);
+  }
   for (size_t i = 0; ok && i < unit->count; ++i) {
     bool is_local = unit->function_local && unit->function_local[i];
     bool is_inline = unit->function_inline && unit->function_inline[i];
@@ -1517,7 +2373,22 @@ static bool write_c_unit_assembly(
           has_jump_label_asm |= unit->funcs[i].data[inst].imm == -14;
           has_unspecialized_alt_wrmsr |= unit->funcs[i].data[inst].imm == -100;
         }
-      if ((is_inline && has_jump_label_asm) || has_unspecialized_alt_wrmsr) {
+      /*
+       * A static always_inline function that nothing references after
+       * inlining needs no out-of-line copy, as with GCC. Emitting one puts
+       * references to __init data into ordinary text (modpost reports them).
+       */
+      bool always_inline_local =
+          unit->function_always_inline && unit->function_always_inline[i];
+      /*
+       * A `static inline` function nothing references is not emitted either
+       * (GCC), unless a section attribute places it for some other reader.
+       */
+      bool unreferenced_static_inline =
+          is_inline && !(unit->function_sections &&
+                         unit->function_sections[i]);
+      if ((is_inline && has_jump_label_asm) || has_unspecialized_alt_wrmsr ||
+          always_inline_local || unreferenced_static_inline) {
         bool referenced = false;
         for (size_t caller = 0; caller < unit->count && !referenced; ++caller)
           for (size_t inst = 0; inst < unit->funcs[caller].len; ++inst) {
@@ -1540,6 +2411,41 @@ static bool write_c_unit_assembly(
           }
         if (!referenced)
           continue;
+      }
+    }
+    /*
+     * Inlining and the optimizer can leave code behind a noreturn marker
+     * (an inlined BUG() followed by its caller's continuation); remove what
+     * no path reaches before the code is emitted.
+     */
+    if (getenv("NYC_DUMP_FINAL") &&
+        strcmp(getenv("NYC_DUMP_FINAL"), unit->names[i]) == 0)
+      nyr_dump(stderr, &unit->funcs[i], unit->names[i]);
+    {
+      /*
+       * Work on a copy: the pruned function must still verify (a removed
+       * fallthrough can change dominance), otherwise the original stays.
+       */
+      nyr_func_t pruned;
+      char prune_error[256] = {0};
+      nyr_func_init(&pruned);
+      if (nyr_func_clone(&unit->funcs[i], &pruned, prune_error,
+                         sizeof(prune_error))) {
+        if (never_count)
+          (void)nyc_mark_noreturn_calls(&pruned, never_names, never_count);
+        nyc_drop_code_after_trap(&pruned);
+        if (nyr_verify(&pruned, prune_error, sizeof(prune_error))) {
+          nyr_func_t original = unit->funcs[i];
+          unit->funcs[i] = pruned;
+          nyr_func_destroy(&original);
+        } else {
+          if (getenv("NYC_DEBUG_PRUNE"))
+            fprintf(stderr, "prune: kept %s unpruned: %s\n", unit->names[i],
+                    prune_error);
+          nyr_func_destroy(&pruned);
+        }
+      } else {
+        nyr_func_destroy(&pruned);
       }
     }
     const char *section =
@@ -1624,6 +2530,8 @@ static bool write_c_unit_assembly(
         }
         if (ok && !emitted_machine) {
           nyr_writer_t function_assembly = {0};
+          if (!getenv("NYC_NO_SLOT_COLOR"))
+            nyc_compact_local_slots(&unit->funcs[i]);
           ok = nyr_x86_64_emit_ir_with_options(
               &function_assembly, target, &unit->funcs[i], unit->names[i],
               false, is_local, retpoline_indirect_calls, retpoline_inline_calls,
@@ -1645,6 +2553,8 @@ static bool write_c_unit_assembly(
             &function_assembly, target, &unit->funcs[i], unit->names[i], false,
             is_local, position_independent, i386_stack_alignment,
             code16_low_stack, err, err_len);
+        if (ok && function_assembly.data)
+          function_assembly.len = nyc_i386_text_peephole(function_assembly.data);
         if (ok)
           ok = write_c_function_assembly(
               &assembly, function_assembly.data ? function_assembly.data : "",
@@ -1730,6 +2640,12 @@ static bool write_c_unit_assembly(
                     target->symbol_prefix, alias->name, target->symbol_prefix,
                     alias->target);
   }
+  /* GNU as writes no .symtab for a unit without symbols, which objtool and
+     other ELF consumers reject; a FILE symbol keeps the object well-formed. */
+  if (ok && !target->symbol_prefix[0])
+    ok = nyr_put(&assembly, "\t.file ") &&
+         write_assembly_quoted_string(&assembly, "nyc") &&
+         nyr_put(&assembly, "\n");
   if (ok)
     ok = nyr_put(&assembly, "\t.section .note.GNU-stack,\"\",@progbits\n");
   if (ok) {
@@ -1750,6 +2666,7 @@ static bool write_c_unit_assembly(
         snprintf(err, err_len, "cannot write assembly output '%s'", path);
     }
   }
+  free(never_names);
   free(assembly.data);
   return ok;
 }
@@ -1977,7 +2894,10 @@ static int compile_source(int argc, char **argv, int source_arg,
                !auto_inline))
             continue;
           inline_callees[inline_callee_count++] = (nyr_inline_callee_t){
-              .name = unit.names[i], .func = &unit.funcs[i]};
+              .name = unit.names[i],
+              .func = &unit.funcs[i],
+              .force = unit.function_always_inline &&
+                       unit.function_always_inline[i]};
         }
       }
     }
@@ -1986,7 +2906,7 @@ static int compile_source(int argc, char **argv, int source_arg,
       nyr_set_inline_callees(inline_callees, inline_callee_count);
     }
     if (ok && getenv("NYC_DISABLE_PASS"))
-      nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), NULL);
+      nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), getenv("NYC_STOP_AFTER"));
     if (ok && driver->optimize_size) {
       static const char disabled[] =
           "loop_unroll,unroll_jam,loop_peel,loop_unswitch,loop_versioning,"
@@ -2033,6 +2953,11 @@ static int compile_source(int argc, char **argv, int source_arg,
       const char *stage = "before optimization";
       if (abi != NYC_ABI_I386 && driver->disable_sse)
         nyc_use_integer_varargs(&unit.funcs[i]);
+      /*
+       * Before SSA construction: code behind a noreturn call has no edges
+       * yet, so dropping it cannot leave a PHI naming a vanished predecessor.
+       */
+      nyc_drop_code_after_trap(&unit.funcs[i]);
       ok = nyr_verify(&unit.funcs[i], err, sizeof(err));
       if (ok && driver->disable_vectorization &&
           nyc_func_uses_fp_or_simd(&unit.funcs[i])) {
@@ -2063,8 +2988,20 @@ static int compile_source(int argc, char **argv, int source_arg,
           nyr_refresh_metadata(&unit.funcs[i]);
       } else if (ok) {
         stage = "during optimization";
-        ok = nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
-                                       opt_options, err, sizeof(err));
+        if (getenv("NYC_DUMP_FUNC") &&
+            strcmp(getenv("NYC_DUMP_FUNC"), unit.names[i]) == 0)
+          nyr_dump(stderr, &unit.funcs[i], "pre-opt");
+        if (getenv("NYC_DUMP_PASSES") &&
+            strcmp(getenv("NYC_DUMP_PASSES"), unit.names[i]) == 0)
+          ok = nyr_optimize_debug_with_options(&unit.funcs[i], stderr, NULL,
+                                               driver->optimization,
+                                               opt_options);
+        else
+          ok = nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
+                                         opt_options, err, sizeof(err));
+        if (getenv("NYC_DUMP_FUNC") &&
+            strcmp(getenv("NYC_DUMP_FUNC"), unit.names[i]) == 0)
+          nyr_dump(stderr, &unit.funcs[i], "post-opt");
       }
       /*
        * Keep NYC's whole-unit pipeline aligned with the native language
@@ -2092,6 +3029,21 @@ static int compile_source(int argc, char **argv, int source_arg,
       if (ok) {
         stage = "after optimization";
         ok = nyr_verify(&unit.funcs[i], err, sizeof(err));
+      }
+      if (ok && abi == NYC_ABI_SYSV_X86_64 && driver->optimization >= 1 &&
+          !getenv("NYC_NO_FOLD_INDIRECT_CALLS"))
+        nyc_fold_indirect_calls(&unit.funcs[i]);
+      if (ok) {
+        /*
+         * A noreturn call produces no result; do not store the register
+         * after it.
+         */
+        nyr_func_t *f = &unit.funcs[i];
+        for (size_t at = 1; at < f->len; ++at)
+          if (f->data[at].op == NYIR_INLINE_ASM && f->data[at].symbol &&
+              !strcmp(f->data[at].symbol, "ud2 # noreturn") &&
+              f->data[at - 1].op == NYIR_CALL)
+            f->data[at - 1].dst = -1;
       }
       if (!ok) {
         char detail[sizeof(err)];
@@ -2131,7 +3083,11 @@ static int compile_source(int argc, char **argv, int source_arg,
                         : !required && unit.function_local[fn] &&
                               unit.function_inline[fn] &&
                               nyc_stackless_inline_candidate(callee))
-            targeted_callees[targeted_callee_count++] = inline_callees[c];
+          {
+            targeted_callees[targeted_callee_count] = inline_callees[c];
+            targeted_callees[targeted_callee_count++].force =
+                unit.function_always_inline[fn];
+          }
         }
         if (!targeted_callee_count)
           continue;
@@ -2634,7 +3590,7 @@ static int compile_source(int argc, char **argv, int source_arg,
       ok = false;
     }
     if (ok && getenv("NYC_DISABLE_PASS"))
-      nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), NULL);
+      nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), getenv("NYC_STOP_AFTER"));
     if (ok && !nyc_func_uses_va_list(&ir))
       ok = nyr_optimize_with_options(
           &ir, driver->optimization,
@@ -3111,6 +4067,11 @@ int main(int argc, char **argv) {
        * caller asked for an object (realmode C files do exactly that).
        */
       driver.code16 = true;
+      /* Real-mode code has no use for 16-byte call alignment; GCC and Clang
+         keep the four-byte i386 stack there, and the realigning call
+         sequence costs about 16 bytes per call. */
+      if (!driver.i386_stack_alignment)
+        driver.i386_stack_alignment = 4;
       continue;
     }
     if (strcmp(option, "-m64") == 0) {

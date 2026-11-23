@@ -2645,4 +2645,296 @@ run directory under `/tmp`.
   A direct NYC/GCC object comparison showed that NYC's kernel compatibility
   mode accepts the flag without emitting the padding or patch table.
 
+- Closed four small boundary gaps found by the microbenchmarks. The
+  built-in headers now declare `atof`, `posix_memalign`, `getppid`, and
+  `CLOCK_MONOTONIC_RAW`. A conditional whose true arm is floating and whose
+  false arm is an integer or another floating type (`c ? 1.5 : 0`) converts
+  the false arm instead of failing; the reverse order (`c ? 0 : 1.5`) still
+  fails closed. Function-scope `_Pragma` directives other than `GCC unroll`
+  are ignored, as GCC ignores unknown pragmas. The `"+r"` inline-asm
+  constraint already worked. The `mixed-arithmetic-conditional` fixture
+  covers the first and last, and the C frontend suite passed in a private
+  build under `tmp/lab/nyc32`.
+
+- Fresh protected-style kernel retry (2026-11-22, Linux 7.3 from
+  `tmp/lab/benchmarks/linux-7.3`, `x86_64_defconfig` plus `olddefconfig`,
+  `KCFLAGS=-O2`, `NYC_KERNEL_COMPAT=1`, `-j32`, output tree
+  `tmp/lab/kbuild-20261122/out`, strict NYC-then-`as` wrapper). The first
+  pass found three defects, each now fixed and exercised by a replay of the
+  failing unit:
+  - Inline-asm templates that write C locals through `nyc_slots=` (the
+    `__put_user_*` helpers, `rdmsr_safe`, `wrmsr_safe`) were not counted in
+    the x86-64 slot table or kept in memory, so a register-promoted result
+    slot failed emission (`lsm_syscalls`, `read_write`, `sunrpc/cache`,
+    `events/core`, `events/intel/p4`, `apic/io_apic`, `cpu/aperfmperf`).
+    The result slots are now parsed generically from the template.
+  - GNU `as` writes no `.symtab` for a unit without symbols, so objtool
+    rejected `lib/iomem_copy.o`, `mm/highmem.o`, `lib/zstd/common/debug.o`
+    and `arch/x86/kernel/trace.o`. `-S` now emits a `.file` directive on ELF
+    targets. The `empty-unit` check in the frontend suite covers it.
+  - `memcombine` is the SLP vectorizer but ignored the no-vectorization
+    switch, so word-copy runs became `vec4` loads and stores and the no-SSE
+    guard rejected 76 functions (`io_nop`, `__sock_recv_timestamp`, ...).
+    Both runs are now gated; `nyc_no_sse_copy4` fails without the gate.
+  After these fixes all 3,005 target C units compile, `vmlinux` links, and
+  the only remaining failure is the known setup size gate: GNU ld reports
+  more than 64 sectors. Per-object, NYC `-Os -m16` code is roughly 1.5 to 2.5
+  times the size of GCC's (for example `cpuflags.o` 995 against 389 bytes,
+  `video.o` 4,151 against 1,776). NYC inlines `cpuid_count`, keeps values in
+  frame homes behind a two-step `sub` frame, and uses 32-bit displacement
+  forms. The gap lies in the 16-bit register allocation and frame code, not
+  in any one function. No `bzImage` was produced, and objtool and modpost
+  diagnostics were not reviewed.
+
+- Setup size follow-up (2026-11-22). A per-unit harness
+  (`tmp/lab/kbuild-20261122/setupsize.sh`) compiles the 17 real-mode setup
+  units with NYC, GCC, and Clang from the recorded Kbuild commands and
+  compares `.text`; `relink.sh` rebuilds only `arch/x86/boot` and relinks
+  `setup.elf`. Totals went from 28,841 bytes (NYC), 13,318 (GCC), and 13,606
+  (Clang) to 23,367 for NYC.
+  - `-m16` now defaults to the four-byte i386 stack. Every call previously
+    carried a `push ebx; mov ebx,esp; and esp,-16; ... mov esp,ebx; pop ebx`
+    realignment (about 16 bytes). This saved 5,100 bytes.
+  - `movl $sym, %r` followed by `addl $n, %r` fuses to `movl $sym+n, %r`, and
+    a store directly followed by a reload of the same register and slot drops
+    the reload (text peephole on i386 function bodies).
+  With these, `.text32` ends at `0x5eb3`, `.pecompat` stays on `0x6000`,
+  `_end` is `0x78c0`, GNU ld accepts the setup, and Kbuild produces a
+  `bzImage`.
+  - Two real i386 miscompiles surfaced while booting that image. Storing a
+    pointer through a struct member (`c->name = p`) or to a file-scope
+    pointer (`HEAP = p`) wrote eight bytes, clobbering the next field. The
+    setup `video_vga` card lost its `set_mode` pointer, and the `HEAP`
+    allocator clobbered its neighbors, which produced "Undefined video mode
+    number: ffff" on every boot. Both stores now use the four-byte pointer
+    form; `i386-pointer-member-store` runs the member case at every regparm.
+  - The `bzImage` now passes the real-mode setup without the video prompt
+    and enters the 64-bit kernel. Boot then spins in
+    `acpi_tb_print_table_header` (called from `acpi_tb_parse_root_table`),
+    with no `/init` yet; the same stop occurs with GCC-built setup objects,
+    so it is a kernel-side miscompile, not a setup one.
+  - Still open: NYC setup code is 1.75 times Clang's. The remaining cost is
+    frame traffic (26% of instructions reference a frame slot) because the
+    i386 allocator is local to straight-line runs and flushes at every
+    targeted label, plus boolean materialization before branches and 64-bit
+    high words on values that never use them. `long long *` indexing on i386
+    scales by four instead of eight, because the pointer class does not
+    carry the element size; the setup units do not use it.
+
+- Kernel boot progress (2026-11-22). A fresh `x86_64_defconfig` build with the
+  strict NYC-then-`as` wrapper compiles all 3,005 target C units, links
+  `vmlinux`, and produces a `bzImage` whose setup passes the upstream limits.
+  Booting that image in QEMU (`tmp/lab/kbuild-20261122/boot.sh`) now reaches
+  PID 1 and the async SCSI probe at about 1.3 s of guest time. Five defects
+  were found and fixed on the way, each by tracing a hang or fault to a
+  replayed unit:
+  - Inlining a callee whose body starts with a `while` put the formal stores
+    after the loop-header label, so every iteration reset the formals
+    (`acpi_tb_fix_string` never advanced, hanging ACPI table parsing).
+  - Dead-store elimination dropped stores into a local that only an
+    inline-asm memory operand reads. `load_direct_gdt` therefore executed
+    `lgdt` on an uninitialized descriptor, which faulted in `ltr`. Inline-asm
+    operands now count as escapes.
+  - Pointer stores into struct members and file-scope pointers wrote eight
+    bytes on i386 (see above).
+  - The x86-64 slot table ignored `nyc_slots=` result slots of put_user,
+    `rdmsr_safe`, and `wrmsr_safe` templates.
+  - `memcombine` (the SLP vectorizer) ignored the no-vectorization switch.
+  Frame size is the remaining blocker. Functions containing inline asm, which
+  is most of the kernel, take the stack encoder, which keeps every live value
+  in a frame home; its frames are 3 to 5 times GCC's. A 42-frame SCSI probe
+  path (`sr_probe` through `try_to_wake_up`) then overflows the 16 KiB task
+  stack. Interval coloring of cross-block values and loop-carried copies, and
+  sharing of nested-block and inlined alloca storage, cut frames by 10 to 20
+  percent (`resource_string` 2,048 to 896 bytes, `try_to_wake_up` 752 to 576)
+  but not enough. Splitting shared constants per use made frames larger and
+  was dropped. The real fix is to accept inline asm in the register-allocating
+  machine form so those functions leave the stack encoder; `stack.guard.*`
+  lowering for that form is in place. `/init` has not run.
+  Debug switches added for this work: `NYC_DUMP_FUNC`, `NYC_DUMP_PASSES`,
+  `NYC_STOP_AFTER`, `NYC_FRAME_STATS`.
+
+- Kernel boots to `/init` (2026-11-22, later the same day). With the fixes
+  below, the default-config `bzImage` boots in QEMU past the SCSI probe,
+  starts a freestanding static `/init` from an initramfs, and that program
+  writes `NYC_KERNEL_INIT_REACHED` to `/dev/console` and powers off
+  (`tmp/lab/kbuild-20261122/boot.sh` with `INITRD=initrd3.gz`). A static glibc
+  `/init` still fails: `exec` returns `-EFAULT` before the `clear_user`
+  fix and, after it, the kernel faults zeroing an anonymous page whose
+  direct-map alias lies in `.rodata` (`memset_orig` from `prep_new_page`). The
+  allocator was not handed that page by `memblock_free_all` or
+  `free_reserved_area`; the cause is still open.
+  - A `typeof` of an integer literal always produced `int`. The syscall
+    wrappers declare their register parameters as
+    `typeof(__builtin_choose_expr(..., 0LL, 0L))`, so every `long` argument
+    (user pointers, sizes) was truncated to 32 bits. Literals now take their
+    type from suffix and magnitude (`typeof-literal-width`).
+  - The `clear_user()` alternative called `rep_stos_alternative` with C-ABI
+    registers; the helper takes its length in `%rcx` and returns the residue
+    there. The call now goes through a thunk emitted into the unit.
+  - Stack overflow on a 42-frame SCSI probe path was removed by: sharing
+    frame homes by exact per-instruction occupancy, interval-coloring
+    cross-block values, renumbering C local slots by interval coloring,
+    sharing nested-block and inlined alloca storage, and `stack.guard.*`
+    lowering for the machine form. Task-stack depth at the deepest probe path
+    went from over 16 KiB to about 10 KiB of headroom.
+  Still open from the acceptance list: the glibc-init fault above, the objtool
+  and modpost diagnostic review, per-object provenance, a retained boot test
+  in the suite, native parity and frame-pointer-omission without the stack
+  encoder, and the remaining C boundary cases.
+
+- Kernel boots a static glibc `/init` (2026-11-22, final pass). The two
+  remaining faults behind the page fault in `memset_orig` were found by
+  printing the faulting page's history from a patched copy of `mm/memory.c`
+  and `mm/page_alloc.c` (the sources were restored afterwards):
+  - A file-scope `uint8_t`/`char` array without an initializer lost its
+    `aligned(N)` attribute, and inherited the previous declaration's value.
+    `empty_zero_page` (`const uint8_t [4096] __aligned(4096)`) therefore sat
+    unaligned in `.rodata`. The attribute is now kept (`global-byte-array-
+    alignment`).
+  - A non-zero integer passed as a `_Bool` argument was not normalized to 1,
+    so `__vm_normal_page(..., pte_special(pte), ...)` saw the low byte of
+    `0x200` as false, treated the shared zero page as an ordinary page, and
+    freed it into the page allocator after copy-on-write. Integer arguments
+    and values stored to `_Bool` struct members are now converted
+    (`bool-argument-normalization`). (Superseded by the next entry.)
+  `src/code/test/lang/kernel/kernel-boot-smoke.sh` builds the kernel with NYC,
+  boots it with a freestanding initramfs `/init`, and fails unless
+  `NYC_KERNEL_INIT_REACHED` appears; both a freestanding and a static glibc
+  `/init` pass. It takes about fifteen minutes and is not part of `ctest`.
+
+- Smoke gate run end to end (2026-11-23). `kernel-boot-smoke.sh` built Linux 7.3
+  `x86_64_defconfig` from a fresh output tree with the final compiler and
+  booted both a freestanding and a static glibc `/init` to
+  `NYC_KERNEL_INIT_REACHED`; both passed. `src/code/test/lang/kernel/kernel-provenance.py` pairs every
+  `# CC` step of a `V=1` Kbuild log with NYC's own `compiled` line (or, for an
+  interleaved line, a `.comment` free of `GCC:`). On the earlier `V=1` log it
+  matched 2,973 steps with none left unpaired; the smoke script's log is not
+  `V=1`, so there it only counts NYC's `compiled` lines (2,973). Changes made on the way:
+  - `clear_user` now calls `rep_stos_alternative` directly with the length in
+    `%rcx`, instead of through a thunk; objtool's "naked return" warning count
+    for that path went from 21 to 0 and "call with UACCESS enabled" from 29 to
+    4.
+  - A statement-level call to a `noreturn` function is followed by a marker
+    `ud2`, and code behind it is dropped before SSA construction (dropping it
+    after optimization left PHIs naming vanished predecessors in
+    `get_signal` and `intel_iommu_init`). Objtool still reports 205
+    "unreachable instruction" and 209 "missing __noreturn" warnings, so that
+    diagnostic review is not finished.
+- `_Bool` store paths (2026-11-23). Three defects, all found by a differential
+  fixture against GCC at `-O0` and `-O2`:
+  - NYC's built-in `<stdbool.h>` defined `bool` as `unsigned char`, so every
+    `bool` in code that includes it silently truncated; it is now `_Bool`.
+    (The kernel defines its own `bool` and was unaffected.)
+  - `_Bool` globals, global and local arrays, `bool *` locals, parameters and
+    globals, `p[i]`, `*p = v`, `b++`/`b--` and `static bool x = 0x100` now
+    convert to 0 or 1 before the byte store narrows the value. The
+    `bool-store-paths` fixture (`-O0` and `-O2`) covers each form.
+  - Still open: a `_Bool` argument of an indirect call (function pointers carry
+    no parameter types in the frontend, only the result type), `bool **`, and
+    compound assignment through a `bool *`.
+- objtool (2026-11-23). A statement-level noreturn call, and
+  `__builtin_unreachable()`, now end the path: code behind them is dropped
+  before SSA construction, the result store is omitted, and the marker `ud2`
+  stays out of the assembly, matching GCC. In a full Linux build "missing
+  __noreturn" warnings fell from 209 to 40 and "unreachable instruction"
+  stayed at 207 before the `__builtin_unreachable` change.
+  A static `always_inline` function with no remaining reference is no longer
+  emitted (it put references to `__init` data into `.text`). The final
+  `V=1` build with `bzImage` and all 12 configured modules from a fresh output
+  tree (all 2,973 `CC` steps NYC, `src/code/test/lang/kernel/kernel-provenance.py` rc 0, both `/init`
+  boots passing) still reports 181 "unreachable instruction", 45 "missing
+  __noreturn", 4 "call with UACCESS enabled", 9 "redundant UACCESS", 11 "leaves
+  .noinstr.text" and 17 modpost section-mismatch warnings. The remaining
+  unreachable instructions follow a `__builtin_unreachable()` inside a
+  `do { } while (0)` block: the marker is not a CFG terminator, so the code
+  after the loop survives. Fixing that needs an unreachable terminator in
+  NYIR; the diagnostic review is therefore not complete. The three modpost
+  warnings on `smp_ops` come from modpost naming the object by NYC's local
+  `__nyc_static_N` symbol, which defeats its `*_ops` allowance.
+- Full `ctest` (2026-11-23): 61 of 63 pass. `ny-stdlib-debug-path` (a debug-info
+  directory string) and `nytrix-addr-probe-device` (a `[vvar]` page reads as
+  readable under Linux 7.3.5) fail; neither touches the C frontend, and I did
+  not run them against an unmodified tree.
+- objtool and modpost, final pass (2026-11-23). The `nyc-kernel-boot` ctest
+  (registered with `-DNYC_LINUX_SRC=<linux-7.3>`, about ten minutes) builds
+  `bzImage` and all 12 configured modules from a fresh output tree, runs the
+  provenance check (every `CC` step NYC) and boots a freestanding and a static
+  glibc `/init`; it passes. Warning counts for that build against the 181
+  "unreachable instruction" and 45 "missing __noreturn" measured before:
+  - 1 unreachable instruction (`apply_fineibt`), 5 missing `__noreturn`
+    (`io_worker_exit`, `wait_for_panic`, `__sysvec_reboot`, which GCC infers
+    as noreturn; NYC does not), 1 unsupported instruction in
+    `native_machine_emergency_restart`;
+  - 6 "call leaves `.noinstr.text`" (four are indirect calls) and 2 "call
+    with UACCESS enabled" (down from 11 and 4), 8 "redundant UACCESS disable"
+    in `.altinstr_replacement`, 2 "return with UACCESS enabled" in ALSA;
+  - 9 modpost section mismatches (six from `__calc_tpm2_event_size`, a plain
+    `static inline` that NYC emits out of line; three from `smp_ops`, which
+    modpost names by NYC's local `__nyc_static_599` symbol).
+  Changes behind the drop: the `ud2 # noreturn` marker is emitted at expression
+  level (noreturn calls, `__builtin_unreachable()`); the driver removes code
+  that no path reaches, before SSA construction and again before emission
+  (with phi-edge fix-up, on a copy that must still verify); the marker and any
+  straight-line instructions behind it, and an epilogue nothing jumps to, are
+  left out of the assembly; `always_inline` callees bypass the inliner's cost
+  model (legality still applies), which closed calls from `noinstr` functions
+  into `static __always_inline` helpers.
+- Test status: `ctest` runs 62 of 64 tests green, with `nyc-kernel-boot`
+  included. `ny-stdlib-debug-path` and `nytrix-addr-probe-device` fail the same
+  way on an unmodified `HEAD` build (checked in a private worktree).
+- Diagnostics after noreturn inference (2026-11-23). The final clean
+  `nyc-kernel-boot` log (`bzImage` plus modules) has 15 objtool diagnostics
+  and no modpost warnings, against about 450 at the start of the day: 0
+  "unreachable instruction" and 0 "missing __noreturn" (from 181 and 45), 0
+  "call with UACCESS enabled", 0 modpost section mismatches (from 17), 9
+  "redundant UACCESS disable" (all in `.altinstr_replacement`: objtool follows
+  the `nop` original of a `stac` alternative and then reaches a `clac`
+  replacement with UACCESS still off; the verbose trace through
+  `rseq_update_user_cs` shows it; cause not found), 3 "call leaves
+  `.noinstr.text`" (`default_idle` and `acpi_safe_halt` through paravirt
+  calls, `smp_text_poke_int3_handler` into `patch_cmp`), 2 "return with
+  UACCESS enabled" (`snd_pcm_sync_ptr` and its compat twin; the path leaves
+  through a `goto` after the `stac` slot; plain `cleanup` attribute scopes
+  with `goto` and `return` run their handlers, so the cause is not that),
+  and 1 "unsupported instruction" (`ljmp` in
+  `native_machine_emergency_restart`). A `_Bool` argument of an indirect call
+  is still not converted: the frontend stores only a function pointer's
+  result type, never its parameter types, at about fifteen propagation sites.
+  The three `smp_ops` modpost mismatches came from a zero-length local object
+  (`__nyc_static_599` in `cpuid.o`) sitting at the end of `.data`, at the
+  address of the next object's first byte; zero-length local objects now go
+  to `.bss` (`zero-length-static` fixture).
+  Changes behind these numbers:
+  - A function whose every path ends in a noreturn call or an endless loop is
+    inferred noreturn within the unit (as GCC does for visible callers); its
+    callers get the marker, and code behind it is removed.
+  - Unreachable-code removal now runs for every function, not only those with
+    a marker, on a copy that must verify (a failing function keeps its body).
+  - An unreferenced `static inline` function is no longer emitted, and a
+    static function placed in a section by attribute (`__init`) is now
+    discardable when nothing references it.
+  - `always_inline` functions with automatic arrays are inlined (the parser
+    marked every function with an automatic array noinline), and the
+    loop-pressure limit no longer rejects them; the `always-inline-array`
+    fixture covers this at `-O0` and `-O2` and checks the call is gone.
+    The six `__calc_tpm2_event_size` modpost mismatches went away with it.
+  - A compound assignment through a `bool *` (`*p |= v`) converts to 0 or 1.
+  - Jump threading also uses a dominating branch: when a block tests `v == 0`
+    (or `!= 0`) and a predecessor chain of single-predecessor blocks leaves a
+    `br.if v`, the edge is threaded to the target the repeated test would
+    choose (`if (ok) enter(); if (!ok) goto fail;` no longer leaves the entered
+    path able to reach `fail`). The `jump-thread-implied-branch` fixture covers
+    it. The two ALSA "return with UACCESS enabled" diagnostics persist: the
+    final IR (`NYC_DUMP_FINAL=<function>` prints it just before emission) shows
+    no re-test: the `stac` block goes straight to the user loads, every error
+    exit reaches the `clac` block, and the error code travels through address-
+    taken local slots. objtool's trace takes the `stac` replacement and then
+    the `nop` original of the `clac` site, a mixed alternative path; whether
+    GCC objects avoid that by layout or by objtool's visited-state rules is
+    not established, so these two may be false positives.
+  - An indirect call whose target is the address of a named function (how
+    Linux writes `static_call()`) is folded to a direct call, as GCC does; the
+    `indirect-call-folding` fixture checks the result and that no indirect
+    thunk remains. Two "{dynamic}" noinstr diagnostics went away with it.
 </details>

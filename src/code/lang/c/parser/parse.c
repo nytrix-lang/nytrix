@@ -37,6 +37,7 @@ typedef struct {
   c_agg_type_t *agg;
   bool is_const;
   bool is_bool;
+  bool pointee_bool;
   bool pointee_const;
   bool is_volatile;
   bool pointee_volatile;
@@ -89,6 +90,7 @@ typedef struct {
   size_t slot;
   bool is_const;
   bool is_bool;
+  bool pointee_bool;
   bool has_integer_constant;
   int64_t integer_constant;
   bool pointee_const;
@@ -197,6 +199,12 @@ typedef struct {
   bool has_asm_register;
   ny_ctok_t alias_target;
   bool is_volatile;
+  /*
+   * `_Bool` object (or array of them): stores convert to 0 or 1.
+   */
+  bool is_bool;
+  /* Pointer to `_Bool`: stores through it convert to 0 or 1. */
+  bool pointee_bool;
   /*
    * C_SEG_* qualifier on the object a global pointer addresses.
    */
@@ -352,6 +360,12 @@ typedef struct {
   size_t next_tag_scope_id;
   bool last_type_const;
   bool last_type_bool;
+  /*
+   * Set by a statement before it lowers a store through a pointer or array
+   * element whose declared type is `_Bool`; the store then converts its value
+   * to 0 or 1. lower_pointer_store consumes and clears it.
+   */
+  bool store_bool;
   bool last_type_const_pointer;
   bool last_type_volatile;
   unsigned char last_type_seg;
@@ -1259,6 +1273,13 @@ static int emit_i64_compare(c_parser_t *p, int left, int right,
 static int emit_i64_select(c_parser_t *p, int condition, int when_true,
                            int when_false);
 static int emit_value(c_parser_t *p, nyr_inst_t inst);
+static bool emit_noreturn_marker(c_parser_t *p);
+/* Convert an integer or pointer value to the 0 or 1 of a C `_Bool`. */
+static int lower_bool_value(c_parser_t *p, int value) {
+  int zero = emit_i64_constant(p, 0);
+  return zero < 0 || value < 0 ? -1
+                               : emit_i64_compare(p, value, zero, NYIR_CMP_NE);
+}
 static bool decode_string_token(ny_ctok_t token, unsigned char **bytes,
                                 size_t *len);
 static bool decode_wide_string_token(ny_ctok_t token, unsigned char **bytes,
@@ -3388,6 +3409,74 @@ static bool static_typeof_is_void_null_pointer(const c_parser_t *p,
          tok_is(p, start + 3, ")") && tok_is(p, start + 4, "0");
 }
 
+/*
+ * C type of a numeric or character literal appearing under typeof. The
+ * suffix and magnitude decide the type (`typeof(0L)` is long, not int); the
+ * syscall wrappers rely on it to keep 64-bit register arguments intact.
+ */
+static c_type_t typeof_literal_type(const c_parser_t *p, ny_ctok_t tok) {
+  if (tok.kind != NY_CTOK_NUMBER || !tok.len || tok.len >= 128)
+    return C_I32;
+  char text[128];
+  memcpy(text, tok.start, tok.len);
+  text[tok.len] = '\0';
+  bool hex = tok.len > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X');
+  bool is_float = false;
+  for (size_t i = 0; i < tok.len; ++i) {
+    char ch = text[i];
+    if (ch == '.' || (!hex && (ch == 'e' || ch == 'E')) ||
+        (hex && (ch == 'p' || ch == 'P')))
+      is_float = true;
+  }
+  char last = text[tok.len - 1];
+  if (!hex && (last == 'f' || last == 'F'))
+    return C_F32;
+  if (is_float)
+    return C_F64;
+  unsigned long long value = 0;
+  size_t end = tok.len;
+  bool is_unsigned = false;
+  unsigned longs = 0;
+  while (end && strchr("uUlL", text[end - 1])) {
+    if (text[end - 1] == 'u' || text[end - 1] == 'U')
+      is_unsigned = true;
+    else
+      ++longs;
+    --end;
+  }
+  text[end] = '\0';
+  errno = 0;
+  value = strtoull(text, NULL, 0);
+  bool overflow = errno == ERANGE;
+  bool non_decimal = hex || (end > 1 && text[0] == '0');
+  bool long_is_64 = p->abi != NYC_ABI_I386;
+  bool fits_int = !overflow && value <= INT32_MAX;
+  bool fits_uint = !overflow && value <= UINT32_MAX;
+  bool fits_long = !overflow && value <= INT64_MAX;
+  if (!longs) {
+    if (!is_unsigned && fits_int)
+      return C_I32;
+    if (is_unsigned || non_decimal) {
+      if (fits_uint)
+        return C_U32;
+    }
+    if (!long_is_64)
+      return is_unsigned || non_decimal ? C_U32 : C_I32;
+    if (!is_unsigned && fits_long)
+      return C_I64;
+    return C_U64;
+  }
+  if (longs == 1 && !long_is_64) {
+    if (!is_unsigned && fits_int)
+      return C_I32;
+    if (fits_uint && (is_unsigned || non_decimal))
+      return C_U32;
+  }
+  if (!is_unsigned && fits_long)
+    return C_I64;
+  return C_U64;
+}
+
 static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
                                          unsigned depth, bool unary_only) {
   if (depth > NY_C_MAX_RECURSION_DEPTH) {
@@ -3965,9 +4054,9 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
     p->last_type_base_valid = true;
   } else if (p->tokens[p->pos].kind == NY_CTOK_NUMBER ||
              p->tokens[p->pos].kind == NY_CTOK_CHAR) {
+    *type = typeof_literal_type(p, p->tokens[p->pos]);
     ++p->pos;
-    *type = C_I32;
-    p->last_type_base_type = C_I32;
+    p->last_type_base_type = *type;
     p->last_type_base_valid = true;
   } else {
     fail(p, "unsupported typeof expression");
@@ -8019,6 +8108,8 @@ static bool try_collect_char_array(c_parser_t *p, bool *matched) {
    */
   p->last_type_section = (ny_ctok_t){0};
   p->last_function_alias = (ny_ctok_t){0};
+  /* The alignment of a previous declaration must not leak into this one. */
+  p->last_type_alignment = 0;
   bool is_external = false;
   bool is_const = false;
   bool attributes_ok = true;
@@ -8150,6 +8241,7 @@ static bool try_collect_char_array(c_parser_t *p, bool *matched) {
                          .is_signed_array = array_type == C_CHAR,
                          .is_const = is_const,
                          .alias_target = alias_target,
+                         .alignment = p->last_type_alignment,
                          .is_external = true};
       }
       if (previous && previous->section && section_buf[0] &&
@@ -8320,6 +8412,7 @@ static bool try_collect_char_array(c_parser_t *p, bool *matched) {
                            .is_const = is_const,
                            .is_tentative = !is_external && !has_initializer,
                            .alias_target = alias_target,
+                           .alignment = p->last_type_alignment,
                            .array_incomplete = incomplete && !has_initializer};
   if (previous && previous->section) {
     /*
@@ -16416,6 +16509,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             .agg = param_agg,
             .is_const = is_const,
             .is_bool = is_bool_param && !c_type_is_pointer(type),
+            .pointee_bool = is_bool_param && type == C_CHAR_PTR,
             .pointee_const = c_type_is_pointer(type) && p->last_type_const,
             .is_volatile = is_volatile,
             .pointee_volatile = pointee_volatile,
@@ -16467,9 +16561,31 @@ error:
   return false;
 }
 
+/*
+ * Globals created by the previous file-scope declaration become `_Bool`
+ * objects when its specifiers named `_Bool`.
+ */
+static void mark_bool_globals(c_parser_t *p, size_t from, bool is_bool) {
+  if (!is_bool)
+    return;
+  for (size_t g = from; g < p->global_count; ++g) {
+    c_global_t *global = &p->globals[g];
+    if (global->is_function_pointer_array || global->is_pointer_array)
+      continue;
+    if (c_type_is_integer(global->type))
+      global->is_bool = true;
+    else if (global->type == C_CHAR_PTR && !global->is_array)
+      global->pointee_bool = true;
+  }
+}
+
 static bool collect_functions(c_parser_t *p) {
   p->pos = 0;
+  size_t bool_globals_pending_from = 0;
+  bool bool_globals_pending = false;
   while (p->pos + 1 < p->token_count) {
+    mark_bool_globals(p, bool_globals_pending_from, bool_globals_pending);
+    bool_globals_pending = false;
     /*
      * Alias attributes belong to one file-scope declaration.
      */
@@ -16584,6 +16700,24 @@ static bool collect_functions(c_parser_t *p) {
       }
     }
     bool matched_global = false;
+    bool_globals_pending_from = p->global_count;
+    /*
+     * Remember whether the declaration's specifiers name `_Bool`; the
+     * collectors below build the globals without the type-specifier state.
+     */
+    bool declaration_is_bool = false;
+    for (size_t scan = p->pos; scan < p->token_count; ++scan) {
+      if (tok_is(p, scan, ";") || tok_is(p, scan, "=") ||
+          tok_is(p, scan, "(") || tok_is(p, scan, "{") ||
+          tok_is(p, scan, "[") || tok_is(p, scan, ",") ||
+          tok_is(p, scan, "*") || tok_is(p, scan, "struct") ||
+          tok_is(p, scan, "union") || tok_is(p, scan, "enum") ||
+          tok_is(p, scan, "typedef"))
+        break;
+      if (tok_is(p, scan, "_Bool") || tok_is(p, scan, "bool"))
+        declaration_is_bool = true;
+    }
+    bool_globals_pending = declaration_is_bool;
     /*
      * Give the string-literal array parser priority over the general pointer
      * array parser, which accepts symbol addresses and nulls.
@@ -17204,6 +17338,7 @@ static bool collect_functions(c_parser_t *p) {
     fn->defined = true;
     p->pos = end;
   }
+  mark_bool_globals(p, bool_globals_pending_from, bool_globals_pending);
   return true;
 }
 
@@ -21812,8 +21947,7 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
     out->function_weak[output_index] = fn->is_weak;
     out->function_no_emit[output_index] = fn->no_emit;
     out->function_discardable[output_index] = fn->is_static && !fn->is_used &&
-                                              !fn->has_asm_alias &&
-                                              (!fn->section || fn->is_inline);
+                                              !fn->has_asm_alias;
     if (fn->section) {
       out->function_sections[output_index] = strdup(fn->section);
       if (!out->function_sections[output_index]) {

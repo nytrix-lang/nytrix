@@ -4629,9 +4629,10 @@ static nyr_mach_type_t mach_nir_value_type(const nyr_type_map_t *types,
 bool nyr_mach_opcode_supported(nyr_op_t op) {
   switch (op) {
   case NYIR_READ_X86_RSP:
+    return false;
   case NYIR_STACK_GUARD_LOAD:
   case NYIR_STACK_GUARD_STORE:
-    return false;
+    return true;
   case NYIR_NOP:
   case NYIR_BOUNDS_CHECK:
   case NYIR_CONST_I64:
@@ -5252,6 +5253,18 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
                      "machine lower: segment-relative access requires the "
                      "NYIR emitter");
   }
+  /*
+   * Linux's rep_stos_alternative takes its length in %rcx and returns the
+   * residue there; only the NYIR emitter knows that convention.
+   */
+  for (size_t i = 0; i < nyir->len; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    if (in->op == NYIR_CALL && in->symbol &&
+        strcmp(in->symbol, "rep_stos_alternative") == 0)
+      return nyr_err(err, err_len,
+                     "machine lower: rep_stos_alternative requires the NYIR "
+                     "emitter");
+  }
   bool trace_lowering =
       ny_dbg_is_enabled(NY_DBG_LOWER) || ny_dbg_is_enabled(NY_DBG_VALUE);
   if (ny_dbg_is_enabled(NY_DBG_LOWER) && trace_lowering &&
@@ -5610,6 +5623,20 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
         goto oom;
     }
   }
+  /*
+   * The stack-protector canary lives in one pinned frame slot allocated
+   * before any alloca, so it sits above every dynamic object and an overrun
+   * reaches it before the saved registers.
+   */
+  uint32_t guard_slot = UINT32_MAX;
+  for (size_t i = 0; i < nyir->len; ++i)
+    if (nyir->data[i].op == NYIR_STACK_GUARD_STORE ||
+        nyir->data[i].op == NYIR_STACK_GUARD_LOAD) {
+      if (!nyr_mach_alloc_typed_frame_slot(&lowered, 8, 8, NYR_MACH_TYPE_I64,
+                                           true, &guard_slot))
+        goto oom;
+      break;
+    }
   if (trace_lowering)
     NY_DBG(NY_DBG_LOWER, "NYIR -> MIR lowering (%zu instructions)", nyir->len);
   for (size_t i = 0, block = 0; i < nyir->len; ++i) {
@@ -5649,6 +5676,18 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       inst.dst = mach_vreg(&lowered, values[in->dst]);
       inst.src0 =
           (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM, .as.imm = in->imm};
+    } else if (in->op == NYIR_STACK_GUARD_LOAD && guard_slot != UINT32_MAX &&
+               in->dst >= 0) {
+      inst.opcode = NYR_MACH_LOAD;
+      inst.dst = mach_vreg(&lowered, values[in->dst]);
+      inst.src0 = mach_frame(guard_slot);
+      inst.effects = NYR_MACH_EFFECT_READ_MEMORY;
+    } else if (in->op == NYIR_STACK_GUARD_STORE && guard_slot != UINT32_MAX &&
+               in->a >= 0) {
+      inst.opcode = NYR_MACH_STORE;
+      inst.dst = mach_frame(guard_slot);
+      inst.src0 = mach_vreg(&lowered, values[in->a]);
+      inst.effects = NYR_MACH_EFFECT_WRITE_MEMORY;
     } else if (in->op == NYIR_LOAD_LOCAL) {
       inst.opcode = NYR_MACH_LOAD;
       inst.dst = mach_vreg(&lowered, values[in->dst]);

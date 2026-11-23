@@ -298,6 +298,21 @@ bool nyr_dead_store_elim(nyr_func_t *f) {
             }
           }
         }
+        /*
+         * Inline assembly can read or write through any pointer operand
+         * (`lgdt %0` with an "m" operand, descriptor-table and MSR helpers),
+         * so an allocation passed to it escapes.
+         */
+        if (in->op == NYIR_INLINE_ASM) {
+          int operands[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
+          for (int k = 0; k < 6; ++k) {
+            if (operands[k] < 0)
+              continue;
+            int root = find_alloc_root(f, defs, operands[k]);
+            if (root >= 0 && root < f->next_value)
+              alloc_escapes[root] = true;
+          }
+        }
         if (in->op == NYIR_STORE_LOCAL && in->imm >= 0 &&
             (size_t)in->imm < count) {
           int root = find_alloc_root(f, defs, in->a);

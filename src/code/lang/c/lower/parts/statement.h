@@ -376,8 +376,14 @@ static c_function_t *lower_return_noreturn_call(c_parser_t *p,
       !tok_is(p, expression_start + 1, "("))
     return NULL;
   c_function_t *called = find_function(p, p->tokens[expression_start]);
-  return called && called->no_return && p->out->len &&
-                 p->out->data[p->out->len - 1].op == NYIR_CALL
+  /* The call may be followed by the noreturn marker. */
+  size_t last = p->out->len;
+  if (last && p->out->data[last - 1].op == NYIR_INLINE_ASM &&
+      p->out->data[last - 1].symbol &&
+      !strcmp(p->out->data[last - 1].symbol, "ud2 # noreturn"))
+    --last;
+  return called && called->no_return && last &&
+                 p->out->data[last - 1].op == NYIR_CALL
              ? called
              : NULL;
 }
@@ -1273,10 +1279,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       }
       ny_ctok_t pragma = *current(p);
       static const char unroll_prefix[] = "\"GCC unroll ";
-      if (pragma.len <= sizeof(unroll_prefix) - 1 ||
-          memcmp(pragma.start, unroll_prefix, sizeof(unroll_prefix) - 1) != 0 ||
-          pragma.start[pragma.len - 1] != '"') {
-        fail(p, "unsupported function-scope _Pragma directive");
+      /* Other pragmas (GCC diagnostic push/pop, ivdep, ...) carry no code
+         generation meaning here; like GCC with unknown pragmas, skip them. */
+      (void)unroll_prefix;
+      if (pragma.len < 2 || pragma.start[pragma.len - 1] != '"') {
+        fail(p, "_Pragma requires a string-literal argument");
         break;
       }
       ++p->pos;
@@ -2385,6 +2392,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             declaration_ok = false;
             break;
           }
+          p->last_type_bool = decl_is_bool && !c_type_is_pointer(type);
           if (!lower_static_scalar_declaration(
                   p, type, name, declarator_is_const, declarator_is_volatile,
                   decl_agg, local_section)) {
@@ -2664,6 +2672,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           if (decl_function_result_agg)
             local->agg = decl_function_result_agg;
           local->address_taken = true;
+          local->is_bool = decl_is_bool && c_type_is_integer(type);
           local->array_count = count;
           local->array_rank = rank;
           memcpy(local->array_extent, extents, sizeof(extents));
@@ -2909,6 +2918,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             local->agg = decl_agg;
           local->function_result_type = decl_function_result_type;
           local->is_bool = decl_is_bool && !c_type_is_pointer(type);
+          local->pointee_bool = decl_is_bool && type == C_CHAR_PTR;
           if (decl_function_result_agg)
             local->agg = decl_function_result_agg;
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
@@ -3063,6 +3073,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             local->agg = decl_agg;
           local->function_result_type = decl_function_result_type;
           local->is_bool = decl_is_bool && !c_type_is_pointer(type);
+          local->pointee_bool = decl_is_bool && type == C_CHAR_PTR;
           if (decl_function_result_agg)
             local->agg = decl_function_result_agg;
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
@@ -3137,6 +3148,16 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       }
     }
     if (pointer_store_statement && accept(p, "*")) {
+      /*
+       * `*name = value` where `name` is declared `_Bool *`.
+       */
+      if (tok_ident(*current(p)) && is_assignment_operator(p, p->pos + 1)) {
+        c_local_t *bool_local = find_local(p, *current(p));
+        c_global_t *bool_global =
+            bool_local ? NULL : find_global(p, *current(p));
+        p->store_bool = bool_local ? bool_local->pointee_bool
+                                   : bool_global && bool_global->pointee_bool;
+      }
       unsigned segment_flags;
       c_value_t address = parse_pointer_store_address(p, &segment_flags);
       bool read_only =
@@ -3393,6 +3414,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       if (!local && !global_pointer && !indexed_global->is_pointer_array &&
           indexed_global->is_volatile && c_type_is_integer(indexed_global->type))
         pointer.agg = c_pointee_marker(indexed_global->is_const, true, 0);
+      p->store_bool =
+          local ? (local_array ? local->is_bool : local->pointee_bool)
+                : indexed_global && !indexed_global->is_pointer_array &&
+                      (global_pointer ? indexed_global->pointee_bool
+                                      : indexed_global->is_bool);
       if (!lower_pointer_store(
               p, pointer,
               local ? ((local->is_const && !pointer_local) ||

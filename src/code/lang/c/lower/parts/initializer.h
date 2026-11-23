@@ -11,7 +11,8 @@ static bool lower_initializer_field(c_parser_t *p, const c_agg_field_t *field,
   c_value_t value = parse_expr(p, 1);
   if (value.value < 0)
     return false;
-  bool pointer_to_bool = field->is_bool && c_type_is_pointer(value.type);
+  bool pointer_to_bool = field->is_bool && (c_type_is_pointer(value.type) ||
+                                            c_type_is_integer(value.type));
   if (type == C_VOID_PTR) {
     if (!c_type_is_pointer(value.type) &&
         !p->last_value_null_pointer_constant) {
@@ -216,6 +217,23 @@ static bool lower_complex_initialize(c_parser_t *p, int base,
 
 static bool add_local(c_parser_t *p, ny_ctok_t name, c_type_t type, int value,
                       bool is_const, bool is_volatile) {
+  /*
+   * An automatic object declared in a nested block cannot outlive it. Mark
+   * its storage so frame layout may overlap it with objects of sibling
+   * blocks (GCC shares slots by scope; without this every guard() and
+   * scoped_guard() temporary in a function keeps its own bytes).
+   */
+  if (value >= 0 && p->tag_scope_depth > 1 && p->out) {
+    size_t scanned = 0;
+    for (size_t i = p->out->len; i > 0 && scanned < 96; --i, ++scanned) {
+      nyr_inst_t *def = &p->out->data[i - 1];
+      if (def->dst == value) {
+        if (def->op == NYIR_ALLOCA)
+          def->flags |= NYIR_INST_F_SCOPE_LOCAL;
+        break;
+      }
+    }
+  }
   for (size_t i = p->local_count; i > p->scope_start; --i) {
     if (tok_same(p->locals[i - 1].name, name)) {
       fail(p, "duplicate declaration in the same C scope");
@@ -954,6 +972,7 @@ static bool lower_static_scalar_declaration(c_parser_t *p, c_type_t type,
                                             bool is_volatile,
                                             c_agg_type_t *aggregate,
                                             ny_ctok_t section) {
+  bool static_is_bool = p->last_type_bool && c_type_is_integer(type);
   if (!c_type_is_integer(type) && !c_type_is_pointer(type) &&
       type != C_FUNC_PTR && tok_is(p, p->pos, "[")) {
     fail(p, "static scalar arrays require integer or pointer elements");
@@ -1123,6 +1142,7 @@ static bool lower_static_scalar_declaration(c_parser_t *p, c_type_t type,
                        .is_function_pointer_array = rank && type == C_FUNC_PTR,
                        .owner_function =
                            p->function ? p->function->name : (ny_ctok_t){0},
+                       .is_bool = static_is_bool,
                        .is_const = is_const};
   if (has_initializer) {
     if (!rank) {
@@ -1157,6 +1177,8 @@ static bool lower_static_scalar_declaration(c_parser_t *p, c_type_t type,
           fail(p, "static scalar object requires a constant initializer");
           return false;
         }
+        if (static_is_bool)
+          value = value != 0;
         memcpy(bytes, &value, width);
       }
     } else if (has_string_initializer) {
@@ -2836,7 +2858,8 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
           }
           return false;
         }
-        if (field->is_bool && c_type_is_pointer(value.type)) {
+        if (field->is_bool && (c_type_is_pointer(value.type) ||
+                               c_type_is_integer(value.type))) {
           int zero = emit_i64_constant(p, 0);
           value.value =
               zero < 0 ? -1
@@ -2949,7 +2972,7 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
                : is_i16 || is_u16
                    ? lower_store_u16_field(p, address, value.value, field_type,
                                            field->is_volatile)
-               : c_type_is_pointer(field_type)
+               : is_ptr || c_type_is_pointer(field_type)
                    ? lower_store_pointer_field(p, address, value.value,
                                                field->is_volatile)
                    : lower_store_field(p, address, value.value, is_f64,
@@ -3426,6 +3449,8 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
 static bool lower_pointer_store(c_parser_t *p, c_value_t address,
                                 bool read_only, bool wrapped,
                                 unsigned segment_flags) {
+  bool store_bool = p->store_bool;
+  p->store_bool = false;
   /*
    * `(*ptr) op= value`: the address parse stops inside the grouping; skip
    * to the closing paren so the assignment operator follows naturally.
@@ -3537,6 +3562,15 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
   bool simple = ny_ctok_eq(op, "=");
   ++p->pos;
   c_value_t value = parse_expr(p, 1);
+  if (store_bool && simple && address.type == C_CHAR_PTR && value.value >= 0 &&
+      (c_type_is_integer(value.type) || c_type_is_float(value.type) ||
+       c_type_is_pointer(value.type))) {
+    /* Convert before the byte store narrows the value. */
+    value.value = lower_boolean_value(p, value);
+    value.type = C_I64;
+    if (value.value < 0)
+      return false;
+  }
   c_type_t element_type = address.type == C_CHAR_PTR  ? C_U8
                           : address.type == C_I8_PTR  ? C_CHAR
                           : address.type == C_I16_PTR ? C_I16
@@ -3731,6 +3765,12 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
                                            : NYIR_SCALAR_I64_RAW});
       if (value.value < 0)
         return false;
+      if (store_bool && address.type == C_CHAR_PTR) {
+        /* `*flag |= x` on a _Bool: the result converts back to 0 or 1. */
+        value.value = lower_bool_value(p, value.value);
+        if (value.value < 0)
+          return false;
+      }
       if (address.type == C_I16_PTR || address.type == C_U16_PTR) {
         value.value = normalize_u16(p, value.value);
         if (value.value < 0)
@@ -3961,13 +4001,19 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
     }
     if (value.value < 0)
       return false;
-    if (!pointer_compound) {
+    if (!pointer_compound && !global->is_bool) {
       value.value = normalize_integer(p, global->type, value.value);
       if (value.value < 0)
         return false;
     }
   }
-  if (global->type == C_I32 || global->type == C_U32 || global->type == C_U8) {
+  if (global->is_bool && c_type_is_integer(global->type)) {
+    /* Convert before any narrowing: 0x100 stored to a _Bool is 1, not 0. */
+    value.value = lower_bool_value(p, value.value);
+    if (value.value < 0)
+      return false;
+  } else if (global->type == C_I32 || global->type == C_U32 ||
+             global->type == C_U8) {
     value.value = normalize_integer(p, global->type, value.value);
     if (value.value < 0)
       return false;
@@ -4001,7 +4047,9 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
                          .segment_flags = c_seg_flags(global->object_seg)};
     return lower_store_scalar_lvalue(p, &target, global->type, value.value);
   }
-  uint8_t flags = global->type == C_I32 || global->type == C_U32
+  uint8_t flags = global->type == C_I32 || global->type == C_U32 ||
+                          (p->abi == NYC_ABI_I386 &&
+                           c_type_is_pointer(global->type))
                       ? NYIR_INST_F_MEM_I32
                       : (global->type == C_U8 ? NYIR_INST_F_MEM_BYTE : 0);
   return emit(

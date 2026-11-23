@@ -2689,7 +2689,7 @@ if(NYC_AS_EXECUTABLE)
     set(i386_probes i386-aggregate-abi i386-spill-arithmetic i386-register-runs
                     asm-bit-string-rmw asm-fninit-status
                     asm-repeat-cmpsb asm-divl-outputs asm-repeat-copy-tail
-                    asm-segment-memory asm-es-fill)
+                    asm-segment-memory asm-es-fill i386-pointer-member-store)
     if(NYC_GNU_CC)
       list(APPEND i386_probes i386-varargs)
     endif()
@@ -2806,6 +2806,26 @@ if(NOT status EQUAL 0 OR NOT stdout MATCHES "#define __x86_64__ 1" OR
    NOT stdout MATCHES "#define __SIZEOF_POINTER__ 8")
   message(FATAL_ERROR
     "nyc x86-64 target predefined types changed unexpectedly\n${stdout}${stderr}")
+endif()
+# A unit without symbols must still assemble to an object with a .symtab,
+# which objtool and other ELF consumers require.
+file(WRITE "${BINARY_DIR}/empty-unit.c" "")
+nyc_execute_ok(
+  [=[nyc failed to emit assembly for an empty translation unit]=]
+  COMMAND "${NYC}" -S "${BINARY_DIR}/empty-unit.c"
+            -o "${BINARY_DIR}/empty-unit.s"
+)
+nyc_execute_ok(
+  [=[could not assemble the empty translation unit]=]
+  COMMAND "${CC}" -c "${BINARY_DIR}/empty-unit.s"
+            -o "${BINARY_DIR}/empty-unit.o"
+)
+if(READELF)
+  execute_process(COMMAND "${READELF}" -S "${BINARY_DIR}/empty-unit.o"
+    OUTPUT_VARIABLE empty_unit_sections)
+  if(NOT empty_unit_sections MATCHES "\\.symtab")
+    message(FATAL_ERROR "empty translation unit object has no .symtab")
+  endif()
 endif()
 set(no_sse_source "${NY_C_CORPUS_no-sse-integer.c}")
 set(no_sse_harness "${NY_C_CORPUS_no-sse-main.c}")
@@ -4037,6 +4057,212 @@ nyc_execute_ok(
 )
 
 nyc_execute_ok(
+  [=[nyc failed to compile the bool-argument-normalization fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 --all "${NY_C_CORPUS_bool-argument-normalization.c}"
+            "${BINARY_DIR}/bool-argument-normalization.o"
+)
+nyc_execute_ok(
+  [=[linking the bool-argument-normalization fixture failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/bool-argument-normalization-host"
+            "${NY_C_CORPUS_bool-argument-normalization-main.c}"
+            "${BINARY_DIR}/bool-argument-normalization.o"
+)
+nyc_execute_ok(
+  [=[a non-zero integer converted to _Bool lost its value\n${stdout}${stderr}]=]
+  COMMAND "${BINARY_DIR}/bool-argument-normalization-host"
+)
+foreach(bool_store_opt -O0 -O2)
+  nyc_execute_ok(
+    [=[nyc failed to compile the bool-store-paths fixture (${status})\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${bool_store_opt} --all "${NY_C_CORPUS_bool-store-paths.c}"
+              "${BINARY_DIR}/bool-store-paths.o"
+  )
+  nyc_execute_ok(
+    [=[linking the bool-store-paths fixture failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -o "${BINARY_DIR}/bool-store-paths-host"
+              "${NY_C_CORPUS_bool-store-paths-main.c}"
+              "${BINARY_DIR}/bool-store-paths.o"
+  )
+  nyc_execute_ok(
+    [=[a non-zero integer stored to a _Bool kept only its low byte (${bool_store_opt})\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/bool-store-paths-host"
+  )
+endforeach()
+nyc_execute_ok(
+  [=[nyc failed to compile the noreturn-no-dead-code fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_noreturn-no-dead-code.c}"
+            -o "${BINARY_DIR}/noreturn-no-dead-code.s"
+)
+file(READ "${BINARY_DIR}/noreturn-no-dead-code.s" noreturn_dead_asm)
+if(noreturn_dead_asm MATCHES "call[^\n]*\tdie\n[^\n]*(movq|ud2)")
+  message(FATAL_ERROR
+    "an instruction follows a noreturn call (objtool reports it as unreachable)\n${noreturn_dead_asm}")
+endif()
+if(noreturn_dead_asm MATCHES "ud2 # noreturn")
+  message(FATAL_ERROR "the noreturn marker leaked into the assembly\n${noreturn_dead_asm}")
+endif()
+if(noreturn_dead_asm MATCHES "\n[ \t]*ud2\n[ \t]*(jmp|movq|call)")
+  message(FATAL_ERROR "code follows __builtin_unreachable\n${noreturn_dead_asm}")
+endif()
+if(noreturn_dead_asm MATCHES "\ntripled:")
+  message(FATAL_ERROR "an unreferenced static always_inline function was emitted\n${noreturn_dead_asm}")
+endif()
+foreach(inline_array_opt -O0 -O2)
+  nyc_execute_ok(
+    [=[nyc failed to compile the always-inline-array fixture (${status})\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${inline_array_opt} --all "${NY_C_CORPUS_always-inline-array.c}"
+              "${BINARY_DIR}/always-inline-array.o"
+  )
+  nyc_execute_ok(
+    [=[linking the always-inline-array fixture failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -o "${BINARY_DIR}/always-inline-array-host"
+              "${NY_C_CORPUS_always-inline-array-main.c}"
+              "${BINARY_DIR}/always-inline-array.o"
+  )
+  nyc_execute_ok(
+    [=[an always_inline callee with automatic arrays computed the wrong result (${inline_array_opt})\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/always-inline-array-host"
+  )
+endforeach()
+nyc_execute_ok(
+  [=[nyc failed to assemble the always-inline-array fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_always-inline-array.c}"
+            -o "${BINARY_DIR}/always-inline-array.s"
+)
+file(READ "${BINARY_DIR}/always-inline-array.s" always_inline_array_asm)
+if(always_inline_array_asm MATCHES "call[^\n]*\tsum_to" OR always_inline_array_asm MATCHES "\nsum_to:")
+  message(FATAL_ERROR "an always_inline callee with automatic arrays was not inlined\n${always_inline_array_asm}")
+endif()
+nyc_execute_ok(
+  [=[nyc failed to compile the indirect-call-folding fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 --all "${NY_C_CORPUS_indirect-call-folding.c}"
+            "${BINARY_DIR}/indirect-call-folding.o"
+)
+nyc_execute_ok(
+  [=[linking the indirect-call-folding fixture failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/indirect-call-folding-host"
+            "${NY_C_CORPUS_indirect-call-folding-main.c}"
+            "${BINARY_DIR}/indirect-call-folding.o"
+)
+nyc_execute_ok(
+  [=[a folded indirect call computed the wrong result\n${stdout}${stderr}]=]
+  COMMAND "${BINARY_DIR}/indirect-call-folding-host"
+)
+nyc_execute_ok(
+  [=[nyc failed to assemble the indirect-call-folding fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_indirect-call-folding.c}"
+            -o "${BINARY_DIR}/indirect-call-folding.s"
+)
+file(READ "${BINARY_DIR}/indirect-call-folding.s" folded_call_asm)
+if(folded_call_asm MATCHES "call[ \t]+\\*" OR folded_call_asm MATCHES "indirect_thunk")
+  message(FATAL_ERROR "a call through a function symbol stayed indirect\n${folded_call_asm}")
+endif()
+nyc_execute_ok(
+  [=[nyc failed to compile the zero-length-static fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_zero-length-static.c}"
+            -o "${BINARY_DIR}/zero-length-static.s"
+)
+file(READ "${BINARY_DIR}/zero-length-static.s" zero_length_asm)
+if(NOT zero_length_asm MATCHES "\\.bss\n[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*zero_length_marker:" OR
+   zero_length_asm MATCHES "\\.data\n[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*zero_length_marker:")
+  message(FATAL_ERROR
+    "a zero-length local object belongs in .bss, not at the end of .data\n${zero_length_asm}")
+endif()
+foreach(implied_opt -O1 -O2)
+  nyc_execute_ok(
+    [=[nyc failed to compile the jump-thread-implied-branch fixture (${status})\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${implied_opt} --all "${NY_C_CORPUS_jump-thread-implied-branch.c}"
+              "${BINARY_DIR}/jump-thread-implied-branch.o"
+  )
+  nyc_execute_ok(
+    [=[linking the jump-thread-implied-branch fixture failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -o "${BINARY_DIR}/jump-thread-implied-branch-host"
+              "${NY_C_CORPUS_jump-thread-implied-branch-main.c}"
+              "${BINARY_DIR}/jump-thread-implied-branch.o"
+  )
+  nyc_execute_ok(
+    [=[a branch decided by a dominating test returned the wrong value (${implied_opt})\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/jump-thread-implied-branch-host"
+  )
+endforeach()
+nyc_execute_ok(
+  [=[nyc failed to assemble the jump-thread-implied-branch fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_jump-thread-implied-branch.c}"
+            -o "${BINARY_DIR}/jump-thread-implied-branch.s"
+)
+file(READ "${BINARY_DIR}/jump-thread-implied-branch.s" implied_branch_asm)
+if(NOT implied_branch_asm MATCHES "\n\tnop\n\tjmp\t[^\n]*\n")
+  message(FATAL_ERROR
+    "the entered path was not threaded past the repeated test\n${implied_branch_asm}")
+endif()
+nyc_execute_ok(
+  [=[nyc failed to compile the global byte array alignment fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_global-byte-array-alignment.c}"
+            -o "${BINARY_DIR}/global-byte-array-alignment.s"
+)
+file(READ "${BINARY_DIR}/global-byte-array-alignment.s" byte_array_alignment_asm)
+if(NOT byte_array_alignment_asm MATCHES "balign 4096[^:]*nyc_zero_page:" OR
+   NOT byte_array_alignment_asm MATCHES "balign 16[^:]*nyc_small:")
+  message(FATAL_ERROR
+    "file-scope byte arrays lost their aligned attribute\n${byte_array_alignment_asm}")
+endif()
+nyc_execute_ok(
+  [=[nyc failed to compile the typeof-literal-width fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 --all "${NY_C_CORPUS_typeof-literal-width.c}"
+            "${BINARY_DIR}/typeof-literal-width.o"
+)
+nyc_execute_ok(
+  [=[linking the typeof-literal-width fixture failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/typeof-literal-width-host"
+            "${NY_C_CORPUS_typeof-literal-width-main.c}"
+            "${BINARY_DIR}/typeof-literal-width.o"
+)
+nyc_execute_ok(
+  [=[typeof of a long literal lost its upper 32 bits\n${stdout}${stderr}]=]
+  COMMAND "${BINARY_DIR}/typeof-literal-width-host"
+)
+nyc_execute_ok(
+  [=[nyc failed to compile the inline-asm descriptor store fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_inline-asm-descriptor-store.c}"
+            -o "${BINARY_DIR}/inline-asm-descriptor-store.s"
+)
+file(READ "${BINARY_DIR}/inline-asm-descriptor-store.s" descriptor_store_asm)
+if(NOT descriptor_store_asm MATCHES "movb.*movb.*lgdt")
+  message(FATAL_ERROR
+    "stores feeding an lgdt memory operand were eliminated\n${descriptor_store_asm}")
+endif()
+nyc_execute_ok(
+  [=[nyc failed to compile the inline-loop-entry fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 --all "${NY_C_CORPUS_inline-loop-entry.c}"
+            "${BINARY_DIR}/inline-loop-entry.o"
+)
+nyc_execute_ok(
+  [=[linking the inline-loop-entry fixture failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/inline-loop-entry-host"
+            "${NY_C_CORPUS_inline-loop-entry-main.c}"
+            "${BINARY_DIR}/inline-loop-entry.o"
+)
+nyc_execute_ok(
+  [=[an inlined callee that starts with a loop reset its formals\n${stdout}${stderr}]=]
+  COMMAND "${BINARY_DIR}/inline-loop-entry-host"
+)
+nyc_execute_ok(
+  [=[nyc failed to compile mixed arithmetic conditionals (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" --all "${NY_C_CORPUS_mixed-arithmetic-conditional.c}"
+            "${BINARY_DIR}/mixed-arithmetic-conditional.o"
+)
+nyc_execute_ok(
+  [=[linking mixed arithmetic conditionals failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-arithmetic-conditional-host"
+            "${NY_C_CORPUS_mixed-arithmetic-conditional-main.c}"
+            "${BINARY_DIR}/mixed-arithmetic-conditional.o"
+)
+nyc_execute_ok(
+  [=[mixed arithmetic conditionals computed the wrong value\n${stdout}${stderr}]=]
+  COMMAND "${BINARY_DIR}/mixed-arithmetic-conditional-host"
+)
+
+nyc_execute_ok(
   [=[nyc failed to compile a conditional preprocessor expression (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" --all "${NY_C_CORPUS_conditional-expression.c}"
             "${BINARY_DIR}/conditional-expression.o"
@@ -4637,6 +4863,11 @@ nyc_execute_ok(
   COMMAND "${NYC}" -O2 -S "${clear_user_alternative_source}"
             -o "${BINARY_DIR}/linux-clear-user-alternative.s"
 )
+file(READ "${BINARY_DIR}/linux-clear-user-alternative.s" clear_user_alt_asm)
+if(NOT clear_user_alt_asm MATCHES "movq[^\n]*%rax, %rcx\n[^\n]*xorl[^\n]*\n[^\n]*call[^\n]*rep_stos_alternative")
+  message(FATAL_ERROR
+    "clear-user must call rep_stos_alternative directly with the length in %rcx\n${clear_user_alt_asm}")
+endif()
 nyc_execute_ok(
   [=[host assembler rejected Linux clear-user alternative lowering\n${stdout}${stderr}]=]
   COMMAND "${CC}" -c "${BINARY_DIR}/linux-clear-user-alternative.s"

@@ -1038,3 +1038,25 @@ static void find_boot_cpu_capability(c_parser_t *p,
   }
   *boot_cpu = fallback_boot_cpu;
 }
+
+/*
+ * Mark the end of a path that cannot continue (a noreturn call or
+ * __builtin_unreachable). The driver removes the code behind it and leaves
+ * the marker out of the assembly, so no instruction follows the call as in
+ * GCC output; objtool reports such instructions as unreachable.
+ */
+static bool emit_noreturn_marker(c_parser_t *p) {
+  return emit(p,
+              (nyr_inst_t){.op = NYIR_INLINE_ASM,
+                           .dst = -1,
+                           .a = -1,
+                           .b = -1,
+                           .c = -1,
+                           .d = -1,
+                           .e = -1,
+                           .f = -1,
+                           .symbol = "ud2 # noreturn",
+                           .effects = NYIR_EFFECT_CONTROL |
+                                      NYIR_EFFECT_MAY_TRAP},
+              NULL);
+}

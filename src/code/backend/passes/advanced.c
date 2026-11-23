@@ -4881,6 +4881,15 @@ static bool nyr_should_inline_general(const nyr_func_t *caller,
         return false;
       }
       if (in->op == NYIR_ALLOCA) {
+        /*
+         * Cloned allocas are marked scope-local, so their storage is shared
+         * by sibling inlined bodies. A forced (always_inline) callee has no
+         * other way to avoid the call, so allow it.
+         */
+        const nyr_inline_callee_t *forced_alloca_entry =
+            nyr_find_inline_callee_entry(callee_symbol);
+        if (forced_alloca_entry && forced_alloca_entry->force)
+          continue;
         nyr_inline_trace(caller, call_idx, symbol, "reject",
                          "callee uses automatic storage (ALLOCA) which is "
                          "incompatible with inlining due to stack slot "
@@ -4918,7 +4927,10 @@ static bool nyr_should_inline_general(const nyr_func_t *caller,
    * Hot-profiled calls continue to use the ordinary hot budget.
    */
   size_t pressure_cfg_limit = static_loop_depth >= 2 ? 96 : 128;
+  const nyr_inline_callee_t *pressure_entry =
+      nyr_find_inline_callee_entry(callee_symbol);
   if (!hot && static_loop_depth >= 1 && callee->next_value > 32 &&
+      !(pressure_entry && pressure_entry->force) &&
       (summary ? summary->has_control_flow
                : nyr_func_has_control_flow(callee)) &&
       effective_size > pressure_cfg_limit) {
@@ -4944,7 +4956,9 @@ static bool nyr_should_inline_general(const nyr_func_t *caller,
         edge_heat, static_loop_depth, constant_args, callee->len,
         pressure_penalty, optimization_credit, budget, effective_size);
 
-  if (effective_size > budget) {
+  const nyr_inline_callee_t *forced_entry =
+      nyr_find_inline_callee_entry(callee_symbol);
+  if (effective_size > budget && !(forced_entry && forced_entry->force)) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
                      "code-size/register-pressure cost exceeds benefit budget");
     return false;
@@ -5274,7 +5288,14 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
   }
 
   for (size_t b = 0; b < fcfg.block_count; ++b) {
-    if (!straight_line &&
+    /*
+     * The formal-local stores belong to the invocation edge. When the callee
+     * entry block is itself a loop header (a body that starts with `while`),
+     * a back edge targets its label, so the stores must precede the label or
+     * every iteration would reset the formals.
+     */
+    bool label_after_formals = b == 0;
+    if (!label_after_formals && !straight_line &&
         !nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
                                              .dst = -1,
                                              .a = -1,
@@ -5314,6 +5335,17 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
           goto done;
       }
     }
+    if (label_after_formals && !straight_line &&
+        !nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
+                                             .dst = -1,
+                                             .a = -1,
+                                             .b = -1,
+                                             .c = -1,
+                                             .d = -1,
+                                             .e = -1,
+                                             .f = -1,
+                                             .imm = labels[b]}))
+      goto done;
 
     for (size_t i = fcfg.block_start[b]; i < fcfg.block_end[b]; ++i) {
       nyr_inst_t *in = &clone.data[i];
@@ -5441,6 +5473,8 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
         if (in->dst >= 0 &&
             (in->dst = nyr_inline_value(vmap, clone.next_value, in->dst)) < 0)
           goto done;
+        if (in->op == NYIR_ALLOCA)
+          in->flags |= NYIR_INST_F_SCOPE_LOCAL;
         int *ops[] = {&in->a, &in->b, &in->c, &in->d, &in->e, &in->f};
         for (size_t p = 0; p < sizeof(ops) / sizeof(ops[0]); ++p)
           if (!(asm_goto && p == 2) && *ops[p] >= 0 &&

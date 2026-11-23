@@ -60,7 +60,7 @@ static const nyc_header_t nyc_headers[] = {
         "typedef int clockid_t;\n"
         "int clock_gettime(clockid_t, struct timespec *);\n"
         "#ifdef __linux__\n#define CLOCK_REALTIME 0\n"
-        "#define CLOCK_MONOTONIC 1\n#endif\n"
+        "#define CLOCK_MONOTONIC 1\n#define CLOCK_MONOTONIC_RAW 4\n#endif\n"
         "struct tm *localtime_r(const time_t *, struct tm *);\n"
         "struct tm *gmtime_r(const time_t *, struct tm *);\n"
         "int nanosleep(const struct timespec *, struct timespec *);\n"),
@@ -156,7 +156,7 @@ static const nyc_header_t nyc_headers[] = {
         "int chdir(const char *);\nint fchdir(int);\n"
         "int rmdir(const char *);\nint getpagesize(void);\n"
         "char *getcwd(char *, size_t);\n"
-        "int fsync(int);\nint ftruncate(int, long);\nint getpid(void);\n"
+        "int fsync(int);\nint ftruncate(int, long);\nint getpid(void);\nint getppid(void);\n"
         "int fchown(int, unsigned int, unsigned int);\n"
         "unsigned int getuid(void);\nunsigned int geteuid(void);\n"
         "long lseek(int, long, int);\n"
@@ -177,7 +177,7 @@ static const nyc_header_t nyc_headers[] = {
                "void *calloc(unsigned long, unsigned long);\n"
                "void *realloc(void *, unsigned long);\nvoid free(void *);\n"
                "void exit(int);\nint atexit(void (*)(void));\n"
-               "char *getenv(const char *);\nint atoi(const char *);\n"
+               "char *getenv(const char *);\nint atoi(const char *);\ndouble atof(const char *);\nint posix_memalign(void **, unsigned long, unsigned long);\n"
                "long strtol(const char *, char **, int);\n"
                "unsigned long strtoul(const char *, char **, int);\n"
                "long long strtoll(const char *, char **, int);\n"
@@ -344,8 +344,8 @@ static const nyc_header_t nyc_headers[] = {
         "int kill(int, int);\n"),
     NYC_HEADER("stdarg.h", false, "#pragma once\n"),
     NYC_HEADER("stdbool.h", false,
-               "#pragma once\n#define bool unsigned char\n#define true 1\n"
-               "#define false 0\n"),
+               "#pragma once\n#define bool _Bool\n#define true 1\n"
+               "#define false 0\n#define __bool_true_false_are_defined 1\n"),
     NYC_HEADER(
         "stddef.h", false,
         "#pragma once\n#ifndef NULL\n#define NULL ((void *)0)\n"
