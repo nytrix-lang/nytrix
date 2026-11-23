@@ -2884,11 +2884,12 @@ run directory under `/tmp`.
   included. `ny-stdlib-debug-path` and `nytrix-addr-probe-device` fail the same
   way on an unmodified `HEAD` build (checked in a private worktree).
 - Diagnostics after noreturn inference (2026-11-23). The final clean
-  `nyc-kernel-boot` log (`bzImage` plus 12 modules) has 3 objtool diagnostics
+  `nyc-kernel-boot` log (`bzImage` plus 12 modules) has 2 objtool diagnostics
   and no modpost warnings, against about 450 at the start of the day (0
   "unreachable instruction", 0 "missing __noreturn", 0 UACCESS diagnostics):
-  - `native_machine_emergency_restart`: an `ljmp` ("unsupported instruction
-    in callable function"); not investigated.
+  - `native_machine_emergency_restart`: the `ljmp` of `machine_real_restart`
+    was inlined into a callable function. noreturn functions are now kept out
+    of line, as GCC does, and the diagnostic is gone.
   - `default_idle` and `acpi_safe_halt`: "call to {dynamic}() leaves
     `.noinstr.text`". NYC lowers the kernel's paravirt call asm
     (`ANNOTATE_RETPOLINE_SAFE; call *pv_ops+off(%rip)` inside an

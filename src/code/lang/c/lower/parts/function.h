@@ -507,6 +507,14 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
    */
   if (parser->has_auto_arrays && !fn->always_inline)
     fn->noinline = true;
+  /*
+   * GCC treats a noreturn function as cold and leaves it out of line. It
+   * also keeps objtool's noreturn handling meaningful: a far jump inside a
+   * noreturn function is allowed, the same jump inlined into a callable one
+   * is not.
+   */
+  if (fn->no_return && !fn->always_inline)
+    fn->noinline = true;
   return true;
 fail:
   free(parser->labels);
