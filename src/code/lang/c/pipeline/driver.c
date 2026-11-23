@@ -2090,9 +2090,61 @@ static bool nyc_mark_noreturn_calls(nyr_func_t *f, const char *const *names,
  * edges are BR, BR_IF and fallthrough. A function with computed jumps or
  * asm goto is left alone, since its label edges are not all visible here.
  */
+/*
+ * Jump threading can leave `br.if (const == const)`: the constant a threaded
+ * edge used to take from a phi now sits next to the test. Decide those
+ * branches here so the paths they never take stop being reachable.
+ */
+static void nyc_fold_constant_branches(nyr_func_t *f) {
+  if (!f || !f->len || f->next_value <= 0)
+    return;
+  bool *known = calloc((size_t)f->next_value, sizeof(*known));
+  int64_t *value = calloc((size_t)f->next_value, sizeof(*value));
+  if (!known || !value) {
+    free(known);
+    free(value);
+    return;
+  }
+  for (unsigned round = 0; round < 3; ++round)
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->dst < 0 || in->dst >= f->next_value)
+        continue;
+      if (in->op == NYIR_CONST_I64) {
+        known[in->dst] = true;
+        value[in->dst] = in->imm;
+      } else if (in->op == NYIR_CMP_I64 && in->a >= 0 && in->b >= 0 &&
+                 in->a < f->next_value && in->b < f->next_value &&
+                 known[in->a] && known[in->b] &&
+                 (in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE)) {
+        known[in->dst] = true;
+        value[in->dst] = (value[in->a] == value[in->b]) == (in->cmp == NYIR_CMP_EQ);
+      }
+    }
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_BR_IF || in->a < 0 || in->a >= f->next_value ||
+        !known[in->a])
+      continue;
+    if (value[in->a] != 0) {
+      nyr_inst_t branch = {.op = NYIR_BR, .dst = -1, .a = -1, .b = -1,
+                           .c = -1, .d = -1, .e = -1, .f = -1,
+                           .imm = in->imm, .effects = NYIR_EFFECT_CONTROL};
+      *in = branch;
+    } else {
+      nyr_inst_t nop = {.op = NYIR_NOP, .dst = -1, .a = -1, .b = -1,
+                        .c = -1, .d = -1, .e = -1, .f = -1};
+      *in = nop;
+    }
+  }
+  free(known);
+  free(value);
+}
+
 static void nyc_drop_code_after_trap(nyr_func_t *f) {
   if (!f || !f->len)
     return;
+  nyc_fold_constant_branches(f);
   bool has_marker = false;
   int64_t max_label = -1;
   for (size_t i = 0; i < f->len; ++i) {

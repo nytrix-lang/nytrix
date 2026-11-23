@@ -190,7 +190,12 @@ static bool jt_block_is_branch_or_cmp(const nyr_func_t *f, const nyr_cfg_t *cfg,
   bool has_bool_tree = false;
   for (size_t i = start; i < term; ++i) {
     nyr_op_t op = f->data[i].op;
-    if (op == NYIR_LABEL || op == NYIR_PHI || op == NYIR_NOP || op == NYIR_COPY)
+    /*
+     * A constant left in the block is not a side effect; if anything after
+     * the block reads it, jt_live_out_safe refuses the thread.
+     */
+    if (op == NYIR_LABEL || op == NYIR_PHI || op == NYIR_NOP ||
+        op == NYIR_COPY || op == NYIR_CONST_I64)
       continue;
     if (op == NYIR_CMP_I64 && cmp_idx == SIZE_MAX &&
         f->data[i].dst == f->data[term].a) {
@@ -694,9 +699,88 @@ static size_t jt_pick_target(const nyr_func_t *f, const nyr_cfg_t *cfg,
   return SIZE_MAX;
 }
 
+/*
+ * A constant defined in a branch-only block and read by later blocks keeps
+ * jt_live_out_safe from threading through that block (the threaded path would
+ * skip its definition). Constants are position independent, so move them to
+ * the top of the entry block.
+ */
+static bool jt_value_used_outside(const nyr_func_t *f, size_t from, size_t to,
+                                  int value) {
+  for (size_t j = 0; j < f->len; ++j) {
+    if (j >= from && j < to)
+      continue;
+    const nyr_inst_t *in = &f->data[j];
+    if (in->a == value || in->b == value || in->c == value ||
+        in->d == value || in->e == value || in->f == value)
+      return true;
+    for (size_t k = 0; k < in->extra_args_len; ++k)
+      if (in->extra_args[k] == value)
+        return true;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].value == value)
+        return true;
+  }
+  return false;
+}
+
+static bool jt_hoist_branch_consts(nyr_func_t *f) {
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg))
+    return false;
+  bool *move = calloc(f->len, sizeof(*move));
+  if (!move) {
+    nyr_cfg_free(&cfg);
+    return false;
+  }
+  size_t moves = 0;
+  for (size_t b = 1; b < cfg.block_count; ++b) {
+    size_t term_i = 0, cmp_i = SIZE_MAX;
+    bool pure_tree = false;
+    if (!cfg.reachable[b] ||
+        !jt_block_is_branch_or_cmp(f, &cfg, b, &term_i, &cmp_i, &pure_tree))
+      continue;
+    for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i)
+      if (f->data[i].op == NYIR_CONST_I64 && f->data[i].dst >= 0 &&
+          jt_value_used_outside(f, cfg.block_start[b], cfg.block_end[b],
+                                f->data[i].dst)) {
+        move[i] = true;
+        ++moves;
+      }
+  }
+  nyr_cfg_free(&cfg);
+  if (!moves) {
+    free(move);
+    return true;
+  }
+  size_t at = 0;
+  while (at < f->len && f->data[at].op == NYIR_LABEL)
+    ++at;
+  nyr_inst_t *data = malloc(f->len * sizeof(*data));
+  if (!data) {
+    free(move);
+    return false;
+  }
+  size_t len = 0;
+  for (size_t i = 0; i < at; ++i)
+    data[len++] = f->data[i];
+  for (size_t i = 0; i < f->len; ++i)
+    if (move[i])
+      data[len++] = f->data[i];
+  for (size_t i = at; i < f->len; ++i)
+    if (!move[i])
+      data[len++] = f->data[i];
+  memcpy(f->data, data, len * sizeof(*data));
+  free(data);
+  free(move);
+  return true;
+}
+
 bool nyr_jump_thread(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
+  if (!jt_hoist_branch_consts(f))
+    return false;
   bool *known =
       f->next_value > 0 ? calloc((size_t)f->next_value, sizeof(*known)) : NULL;
   int64_t *values =
@@ -730,8 +814,19 @@ bool nyr_jump_thread(nyr_func_t *f) {
       bool pure_tree = false;
       if (!cfg.reachable[through] ||
           !jt_block_is_branch_or_cmp(f, &cfg, through, &term_i, &cmp_i,
-                                     &pure_tree))
+                                     &pure_tree)) {
+        if (getenv("NYC_DEBUG_JT") && cfg.reachable[through]) {
+          size_t st = cfg.block_start[through];
+          size_t en = nyr_block_last_non_nop(f, &cfg, through);
+          bool has_phi = false;
+          for (size_t q = st; q < en; ++q)
+            has_phi |= f->data[q].op == NYIR_PHI;
+          if (has_phi)
+            fprintf(stderr, "jt: len=%zu block %zu has phi, not branch-only\n",
+                    f->len, through);
+        }
         continue;
+      }
       const nyr_inst_t *term = &f->data[term_i];
       int64_t cond_value = 0;
       bool direct_constant = false;
@@ -859,6 +954,11 @@ bool nyr_jump_thread(nyr_func_t *f) {
               continue;
             size_t target =
                 jt_pick_target(f, &cfg, through, term_i, path_value);
+            if (getenv("NYC_DEBUG_JT"))
+              fprintf(stderr,
+                      "jt: len=%zu try pred=%zu through=%zu target=%zd val=%lld\n",
+                      f->len, pred, through, (ssize_t)target,
+                      (long long)path_value);
             if (target != SIZE_MAX && target != through && target != pred &&
                 thread_edge_ex(f, &cfg, defs, pred, pred, SIZE_MAX, through,
                                target)) {

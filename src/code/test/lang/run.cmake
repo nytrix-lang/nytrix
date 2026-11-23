@@ -4195,6 +4195,23 @@ if(NOT implied_branch_asm MATCHES "\n\tnop\n\tjmp\t[^\n]*\n")
   message(FATAL_ERROR
     "the entered path was not threaded past the repeated test\n${implied_branch_asm}")
 endif()
+foreach(once_opt -O0 -O2)
+  nyc_execute_ok(
+    [=[nyc failed to compile the scoped-once-loops fixture (${status})\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${once_opt} --all "${NY_C_CORPUS_scoped-once-loops.c}"
+              "${BINARY_DIR}/scoped-once-loops.o"
+  )
+  nyc_execute_ok(
+    [=[linking the scoped-once-loops fixture failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -o "${BINARY_DIR}/scoped-once-loops-host"
+              "${NY_C_CORPUS_scoped-once-loops-main.c}"
+              "${BINARY_DIR}/scoped-once-loops.o"
+  )
+  nyc_execute_ok(
+    [=[a one-shot done-flag loop ran its body or cleanup the wrong number of times (${once_opt})\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/scoped-once-loops-host"
+  )
+endforeach()
 nyc_execute_ok(
   [=[nyc failed to compile the global byte array alignment fixture (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_global-byte-array-alignment.c}"

@@ -1010,6 +1010,63 @@ static bool lower_do_while(c_parser_t *p, size_t limit, bool *returned) {
   return true;
 }
 
+/*
+ * `for (...; !done; done = 1)` where the body only ever stores 1 to `done`
+ * runs its body at most once: after the step `done` is 1, so the test fails.
+ * Linux writes scoped user access (and other scope helpers) as nested loops of
+ * this shape. Reporting that lets the loop skip its back edge, so the exit
+ * path is a plain fallthrough instead of a branch back to the test.
+ */
+static bool for_loop_runs_once(c_parser_t *p, size_t cond_start,
+                               size_t cond_end, size_t step_start,
+                               size_t step_end, size_t body_start,
+                               size_t body_end) {
+  size_t at = cond_start;
+  while (at < cond_end && tok_is(p, at, "("))
+    ++at;
+  if (at + 1 >= cond_end || !tok_is(p, at, "!") || !tok_ident(p->tokens[at + 1]))
+    return false;
+  ny_ctok_t name = p->tokens[at + 1];
+  size_t rest = at + 2;
+  while (rest < cond_end && tok_is(p, rest, ")"))
+    ++rest;
+  if (rest != cond_end)
+    return false;
+  if (step_end - step_start != 3 || !tok_same(p->tokens[step_start], name) ||
+      !tok_is(p, step_start + 1, "=") ||
+      !(tok_is(p, step_start + 2, "1") || tok_is(p, step_start + 2, "true")))
+    return false;
+  c_local_t *local = find_local(p, name);
+  if (!local || local->address_taken || local->is_volatile ||
+      !c_type_is_integer(local->type))
+    return false;
+  for (size_t i = body_start; i < body_end; ++i) {
+    if (!tok_same(p->tokens[i], name))
+      continue;
+    if (i > 0 && (tok_is(p, i - 1, ".") || tok_is(p, i - 1, "->")))
+      continue; /* member of the same spelling */
+    if (i > 0 && (tok_is(p, i - 1, "&") || tok_is(p, i - 1, "++") ||
+                  tok_is(p, i - 1, "--")))
+      return false;
+    if (i + 1 >= body_end)
+      continue;
+    ny_ctok_t next = p->tokens[i + 1];
+    if (tok_is(p, i + 1, "++") || tok_is(p, i + 1, "--"))
+      return false;
+    if (ny_ctok_eq(next, "=")) {
+      if (i + 3 > body_end ||
+          !(tok_is(p, i + 2, "1") || tok_is(p, i + 2, "true")) ||
+          (i + 3 < body_end && !tok_is(p, i + 3, ")") &&
+           !tok_is(p, i + 3, ";") && !tok_is(p, i + 3, ",")))
+        return false;
+      continue;
+    }
+    if (is_assignment_operator(p, i + 1))
+      return false;
+  }
+  return true;
+}
+
 static bool lower_for_in_scope(c_parser_t *p, size_t body_start,
                                size_t after_body, bool *returned) {
   size_t saved_local_count = p->local_count;
@@ -1137,6 +1194,7 @@ static bool lower_for_in_scope(c_parser_t *p, size_t body_start,
   if (!emit_label(p, (int64_t)header_label))
     return false;
   c_value_t condition;
+  size_t condition_start = p->pos;
   if (tok_is(p, p->pos, ";")) {
     int value =
         emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = 1});
@@ -1144,6 +1202,7 @@ static bool lower_for_in_scope(c_parser_t *p, size_t body_start,
   } else {
     condition = parse_expr(p, 0);
   }
+  size_t condition_end = p->pos;
   if (condition.value < 0 || !expect(p, ";"))
     return false;
   int truth = lower_truth_value(p, condition);
@@ -1154,6 +1213,10 @@ static bool lower_for_in_scope(c_parser_t *p, size_t body_start,
     fail(p, "malformed for-loop header");
     return false;
   }
+  bool runs_once =
+      condition_end > condition_start &&
+      for_loop_runs_once(p, condition_start, condition_end, step_start,
+                         step_end, body_start, after_body);
   p->pos = body_start;
   size_t body_end = after_body;
   bool body_is_block = tok_is(p, body_start, "{");
@@ -1233,7 +1296,7 @@ static bool lower_for_in_scope(c_parser_t *p, size_t body_start,
     fail(p, "for-loop step contains an unsupported expression");
     return false;
   }
-  if (!emit_branch(p, (int64_t)header_label) ||
+  if (!emit_branch(p, (int64_t)(runs_once ? exit_label : header_label)) ||
       !emit_label(p, (int64_t)exit_label) ||
       !lower_cleanup_range(p, saved_local_count, p->local_count))
     return false;
