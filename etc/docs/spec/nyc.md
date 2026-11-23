@@ -2930,9 +2930,12 @@ run directory under `/tmp`.
     no re-test: the `stac` block goes straight to the user loads, every error
     exit reaches the `clac` block, and the error code travels through address-
     taken local slots. objtool's trace takes the `stac` replacement and then
-    the `nop` original of the `clac` site, a mixed alternative path; whether
-    GCC objects avoid that by layout or by objtool's visited-state rules is
-    not established, so these two may be false positives.
+    the `nop` original of the `clac` site. These are not false positives:
+    `sound/core/pcm_native.c` compiled with GCC from the same Kbuild command
+    line (`-fms-extensions` in place of `-fms-anonymous-structs`) gives an
+    object with no objtool diagnostics at all, while the NYC object reports
+    both. The difference is in how the `stac` block and the error exits are
+    laid out, and is not yet explained.
   - An indirect call whose target is the address of a named function (how
     Linux writes `static_call()`) is folded to a direct call, as GCC does; the
     `indirect-call-folding` fixture checks the result and that no indirect
