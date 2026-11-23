@@ -19,3 +19,9 @@ int st_global_ptr(bool *q, int v) { gpb = q; *gpb = v; return *q; }
 int st_param_value(bool b) { b = 0x300; return b; }
 int st_compound(bool *p, int v) { *p = false; *p |= v; return *p; }
 int st_compound_add(bool *p, int v) { *p = true; *p += v; return *p; }
+struct bool_ops {
+  bool (*take)(bool);
+  int (*mix)(int, bool, long);
+};
+int st_indirect_field(struct bool_ops *o, int v) { return o->take(v); }
+int st_indirect_mix(struct bool_ops *o, int v) { return o->mix(7, v, 9L); }

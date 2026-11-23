@@ -400,6 +400,9 @@ typedef struct {
   c_type_t indirect_result_type;
   const c_agg_type_t *indirect_result_agg;
   bool has_indirect_result_signature;
+  /* Parameters of the called function pointer that are _Bool (bit per index). */
+  uint64_t indirect_bool_params;
+  uint64_t last_function_pointer_bool_params;
   /*
    * Aggregate type referenced by the most recent parse_type result.
    */
@@ -2672,6 +2675,7 @@ static bool parse_field_declarator(c_parser_t *p, c_type_t type,
     field->elem_count = 1;
     field->kind = C_AGG_FIELD_PTR;
     field->agg = NULL;
+    field->function_bool_params = p->last_function_pointer_bool_params;
     field->is_function_pointer = true;
     field->function_result_type =
         c_add_pointer_levels(type, inherited_pointers);
@@ -5426,6 +5430,43 @@ static bool parse_parenthesized_declarator_name(c_parser_t *p,
   return !parenthesized || expect(p, ")");
 }
 
+/*
+ * Which parameters of the parameter list in tokens [start, end) are plain
+ * `_Bool` values: no pointer or function declarator, and the type specifier is
+ * `_Bool` or a typedef that names it. Used to convert indirect-call arguments.
+ */
+static uint64_t function_pointer_bool_mask(c_parser_t *p, size_t start,
+                                           size_t end) {
+  uint64_t mask = 0;
+  size_t index = 0, depth = 0;
+  bool is_bool = false, disqualified = false;
+  for (size_t at = start; at <= end && at < p->token_count; ++at) {
+    bool boundary = at == end || (depth == 0 && tok_is(p, at, ","));
+    if (boundary) {
+      if (is_bool && !disqualified && index < 64)
+        mask |= UINT64_C(1) << index;
+      ++index;
+      is_bool = false;
+      disqualified = false;
+      continue;
+    }
+    if (tok_is(p, at, "(") || tok_is(p, at, "["))
+      ++depth, disqualified = true;
+    else if (tok_is(p, at, ")") || tok_is(p, at, "]"))
+      depth = depth ? depth - 1 : 0;
+    else if (tok_is(p, at, "*") || tok_is(p, at, "..."))
+      disqualified = true;
+    else if (tok_is(p, at, "_Bool"))
+      is_bool = true;
+    else if (tok_ident(p->tokens[at])) {
+      const c_typedef_t *alias = find_typedef(p, p->tokens[at]);
+      if (alias && alias->is_bool && !alias->is_array)
+        is_bool = true;
+    }
+  }
+  return mask;
+}
+
 static bool parse_function_pointer_declarator(c_parser_t *p, ny_ctok_t *name) {
   if (!tok_is(p, p->pos, "("))
     return false;
@@ -5469,6 +5510,7 @@ static bool parse_function_pointer_declarator(c_parser_t *p, ny_ctok_t *name) {
   }
   if (!expect(p, ")") || !expect(p, "("))
     return false;
+  size_t params_start = p->pos;
   size_t depth = 1;
   while (p->pos < p->token_count && depth) {
     if (accept(p, "("))
@@ -5482,6 +5524,8 @@ static bool parse_function_pointer_declarator(c_parser_t *p, ny_ctok_t *name) {
     fail(p, "unterminated C function-pointer declarator");
     return false;
   }
+  p->last_function_pointer_bool_params =
+      function_pointer_bool_mask(p, params_start, p->pos - 1);
   return true;
 }
 

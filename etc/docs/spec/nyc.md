@@ -2982,4 +2982,12 @@ run directory under `/tmp`.
   test fail, so it is not vacuous. The rest of P0 (false positives in the
   differential and benchmark lanes, silent exclusions, expected-failure
   fragility, duplication) is not audited.
+- Indirect-call `_Bool` arguments (2026-11-23). A call through a struct member
+  function pointer now converts a `_Bool` parameter's argument to 0 or 1: the
+  parameter list of a function-pointer declarator is scanned for plain `_Bool`
+  (or typedef-of-`_Bool`) parameters and the mask travels with the field to
+  the call. The `bool-store-paths` fixture calls through such members with
+  `0x200` and `0x300`. Function-pointer locals, globals, parameters and
+  typedef'd pointer types do not carry the mask yet and still pass the raw
+  value.
 </details>

@@ -77,6 +77,8 @@ typedef struct {
   int function_result_type;   /* nyc C type tag when signature is known */
   const c_agg_type_t *function_result_agg;
   bool has_function_signature;
+  /* Bit i set: parameter i of this function pointer is a _Bool. */
+  uint64_t function_bool_params;
   bool is_volatile;
   bool is_signed_byte;
   bool is_bool;

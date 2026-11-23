@@ -111,6 +111,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
       p->indirect_result_type = (c_type_t)field->function_result_type;
       p->indirect_result_agg = (c_agg_type_t *)field->function_result_agg;
       p->has_indirect_result_signature = true;
+      p->indirect_bool_params = field->function_bool_params;
     }
     int address = value.value;
     if (field->offset)
@@ -542,6 +543,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
           p->indirect_result_type = (c_type_t)field->function_result_type;
           p->indirect_result_agg = field->function_result_agg;
           p->has_indirect_result_signature = true;
+          p->indirect_bool_params = field->function_bool_params;
         }
         if (c_type_is_integer(element_type))
           element = normalize_integer(p, element_type, element);
@@ -582,6 +584,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
         p->indirect_result_type = (c_type_t)field->function_result_type;
         p->indirect_result_agg = field->function_result_agg;
         p->has_indirect_result_signature = true;
+        p->indirect_bool_params = field->function_bool_params;
       }
       value = (c_value_t){loaded, pointer_type, field->agg};
       continue;
@@ -2665,6 +2668,9 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
     fail(p, "indirect C call requires a function pointer");
     return (c_value_t){-1, C_BAD, NULL};
   }
+  uint64_t bool_params = p->indirect_bool_params;
+  p->indirect_bool_params = 0;
+  size_t first_param_arg = 0;
   bool empty_agg_result =
       indirect_result_type == C_AGG && indirect_result_agg &&
       indirect_result_agg->complete && indirect_result_agg->size == 0;
@@ -2700,6 +2706,7 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
     for (;;) {
       if (argc == NYIR_CALL_MAX_ARGS) {
         fail(p, "indirect call exceeds the NYIR limit of 63 arguments");
+  first_param_arg = argc;
         return (c_value_t){-1, C_BAD, NULL};
       }
       c_value_t value = parse_expr(p, 1);
@@ -2709,6 +2716,16 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
       if (p->abi == NYC_ABI_I386 && c_type_is_integer(value.type) &&
           c_type_size(p->abi, value.type) == 8)
         wide_args |= UINT64_C(1) << argc;
+      /* A _Bool parameter receives 0 or 1, not the low byte of the value. */
+      size_t param_index = argc - first_param_arg;
+      if (param_index < 64 && (bool_params >> param_index & 1u) &&
+          (c_type_is_integer(value.type) || c_type_is_pointer(value.type) ||
+           c_type_is_float(value.type))) {
+        int boolean = lower_boolean_value(p, value);
+        if (boolean < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        value = (c_value_t){boolean, C_I64, NULL};
+      }
       classes[argc] = c_type_is_float(value.type)
                           ? c_float_scalar_class(value.type)
                           : NYIR_SCALAR_I64_RAW;
