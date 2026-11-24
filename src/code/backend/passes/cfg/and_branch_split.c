@@ -88,6 +88,15 @@ static size_t abs_uses(const nyr_func_t *f, int v) {
   return n;
 }
 
+static bool abs_sink_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_AND_BRANCH_SPLIT_SINK");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 static bool abs_block_has_phi(const nyr_func_t *f, const nyr_cfg_t *cfg,
                               int64_t label) {
   for (size_t b = 0; b < cfg->block_count; ++b) {
@@ -172,11 +181,134 @@ bool nyr_and_branch_split(nyr_func_t *f) {
       inv.debug = andi->debug;
       nyr_clear_derived_facts(&inv);
       inv.effects = nyr_inst_effects(&inv);
-      *andi = inv;
-      br->imm = exit_label;
       nyr_inst_t second = *br;
       second.a = c2;
       second.imm = body_label;
+      second.extra_args = NULL;
+      second.extra_args_len = 0;
+      second.arg_sizes = NULL;
+      second.phi_incoming = NULL;
+      second.phi_incoming_len = 0;
+
+      nyr_inst_t sunk_insts[4];
+      size_t sunk_n = 0;
+      bool can_sink = false;
+      int xor_at = -1, cmp_at = -1;
+      int feed_idx[2] = {-1, -1};
+      int feed_n = 0;
+      if (!abs_sink_disabled() && c2 >= 0 && c2 < f->next_value &&
+          defs[c2] >= 0 && cfg.inst_block[(size_t)defs[c2]] == b &&
+          (size_t)defs[c2] != and_at && abs_uses(f, c2) == 1) {
+        if (!neg2) {
+          cmp_at = defs[c2];
+          can_sink = true;
+        } else if (t2->dst >= 0 && t2->dst < f->next_value &&
+                   defs[t2->dst] >= 0 &&
+                   cfg.inst_block[(size_t)defs[t2->dst]] == b &&
+                   (size_t)defs[t2->dst] != and_at &&
+                   defs[t2->dst] < defs[c2] && abs_uses(f, t2->dst) == 1) {
+          cmp_at = defs[t2->dst];
+          xor_at = defs[c2];
+          can_sink = true;
+        }
+      }
+      if (can_sink) {
+        int ops[2] = {t2->a, t2->b};
+        for (int oi = 0; oi < 2; ++oi) {
+          int op = ops[oi];
+          if (oi == 1 && op == ops[0])
+            continue;
+          if (op < 0 || op >= f->next_value || defs[op] < 0)
+            continue;
+          int fi = defs[op];
+          if (cfg.inst_block[(size_t)fi] != b || fi >= cmp_at ||
+              fi == (int)and_at)
+            continue;
+          if (op == c1->a || op == c1->b || op == x || op == andi->a)
+            continue;
+          const nyr_inst_t *fd = &f->data[fi];
+          if ((fd->op != NYIR_ADD_I64 && fd->op != NYIR_SUB_I64 &&
+               fd->op != NYIR_MUL_I64) ||
+              fd->extra_args || fd->arg_sizes || fd->phi_incoming ||
+              nyr_effective_effects(fd) != NYIR_EFFECT_NONE ||
+              abs_uses(f, op) != 1)
+            continue;
+          feed_idx[feed_n++] = fi;
+        }
+        if (feed_n == 2 && feed_idx[0] > feed_idx[1]) {
+          int tmp = feed_idx[0];
+          feed_idx[0] = feed_idx[1];
+          feed_idx[1] = tmp;
+        }
+        for (int k = 0; k < feed_n; ++k) {
+          nyr_inst_t fd = f->data[feed_idx[k]];
+          fd.extra_args = NULL;
+          fd.extra_args_len = 0;
+          fd.arg_sizes = NULL;
+          fd.phi_incoming = NULL;
+          fd.phi_incoming_len = 0;
+          nyr_clear_derived_facts(&fd);
+          fd.effects = nyr_inst_effects(&fd);
+          sunk_insts[sunk_n++] = fd;
+        }
+        nyr_inst_t sunk_cmp = *t2;
+        sunk_cmp.dst = c2;
+        sunk_cmp.cmp = neg2 ? abs_invert(t2->cmp) : t2->cmp;
+        sunk_cmp.extra_args = NULL;
+        sunk_cmp.extra_args_len = 0;
+        sunk_cmp.arg_sizes = NULL;
+        sunk_cmp.phi_incoming = NULL;
+        sunk_cmp.phi_incoming_len = 0;
+        nyr_clear_derived_facts(&sunk_cmp);
+        sunk_cmp.effects = nyr_inst_effects(&sunk_cmp);
+        sunk_insts[sunk_n++] = sunk_cmp;
+      }
+
+      if (can_sink && sunk_n > 0) {
+        nyr_func_t cand = {0};
+        if (nyr_ir_func_clone(f, &cand)) {
+          nyr_inst_t nop = {.op = NYIR_NOP,
+                            .dst = -1,
+                            .a = -1,
+                            .b = -1,
+                            .c = -1,
+                            .d = -1,
+                            .e = -1,
+                            .f = -1};
+          nyr_inst_discard(&cand.data[and_at]);
+          cand.data[and_at] = inv;
+          cand.data[br_at].imm = exit_label;
+          nyr_inst_discard(&cand.data[cmp_at]);
+          cand.data[cmp_at] = nop;
+          if (xor_at >= 0) {
+            nyr_inst_discard(&cand.data[xor_at]);
+            cand.data[xor_at] = nop;
+          }
+          for (int k = 0; k < feed_n; ++k) {
+            nyr_inst_discard(&cand.data[feed_idx[k]]);
+            cand.data[feed_idx[k]] = nop;
+          }
+          if (nir_ensure_inst_space(&cand, sunk_n + 1)) {
+            size_t at = br_at + 1;
+            memmove(&cand.data[at + sunk_n + 1], &cand.data[at],
+                    (cand.len - at) * sizeof(*cand.data));
+            for (size_t k = 0; k < sunk_n; ++k)
+              cand.data[at + k] = sunk_insts[k];
+            cand.data[at + sunk_n] = second;
+            cand.len += sunk_n + 1;
+            char err[256] = {0};
+            if (nyr_ir_verify(&cand, err, sizeof(err))) {
+              nyr_func_replace(f, &cand);
+              done = true;
+              continue;
+            }
+          }
+          nyr_ir_func_free(&cand);
+        }
+      }
+
+      *andi = inv;
+      br->imm = exit_label;
       if (!nir_ensure_inst_space(f, 1)) {
         failed = true;
         break;
