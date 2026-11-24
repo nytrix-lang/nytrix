@@ -3040,11 +3040,12 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     add_test(
       NAME nyr-c-harness-fault-injection
       COMMAND "${CMAKE_COMMAND}"
+        -DHARNESS_FAULT_INJECTION=ON
         "-DNYC=$<TARGET_FILE:nyc>"
         "-DCC=${CMAKE_C_COMPILER}"
         "-DSOURCE_DIR=${NYR_C_TEST_DIR}"
         "-DBINARY_DIR=${NYR_C_TEST_OUTPUT_DIR}/fault-injection"
-        -P "${NYR_C_TEST_DIR}/harness-fault-injection.cmake"
+        -P "${NYR_C_TEST_DIR}/harness.cmake"
     )
     set_tests_properties(nyr-c-harness-fault-injection PROPERTIES TIMEOUT 60)
     # Kernel acceptance tests (nyc-kernel-boot, nyc-kernel-boot-latest).
