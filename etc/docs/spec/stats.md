@@ -4910,7 +4910,13 @@ the C differential sweep was unchanged, and `./make bench`
 during that run, and its dashboard rows for bitcount, graph-bfs, prime,
 sieve and radix-tree are noise: their AOT instruction counts equal HEAD's
 (bitcount NYR 45.08 M both), and graph-bfs is faster than HEAD in cycles
-(NYC 56.5 M to 52.9 M, NYR 48.3 M to 42.9 M, best of seven).
+(NYC 56.5 M to 52.9 M, NYR 48.3 M to 42.9 M, best of seven). With the GVN alloca
+change the full tree passed 2548/2548 and the C differential sweep was
+unchanged (two more programs matched GCC). Its `./make bench` started at load
+7 but ended at load 25 under concurrent builds and failed the string
+NYR/LLVM gate on `append-scaling` again (2.02×); nine-run timing on the same
+host gave NYR 1.89 ms (0.24× of LLVM) against 1.77 ms at HEAD, and records
+NYR 41.1 ms against 40.4 ms, so the gate tripped on load, not on code.
 `./make bench` (report `bench-20261123-233709-1786163`) passed every
 per-class gate with all checksums correct. Rows that moved against history
 in that single run (NYR append-scaling, bitcount, the JSON scan, sieve, stream,
