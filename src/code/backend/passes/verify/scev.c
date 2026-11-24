@@ -51,6 +51,76 @@ static bool const_value(const nyr_func_t *f, const int *defs, int value,
   return nyr_const_i64(f, defs, root_copy(f, defs, value), out);
 }
 
+static bool scev_unsigned_cmp_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_SCEV_UNSIGNED_CMP");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+static bool scev_xor_sign_operand(const nyr_func_t *f, const int *defs,
+                                  int xor_val, int *other_out) {
+  int di = def_index(f, defs, xor_val);
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyr_inst_t *in = &f->data[di];
+  if (in->op != NYIR_XOR_I64)
+    return false;
+  const uint64_t sign_bit = UINT64_C(1) << 63;
+  int64_t cv = 0;
+  if (const_value(f, defs, in->a, &cv) && (uint64_t)cv == sign_bit) {
+    *other_out = root_copy(f, defs, in->b);
+    return true;
+  }
+  if (const_value(f, defs, in->b, &cv) && (uint64_t)cv == sign_bit) {
+    *other_out = root_copy(f, defs, in->a);
+    return true;
+  }
+  return false;
+}
+
+static bool scev_match_iv_cmp(const nyr_func_t *f, const int *defs,
+                              const nyr_inst_t *cmp, int iv, int64_t start,
+                              bool start_is_const, int64_t *limit_out,
+                              bool *limit_is_const_out, int *limit_val_out,
+                              bool *unsigned_cmp_out) {
+  if (root_copy(f, defs, cmp->a) == iv) {
+    *limit_val_out = cmp->b;
+    *limit_is_const_out = const_value(f, defs, cmp->b, limit_out);
+    *unsigned_cmp_out = false;
+    return true;
+  }
+  if (scev_unsigned_cmp_disabled() || !start_is_const || start < 0 ||
+      cmp->cmp == NYIR_CMP_EQ || cmp->cmp == NYIR_CMP_NE)
+    return false;
+  int lhs_unflipped = -1;
+  if (!scev_xor_sign_operand(f, defs, cmp->a, &lhs_unflipped) ||
+      lhs_unflipped != iv)
+    return false;
+  const uint64_t sign_bit = UINT64_C(1) << 63;
+  uint64_t ulimit = 0;
+  int64_t lim_flipped = 0;
+  int rhs_unflipped = -1;
+  int64_t rhs_orig = 0;
+  if (const_value(f, defs, cmp->b, &lim_flipped)) {
+    ulimit = (uint64_t)lim_flipped ^ sign_bit;
+  } else if (scev_xor_sign_operand(f, defs, cmp->b, &rhs_unflipped) &&
+             const_value(f, defs, rhs_unflipped, &rhs_orig)) {
+    ulimit = (uint64_t)rhs_orig;
+  } else {
+    return false;
+  }
+  if (ulimit > (uint64_t)INT64_MAX)
+    return false;
+  *limit_out = (int64_t)ulimit;
+  *limit_is_const_out = true;
+  *limit_val_out = -1;
+  *unsigned_cmp_out = true;
+  return true;
+}
+
 static bool compute_trip(nyr_scev_loop_t *l) {
   if (!l->init_is_const || !l->limit_is_const || l->step == 0)
     return false;
@@ -669,9 +739,15 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
             for (size_t j = cfg.block_start[header]; j < cfg.block_end[header];
                  ++j) {
               const nyr_inst_t *cmp = &f->data[j];
+              int64_t lim = 0;
+              bool lim_const = false;
+              int lim_val = -1;
+              bool unsigned_cmp = false;
               if (cmp->op != NYIR_CMP_I64 || cmp->dst < 0 ||
-                  root_copy(f, defs, cmp->a) != phi->dst ||
-                  root_copy(f, defs, control->a) != cmp->dst)
+                  root_copy(f, defs, control->a) != cmp->dst ||
+                  !scev_match_iv_cmp(f, defs, cmp, phi->dst, start,
+                                     start_is_const, &lim, &lim_const, &lim_val,
+                                     &unsigned_cmp))
                 continue;
               nyr_scev_loop_t loop = {.header_block = header,
                                       .latch_block = latch,
@@ -682,13 +758,20 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
                                       .iv = phi->dst,
                                       .init_value = init,
                                       .next_value = next,
-                                      .limit_value = cmp->b,
+                                      .limit_value = lim_val,
                                       .init = start,
                                       .init_is_const = start_is_const,
                                       .step = step,
                                       .predicate = cmp->cmp};
-              loop.limit_is_const = const_value(f, defs, cmp->b, &loop.limit);
+              loop.limit = lim;
+              loop.limit_is_const = lim_const;
               compute_trip(&loop);
+              if (unsigned_cmp && loop.trip_count_known) {
+                ny_i128 exit_val =
+                    (ny_i128)loop.init + (ny_i128)loop.trip_count * loop.step;
+                if (exit_val < 0)
+                  loop.trip_count_known = false;
+              }
               if (loop.trip_count_known &&
                   (!wrapped_sext32 || scev_sext32_safe(&loop))) {
                 trip_known = true;
@@ -698,6 +781,7 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
             }
           } else {
             bool is_primary = false;
+            bool unsigned_cmp = false;
             size_t cmp_at = SIZE_MAX;
             nyr_scev_loop_t loop = {.header_block = header,
                                     .latch_block = latch,
@@ -716,28 +800,42 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
             for (size_t j = cfg.block_start[header]; j < cfg.block_end[header];
                  ++j) {
               const nyr_inst_t *cmp = &f->data[j];
+              int64_t lim = 0;
+              bool lim_const = false;
+              int lim_val = -1;
+              bool ucmp = false;
               if (cmp->op != NYIR_CMP_I64 || cmp->dst < 0 ||
-                  root_copy(f, defs, cmp->a) != phi->dst ||
-                  root_copy(f, defs, control->a) != cmp->dst)
+                  root_copy(f, defs, control->a) != cmp->dst ||
+                  !scev_match_iv_cmp(f, defs, cmp, phi->dst, start,
+                                     start_is_const, &lim, &lim_const, &lim_val,
+                                     &ucmp))
                 continue;
-              loop.limit_value = cmp->b;
+              loop.limit_value = lim_val;
               loop.predicate = cmp->cmp;
-              loop.limit_is_const = const_value(f, defs, cmp->b, &loop.limit);
+              loop.limit = lim;
+              loop.limit_is_const = lim_const;
+              unsigned_cmp = ucmp;
               cmp_at = j;
               is_primary = true;
               break;
             }
             if (is_primary) {
               compute_trip(&loop);
+              if (unsigned_cmp && loop.trip_count_known) {
+                ny_i128 exit_val =
+                    (ny_i128)loop.init + (ny_i128)loop.trip_count * loop.step;
+                if (exit_val < 0)
+                  loop.trip_count_known = false;
+              }
               /*
                * Range facts can bound a loop whose start or limit is not a
                * literal even when no exact trip count exists. Only the
                * primary IV carries the exit test, so only it gets bounds.
                */
-              if (facts && cmp_at < f->len)
+              if (!unsigned_cmp && facts && cmp_at < f->len)
                 compute_range_bounds(f, facts, &cfg, in_loop, defs, cmp_at,
                                      &loop);
-              if (facts && !getenv("NYTRIX_NO_SCEV_TRIP_EXPR"))
+              if (!unsigned_cmp && facts && !getenv("NYTRIX_NO_SCEV_TRIP_EXPR"))
                 compute_trip_expr(f, facts, &cfg, in_loop, defs, cmp_at, &loop);
               compute_multiple(&loop);
             } else if (trip_known && loop.init_is_const) {
