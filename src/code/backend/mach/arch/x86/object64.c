@@ -76,6 +76,15 @@ typedef struct {
   unsigned pending_sib_index;
   unsigned pending_sib_scale;
   bool pending_sib_valid;
+  /*
+   * [rbp + index*scale + disp] for an adjacent `add frame_addr, index` that
+   * was not emitted: a stack buffer indexed by a resident register.
+   */
+  uint32_t pending_frame_vreg;
+  unsigned pending_frame_index;
+  unsigned pending_frame_scale;
+  int32_t pending_frame_disp;
+  bool pending_frame_valid;
   /* [base + disp] for an adjacent ADD of a constant that was not emitted. */
   uint32_t pending_disp_vreg;
   unsigned pending_disp_base;
@@ -6858,6 +6867,59 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
  * [base + index*scale] when the defining ADD decomposes; otherwise falls
  * back to a single base register (rax when no colored preg exists).
  */
+/*
+ * An elided `add frame_addr, index` feeding the adjacent scalar load or
+ * store: address the stack buffer as [rbp + index*scale + slot] instead of
+ * rematerializing the frame address into RAX at every access. Vector
+ * accesses keep the RAX form; they consume pending SIB without a
+ * displacement. NYTRIX_NO_FRAME_ADD_SIB=1 disables it.
+ */
+static bool mach_frame_sib_pending(nyr_x64_mach_enc_t *e, uint32_t addr,
+                                   const nyr_mach_inst_t *use,
+                                   const nyr_mach_operand_t *base,
+                                   const nyr_mach_operand_t *index,
+                                   unsigned scale) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_FRAME_ADD_SIB");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !use || !base || !index || !e->addr_fold ||
+      !e->addr_fold_known)
+    return false;
+  bool scalar_use =
+      (use->opcode == NYR_MACH_LOAD && !mach_is_v128(e->mach, &use->dst)) ||
+      (use->opcode == NYR_MACH_STORE && !mach_is_v128(e->mach, &use->src0) &&
+       mach_op_is_vreg(&use->dst, addr));
+  if (!scalar_use)
+    return false;
+  const nyr_mach_operand_t *frame = NULL, *idx = NULL;
+  if (base->kind == NYR_MACH_OPERAND_VREG && base->as.reg < e->mach->vreg_len &&
+      e->addr_fold_known[base->as.reg] &&
+      e->addr_fold[base->as.reg].kind == NYR_MACH_OPERAND_FRAME) {
+    frame = base;
+    idx = index;
+  } else if (scale == 1 && index->kind == NYR_MACH_OPERAND_VREG &&
+             index->as.reg < e->mach->vreg_len &&
+             e->addr_fold_known[index->as.reg] &&
+             e->addr_fold[index->as.reg].kind == NYR_MACH_OPERAND_FRAME) {
+    frame = index;
+    idx = base;
+  }
+  if (!frame || idx->kind != NYR_MACH_OPERAND_VREG ||
+      idx->as.reg >= e->mach->vreg_len)
+    return false;
+  int ip = mach_vreg_preg(e, idx->as.reg);
+  if (ip < 0 || (ip & 7) == 4 || !mach_seed_colored_preg(e, idx->as.reg))
+    return false;
+  e->pending_frame_vreg = addr;
+  e->pending_frame_index = (unsigned)ip;
+  e->pending_frame_scale = scale;
+  e->pending_frame_disp = mach_slot_off(e, &e->addr_fold[frame->as.reg]);
+  e->pending_frame_valid = true;
+  return true;
+}
+
 static bool mach_resolve_mem_addr(nyr_x64_mach_enc_t *e,
                                   const nyr_mach_operand_t *op,
                                   ny_x64_mem_addr_t *out) {
@@ -6869,6 +6931,15 @@ static bool mach_resolve_mem_addr(nyr_x64_mach_enc_t *e,
     out->base = e->pending_disp_base;
     out->disp = e->pending_disp;
     e->pending_disp_valid = false;
+    return true;
+  }
+  if (e->pending_frame_valid && op &&
+      mach_op_is_vreg(op, e->pending_frame_vreg)) {
+    out->base = 5; /* rbp */
+    out->index = (int)e->pending_frame_index;
+    out->scale = e->pending_frame_scale;
+    out->disp = e->pending_frame_disp;
+    e->pending_frame_valid = false;
     return true;
   }
   if (op && op->kind == NYR_MACH_OPERAND_VREG &&
@@ -14955,6 +15026,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
      */
     mach_rax_invalidate(e);
     e->pending_sib_valid = false;
+    e->pending_frame_valid = false;
     mach_r10_index_invalidate(e);
     e->fused_jcc = 0; /* no flags-only CMP pending across a block edge */
     e->cur_inst = blk->first_inst;
@@ -16436,6 +16508,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           unsigned scale = 0;
           if (mach_sib_add_mem(e, in->dst.as.reg, e->cur_inst + 1, &base,
                                &index, &scale, &scaled_value)) {
+            if (mach_frame_sib_pending(e, in->dst.as.reg,
+                                       &mach->insts[e->cur_inst + 1], base,
+                                       index, scale))
+              break;
             int bp = base->kind == NYR_MACH_OPERAND_VREG
                          ? mach_vreg_preg(e, base->as.reg)
                          : -1;
@@ -17574,21 +17650,21 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              * ud >= 3 (not power of two) using mul r9 (rdx:rax = rax * r9).
              */
             int l = 64 - __builtin_clzll(ud - 1u);
-            unsigned __int128 pow_lo = (unsigned __int128)1u << (64 + l - 1);
-            unsigned __int128 m1 = (pow_lo + ud - 1u) / ud;
-            unsigned __int128 e1 = m1 * ud - pow_lo;
+            ny_u128 pow_lo = (ny_u128)1u << (64 + l - 1);
+            ny_u128 m1 = (pow_lo + ud - 1u) / ud;
+            ny_u128 e1 = m1 * ud - pow_lo;
             uint64_t magic = 0;
             unsigned post_sh = 0;
             bool needs_add = false;
-            if (m1 < ((unsigned __int128)1u << 64) &&
-                (unsigned __int128)UINT64_MAX * e1 < pow_lo) {
+            if (m1 < ((ny_u128)1u << 64) &&
+                (ny_u128)UINT64_MAX * e1 < pow_lo) {
               magic = (uint64_t)m1;
               post_sh = (unsigned)(l - 1);
               needs_add = false;
             } else {
-              unsigned __int128 pow_hi = (unsigned __int128)1u << (64 + l);
-              unsigned __int128 m2 =
-                  (pow_hi + ud - 1u) / ud - ((unsigned __int128)1u << 64);
+              ny_u128 pow_hi = (ny_u128)1u << (64 + l);
+              ny_u128 m2 =
+                  (pow_hi + ud - 1u) / ud - ((ny_u128)1u << 64);
               magic = (uint64_t)m2;
               post_sh = (unsigned)l;
               needs_add = true;
@@ -17976,7 +18052,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 ++l;
               unsigned shift = 31 + l;
               uint64_t um =
-                  (uint64_t)((((unsigned __int128)1 << shift) + ad - 1) / ad);
+                  (uint64_t)((((ny_u128)1 << shift) + ad - 1) / ad);
               /*
                * Only RAX and RDX: q = (x * m) >> shift in RDX.
                */

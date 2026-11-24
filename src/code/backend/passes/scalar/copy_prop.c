@@ -102,6 +102,97 @@ static bool nir_copy_class_preserved(const nyr_scalar_class_t *vclass,
 }
 
 /*
+ * Values used only as the address operand of scalar loads and stores,
+ * directly or through one ADD_I64 whose result is itself used that way.
+ * A scalar-class COPY of such a value refines nothing a consumer reads:
+ * memory operands take machine addresses, not ABI classes. Returns NULL when
+ * disabled (NYTRIX_NO_ADDR_COPY_FOLD=1) or on allocation failure.
+ */
+static void nir_mark_use(const nyr_inst_t *in, int slot, int v,
+                         unsigned char *bad) {
+  if (v < 0)
+    return;
+  bool addr = slot == 0 &&
+              (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+              in->b != v && in->c != v && in->d != v;
+  if (!addr)
+    bad[v] = 1;
+}
+
+static void nir_mark_add_use(const nyr_inst_t *in, int slot, int v,
+                             const unsigned char *ldst_bad, unsigned char *bad) {
+  if (v < 0)
+    return;
+  if (slot == 0 && (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+      in->b != v && in->c != v && in->d != v)
+    return;
+  if ((slot == 0 || slot == 1) && in->op == NYIR_ADD_I64 && in->a != in->b &&
+      in->dst >= 0 && !ldst_bad[in->dst] && in->extra_args_len == 0)
+    return;
+  bad[v] = 1;
+}
+
+static unsigned char *nir_addr_only_values(const nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_ADDR_COPY_FOLD");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !f || f->next_value <= 0)
+    return NULL;
+  size_t nv = (size_t)f->next_value;
+  unsigned char *ldst_bad = (unsigned char *)calloc(nv, 1);
+  unsigned char *bad = (unsigned char *)calloc(nv, 1);
+  if (!ldst_bad || !bad) {
+    free(ldst_bad);
+    free(bad);
+    return NULL;
+  }
+  for (int pass = 0; pass < 2; ++pass) {
+    unsigned char *out = pass == 0 ? ldst_bad : bad;
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      const int ops[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
+      for (int s = 0; s < 6; ++s) {
+        if (ops[s] < 0 || (size_t)ops[s] >= nv)
+          continue;
+        if (pass == 0)
+          nir_mark_use(in, s, ops[s], out);
+        else
+          nir_mark_add_use(in, s, ops[s], ldst_bad, out);
+      }
+      for (size_t k = 0; k < in->extra_args_len; ++k)
+        if (in->extra_args[k] >= 0 && (size_t)in->extra_args[k] < nv)
+          out[in->extra_args[k]] = 1;
+      for (size_t k = 0; k < in->phi_incoming_len; ++k)
+        if (in->phi_incoming[k].value >= 0 &&
+            (size_t)in->phi_incoming[k].value < nv)
+          out[in->phi_incoming[k].value] = 1;
+    }
+  }
+  free(ldst_bad);
+  for (size_t v = 0; v < nv; ++v)
+    bad[v] = !bad[v];
+  return bad;
+}
+
+/*
+ * A class-contract COPY of a stack allocation whose result only forms
+ * load/store addresses. Folding it lets the encoder address the frame
+ * directly instead of keeping (and reloading) a retagged base per use site.
+ */
+static bool nir_copy_addr_only_alloca(const nyr_func_t *f, const int *defs,
+                                      const unsigned char *addr_only,
+                                      const int *alias, const nyr_inst_t *in) {
+  if (!addr_only || !defs || !in || in->dst < 0 || !addr_only[in->dst])
+    return false;
+  int s = nir_alias_find(alias, in->a);
+  if (s < 0 || s >= f->next_value || defs[s] < 0)
+    return false;
+  return f->data[(size_t)defs[s]].op == NYIR_ALLOCA;
+}
+
+/*
  * Call-argument identity stays fixed unless the producer has a known
  * ownership fact that can refresh the value metadata after rewriting. Scalar
  * class contracts remain tied to the explicit copy and are handled below.
@@ -243,11 +334,13 @@ static bool copy_prop_cfg(nyr_func_t *f) {
   int *defs = nyr_build_defs(f);
   nyr_scalar_class_t *vclass = nir_value_classes(f);
   unsigned char *call_used = nir_call_arg_values(f);
+  unsigned char *addr_only = nir_addr_only_values(f);
   nyr_cfg_t cfg = {0};
   if (!defs || !vclass || !call_used || !nyr_cfg_build(f, &cfg)) {
     free(defs);
     free(vclass);
     free(call_used);
+    free(addr_only);
     nyr_cfg_free(&cfg);
     return false;
   }
@@ -263,6 +356,9 @@ static bool copy_prop_cfg(nyr_func_t *f) {
       free(alias_blk);
     }
     free(defs);
+    free(vclass);
+    free(call_used);
+    free(addr_only);
     nyr_cfg_free(&cfg);
     return false;
   }
@@ -389,7 +485,8 @@ static bool copy_prop_cfg(nyr_func_t *f) {
     if (in->op == NYIR_COPY && in->a >= 0 &&
         nir_copy_dst_calls_safe(f, defs, call_used, alias, in) &&
         (!nir_copy_has_class_contract(f, in) ||
-         nir_copy_class_preserved(vclass, call_used, alias, in))) {
+         nir_copy_class_preserved(vclass, call_used, alias, in) ||
+         nir_copy_addr_only_alloca(f, defs, addr_only, alias, in))) {
       int s = nir_alias_find(alias, in->a);
       bool safe = false;
       size_t src_blk = SIZE_MAX;
@@ -456,6 +553,7 @@ static bool copy_prop_cfg(nyr_func_t *f) {
   free(defs);
   free(vclass);
   free(call_used);
+  free(addr_only);
   nyr_cfg_free(&cfg);
   return true;
 }
@@ -476,12 +574,14 @@ bool nyr_copy_prop(nyr_func_t *f) {
   nyr_scalar_class_t *vclass = nir_value_classes(f);
   unsigned char *call_used = nir_call_arg_values(f);
   int *defs = nyr_build_defs(f);
+  unsigned char *addr_only = nir_addr_only_values(f);
   if (!alias || !vclass || !call_used || !defs) {
     if (nv > 256)
       free(alias);
     free(vclass);
     free(call_used);
     free(defs);
+    free(addr_only);
     return false;
   }
   for (int i = 0; i < f->next_value; ++i)
@@ -515,7 +615,8 @@ bool nyr_copy_prop(nyr_func_t *f) {
       if (in->op == NYIR_COPY && in->a >= 0 &&
           nir_copy_dst_calls_safe(f, defs, call_used, alias, in) &&
           (!nir_copy_has_class_contract(f, in) ||
-           nir_copy_class_preserved(vclass, call_used, alias, in)))
+           nir_copy_class_preserved(vclass, call_used, alias, in) ||
+           nir_copy_addr_only_alloca(f, defs, addr_only, alias, in)))
         alias[in->dst] = nir_alias_find(alias, in->a);
       else {
         if (nir_copy_has_class_contract(f, in) &&
@@ -533,5 +634,6 @@ bool nyr_copy_prop(nyr_func_t *f) {
   free(vclass);
   free(call_used);
   free(defs);
+  free(addr_only);
   return true;
 }
