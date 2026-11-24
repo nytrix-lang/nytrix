@@ -296,12 +296,11 @@ user-visible changes in the [changelog](../CHANGELOG.md).
   the newest release tag (`v7.3`, no source patches), builds all 3003 C units
   with NYC (no `CC` step without NYC, zero build errors) and boots its
   `bzImage` to `/init`, both inits, under QEMU TCG (`qemu64`) and under KVM
-  with the host CPU, one CPU: met. Two things remain. The pristine tag
+  with the host CPU, one CPU: met; four-CPU boots also reach `/init` under
+  both TCG and KVM. One thing remains. The pristine tag
   identifies NYC as GCC 12, so Kbuild enables `X86_KERNEL_IBT`; its objtool
   pass reports one "unreachable instruction" (`___bpf_prog_run+0x1146d`, the
-  `endbr64` of a computed-goto label; the host GCC reports none). And with
-  four CPUs under KVM the kernel oopses with a NULL dereference at 0.44 s
-  during CPU bring-up, so only one-CPU boots are verified.
+  `endbr64` of a computed-goto label; the host GCC reports none).
 - [ ] Establish assembly/direct-object/physical-machine parity over the native
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission without
@@ -3131,4 +3130,11 @@ run directory under `/tmp`.
   keeps its effects and fails the compile. Both inits now boot under KVM in
   under two seconds, and the smoke gate boots them under KVM whenever
   `/dev/kvm` is writable.
+- Four-CPU KVM boot (2026-11-25). Two more miscompiles, found by booting the
+  pristine tree with `-smp 4`: a zero-initialised `__int128` whose address is
+  taken (`__send_ipi_mask`) had an 8-byte slot, so its high word overwrote
+  the saved frame, and an in-place compound-literal assignment zeroed whole
+  words, so a 4-byte spinlock initialiser clobbered its neighbour
+  (`ss_rstat_init`). Both are fixed with execution fixtures. A 128-bit value
+  used as a condition now tests both words instead of the area pointer.
 </details>
