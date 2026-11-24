@@ -730,6 +730,28 @@ static bool mach_cc_interferes(const nyr_mach_func_t *m, const uint64_t *out,
  * constant operand is flipped in place when this compare is its only user.
  * NYTRIX_NO_UNSIGNED_CMP=1 disables it.
  */
+static bool ucmp_unchanged_between(const nyr_mach_func_t *m, uint32_t v,
+                                   size_t from, size_t to) {
+  if (from >= to || to >= m->inst_len)
+    return false;
+  for (size_t b = 0; b < m->block_len; ++b) {
+    size_t lo = m->blocks[b].first_inst;
+    size_t hi = lo + m->blocks[b].inst_count;
+    if (from < lo || from >= hi)
+      continue;
+    if (to >= hi)
+      return false; /* different blocks */
+    for (size_t i = from + 1; i < to; ++i) {
+      const nyr_mach_inst_t *in = &m->insts[i];
+      if (in->opcode == NYR_MACH_CALL ||
+          (mach_cc_is_def(in) && in->dst.as.reg == v))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 static void mach_fuse_unsigned_cmp(nyr_mach_func_t *m) {
   static int disabled = -1;
   if (disabled < 0) {
@@ -814,9 +836,19 @@ static void mach_fuse_unsigned_cmp(nyr_mach_func_t *m) {
     }
     if (!ok || flip_src[0] < 0 || (flip_src[1] < 0 && !is_const[1]))
       continue;
-    /* The unflipped source must still hold its value at the compare. */
-    if (defs[flip_src[0]] != 1 ||
-        (flip_src[1] >= 0 && defs[flip_src[1]] != 1))
+    /*
+     * The unflipped source must still hold its value at the compare: either
+     * it has one definition, or the flip and the compare share a block with
+     * no redefinition between them (an induction variable's PHI copies).
+     */
+    bool stable = true;
+    for (int k = 0; k < 2 && stable; ++k) {
+      if (flip_src[k] < 0 || defs[flip_src[k]] == 1)
+        continue;
+      stable = ucmp_unchanged_between(m, (uint32_t)flip_src[k], flip_def[k],
+                                      i);
+    }
+    if (!stable)
       continue;
     cmp->src0.as.reg = (uint32_t)flip_src[0];
     if (flip_src[1] >= 0) {

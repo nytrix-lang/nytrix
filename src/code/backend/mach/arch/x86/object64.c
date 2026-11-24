@@ -2866,8 +2866,9 @@ static int mach_slot_off(const nyr_x64_mach_enc_t *e,
     size_t slot = op->as.frame_index;
     if (slot > e->mach->frame_slot_len)
       slot = e->mach->frame_slot_len;
+    /* Encoder-internal folds carry `frame + c` in the addend. */
     if (e->frame_slot_offsets)
-      return e->frame_slot_offsets[slot];
+      return e->frame_slot_offsets[slot] + (int)op->addend;
     size_t off = 0;
     for (size_t i = 0; i < slot; ++i) {
       size_t size = e->mach->frame_slots[i].size;
@@ -2879,7 +2880,7 @@ static int mach_slot_off(const nyr_x64_mach_enc_t *e,
       off = (off + align - 1) & ~(align - 1);
       off += size;
     }
-    return -((int)(e->cs_slots * 8u + off + 8));
+    return -((int)(e->cs_slots * 8u + off + 8)) + (int)op->addend;
   }
   if (op->kind == NYR_MACH_OPERAND_VREG)
     return mach_vreg_home_off(e, op->as.reg);
@@ -6931,6 +6932,16 @@ static bool mach_resolve_mem_addr(nyr_x64_mach_enc_t *e,
     out->base = e->pending_disp_base;
     out->disp = e->pending_disp;
     e->pending_disp_valid = false;
+    return true;
+  }
+  /* A folded frame address is [rbp + slot] itself. */
+  if (op && op->kind == NYR_MACH_OPERAND_VREG &&
+      op->as.reg < e->mach->vreg_len && e->addr_fold && e->addr_fold_known &&
+      e->addr_fold_known[op->as.reg] &&
+      e->addr_fold[op->as.reg].kind == NYR_MACH_OPERAND_FRAME &&
+      !(e->pending_sib_valid && mach_op_is_vreg(op, e->pending_sib_vreg))) {
+    out->base = 5; /* rbp */
+    out->disp = mach_slot_off(e, &e->addr_fold[op->as.reg]);
     return true;
   }
   if (e->pending_frame_valid && op &&
@@ -14925,18 +14936,70 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
     if (mach->block_len > 0 && mach->inst_len > 0) {
       const nyr_mach_block_t *aentry = &mach->blocks[0];
       const size_t aend = aentry->first_inst + aentry->inst_count;
-      for (size_t i = aentry->first_inst; i < aend && i < mach->inst_len; ++i) {
+      /*
+       * A frame address is the same constant wherever it is computed, so a
+       * single-definition frame LEA folds from any block
+       * (NYTRIX_NO_FRAME_FOLD_ANY=1 keeps the entry-block rule). Symbols stay
+       * entry-only.
+       */
+      static int frame_any = -1;
+      if (frame_any < 0) {
+        const char *env = getenv("NYTRIX_NO_FRAME_FOLD_ANY");
+        frame_any = !(env && *env && strcmp(env, "0") != 0);
+      }
+      for (size_t i = 0; i < mach->inst_len; ++i) {
         const nyr_mach_inst_t *ci = &mach->insts[i];
+        bool in_entry = i >= aentry->first_inst && i < aend;
         if (ci->opcode == NYR_MACH_LEA &&
             ci->dst.kind == NYR_MACH_OPERAND_VREG &&
             ci->dst.as.reg < mach->vreg_len &&
             e->def_count[ci->dst.as.reg] == 1 &&
-            (ci->src0.kind == NYR_MACH_OPERAND_FRAME ||
-             ci->src0.kind == NYR_MACH_OPERAND_SYMBOL)) {
+            ((ci->src0.kind == NYR_MACH_OPERAND_FRAME &&
+              (in_entry || frame_any)) ||
+             (ci->src0.kind == NYR_MACH_OPERAND_SYMBOL && in_entry))) {
           addr_fold[ci->dst.as.reg] = ci->src0;
           addr_fold_known[ci->dst.as.reg] = true;
         }
       }
+      /*
+       * `frame + c` (a field of a stack aggregate) is a frame address too.
+       * Two rounds cover a field address built from another fold.
+       */
+      for (int round = 0; frame_any && round < 2; ++round)
+        for (size_t i = 0; i < mach->inst_len; ++i) {
+          const nyr_mach_inst_t *ci = &mach->insts[i];
+          if (ci->opcode != NYR_MACH_ADD || ci->narrow32 ||
+              ci->dst.kind != NYR_MACH_OPERAND_VREG ||
+              ci->dst.as.reg >= mach->vreg_len ||
+              e->def_count[ci->dst.as.reg] != 1 ||
+              addr_fold_known[ci->dst.as.reg] ||
+              mach->vreg_types[ci->dst.as.reg] != NYR_MACH_TYPE_I64)
+            continue;
+          const nyr_mach_operand_t *sides[2] = {&ci->src0, &ci->src1};
+          for (int k = 0; k < 2; ++k) {
+            const nyr_mach_operand_t *fb = sides[k], *cv = sides[1 - k];
+            if (fb->kind != NYR_MACH_OPERAND_VREG ||
+                fb->as.reg >= mach->vreg_len || !addr_fold_known[fb->as.reg] ||
+                addr_fold[fb->as.reg].kind != NYR_MACH_OPERAND_FRAME)
+              continue;
+            int64_t c = 0;
+            if (cv->kind == NYR_MACH_OPERAND_IMM)
+              c = cv->as.imm;
+            else if (cv->kind == NYR_MACH_OPERAND_VREG &&
+                     cv->as.reg < mach->vreg_len &&
+                     imm_fold_known[cv->as.reg])
+              c = imm_fold[cv->as.reg];
+            else
+              continue;
+            int64_t total = addr_fold[fb->as.reg].addend + c;
+            if (total < -(INT64_C(1) << 20) || total > (INT64_C(1) << 20))
+              continue;
+            addr_fold[ci->dst.as.reg] = addr_fold[fb->as.reg];
+            addr_fold[ci->dst.as.reg].addend = total;
+            addr_fold_known[ci->dst.as.reg] = true;
+            break;
+          }
+        }
     }
     if (!mach_prepare_select_bit_test(e, name))
       return mach_err(e, "x64 machine form encode: select fusion failed");
@@ -18098,12 +18161,27 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             const unsigned magic_clobbers = (1u << 0) | (1u << 2) | (1u << 10);
             uint32_t dead_dividend =
                 mach_dead_vreg_use_at_current_inst(e, &in->src0);
+            static int no_div_direct = -1;
+            if (no_div_direct < 0) {
+              const char *env = getenv("NYTRIX_NO_DIV_DIRECT");
+              no_div_direct = env && *env && strcmp(env, "0") != 0;
+            }
+            /* A resident dividend goes straight to R10 (no RAX hop). */
+            int dividend_preg =
+                !no_div_direct && in->src0.kind == NYR_MACH_OPERAND_VREG
+                    ? mach_vreg_preg(e, in->src0.as.reg)
+                    : -1;
+            bool direct_dividend = dividend_preg >= 0 && dividend_preg != 0 &&
+                                   dividend_preg != 2 && dividend_preg != 10 &&
+                                   mach_seed_colored_preg(e, in->src0.as.reg);
             if (!mach_flush_pregs_to_home_preserving_dead_use(
                     e, magic_clobbers, dead_dividend, false) ||
-                !mach_load_op_rax(e, &in->src0) ||
+                (direct_dividend
+                     ? !mach_mov_preg_preg(e, 10, (unsigned)dividend_preg)
+                     : !mach_load_op_rax(e, &in->src0)) ||
                 !mach_flush_pregs_to_home_preserving_dead_use(
                     e, magic_clobbers, dead_dividend, true) ||
-                !mach_mov_reg_rax(e, 10) ||
+                (!direct_dividend && !mach_mov_reg_rax(e, 10)) ||
                 !mach_rex(e, true, false, false, false) || !mach_u8(e, 0xb8) ||
                 !mach_i64(e, magic) || !mach_rex(e, true, false, false, true) ||
                 !mach_u8(e, 0xf7) || !mach_u8(e, 0xea))
@@ -18134,8 +18212,20 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               if (!mach_mov_preg_preg(e, 0, 10) ||
                   !mach_alu_preg_preg(e, NYR_MACH_SUB, 0, 2))
                 return false;
-            } else if (!mach_mov_preg_preg(e, 0, 2)) {
-              return false;
+            } else {
+              /* The quotient is in RDX: move it to its register directly. */
+              int qp = !no_div_direct && in->dst.kind == NYR_MACH_OPERAND_VREG
+                           ? mach_vreg_def_preg(e, in->dst.as.reg)
+                           : -1;
+              if (qp >= 0 && qp != 0 && qp != 10) {
+                if ((qp != 2 && !mach_mov_preg_preg(e, (unsigned)qp, 2)) ||
+                    !mach_commit_preg(e, &in->dst, dst, (unsigned)qp, false))
+                  return false;
+                mach_record_div_stat(e, true);
+                break;
+              }
+              if (!mach_mov_preg_preg(e, 0, 2))
+                return false;
             }
             if (!mach_commit_vreg(e, &in->dst, dst))
               return false;

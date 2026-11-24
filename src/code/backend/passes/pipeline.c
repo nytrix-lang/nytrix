@@ -982,6 +982,10 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_if_convert, "if_convert"},
     {nyr_ilp_reassociate, "ilp_reassociate"},
     {nyr_loop_sub_iv, "loop_sub_iv"},
+    {nyr_iv_merge, "iv_merge"},
+    {nyr_loop_store_promote, "loop_store_promote"},
+    {nyr_and_branch_split, "and_branch_split"},
+    {nyr_addr_base_reassoc, "addr_base_reassoc"},
     {nyr_loop_guard_hoist, "loop_guard_hoist"},
     {nyr_mem_dse, "mem_dse"},
     {nyr_loop_global_promote, "loop_global_promote"},
@@ -2452,10 +2456,11 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     if (ok && !nyr_pass_stopped) {
       static bool (*const gvn_cleanup[])(nyr_func_t *) = {
-          nyr_dead_alloc_elim, nyr_addr_reassoc, nyr_copy_prop,
-          nyr_gvn_pre,         nyr_range_check_fold, nyr_dce,
+          nyr_dead_alloc_elim,  nyr_loop_store_promote, nyr_iv_merge,
+          nyr_addr_reassoc,     nyr_addr_base_reassoc,  nyr_copy_prop,
+          nyr_gvn_pre,          nyr_range_check_fold,   nyr_dce,
           nyr_compact_if_sparse};
-      nyr_run_seq(f, gvn_cleanup, 7, stats, dump, &ok);
+      nyr_run_seq(f, gvn_cleanup, 10, stats, dump, &ok);
     }
     if (ok && !nyr_pass_stopped)
       nyr_run_pass(f, nyr_ipa_constprop, stats, dump, &ok);
@@ -2477,6 +2482,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_ilp_reassociate, stats, dump, &ok);
+    /* Loop tests `c1 && c2` back to two branches, once nothing else moves. */
+    if (ok && !nyr_pass_stopped && nyr_has_loop(f))
+      nyr_run_pass(f, nyr_and_branch_split, stats, dump, &ok);
     /*
      * Diagnostic: NYTRIX_DUMP_FINAL_NYIR=1 prints each function as it
      * leaves the scalar pipeline (the module-level route).

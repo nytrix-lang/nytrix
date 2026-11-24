@@ -32,6 +32,51 @@ typedef struct {
 } nir_peephole_parallel_ctx_t;
 
 /*
+ * Every use of v is a branch condition, directly or through one COPY. A
+ * value read as data (tagged-bool decoding, selects) keeps its exact form.
+ */
+static bool nir_only_branch_uses(const nyr_func_t *f, int v) {
+  if (!f || v < 0)
+    return false;
+  bool any = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_NOP)
+      continue;
+    bool uses = in->a == v || in->b == v || in->c == v || in->d == v ||
+                in->e == v || in->f == v;
+    for (size_t k = 0; !uses && k < in->extra_args_len; ++k)
+      uses = in->extra_args[k] == v;
+    for (size_t k = 0; !uses && k < in->phi_incoming_len; ++k)
+      uses = in->phi_incoming[k].value == v;
+    if (!uses)
+      continue;
+    any = true;
+    if (in->op == NYIR_BR_IF && in->a == v && in->b != v)
+      continue;
+    if (in->op == NYIR_COPY && in->a == v && in->dst >= 0) {
+      for (size_t j = 0; j < f->len; ++j) {
+        const nyr_inst_t *u = &f->data[j];
+        if (u->op == NYIR_NOP)
+          continue;
+        bool u_uses = u->a == in->dst || u->b == in->dst || u->c == in->dst ||
+                      u->d == in->dst || u->e == in->dst || u->f == in->dst;
+        for (size_t k = 0; !u_uses && k < u->extra_args_len; ++k)
+          u_uses = u->extra_args[k] == in->dst;
+        for (size_t k = 0; !u_uses && k < u->phi_incoming_len; ++k)
+          u_uses = u->phi_incoming[k].value == in->dst;
+        if (u_uses && !(u->op == NYIR_BR_IF && u->a == in->dst &&
+                        u->b != in->dst))
+          return false;
+      }
+      continue;
+    }
+    return false;
+  }
+  return any;
+}
+
+/*
  * A def-map entry is only trusted while it still points at the instruction
  * that defines the value.  Inserting rewrites (nir_rewrite_shl/neg) shift
  * later indices and make cached entries stale; matching on a stale entry
@@ -1184,6 +1229,28 @@ bool nyr_peephole(nyr_func_t *f) {
       break;
     }
     case NYIR_AND_I64:
+      /*
+       * `1 & c` where c is directly a raw CMP_I64 result: the compare itself
+       * writes exactly 0 or 1, so the mask is the identity. Unlike the
+       * chain-based proof rejected below, this reads one definition. Keeping
+       * the AND blocked compare/branch fusion (`setl; movzx; and; test; je`
+       * for every list bounds check). NYTRIX_NO_CMP_AND1=1 disables it.
+       */
+      if (defs && ((ak && av == 1) || (bk && bv == 1))) {
+        static int no_cmp_and1 = -1;
+        if (no_cmp_and1 < 0) {
+          const char *env = getenv("NYTRIX_NO_CMP_AND1");
+          no_cmp_and1 = env && *env && strcmp(env, "0") != 0;
+        }
+        int other = (ak && av == 1) ? in->b : in->a;
+        const nyr_inst_t *c = nir_def_inst(f, defs, other);
+        if (!no_cmp_and1 && c && c->op == NYIR_CMP_I64 &&
+            c->scalar_class == NYIR_SCALAR_I64_RAW &&
+            nir_only_branch_uses(f, in->dst)) {
+          nir_make_copy(in, other);
+          break;
+        }
+      }
       /*
        * `x & 1` is deliberately kept. It is the canonical low-bit test that
        * the x86-64 emitter fuses into `testq $1`, and replacing it with `x`

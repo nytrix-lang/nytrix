@@ -585,9 +585,9 @@ bool nyr_isle_apply_mach(nyr_mach_func_t *mach) {
           continue;
         if (rule->emit_op == NYIR_CONST_I64) {
           in->opcode = NYR_MACH_COPY;
-          in->src0.kind = NYR_MACH_OPERAND_IMM;
+          in->src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM};
           in->src0.as.imm = rule->emit_imm;
-          in->src1.kind = NYR_MACH_OPERAND_NONE;
+          in->src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_NONE};
         } else if (rule->emit_op == NYIR_SHL_I64) {
           /*
            * add_self (x + x → x << 1): keep the shift semantics; the
@@ -595,11 +595,11 @@ bool nyr_isle_apply_mach(nyr_mach_func_t *mach) {
            * instead of 2x.
            */
           in->opcode = NYR_MACH_SHL;
-          in->src1.kind = NYR_MACH_OPERAND_IMM;
+          in->src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM};
           in->src1.as.imm = rule->emit_imm;
         } else {
           in->opcode = NYR_MACH_COPY;
-          in->src1.kind = NYR_MACH_OPERAND_NONE;
+          in->src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_NONE};
         }
         break;
       }
@@ -610,16 +610,16 @@ bool nyr_isle_apply_mach(nyr_mach_func_t *mach) {
         continue;
       if (rule->emit_op == NYIR_CONST_I64) {
         in->opcode = NYR_MACH_COPY;
-        in->src0.kind = NYR_MACH_OPERAND_IMM;
+        in->src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM};
         in->src0.as.imm = rule->emit_imm;
-        in->src1.kind = NYR_MACH_OPERAND_NONE;
+        in->src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_NONE};
       } else if (rule->emit_op == NYIR_SHL_I64) {
         in->opcode = NYR_MACH_SHL;
-        in->src1.kind = NYR_MACH_OPERAND_IMM;
+        in->src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM};
         in->src1.as.imm = rule->emit_imm;
       } else {
         in->opcode = NYR_MACH_COPY;
-        in->src1.kind = NYR_MACH_OPERAND_NONE;
+        in->src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_NONE};
       }
       break;
     }

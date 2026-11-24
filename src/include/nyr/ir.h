@@ -909,6 +909,14 @@ bool nyr_if_convert(nyr_func_t *f);
 bool nyr_ilp_reassociate(nyr_func_t *f);
 /* Turn `inv - i` for an induction variable i into its own decrementing IV. */
 bool nyr_loop_sub_iv(nyr_func_t *f);
+/* Merge header IVs that step by the same constant into one plus offsets. */
+bool nyr_iv_merge(nyr_func_t *f);
+/* Share (B + x) across addresses (B + C_k) + x; C_k becomes a displacement. */
+bool nyr_addr_base_reassoc(nyr_func_t *f);
+/* Versioned register promotion of a loop-invariant cell (runtime overlap check). */
+bool nyr_loop_store_promote(nyr_func_t *f);
+/* Split `br.if (c1 & c2)` loop tests into two compare-and-branch pairs. */
+bool nyr_and_branch_split(nyr_func_t *f);
 /* Hoist loop-invariant exit guards from loop headers into a new preheader. */
 bool nyr_loop_guard_hoist(nyr_func_t *f);
 /* Remove heap/vector stores overwritten in the same block before any read. */
