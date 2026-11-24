@@ -2269,6 +2269,17 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
     fail(p, "direct call exceeds the NYIR limit of 64 arguments");
     return (c_value_t){-1, C_BAD, NULL};
   }
+  /*
+   * A prototype that returns a complex type (libm's conj, cexp, ...) returns a
+   * two-lane aggregate; use the aggregate path for it, as for a definition.
+   */
+  c_function_t complex_result_fn;
+  if (c_type_is_complex(fn->result)) {
+    complex_result_fn = *fn;
+    complex_result_fn.result_agg = c_complex_aggregate(fn->result);
+    complex_result_fn.result = C_AGG;
+    fn = &complex_result_fn;
+  }
   bool empty_agg_result = fn->result == C_AGG && fn->result_agg &&
                           fn->result_agg->complete && fn->result_agg->size == 0;
   bool has_agg_result = fn->result == C_AGG && !empty_agg_result;
@@ -2287,7 +2298,7 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
   }
   bool has_agg_param = false;
   for (size_t i = 0; i < fn->param_count; ++i)
-    if (fn->params[i].type == C_AGG)
+    if (fn->params[i].type == C_AGG || c_type_is_complex(fn->params[i].type))
       has_agg_param = true;
   size_t argc = fn->param_count + (sret ? 1u : 0u);
   if (argc > NYIR_CALL_MAX_ARGS) {
@@ -2381,6 +2392,26 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
       size_t argument_start = p->pos;
       c_value_t value = parse_expr(p, 1);
       c_param_t *param = variadic_arg ? NULL : &fn->params[logical];
+      /*
+       * A complex parameter travels as a two-lane aggregate: promote a real
+       * argument to the matching complex shape and compare by shape, since
+       * expression results use their own static aggregate descriptors.
+       */
+      c_param_t complex_param;
+      if (param && c_type_is_complex(param->type)) {
+        complex_param = *param;
+        complex_param.type = C_AGG;
+        complex_param.agg = c_complex_aggregate(param->type);
+        param = &complex_param;
+        if (value.value >= 0 &&
+            (c_type_is_float(value.type) || c_type_is_integer(value.type)))
+          value = lower_scalar_to_complex(p, value,
+                                          complex_param.agg->size == 8);
+        if (value.value >= 0 && value.type == C_AGG && value.agg &&
+            value.agg != complex_param.agg &&
+            value.agg->size == complex_param.agg->size)
+          value.agg = complex_param.agg; /* C typing leaves only a complex */
+      }
       int *args[] = {&call.a, &call.b, &call.c, &call.d, &call.e, &call.f};
       if (variadic_arg) {
         if (value.value < 0 || value.type == C_BAD) {
@@ -2446,7 +2477,13 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
         bool matching_aggregate =
             value.agg == param->agg ||
             (value.agg && param->agg && value.agg->is_int128 &&
-             param->agg->is_int128);
+             param->agg->is_int128) ||
+            /* Two complex descriptors of the same width are the same type. */
+            (value.agg && param->agg && value.agg->scope_id == SIZE_MAX &&
+             param->agg->scope_id == SIZE_MAX &&
+             value.agg->size == param->agg->size &&
+             value.agg->field_count == 2 && param->agg->field_count == 2 &&
+             value.agg->fields[0].kind == param->agg->fields[0].kind);
         if (value.value < 0 || value.type != C_AGG || !matching_aggregate) {
           fail(p, "direct calls require matching aggregate argument types");
           goto call_error;
@@ -4782,6 +4819,68 @@ static c_value_t parse_primary(c_parser_t *p) {
       }
       if (c_type_is_pointer(cast_type) && p->last_value_null_pointer_constant)
         return (c_value_t){operand.value, cast_type, NULL};
+      if (c_type_is_complex(cast_type) && cast_type != C_C_LDOUBLE &&
+          operand.value >= 0) {
+        /* (T _Complex)expr: convert or widen into the target's lane type. */
+        bool to_single = cast_type == C_C64;
+        if (operand.type != C_AGG) {
+          if (c_type_is_float(operand.type) || c_type_is_integer(operand.type))
+            return lower_scalar_to_complex(p, operand, to_single);
+        } else if (operand.agg && operand.agg->scope_id == SIZE_MAX &&
+                   operand.agg->field_count == 2) {
+          bool from_single = operand.agg->size == 8;
+          if (from_single == to_single)
+            return (c_value_t){operand.value, C_AGG,
+                               to_single ? &lower_complex_value_f32
+                                         : &lower_complex_value_f64};
+          size_t lane = from_single ? 4 : 8;
+          int real_source =
+              from_single ? lower_load_f32_field(p, operand.value, false)
+                          : lower_load_field(p, operand.value, true, false);
+          int imag_address = lower_add_const(p, operand.value, lane);
+          int imag_source =
+              imag_address < 0 ? -1
+              : from_single    ? lower_load_f32_field(p, imag_address, false)
+                               : lower_load_field(p, imag_address, true, false);
+          nyr_op_t convert = from_single ? NYIR_F32_TO_F64 : NYIR_F64_TO_F32;
+          nyr_scalar_class_t class_to =
+              to_single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64;
+          int real_value =
+              real_source < 0
+                  ? -1
+                  : emit_value(p, (nyr_inst_t){.op = convert,
+                                               .dst = -1,
+                                               .a = real_source,
+                                               .scalar_class = class_to});
+          int imag_value =
+              imag_source < 0
+                  ? -1
+                  : emit_value(p, (nyr_inst_t){.op = convert,
+                                               .dst = -1,
+                                               .a = imag_source,
+                                               .scalar_class = class_to});
+          size_t offset = 0;
+          if (real_value < 0 || imag_value < 0 ||
+              !agg_area_alloc(p, to_single ? 8 : 16, &offset))
+            return (c_value_t){-1, C_BAD, NULL};
+          int base = p->agg_base;
+          int imag_target = lower_add_const(p, base, to_single ? 4 : 8);
+          bool stored =
+              imag_target >= 0 &&
+              (to_single
+                   ? lower_store_f32_field(p, base, real_value, false) &&
+                         lower_store_f32_field(p, imag_target, imag_value,
+                                               false)
+                   : lower_store_field(p, base, real_value, true, false) &&
+                         lower_store_field(p, imag_target, imag_value, true,
+                                           false));
+          if (!stored)
+            return (c_value_t){-1, C_BAD, NULL};
+          return (c_value_t){base, C_AGG,
+                             to_single ? &lower_complex_value_f32
+                                       : &lower_complex_value_f64};
+        }
+      }
       char message[128];
       snprintf(message, sizeof(message),
                "unsupported cast or implicit conversion (from type %d to %d)",
@@ -10148,7 +10247,11 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
           fail(p, "complex aggregate is not classifiable by the C ABI");
           return (c_value_t){-1, C_BAD, NULL};
         }
-        return lower_aggregate_call_result(p, call_result, left.agg, packed);
+        left = lower_aggregate_call_result(p, call_result, left.agg, packed);
+        if (left.value < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        /* Keep climbing: `a * b + c` continues with the next operator. */
+        continue;
       }
       size_t offset = 0;
       if (!agg_area_alloc(p, left.agg->size, &offset)) {

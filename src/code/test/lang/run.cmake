@@ -4235,6 +4235,25 @@ file(READ "${BINARY_DIR}/segment-cast-ok.s" segment_cast_asm)
 if(NOT segment_cast_asm MATCHES "%gs:")
   message(FATAL_ERROR "the segment cast lost its %gs prefix\n${segment_cast_asm}")
 endif()
+file(READ "${SOURCE_DIR}/c/complex-forms.expected" complex_forms_expected)
+foreach(complex_opt -O0 -O2)
+  nyc_execute_ok(
+    [=[nyc failed to compile the complex-forms fixture (${status})\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${complex_opt} --all "${NY_C_CORPUS_complex-forms.c}"
+              "${BINARY_DIR}/complex-forms.o"
+  )
+  nyc_execute_ok(
+    [=[linking the complex-forms fixture failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -o "${BINARY_DIR}/complex-forms-host" "${BINARY_DIR}/complex-forms.o" -lm
+  )
+  nyc_execute_ok(
+    [=[the complex-forms fixture crashed\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/complex-forms-host"
+  )
+  if(NOT stdout STREQUAL complex_forms_expected)
+    message(FATAL_ERROR "complex forms differ from GCC (${complex_opt})\nexpected:\n${complex_forms_expected}\ngot:\n${stdout}")
+  endif()
+endforeach()
 nyc_execute_ok(
   [=[nyc failed to compile the global byte array alignment fixture (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_global-byte-array-alignment.c}"

@@ -1294,6 +1294,7 @@ static int emit_i64_compare(c_parser_t *p, int left, int right,
 static int emit_i64_select(c_parser_t *p, int condition, int when_true,
                            int when_false);
 static int emit_value(c_parser_t *p, nyr_inst_t inst);
+static c_agg_type_t *c_complex_aggregate(c_type_t type);
 static bool emit_noreturn_marker(c_parser_t *p);
 /* Convert an integer or pointer value to the 0 or 1 of a C `_Bool`. */
 static int lower_bool_value(c_parser_t *p, int value) {

@@ -3026,4 +3026,15 @@ run directory under `/tmp`.
   and the annotation sections preserved; nothing is dropped silently. The
   resumable-asm regression checks the note and that `.discard.test` is in the
   object.
+- Complex forms (2026-11-24). A GCC differential over fifteen complex forms
+  found, and fixed: complex arguments to calls (a prototype's complex
+  parameter was compared as a scalar, and a call to `creal`, `cimag`, `conj` or
+  any libm complex function failed or crashed because no argument-size table
+  was allocated); a complex result from a prototype; `a * b + c` and `x * a - a`
+  (the multiply and divide helper returned from the expression loop, so the
+  next operator was a syntax error); `(double _Complex)float_complex_value`
+  casts; and complex descriptors of the same width that were compared by
+  pointer. `complex-forms` prints each result and must match GCC's output at
+  `-O0` and `-O2`. Still unsupported: compound assignment on complex values
+  (`a -= b`), arrays of complex values, and `long double _Complex` promotion.
 </details>
