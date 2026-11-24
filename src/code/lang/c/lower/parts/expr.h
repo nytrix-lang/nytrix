@@ -2325,6 +2325,10 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
   if (p->abi == NYC_ABI_I386)
     call.flags |= NYIR_INST_F_I386_C_ABI;
   call.flags |= c_function_regparm(p, fn) << NYIR_INST_F_I386_REGPARM_SHIFT;
+  /* The C library allocator: eligible for dead-allocation elimination. */
+  if (!p->no_builtin && !fn->defined && !fn->has_asm_alias &&
+      (ny_ctok_eq(name, "malloc") || ny_ctok_eq(name, "free")))
+    call.flags |= NYIR_INST_F_LIBC_ALLOC;
   if (!call.symbol) {
     fail(p, "out of memory creating call symbol");
     return (c_value_t){-1, C_BAD, NULL};

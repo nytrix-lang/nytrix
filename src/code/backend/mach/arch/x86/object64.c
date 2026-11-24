@@ -76,6 +76,11 @@ typedef struct {
   unsigned pending_sib_index;
   unsigned pending_sib_scale;
   bool pending_sib_valid;
+  /* [base + disp] for an adjacent ADD of a constant that was not emitted. */
+  uint32_t pending_disp_vreg;
+  unsigned pending_disp_base;
+  int32_t pending_disp;
+  bool pending_disp_valid;
   /*
    * SHL x, k (k = 1..3) folded into the next ADD as lea [y + x*2^k].
    */
@@ -143,6 +148,8 @@ typedef struct {
    * into that copy's register instead of through %rax.
    */
   uint32_t *vreg_use_count;
+  /* Every operand reference (dst, sources, call args), saturating at 3. */
+  uint8_t *vreg_any_ref;
   /*
    * Encoder decision counters for the audit: how symbol addresses were
    * materialized.  These are what an address-encoding change moves, so they
@@ -429,6 +436,8 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   free(e->vreg_literal_rhs_only);
   free(e->vreg_use_count);
   e->vreg_use_count = NULL;
+  free(e->vreg_any_ref);
+  e->vreg_any_ref = NULL;
   free(e->vreg_carried_copy_cache);
   free(e->loop_fpr);
   free(e->loop_fpr_entry);
@@ -792,6 +801,15 @@ static bool mach_loop_cover_blocks(void *ctx, int color, size_t start,
 static size_t mach_inst_input_uses_vreg(const nyr_mach_inst_t *in,
                                         uint32_t vreg);
 
+static bool mach_skip_literal_recolor(void) {
+  static int skip = -1;
+  if (skip < 0) {
+    const char *env = getenv("NYTRIX_NO_LITERAL_RECOLOR_SKIP");
+    skip = !(env && *env && strcmp(env, "0") != 0);
+  }
+  return skip != 0;
+}
+
 static void mach_mark_local_spills(const nyr_x64_mach_enc_t *e,
                                    const nyr_mach_func_t *m,
                                    unsigned char *candidate) {
@@ -806,6 +824,14 @@ static void mach_mark_local_spills(const nyr_x64_mach_enc_t *e,
         s->spill_reason == NYR_MACH_SPILL_FIXED_CLOBBER ||
         m->vreg_types[s->vreg] != NYR_MACH_TYPE_I64 ||
         (e->loop_gpr && e->loop_gpr[s->vreg] >= 0) ||
+        /*
+         * A literal decolored by mach_decolor_literals is rematerialized at
+         * every use; giving it a color back only costs a dead `mov` and, in
+         * the callee-saved bank, a push/pop pair (ackermann's `1`).
+         * NYTRIX_NO_LITERAL_RECOLOR_SKIP=1 restores the old behaviour.
+         */
+        (mach_skip_literal_recolor() && e->decolored_literal &&
+         e->decolored_literal[s->vreg]) ||
         nyr_mach_regalloc_live_in(a, s->block, s->vreg) ||
         nyr_mach_regalloc_live_out(a, s->block, s->vreg))
       continue;
@@ -1832,6 +1858,31 @@ static bool mach_loop_gpr_within_budget(const nyr_mach_func_t *m) {
          m->vreg_len <= MACH_LOOP_GPR_MAX_RANGE_CELLS / m->block_len;
 }
 
+/*
+ * Root boost: a buffer base reloads its home on every access when it loses
+ * its color. COPY roots mirror another vreg (doubling them cost viterbi
+ * 7.4%). ADD/SUB/LEA roots are per-iteration offset temporaries
+ * (`k*8 + 16`) that an address mode or one add rebuilds; boosting them
+ * displaced sssp's three buffer bases, which then reloaded twelve times per
+ * iteration. NYTRIX_LOOP_ROOT_BOOST_ARITH=1 restores boosting those.
+ */
+static bool mach_loop_root_boost(const nyr_mach_func_t *m, size_t def_pc) {
+  if (def_pc >= m->inst_len)
+    return false;
+  nyr_mach_opcode_t op = m->insts[def_pc].opcode;
+  if (op == NYR_MACH_COPY)
+    return false;
+  static int arith = -1;
+  if (arith < 0) {
+    const char *env = getenv("NYTRIX_LOOP_ROOT_BOOST_ARITH");
+    arith = env && *env && strcmp(env, "0") != 0;
+  }
+  if (!arith &&
+      (op == NYR_MACH_ADD || op == NYR_MACH_SUB || op == NYR_MACH_LEA))
+    return false;
+  return true;
+}
+
 static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
                                     bool private_spill_homes) {
   const nyr_mach_func_t *m = e->mach;
@@ -2245,8 +2296,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
       cands[cand_len++] = (mach_loop_cand_t){
           .vreg = v,
           .score = score[v],
-          .rank = loop_root[v] &&
-                          m->insts[def_pc[v]].opcode != NYR_MACH_COPY
+          .rank = loop_root[v] && mach_loop_root_boost(m, def_pc[v])
                       ? score[v] * 2u
                       : score[v],
 
@@ -2975,6 +3025,10 @@ static unsigned char mach_cond_setcc(nyr_mach_cond_t cond, bool is_float) {
       0x9E, /* LE  -> setle */
       0x9F, /* GT  -> setg  */
       0x9D, /* GE  -> setge */
+      0x92, /* B   -> setb  */
+      0x93, /* AE  -> setae */
+      0x96, /* BE  -> setbe */
+      0x97, /* A   -> seta  */
   };
   static const unsigned char float_tab[] = {
       0x94, /* EQ  -> sete  (ZF=1)         */
@@ -2986,7 +3040,7 @@ static unsigned char mach_cond_setcc(nyr_mach_cond_t cond, bool is_float) {
   };
   const unsigned char *tab = is_float ? float_tab : int_tab;
   unsigned idx = (unsigned)cond - (unsigned)NYR_MACH_COND_EQ;
-  if (idx >= 6)
+  if (idx >= (is_float ? 6u : 10u))
     return 0;
   return tab[idx];
 }
@@ -3188,6 +3242,10 @@ static unsigned char mach_cond_jcc(nyr_mach_cond_t cond, bool is_float) {
       0x8E, /* LE  -> jle */
       0x8F, /* GT  -> jg  */
       0x8D, /* GE  -> jge */
+      0x82, /* B   -> jb  */
+      0x83, /* AE  -> jae */
+      0x86, /* BE  -> jbe */
+      0x87, /* A   -> ja  */
   };
   static const unsigned char float_tab[] = {
       0x84, /* EQ  -> je  */
@@ -3199,7 +3257,7 @@ static unsigned char mach_cond_jcc(nyr_mach_cond_t cond, bool is_float) {
   };
   const unsigned char *tab = is_float ? float_tab : int_tab;
   unsigned idx = (unsigned)cond - (unsigned)NYR_MACH_COND_EQ;
-  if (idx >= 6)
+  if (idx >= (is_float ? 6u : 10u))
     return 0;
   return tab[idx];
 }
@@ -6266,6 +6324,75 @@ static bool mach_sib_lea_has_float_memory_use(const nyr_x64_mach_enc_t *e,
   return false;
 }
 
+/*
+ * `addr = base + C` read only by the adjacent scalar LOAD/STORE: the access
+ * can use [base + C] and the ADD need not be emitted. NYTRIX_NO_DISP_FOLD=1
+ * disables it.
+ */
+static bool mach_disp_add_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
+                              size_t use_index, uint32_t *base_out,
+                              int32_t *disp_out) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_DISP_FOLD");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !e || !e->mach || !e->def_inst || !e->imm_fold_known ||
+      !e->imm_fold || vreg >= e->mach->vreg_len ||
+      use_index >= e->mach->inst_len)
+    return false;
+  size_t def_index = e->def_inst[vreg];
+  if (def_index == SIZE_MAX || def_index + 1 != use_index)
+    return false;
+  size_t block = mach_block_for_inst(e, def_index);
+  if (block == SIZE_MAX || mach_block_for_inst(e, use_index) != block)
+    return false;
+  const nyr_mach_inst_t *def = &e->mach->insts[def_index];
+  const nyr_mach_inst_t *use = &e->mach->insts[use_index];
+  if (def->opcode != NYR_MACH_ADD || def->dst.kind != NYR_MACH_OPERAND_VREG ||
+      def->dst.as.reg != vreg || def->narrow32 ||
+      def->src0.kind != NYR_MACH_OPERAND_VREG ||
+      def->src1.kind != NYR_MACH_OPERAND_VREG ||
+      def->src0.as.reg >= e->mach->vreg_len ||
+      def->src1.as.reg >= e->mach->vreg_len ||
+      e->mach->vreg_classes[vreg] != NYR_MACH_REGCLASS_GPR ||
+      e->mach->vreg_types[vreg] != NYR_MACH_TYPE_I64)
+    return false;
+  bool k0 = e->imm_fold_known[def->src0.as.reg];
+  bool k1 = e->imm_fold_known[def->src1.as.reg];
+  if (k0 == k1)
+    return false;
+  uint32_t base = k0 ? def->src1.as.reg : def->src0.as.reg;
+  int64_t disp = e->imm_fold[k0 ? def->src0.as.reg : def->src1.as.reg];
+  if (disp < INT32_MIN || disp > INT32_MAX ||
+      e->mach->vreg_classes[base] != NYR_MACH_REGCLASS_GPR ||
+      e->mach->vreg_types[base] != NYR_MACH_TYPE_I64)
+    return false;
+  bool is_load = use->opcode == NYR_MACH_LOAD &&
+                 mach_op_is_vreg(&use->src0, vreg) &&
+                 !mach_is_float(e->mach, &use->dst) &&
+                 !mach_is_v128(e->mach, &use->dst) &&
+                 !mach_op_is_vreg(&use->src1, vreg) &&
+                 !mach_op_is_vreg(&use->src2, vreg);
+  bool is_store = use->opcode == NYR_MACH_STORE &&
+                  mach_op_is_vreg(&use->dst, vreg) &&
+                  !mach_is_float(e->mach, &use->src0) &&
+                  !mach_is_v128(e->mach, &use->src0) &&
+                  !mach_op_is_vreg(&use->src0, vreg) &&
+                  !mach_op_is_vreg(&use->src1, vreg) &&
+                  !mach_op_is_vreg(&use->src2, vreg);
+  if (!is_load && !is_store)
+    return false;
+  /* One definition and this one access: nothing else reads the sum. */
+  if (!e->vreg_any_ref || e->vreg_any_ref[vreg] != 2)
+    return false;
+  if (base_out)
+    *base_out = base;
+  if (disp_out)
+    *disp_out = (int32_t)disp;
+  return true;
+}
+
 static bool mach_sib_add_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
                              size_t use_index,
                              const nyr_mach_operand_t **base_out,
@@ -6290,6 +6417,16 @@ static bool mach_sib_add_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
   if (def->opcode != NYR_MACH_ADD || def->dst.kind != NYR_MACH_OPERAND_VREG ||
       def->dst.as.reg != vreg || def->src0.kind != NYR_MACH_OPERAND_VREG ||
       def->src1.kind != NYR_MACH_OPERAND_VREG || (!is_load && !is_store))
+    return false;
+  /*
+   * base + constant is a displacement, not an index: taking the SIB form
+   * materialized the constant into a scratch register for every access.
+   */
+  if (e->imm_fold_known &&
+      ((def->src0.as.reg < e->mach->vreg_len &&
+        e->imm_fold_known[def->src0.as.reg]) ||
+       (def->src1.as.reg < e->mach->vreg_len &&
+        e->imm_fold_known[def->src1.as.reg])))
     return false;
   const nyr_mach_operand_t *inputs[] = {&def->src0, &def->src1};
   const nyr_mach_operand_t *base = NULL, *index = NULL;
@@ -6700,6 +6837,12 @@ static bool mach_resolve_mem_addr(nyr_x64_mach_enc_t *e,
   out->index = -1;
   out->scale = 1;
   out->disp = 0;
+  if (e->pending_disp_valid && op && mach_op_is_vreg(op, e->pending_disp_vreg)) {
+    out->base = e->pending_disp_base;
+    out->disp = e->pending_disp;
+    e->pending_disp_valid = false;
+    return true;
+  }
   if (op && op->kind == NYR_MACH_OPERAND_VREG &&
       op->as.reg < e->mach->vreg_len) {
     const nyr_mach_operand_t *base = NULL, *index = NULL;
@@ -6829,6 +6972,9 @@ static bool mach_emit_mem(nyr_x64_mach_enc_t *e, const ny_x64_mem_addr_t *a,
     unsigned mod = a->disp >= INT8_MIN && a->disp <= INT8_MAX ? 1u : 2u;
     if (!mach_u8(
             e, (unsigned char)((mod << 6) | ((reg & 7) << 3) | (a->base & 7))))
+      return false;
+    /* An RSP/R12 base is encoded only through a SIB byte (no index). */
+    if ((a->base & 7) == 4 && !mach_u8(e, 0x24))
       return false;
     return mod == 1 ? mach_u8(e, (unsigned char)a->disp) : mach_i32(e, a->disp);
   }
@@ -11824,6 +11970,24 @@ static bool mach_prepare_direct_params(nyr_x64_mach_enc_t *e) {
         in->dst.kind == NYR_MACH_OPERAND_FRAME &&
         in->dst.as.frame_index >= mach->param_count)
       continue;
+    /*
+     * A constant materialized ahead of the parameter loads (ackermann's
+     * `m == 0` test constant) reads no argument register. It only ends the
+     * direct window if its destination is an argument register.
+     */
+    if (in->opcode == NYR_MACH_COPY && in->src0.kind == NYR_MACH_OPERAND_IMM &&
+        in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.as.reg < mach->vreg_len && !mach_is_float(mach, &in->dst) &&
+        !getenv("NYTRIX_NO_PARAM_PREFIX_CONST")) {
+      size_t saved = e->cur_inst;
+      e->cur_inst = i;
+      int cp = mach_vreg_def_preg(e, in->dst.as.reg);
+      e->cur_inst = saved;
+      if (cp == 7 || cp == 6 || cp == 2 || cp == 1 || cp == 8 || cp == 9 ||
+          cp == 0)
+        incoming_args_live = false;
+      continue;
+    }
     if (in->opcode != NYR_MACH_LOAD ||
         in->src0.kind != NYR_MACH_OPERAND_FRAME ||
         in->src0.as.frame_index >= mach->param_count ||
@@ -12916,6 +13080,24 @@ static bool mach_build_vreg_use_counts(nyr_x64_mach_enc_t *e) {
     }
   }
   e->vreg_use_count = counts;
+  free(e->vreg_any_ref);
+  e->vreg_any_ref = calloc(m->vreg_len, sizeof(*e->vreg_any_ref));
+  if (!e->vreg_any_ref)
+    return false;
+  for (size_t i = 0; i < m->inst_len; ++i) {
+    const nyr_mach_inst_t *in = &m->insts[i];
+    const nyr_mach_operand_t *ops[] = {&in->dst, &in->src0, &in->src1,
+                                       &in->src2};
+    for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+      if (ops[k]->kind == NYR_MACH_OPERAND_VREG &&
+          ops[k]->as.reg < m->vreg_len && e->vreg_any_ref[ops[k]->as.reg] < 3)
+        e->vreg_any_ref[ops[k]->as.reg]++;
+    for (size_t k = 0; k < in->args_len; ++k)
+      if (in->args[k].kind == NYR_MACH_OPERAND_VREG &&
+          in->args[k].as.reg < m->vreg_len &&
+          e->vreg_any_ref[in->args[k].as.reg] < 3)
+        e->vreg_any_ref[in->args[k].as.reg]++;
+  }
   return true;
 }
 
@@ -16065,6 +16247,23 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             e->select_skip_alu[in->dst.as.reg])
           break;
         if (in->opcode == NYR_MACH_ADD &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG) {
+          uint32_t disp_base = 0;
+          int32_t disp = 0;
+          if (mach_disp_add_mem(e, in->dst.as.reg, e->cur_inst + 1,
+                                &disp_base, &disp)) {
+            int bp = mach_vreg_preg(e, disp_base);
+            if (bp >= 0 && bp != 0 && bp != 10 &&
+                mach_seed_colored_preg(e, disp_base)) {
+              e->pending_disp_vreg = in->dst.as.reg;
+              e->pending_disp_base = (unsigned)bp;
+              e->pending_disp = disp;
+              e->pending_disp_valid = true;
+              break;
+            }
+          }
+        }
+        if (in->opcode == NYR_MACH_ADD &&
             in->dst.kind == NYR_MACH_OPERAND_VREG &&
             e->cur_inst + 1 < mach->inst_len &&
             (mach->insts[e->cur_inst + 1].opcode == NYR_MACH_LOAD ||
@@ -17882,6 +18081,56 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                          in->src0.as.reg < e->colors_len
                                      ? e->select_test_src[in->src0.as.reg]
                                      : -1;
+        /*
+         * Materialized truth value with every operand resident: test it in
+         * place and cmov into the result register instead of staging the
+         * condition and false arm through RAX/R10 (fhourstones `evaluate`
+         * spent six instructions per select). NYTRIX_NO_SELECT_REG=1
+         * disables it.
+         */
+        static int select_reg_disabled = -1;
+        if (select_reg_disabled < 0) {
+          const char *env = getenv("NYTRIX_NO_SELECT_REG");
+          select_reg_disabled = env && *env && strcmp(env, "0") != 0;
+        }
+        if (fused_test_src < 0 && !select_reg_disabled && true_preg >= 0 &&
+            in->src0.kind == NYR_MACH_OPERAND_VREG &&
+            in->src2.kind == NYR_MACH_OPERAND_VREG &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            !mach_is_float(mach, &in->dst) &&
+            mach_seed_colored_preg(e, in->src0.as.reg) &&
+            mach_seed_colored_preg(e, in->src2.as.reg)) {
+          int cond_preg = mach_vreg_preg(e, in->src0.as.reg);
+          int false_preg = mach_vreg_preg(e, in->src2.as.reg);
+          int result_preg = mach_vreg_def_preg(e, in->dst.as.reg);
+          true_preg = mach_vreg_preg(e, in->src1.as.reg);
+          if (cond_preg >= 0 && false_preg >= 0 && result_preg >= 0 &&
+              true_preg >= 0 && cond_preg != 10 && false_preg != 10 &&
+              true_preg != 10) {
+            bool ne = true;
+            int other_preg = true_preg;
+            if (!mach_rex(e, true, cond_preg >= 8, false, cond_preg >= 8) ||
+                !mach_u8(e, 0x85) ||
+                !mach_u8(e, (unsigned char)(0xc0 | ((cond_preg & 7) << 3) |
+                                            (cond_preg & 7))))
+              return false;
+            if (result_preg == true_preg) {
+              ne = false;
+              other_preg = false_preg;
+            } else if (result_preg != false_preg &&
+                       !mach_mov_preg_preg(e, result_preg, false_preg)) {
+              return false;
+            }
+            if (!mach_rex(e, true, result_preg >= 8, false, other_preg >= 8) ||
+                !mach_u8(e, 0x0f) || !mach_u8(e, ne ? 0x45 : 0x44) ||
+                !mach_u8(e, (unsigned char)(0xc0 | ((result_preg & 7) << 3) |
+                                            (other_preg & 7))) ||
+                !mach_commit_preg(e, &in->dst, dst, (unsigned)result_preg,
+                                  false))
+              return false;
+            break;
+          }
+        }
         if (fused_test_src >= 0) {
           /*
            * Both arms are live at SELECT, so seed them before establishing

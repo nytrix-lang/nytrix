@@ -134,6 +134,8 @@ bool nyr_phiopt(nyr_func_t *f) {
     nyr_cfg_free(&cfg);
     return false;
   }
+  bool *made = calloc(f->len ? f->len : 1, sizeof(*made));
+  bool any_made = false;
   bool any_trivial = false;
   for (bool fold_again = true; fold_again;) {
     fold_again = false;
@@ -167,6 +169,9 @@ bool nyr_phiopt(nyr_func_t *f) {
       if (!dominates)
         continue;
       nir_make_copy(phi, unique_v);
+      if (made)
+        made[i] = true;
+      any_made = true;
       fold_again = true;
       any_trivial = true;
       if (trace)
@@ -179,6 +184,7 @@ bool nyr_phiopt(nyr_func_t *f) {
     if (!defs) {
       free(known);
       free(values);
+      free(made);
       nyr_cfg_free(&cfg);
       return false;
     }
@@ -188,6 +194,7 @@ bool nyr_phiopt(nyr_func_t *f) {
     free(known);
     free(values);
     free(defs);
+    free(made);
     return false;
   }
 
@@ -245,9 +252,53 @@ bool nyr_phiopt(nyr_func_t *f) {
       continue;
     }
     nir_make_copy(phi, selected);
+    if (made)
+      made[i] = true;
+    any_made = true;
     if (trace)
       rewritten++;
   }
+
+  /*
+   * A COPY that replaced the first of several PHIs would precede the rest
+   * (verifier: "phi is not at the start of its block"). Its operand is a
+   * constant defined elsewhere, so sink it below the block's PHI run.
+   */
+  for (size_t i = 0; any_made && made && i < f->len; ++i) {
+    if (!made[i])
+      continue;
+    size_t end = i + 1;
+    while (end < f->len &&
+           (f->data[end].op == NYIR_PHI || f->data[end].op == NYIR_NOP ||
+            made[end]))
+      ++end;
+    size_t w = i;
+    nyr_inst_t *tmp = malloc((end - i) * sizeof(*tmp));
+    bool *tmp_made = malloc((end - i) * sizeof(*tmp_made));
+    if (!tmp || !tmp_made) {
+      free(tmp);
+      free(tmp_made);
+      break;
+    }
+    size_t t = 0;
+    for (size_t k = i; k < end; ++k)
+      if (f->data[k].op == NYIR_PHI)
+        f->data[w++] = f->data[k];
+      else {
+        tmp[t] = f->data[k];
+        tmp_made[t++] = made[k];
+      }
+    for (size_t k = 0; k < t; ++k) {
+      made[w] = false;
+      f->data[w++] = tmp[k];
+    }
+    for (size_t k = i; k < end; ++k)
+      made[k] = false;
+    free(tmp);
+    free(tmp_made);
+    i = end - 1;
+  }
+  free(made);
 
   if (trace)
     ny_dbg_heuristic_event(

@@ -723,6 +723,139 @@ static bool mach_cc_interferes(const nyr_mach_func_t *m, const uint64_t *out,
 }
 
 /*
+ * C unsigned comparisons reach NYIR as signed compares of sign-flipped
+ * operands: `a <u b` is `(a ^ MIN) <s (b ^ MIN)` (NYIR has no unsigned
+ * condition). x86 compares unsigned directly: compare the unflipped values
+ * with B/BE/A/AE and drop the flips (a movabs and two xors per compare). A
+ * constant operand is flipped in place when this compare is its only user.
+ * NYTRIX_NO_UNSIGNED_CMP=1 disables it.
+ */
+static void mach_fuse_unsigned_cmp(nyr_mach_func_t *m) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_UNSIGNED_CMP");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  size_t nv = m->vreg_len;
+  if (disabled || !nv)
+    return;
+  uint32_t *uses = calloc(nv, sizeof(*uses));
+  uint8_t *defs = calloc(nv, 1);
+  size_t *def_at = malloc(nv * sizeof(*def_at));
+  if (!uses || !defs || !def_at)
+    goto done;
+  for (size_t i = 0; i < m->inst_len; ++i) {
+    const nyr_mach_inst_t *in = &m->insts[i];
+    if (mach_cc_is_def(in) && in->dst.as.reg < nv) {
+      uint32_t v = in->dst.as.reg;
+      defs[v] = defs[v] < 2 ? defs[v] + 1 : 2;
+      def_at[v] = i;
+    }
+    const nyr_mach_operand_t *ops[] = {&in->src0, &in->src1, &in->src2,
+                                       in->opcode == NYR_MACH_STORE ? &in->dst
+                                                                    : NULL};
+    for (size_t k = 0; k < 4 + in->args_len; ++k) {
+      const nyr_mach_operand_t *op = k < 4 ? ops[k] : &in->args[k - 4];
+      if (op && op->kind == NYR_MACH_OPERAND_VREG && op->as.reg < nv)
+        uses[op->as.reg]++;
+    }
+  }
+#define UCMP_CONST(op, out)                                                    \
+  ((op).kind == NYR_MACH_OPERAND_IMM                                           \
+       ? ((out) = (op).as.imm, true)                                           \
+       : ((op).kind == NYR_MACH_OPERAND_VREG && (op).as.reg < nv &&            \
+          defs[(op).as.reg] == 1 &&                                            \
+          m->insts[def_at[(op).as.reg]].opcode == NYR_MACH_COPY &&             \
+          m->insts[def_at[(op).as.reg]].src0.kind == NYR_MACH_OPERAND_IMM &&   \
+          !m->insts[def_at[(op).as.reg]].narrow32 &&                           \
+          ((out) = m->insts[def_at[(op).as.reg]].src0.as.imm, true)))
+  bool changed = false;
+  for (size_t i = 0; i < m->inst_len; ++i) {
+    nyr_mach_inst_t *cmp = &m->insts[i];
+    if (cmp->opcode != NYR_MACH_CMP || cmp->narrow32 ||
+        cmp->condition < NYR_MACH_COND_LT ||
+        cmp->condition > NYR_MACH_COND_GE ||
+        cmp->dst.kind != NYR_MACH_OPERAND_VREG ||
+        cmp->src0.kind != NYR_MACH_OPERAND_VREG ||
+        cmp->src0.as.reg >= nv ||
+        m->vreg_types[cmp->src0.as.reg] != NYR_MACH_TYPE_I64 ||
+        m->vreg_classes[cmp->src0.as.reg] != NYR_MACH_REGCLASS_GPR)
+      continue;
+    /* Side k: the flipped value's source, or a constant to unflip. */
+    int64_t flip_src[2] = {-1, -1};
+    size_t flip_def[2] = {SIZE_MAX, SIZE_MAX};
+    int64_t konst[2] = {0, 0};
+    bool is_const[2] = {false, false};
+    const nyr_mach_operand_t *sides[2] = {&cmp->src0, &cmp->src1};
+    bool ok = true;
+    for (int k = 0; k < 2 && ok; ++k) {
+      const nyr_mach_operand_t *op = sides[k];
+      int64_t c = 0;
+      if (op->kind == NYR_MACH_OPERAND_VREG && op->as.reg < nv &&
+          defs[op->as.reg] == 1) {
+        const nyr_mach_inst_t *x = &m->insts[def_at[op->as.reg]];
+        int64_t mk = 0;
+        if (x->opcode == NYR_MACH_XOR && !x->narrow32 &&
+            x->src0.kind == NYR_MACH_OPERAND_VREG && x->src0.as.reg < nv &&
+            m->vreg_types[x->src0.as.reg] == NYR_MACH_TYPE_I64 &&
+            UCMP_CONST(x->src1, mk) && mk == INT64_MIN) {
+          flip_src[k] = x->src0.as.reg;
+          flip_def[k] = def_at[op->as.reg];
+          continue;
+        }
+      }
+      if (k == 1 && UCMP_CONST(*op, c) &&
+          (op->kind == NYR_MACH_OPERAND_IMM || uses[op->as.reg] == 1)) {
+        is_const[k] = true;
+        konst[k] = c;
+        continue;
+      }
+      ok = false;
+    }
+    if (!ok || flip_src[0] < 0 || (flip_src[1] < 0 && !is_const[1]))
+      continue;
+    /* The unflipped source must still hold its value at the compare. */
+    if (defs[flip_src[0]] != 1 ||
+        (flip_src[1] >= 0 && defs[flip_src[1]] != 1))
+      continue;
+    cmp->src0.as.reg = (uint32_t)flip_src[0];
+    if (flip_src[1] >= 0) {
+      cmp->src1.as.reg = (uint32_t)flip_src[1];
+    } else if (cmp->src1.kind == NYR_MACH_OPERAND_IMM) {
+      cmp->src1.as.imm = konst[1] ^ INT64_MIN;
+    } else {
+      m->insts[def_at[cmp->src1.as.reg]].src0.as.imm = konst[1] ^ INT64_MIN;
+    }
+    cmp->condition = cmp->condition == NYR_MACH_COND_LT   ? NYR_MACH_COND_B
+                     : cmp->condition == NYR_MACH_COND_LE ? NYR_MACH_COND_BE
+                     : cmp->condition == NYR_MACH_COND_GT ? NYR_MACH_COND_A
+                                                          : NYR_MACH_COND_AE;
+    for (int k = 0; k < 2; ++k) {
+      if (flip_def[k] == SIZE_MAX)
+        continue;
+      nyr_mach_inst_t *x = &m->insts[flip_def[k]];
+      uint32_t xv = x->dst.as.reg;
+      if (uses[xv] > 0)
+        uses[xv]--;
+      uses[x->src0.as.reg]++;
+      if (uses[xv] == 0) {
+        *x = (nyr_mach_inst_t){.opcode = NYR_MACH_NOP,
+                               .source_pc = x->source_pc};
+        defs[xv] = 0;
+      }
+    }
+    changed = true;
+  }
+#undef UCMP_CONST
+  if (changed)
+    mach_compact_nops(m);
+done:
+  free(uses);
+  free(defs);
+  free(def_at);
+}
+
+/*
  * Fuse the fixed shapes C integer conversions leave behind:
  *   load.i32 v; and w, v, 0xffffffff  -> zero-extending load
  *   shl v, x, 32; sar w, v, 32        -> movsxd w, x
@@ -863,6 +996,49 @@ static void mach_fuse_int_widening(nyr_mach_func_t *m) {
         *first = (nyr_mach_inst_t){.opcode = NYR_MACH_NOP,
                                    .source_pc = first->source_pc};
         changed = true;
+      }
+    }
+  }
+  /*
+   * The same shl/sar pair separated by other instructions (if-conversion
+   * hoists both arms, so a C `int` update's shift pair is interleaved with
+   * the other arm's): read the shifted value's source directly. The source
+   * has one definition, so it is unchanged at the SAR. NYTRIX_NO_SEXT_FAR=1
+   * disables it.
+   */
+  static int sext_far_disabled = -1;
+  if (sext_far_disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_SEXT_FAR");
+    sext_far_disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  for (size_t b = 0; b < m->block_len && !sext_far_disabled; ++b) {
+    const nyr_mach_block_t *block = &m->blocks[b];
+    for (size_t n = 1; n < block->inst_count; ++n) {
+      nyr_mach_inst_t *sar = &m->insts[block->first_inst + n];
+      if (sar->opcode != NYR_MACH_SAR || sar->narrow32 || sar->sext32 ||
+          sar->dst.kind != NYR_MACH_OPERAND_VREG ||
+          sar->src0.kind != NYR_MACH_OPERAND_VREG ||
+          sar->src0.as.reg >= nv || !MACH_CONST_OP(sar->src1, 32))
+        continue;
+      uint32_t v = sar->src0.as.reg;
+      if (uses[v] != 1 || defs[v] != 1)
+        continue;
+      size_t lo = n > 64 ? n - 64 : 0;
+      for (size_t k = n; k-- > lo;) {
+        nyr_mach_inst_t *shl = &m->insts[block->first_inst + k];
+        if (!mach_cc_is_def(shl) || shl->dst.as.reg != v)
+          continue;
+        if (shl->opcode == NYR_MACH_SHL && !shl->narrow32 &&
+            shl->src0.kind == NYR_MACH_OPERAND_VREG &&
+            shl->src0.as.reg < nv && defs[shl->src0.as.reg] == 1 &&
+            MACH_CONST_OP(shl->src1, 32)) {
+          sar->src0 = shl->src0;
+          sar->sext32 = true;
+          *shl = (nyr_mach_inst_t){.opcode = NYR_MACH_NOP,
+                                   .source_pc = shl->source_pc};
+          changed = true;
+        }
+        break;
       }
     }
   }
@@ -3920,7 +4096,7 @@ bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
     const nyr_mach_operand_t *bad_operand = NULL;
     if (inst->opcode > NYR_MACH_POPCOUNT64)
       bad_field = "opcode";
-    else if (inst->condition > NYR_MACH_COND_GE)
+    else if (inst->condition > NYR_MACH_COND_A)
       bad_field = "condition";
     else if ((inst->effects &
               ~(NYR_MACH_EFFECT_READ_MEMORY | NYR_MACH_EFFECT_WRITE_MEMORY |
@@ -6528,6 +6704,8 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
     goto oom;
   if (nyir->untagged_values)
     mach_fuse_int_widening(&lowered);
+  if (caps & NY_NATIVE_CAP_MACH_SCALED_LEA)
+    mach_fuse_unsigned_cmp(&lowered);
   mach_coalesce_copies(&lowered, nyir);
   if (!mach_split_around_loops(&lowered))
     goto oom;

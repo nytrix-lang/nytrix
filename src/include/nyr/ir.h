@@ -1068,7 +1068,9 @@ bool nyr_algebraic_combine(nyr_func_t *f);
 bool nyr_double_neg(nyr_func_t *f);
 bool nyr_reassoc_add(nyr_func_t *f);
 bool nyr_addr_reassoc(nyr_func_t *f);
+extern _Thread_local bool nyr_ifconv_late;
 bool nyr_dead_alloc_elim(nyr_func_t *f);
+bool nyr_range_check_fold(nyr_func_t *f);
 bool nyr_rewrite_fuel(nyr_func_t *f);
 /** Equality-saturation e-graph over pure scalar integer ops (see opt/egraph.c).
  */

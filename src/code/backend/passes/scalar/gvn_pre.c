@@ -240,9 +240,34 @@ static bool gvn_ranges_disjoint(const nyr_func_t *f, const int *defs,
       return read_root.offset == 0 && write_root.offset == 0;
     break;
   case GVN_ADDR_LOCAL:
-  case GVN_ADDR_ALLOCA:
     if (read_root.id != write_root.id)
       return read_root.offset == 0 && write_root.offset == 0;
+    break;
+  case GVN_ADDR_ALLOCA:
+    if (read_root.id != write_root.id) {
+      if (read_root.offset == 0 && write_root.offset == 0)
+        return true;
+      /*
+       * Two distinct stack objects cannot overlap where each access lies
+       * inside its own object (mont64's promoted limb buffers: a store to
+       * tbuf[j] kept every a[j] reload). NYTRIX_NO_GVN_ALLOCA_BOUNDS=1
+       * restores the offset-zero rule.
+       */
+      static int bounds = -1;
+      if (bounds < 0) {
+        const char *env = getenv("NYTRIX_NO_GVN_ALLOCA_BOUNDS");
+        bounds = !(env && *env && strcmp(env, "0") != 0);
+      }
+      if (!bounds || write_size == 0 || write_size > INT64_MAX)
+        return false;
+      const nyr_inst_t *ra = &f->data[defs[read_root.id]];
+      const nyr_inst_t *wa = &f->data[defs[write_root.id]];
+      return ra->op == NYIR_ALLOCA && wa->op == NYIR_ALLOCA && ra->imm > 0 &&
+             wa->imm > 0 && read_root.offset >= 0 &&
+             read_root.offset <= ra->imm - (int64_t)sizeof(int64_t) &&
+             write_root.offset >= 0 &&
+             write_root.offset <= wa->imm - (int64_t)write_size;
+    }
     break;
   default:
     return false;
@@ -1036,8 +1061,17 @@ static bool gvn_same_integer_operands(const nyr_func_t *f, const int *defs,
                                       const unsigned char *unique,
                                       const nyr_inst_t *a,
                                       const nyr_inst_t *b) {
-  if (a->op != b->op ||
-      (a->op != NYIR_MUL_I64 && a->op != NYIR_ADD_I64 && a->op != NYIR_SUB_I64))
+  static int bitops = -1;
+  if (bitops < 0) {
+    const char *env = getenv("NYTRIX_NO_GVN_LOOP_BITOPS");
+    bitops = !(env && *env && strcmp(env, "0") != 0);
+  }
+  bool shift = a->op == NYIR_SHL_I64 || a->op == NYIR_SAR_I64;
+  bool logic = a->op == NYIR_AND_I64 || a->op == NYIR_OR_I64 ||
+               a->op == NYIR_XOR_I64;
+  if (a->op != b->op || a->flags != b->flags ||
+      (a->op != NYIR_MUL_I64 && a->op != NYIR_ADD_I64 &&
+       a->op != NYIR_SUB_I64 && !(bitops && (shift || logic))))
     return false;
   int a0 = gvn_unique_copy_root(f, defs, unique, a->a);
   int a1 = gvn_unique_copy_root(f, defs, unique, a->b);
@@ -1045,7 +1079,7 @@ static bool gvn_same_integer_operands(const nyr_func_t *f, const int *defs,
   int b1 = gvn_unique_copy_root(f, defs, unique, b->b);
   return a0 >= 0 && a1 >= 0 && b0 >= 0 && b1 >= 0 &&
          ((a0 == b0 && a1 == b1) ||
-          (a->op != NYIR_SUB_I64 && a0 == b1 && a1 == b0));
+          (a->op != NYIR_SUB_I64 && !shift && a0 == b1 && a1 == b0));
 }
 
 static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
@@ -1203,16 +1237,44 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
                      val_def)) {
       if (trace)
         loads_handled_by_pre++;
+      /*
+       * A load PRE replaced with a COPY must forward its identity like any
+       * other copy; otherwise the redundant load's users (the `(char)` shift
+       * pair of a repeated `s[i]`) never match the original's.
+       */
+      if (f->data[i].op == NYIR_COPY && f->data[i].a >= 0 &&
+          f->data[i].a < f->next_value && f->data[i].dst >= 0 &&
+          f->data[i].dst < f->next_value) {
+        copy_of[f->data[i].dst] =
+            gvn_canonical_value(f->data[i].a, copy_of, (size_t)f->next_value,
+                                cfg, val_def, f->len, i);
+        if (vn_of_val[f->data[i].a] >= 0)
+          vn_of_val[f->data[i].dst] = vn_of_val[f->data[i].a];
+      }
       continue;
     }
 
     if (trace)
       candidates++;
     size_t block = cfg->inst_block[i];
+    /*
+     * Shifts and bitwise operations are as pure as ADD/SUB/MUL; leaving
+     * them out kept every `(char)` sign extension (shl/sar) duplicated in
+     * loop bodies. NYTRIX_NO_GVN_LOOP_BITOPS=1 restores the old list.
+     */
+    static int loop_bitops = -1;
+    if (loop_bitops < 0) {
+      const char *env = getenv("NYTRIX_NO_GVN_LOOP_BITOPS");
+      loop_bitops = !(env && *env && strcmp(env, "0") != 0);
+    }
+    bool loop_ok_op = in->op == NYIR_LOAD_I64 || in->op == NYIR_MUL_I64 ||
+                      in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64 ||
+                      (loop_bitops &&
+                       (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64 ||
+                        in->op == NYIR_AND_I64 || in->op == NYIR_OR_I64 ||
+                        in->op == NYIR_XOR_I64));
     if (loop_analysis_failed || !loop_blocks ||
-        (block < cfg->block_count && loop_blocks[block] &&
-         in->op != NYIR_LOAD_I64 && in->op != NYIR_MUL_I64 &&
-         in->op != NYIR_ADD_I64 && in->op != NYIR_SUB_I64)) {
+        (block < cfg->block_count && loop_blocks[block] && !loop_ok_op)) {
       if (trace)
         excluded_loop++;
       continue;

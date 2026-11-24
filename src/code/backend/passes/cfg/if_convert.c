@@ -10,6 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Set by the pipeline around its final if-conversion, after the loop and
+ * vectorizer passes: splitting a shared join before them hides shapes the
+ * vectorizer handles itself (cd's nested conditional count).
+ */
+_Thread_local bool nyr_ifconv_late = false;
+
 typedef struct {
   size_t insts[8];
   size_t count;
@@ -471,6 +478,48 @@ static bool ifc_arm_defines(const nyr_func_t *f, const ifc_arm_t *arm,
   return false;
 }
 
+/*
+ * A converted arm keeps its label while its body and branch become NOPs, so
+ * the dead block falls through into whatever follows it. When that is a
+ * join block (a split join sits right after its arms) the dead edge counts
+ * as a predecessor and blocks threading. Drop the label once nothing names
+ * it: the NOP run then follows an unconditional terminator and has no edge.
+ */
+static void ifc_erase_dead_arm_label(nyr_func_t *f, int64_t label) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_IFCONV_SPLIT_JOIN");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || label < 0)
+    return;
+  size_t at = SIZE_MAX;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm == label)
+      return;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].predecessor_label == label)
+        return;
+    if (in->op == NYIR_LABEL && in->imm == label)
+      at = i;
+  }
+  if (at == SIZE_MAX || at == 0)
+    return;
+  /* The block before the label must end in an unconditional terminator. */
+  size_t prev = at;
+  while (prev > 0 && f->data[prev - 1].op == NYIR_NOP)
+    --prev;
+  if (prev == 0 || (f->data[prev - 1].op != NYIR_BR &&
+                    f->data[prev - 1].op != NYIR_RET))
+    return;
+  /* Only NOPs may remain in the dead block. */
+  for (size_t i = at + 1; i < f->len && f->data[i].op != NYIR_LABEL; ++i)
+    if (f->data[i].op != NYIR_NOP)
+      return;
+  (void)nyr_erase_instruction(f, at);
+}
+
 static bool ifc_rewrite(nyr_func_t *f, size_t branch, size_t trailing_br,
                         const ifc_arm_t *false_arm, const ifc_arm_t *true_arm,
                         const ifc_phi_pair_t *phis, size_t phi_count,
@@ -614,6 +663,8 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch, size_t trailing_br,
                                              : phis[i].phi_index;
     (void)nyr_erase_instruction(f, pidx);
   }
+  ifc_erase_dead_arm_label(f, false_arm->label);
+  ifc_erase_dead_arm_label(f, true_arm->label);
   nyr_refresh_metadata(f);
   return true;
 }
@@ -1350,9 +1401,495 @@ static bool ifc_sets_loop_exit_flag(const nyr_func_t *f, const nyr_cfg_t *cfg,
                                      phi_count, 0);
 }
 
+/*
+ * An `if (a) x; else if (b) y;` chain whose inner join was threaded into the
+ * outer join leaves one PHI with three incoming edges, two of them the arms
+ * of the inner diamond (fhourstones `evaluate`: score += 3 / -= 3 / keep).
+ * The diamond matcher needs a two-predecessor join, so give the inner arms
+ * their own join block (a PHI of the two arm values and a branch to the old
+ * join). The inner diamond then converts to a SELECT, cfg_simplify folds the
+ * block away, and the outer diamond becomes convertible on the next run.
+ * Returns 1 after one split, 0 when none applies, -1 on allocation failure.
+ * NYTRIX_NO_IFCONV_SPLIT_JOIN=1 disables it.
+ */
+static bool ifc_split_arm_ok(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                             size_t arm, size_t join, size_t *header_out,
+                             size_t *br_out) {
+  if (cfg->succ_offsets[arm + 1] - cfg->succ_offsets[arm] != 1 ||
+      cfg->succ_blocks[cfg->succ_offsets[arm]] != join ||
+      cfg->pred_offsets[arm + 1] - cfg->pred_offsets[arm] != 1 ||
+      cfg->block_label[arm] < 0 || !cfg->reachable[arm])
+    return false;
+  size_t header = cfg->pred_blocks[cfg->pred_offsets[arm]];
+  /*
+   * `br.if T; br F` puts the trailing BR in its own label-less block; the
+   * real header is the block that falls into it.
+   */
+  if (header != arm && cfg->block_label[header] < 0 &&
+      cfg->succ_offsets[header + 1] - cfg->succ_offsets[header] == 1 &&
+      cfg->pred_offsets[header + 1] - cfg->pred_offsets[header] == 1) {
+    bool only_br = true;
+    for (size_t i = cfg->block_start[header];
+         i < cfg->block_end[header] && only_br; ++i)
+      only_br = f->data[i].op == NYIR_NOP || f->data[i].op == NYIR_BR;
+    size_t up = cfg->pred_blocks[cfg->pred_offsets[header]];
+    size_t uend = cfg->block_end[up];
+    while (uend > cfg->block_start[up] && f->data[uend - 1].op == NYIR_NOP)
+      --uend;
+    if (only_br && up != header && uend > cfg->block_start[up] &&
+        f->data[uend - 1].op == NYIR_BR_IF &&
+        cfg->block_end[up] == cfg->block_start[header])
+      header = up;
+  }
+  if (header == arm || header == join ||
+      cfg->succ_offsets[header + 1] - cfg->succ_offsets[header] != 2)
+    return false;
+  size_t start = cfg->block_start[arm], end = cfg->block_end[arm];
+  while (end > start && f->data[end - 1].op == NYIR_NOP)
+    --end;
+  if (end <= start || f->data[end - 1].op != NYIR_BR ||
+      f->data[end - 1].imm != cfg->block_label[join])
+    return false;
+  size_t body = 0;
+  for (size_t i = start; i + 1 < end; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_LABEL || in->op == NYIR_NOP)
+      continue;
+    if (!ifc_safe_arm_op(in) || ++body > 8)
+      return false;
+  }
+  *header_out = header;
+  *br_out = end - 1;
+  return true;
+}
+
+static bool ifc_empty_bridge_block(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                   size_t b, size_t *br_out) {
+  if (cfg->block_label[b] < 0 ||
+      cfg->succ_offsets[b + 1] - cfg->succ_offsets[b] != 1)
+    return false;
+  size_t br = SIZE_MAX;
+  for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+    nyr_op_t op = f->data[i].op;
+    if (op == NYIR_LABEL || op == NYIR_NOP)
+      continue;
+    if (op != NYIR_BR || br != SIZE_MAX)
+      return false;
+    br = i;
+  }
+  if (br == SIZE_MAX)
+    return false;
+  *br_out = br;
+  return true;
+}
+
+/*
+ * `if (a && b < m) { m = b; ... }` leaves the inner test's false edge in an
+ * empty bridge shared with the outer test's false edge, so the inner diamond
+ * has no exclusive arm (dijkstra's argmin). Give the inner header X its own
+ * bridge to the join when X's other successor is an exclusive arm T that
+ * branches to the same join; the split below then isolates {T, bridge} and
+ * the inner diamond converts to a SELECT. Returns 1/0/-1 like the split.
+ */
+static int ifc_unshare_bridge(nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_IFCONV_SPLIT_JOIN");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !nyr_ifconv_late)
+    return 0;
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg)) {
+    nyr_cfg_free(&cfg);
+    return 0;
+  }
+  int result = 0;
+  for (size_t e = 0; e < cfg.block_count && result == 0; ++e) {
+    size_t ebr = 0;
+    if (!cfg.reachable[e] || !ifc_empty_bridge_block(f, &cfg, e, &ebr) ||
+        cfg.pred_offsets[e + 1] - cfg.pred_offsets[e] < 2)
+      continue;
+    size_t join = cfg.succ_blocks[cfg.succ_offsets[e]];
+    if (join == e || cfg.block_label[join] < 0)
+      continue;
+    for (size_t pi = cfg.pred_offsets[e];
+         pi < cfg.pred_offsets[e + 1] && result == 0; ++pi) {
+      size_t x = cfg.pred_blocks[pi];
+      if (x == e || cfg.succ_offsets[x + 1] - cfg.succ_offsets[x] != 2)
+        continue;
+      size_t t = cfg.succ_blocks[cfg.succ_offsets[x]] == e
+                     ? cfg.succ_blocks[cfg.succ_offsets[x] + 1]
+                     : cfg.succ_blocks[cfg.succ_offsets[x]];
+      size_t hp = 0, tbr = 0;
+      if (t == e || !ifc_split_arm_ok(f, &cfg, t, join, &hp, &tbr) || hp != x)
+        continue;
+      /* X ends in BR_IF (to T or E) and then falls through or branches. */
+      size_t xend = cfg.block_end[x];
+      while (xend > cfg.block_start[x] && f->data[xend - 1].op == NYIR_NOP)
+        --xend;
+      if (xend == cfg.block_start[x])
+        continue;
+      nyr_inst_t *last = &f->data[xend - 1];
+      int64_t el = cfg.block_label[e];
+      bool fallthrough = last->op == NYIR_BR_IF && last->imm != el &&
+                         xend == cfg.block_end[x] && cfg.block_end[x] ==
+                         cfg.block_start[e];
+      bool explicit_br = (last->op == NYIR_BR && last->imm == el) ||
+                         (last->op == NYIR_BR_IF && last->imm == el);
+      if (!fallthrough && !explicit_br)
+        continue;
+      /* The join PHIs must name E exactly once. */
+      size_t first = cfg.block_start[join];
+      if (f->data[first].op == NYIR_LABEL)
+        ++first;
+      bool ok = true;
+      for (size_t i = first; i < cfg.block_end[join] && ok; ++i) {
+        const nyr_inst_t *phi = &f->data[i];
+        if (phi->op == NYIR_NOP)
+          continue;
+        if (phi->op != NYIR_PHI)
+          break;
+        size_t seen = 0;
+        for (size_t k = 0; k < phi->phi_incoming_len; ++k)
+          seen += phi->phi_incoming[k].predecessor_label == el;
+        ok = seen == 1;
+      }
+      if (!ok)
+        continue;
+      int64_t fresh = nyr_fresh_label(f);
+      if (fresh < 0)
+        continue;
+      /* Grow the join PHIs first (allocation can fail). */
+      for (size_t i = first; i < cfg.block_end[join] && ok; ++i) {
+        nyr_inst_t *phi = &f->data[i];
+        if (phi->op == NYIR_NOP)
+          continue;
+        if (phi->op != NYIR_PHI)
+          break;
+        nyr_phi_incoming_t *grown =
+            realloc(phi->phi_incoming,
+                    (phi->phi_incoming_len + 1) * sizeof(*grown));
+        if (!grown) {
+          ok = false;
+          break;
+        }
+        phi->phi_incoming = grown;
+        int v = -1;
+        for (size_t k = 0; k < phi->phi_incoming_len; ++k)
+          if (grown[k].predecessor_label == el)
+            v = grown[k].value;
+        grown[phi->phi_incoming_len++] = (nyr_phi_incoming_t){fresh, v};
+      }
+      if (!ok || !nir_ensure_inst_space(f, 3)) {
+        result = -1;
+        break;
+      }
+      nyr_inst_t label = {.op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1,
+                          .c = -1, .d = -1, .e = -1, .f = -1, .imm = fresh};
+      nyr_inst_t to_join = label;
+      to_join.op = NYIR_BR;
+      to_join.imm = cfg.block_label[join];
+      size_t at;
+      size_t n = 0;
+      nyr_inst_t seq[3];
+      if (fallthrough) {
+        /* X: ...; br.if T  ->  ...; br.if T; Lnew: br J (X falls into Lnew;
+         * an explicit `br Lnew` would form its own block after the BR_IF). */
+        at = xend;
+        seq[n++] = label;
+        seq[n++] = to_join;
+      } else {
+        last->imm = fresh;
+        at = ebr + 1; /* after E's unconditional branch */
+        seq[n++] = label;
+        seq[n++] = to_join;
+      }
+      memmove(&f->data[at + n], &f->data[at],
+              (f->len - at) * sizeof(nyr_inst_t));
+      memcpy(&f->data[at], seq, n * sizeof(nyr_inst_t));
+      f->len += n;
+      result = 1;
+    }
+  }
+  nyr_cfg_free(&cfg);
+  return result;
+}
+
+static int ifc_split_shared_join(nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_IFCONV_SPLIT_JOIN");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !nyr_ifconv_late)
+    return 0;
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg)) {
+    nyr_cfg_free(&cfg);
+    return 0;
+  }
+  int result = 0;
+  for (size_t join = 0; join < cfg.block_count && result == 0; ++join) {
+    size_t np = cfg.pred_offsets[join + 1] - cfg.pred_offsets[join];
+    if (np < 3 || cfg.block_label[join] < 0 || !cfg.reachable[join])
+      continue;
+    size_t first = cfg.block_start[join];
+    if (first < cfg.block_end[join] && f->data[first].op == NYIR_LABEL)
+      ++first;
+    size_t phi_end = first, phi_count = 0;
+    while (phi_end < cfg.block_end[join] &&
+           (f->data[phi_end].op == NYIR_PHI || f->data[phi_end].op == NYIR_NOP))
+      phi_count += f->data[phi_end++].op == NYIR_PHI;
+    if (phi_count == 0)
+      continue;
+    for (size_t pi = cfg.pred_offsets[join];
+         pi < cfg.pred_offsets[join + 1] && result == 0; ++pi) {
+      size_t p = cfg.pred_blocks[pi], hp = 0, brp = 0;
+      if (!ifc_split_arm_ok(f, &cfg, p, join, &hp, &brp))
+        continue;
+      for (size_t qi = pi + 1; qi < cfg.pred_offsets[join + 1]; ++qi) {
+        size_t q = cfg.pred_blocks[qi], hq = 0, brq = 0;
+        if (q == p || !ifc_split_arm_ok(f, &cfg, q, join, &hq, &brq) ||
+            hq != hp)
+          continue;
+        int64_t lp = cfg.block_label[p], lq = cfg.block_label[q];
+        /* Every join PHI must name both arms exactly once. */
+        bool phis_ok = true;
+        for (size_t i = first; i < phi_end && phis_ok; ++i) {
+          const nyr_inst_t *phi = &f->data[i];
+          if (phi->op != NYIR_PHI)
+            continue;
+          size_t seen_p = 0, seen_q = 0;
+          for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+            seen_p += phi->phi_incoming[k].predecessor_label == lp;
+            seen_q += phi->phi_incoming[k].predecessor_label == lq;
+          }
+          phis_ok = seen_p == 1 && seen_q == 1 && phi->phi_incoming_len == np;
+        }
+        /* Only PHIs whose two arm values differ need a PHI in the new
+         * join; the old join takes an identical value directly. */
+        size_t differing = 0;
+        for (size_t i = first; i < phi_end && phis_ok; ++i) {
+          const nyr_inst_t *phi = &f->data[i];
+          if (phi->op != NYIR_PHI)
+            continue;
+          int vp = -1, vq = -1;
+          for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+            if (phi->phi_incoming[k].predecessor_label == lp)
+              vp = phi->phi_incoming[k].value;
+            if (phi->phi_incoming[k].predecessor_label == lq)
+              vq = phi->phi_incoming[k].value;
+          }
+          differing += vp != vq;
+        }
+        if (!phis_ok || differing == 0)
+          break;
+        int64_t fresh = nyr_fresh_label(f);
+        size_t nphi = differing;
+        if (fresh < 0 || !nir_ensure_inst_space(f, nphi + 2)) {
+          result = fresh < 0 ? 0 : -1;
+          break;
+        }
+        size_t at = (brp > brq ? brp : brq) + 1;
+        nyr_inst_t *block = calloc(nphi + 2, sizeof(*block));
+        if (!block) {
+          result = -1;
+          break;
+        }
+        block[0] = (nyr_inst_t){.op = NYIR_LABEL, .dst = -1, .a = -1,
+                                .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
+                                .imm = fresh};
+        bool alloc_ok = true;
+        size_t made_phis = 0;
+        for (size_t i = 0; i < phi_end - first && alloc_ok; ++i) {
+          nyr_inst_t *old = &f->data[first + i];
+          if (old->op != NYIR_PHI)
+            continue;
+          int same_p = -1, same_q = -1;
+          for (size_t k = 0; k < old->phi_incoming_len; ++k) {
+            if (old->phi_incoming[k].predecessor_label == lp)
+              same_p = old->phi_incoming[k].value;
+            if (old->phi_incoming[k].predecessor_label == lq)
+              same_q = old->phi_incoming[k].value;
+          }
+          if (same_p == same_q) {
+            size_t kept = 0;
+            for (size_t k = 0; k < old->phi_incoming_len; ++k) {
+              nyr_phi_incoming_t in = old->phi_incoming[k];
+              if (in.predecessor_label != lp && in.predecessor_label != lq)
+                old->phi_incoming[kept++] = in;
+            }
+            old->phi_incoming[kept++] = (nyr_phi_incoming_t){fresh, same_p};
+            old->phi_incoming_len = kept;
+            continue;
+          }
+          nyr_inst_t phi = *old;
+          phi.dst = f->next_value++;
+          nyr_clear_derived_facts(&phi);
+          phi.phi_incoming = calloc(2, sizeof(*phi.phi_incoming));
+          if (!phi.phi_incoming) {
+            alloc_ok = false;
+            break;
+          }
+          phi.phi_incoming_len = 2;
+          size_t kept = 0;
+          int vp = -1, vq = -1;
+          for (size_t k = 0; k < old->phi_incoming_len; ++k) {
+            nyr_phi_incoming_t in = old->phi_incoming[k];
+            if (in.predecessor_label == lp)
+              vp = in.value;
+            else if (in.predecessor_label == lq)
+              vq = in.value;
+            else
+              old->phi_incoming[kept++] = in;
+          }
+          phi.phi_incoming[0] = (nyr_phi_incoming_t){lp, vp};
+          phi.phi_incoming[1] = (nyr_phi_incoming_t){lq, vq};
+          old->phi_incoming[kept++] = (nyr_phi_incoming_t){fresh, phi.dst};
+          old->phi_incoming_len = kept;
+          nyr_clear_derived_facts(old);
+          block[1 + made_phis++] = phi;
+        }
+        if (!alloc_ok) {
+          for (size_t i = 0; i < nphi; ++i)
+            free(block[1 + i].phi_incoming);
+          free(block);
+          result = -1;
+          break;
+        }
+        block[nphi + 1] = (nyr_inst_t){.op = NYIR_BR, .dst = -1, .a = -1,
+                                       .b = -1, .c = -1, .d = -1, .e = -1,
+                                       .f = -1, .imm = cfg.block_label[join]};
+        f->data[brp].imm = fresh;
+        f->data[brq].imm = fresh;
+        memmove(&f->data[at + nphi + 2], &f->data[at],
+                (f->len - at) * sizeof(nyr_inst_t));
+        memcpy(&f->data[at], block, (nphi + 2) * sizeof(nyr_inst_t));
+        f->len += nphi + 2;
+        free(block);
+        result = 1;
+        break;
+      }
+    }
+  }
+  nyr_cfg_free(&cfg);
+  return result;
+}
+
+/*
+ * Bypass an empty forwarding block E (label, NOPs, `br X`) whose only
+ * predecessor P reaches it through an unconditional branch: P branches to X,
+ * X's PHIs name P instead of E, and E is erased. A converted split join is
+ * exactly such a block; removing it exposes the outer diamond.
+ */
+static int ifc_thread_forwarders(nyr_func_t *f) {
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg)) {
+    nyr_cfg_free(&cfg);
+    return 0;
+  }
+  int done = 0;
+  for (size_t e = 0; e < cfg.block_count; ++e) {
+    if (cfg.block_label[e] < 0 ||
+        cfg.pred_offsets[e + 1] - cfg.pred_offsets[e] != 1 ||
+        cfg.succ_offsets[e + 1] - cfg.succ_offsets[e] != 1)
+      continue;
+    size_t p = cfg.pred_blocks[cfg.pred_offsets[e]];
+    size_t x = cfg.succ_blocks[cfg.succ_offsets[e]];
+    if (p == e || x == e || cfg.block_label[p] < 0 || cfg.block_label[x] < 0)
+      continue;
+    size_t start = cfg.block_start[e], end = cfg.block_end[e];
+    if (f->data[start].op != NYIR_LABEL)
+      continue;
+    size_t br = SIZE_MAX;
+    bool empty = true;
+    for (size_t i = start + 1; i < end && empty; ++i) {
+      if (f->data[i].op == NYIR_NOP)
+        continue;
+      if (f->data[i].op == NYIR_BR && br == SIZE_MAX)
+        br = i;
+      else
+        empty = false;
+    }
+    if (!empty || br == SIZE_MAX)
+      continue;
+    size_t pend = cfg.block_end[p];
+    while (pend > cfg.block_start[p] && f->data[pend - 1].op == NYIR_NOP)
+      --pend;
+    if (pend == cfg.block_start[p] || f->data[pend - 1].op != NYIR_BR ||
+        f->data[pend - 1].imm != cfg.block_label[e])
+      continue;
+    /* P must not already reach X (a PHI would name P twice). */
+    bool p_to_x = false;
+    for (size_t k = cfg.pred_offsets[x]; k < cfg.pred_offsets[x + 1]; ++k)
+      p_to_x |= cfg.pred_blocks[k] == p;
+    if (p_to_x)
+      continue;
+    /* E's label must sit after an unconditional terminator. */
+    size_t prev = start;
+    while (prev > 0 && f->data[prev - 1].op == NYIR_NOP)
+      --prev;
+    if (prev == 0 || (f->data[prev - 1].op != NYIR_BR &&
+                      f->data[prev - 1].op != NYIR_RET))
+      continue;
+    f->data[pend - 1].imm = cfg.block_label[x];
+    for (size_t i = cfg.block_start[x]; i < cfg.block_end[x]; ++i) {
+      nyr_inst_t *phi = &f->data[i];
+      if (phi->op != NYIR_PHI)
+        continue;
+      for (size_t k = 0; k < phi->phi_incoming_len; ++k)
+        if (phi->phi_incoming[k].predecessor_label == cfg.block_label[e])
+          phi->phi_incoming[k].predecessor_label = cfg.block_label[p];
+    }
+    (void)nyr_erase_instruction(f, br);
+    (void)nyr_erase_instruction(f, start);
+    done = 1;
+    break;
+  }
+  nyr_cfg_free(&cfg);
+  return done;
+}
+
+static bool ifc_convert_all(nyr_func_t *f, bool *any_change);
+
 bool nyr_if_convert(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
+  /*
+   * A split join becomes an empty bridge once its inner diamond converts;
+   * the outer diamond is matched only after cfg_simplify removes it, and
+   * after unrolling no later if_convert run would see it. Bounded rounds.
+   */
+  for (int round = 0; round < 8; ++round) {
+    int splits = 0;
+    for (; splits < 256; ++splits) {
+      int r = ifc_unshare_bridge(f);
+      if (r == 0)
+        r = ifc_split_shared_join(f);
+      if (r < 0)
+        return false;
+      if (r == 0)
+        break;
+    }
+    bool changed = false;
+    if (!ifc_convert_all(f, &changed))
+      return false;
+    if (!splits || !changed)
+      return true;
+    /* Drop the dead arm blocks first: their stale branches keep labels
+     * and predecessor edges alive and block the threading below. */
+    if (!nyr_dce(f))
+      return false;
+    for (int t = 0; t < 512 && ifc_thread_forwarders(f); ++t) {
+    }
+    if (!nyr_cfg_simplify(f))
+      return false;
+  }
+  return true;
+}
+
+static bool ifc_convert_all(nyr_func_t *f, bool *any_change) {
   for (;;) {
     nyr_cfg_t cfg = {0};
     int *defs = nyr_build_defs(f);
@@ -1581,5 +2118,6 @@ bool nyr_if_convert(nyr_func_t *f) {
     nyr_type_map_free(&types);
     if (!changed)
       return true;
+    *any_change = true;
   }
 }

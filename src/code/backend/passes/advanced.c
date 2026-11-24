@@ -6593,6 +6593,653 @@ bool nyr_reassoc_add(nyr_func_t *f) {
   return true;
 }
 
+/*
+ * Late address reassociation. Unrolled cell walks and stencils address
+ * neighbours as B + ((x + C) << K): each element computes its own index,
+ * and the encoder can fold only one of the two adds into the memory operand
+ * (fhourstones `evaluate` spilled every `x + k` to a stack home and reloaded
+ * it). When at least two addresses share (B, x, K), rewrite each one as
+ * (B + (x << K)) + (C << K); GVN then shares the base and every access
+ * becomes [base + disp]. Wrapping i64 arithmetic makes the identity exact.
+ * Runs after the loop and vectorizer passes, which match the original shape.
+ * NYTRIX_NO_ADDR_REASSOC=1 disables it.
+ */
+typedef struct {
+  size_t at;
+  int base, x;
+  int64_t k, disp;
+  nyr_scalar_class_t shl_class;
+} nyr_addr_reassoc_cand_t;
+
+static bool nyr_addr_reassoc_key_eq(const nyr_addr_reassoc_cand_t *a,
+                                    const nyr_addr_reassoc_cand_t *b) {
+  return a->base == b->base && a->x == b->x && a->k == b->k;
+}
+
+bool nyr_addr_reassoc(nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_ADDR_REASSOC");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !f || f->next_value <= 0 || f->len < 4)
+    return true;
+  int *defs = nyr_build_defs(f);
+  if (!defs)
+    return false;
+  size_t cap = 0, n = 0;
+  nyr_addr_reassoc_cand_t *cands = NULL;
+  bool *is_direct = NULL;
+  bool ok = true;
+#define NYR_AR_CONST(v, out)                                                            \
+  ((v) >= 0 && (v) < f->next_value && defs[(v)] >= 0 &&                                 \
+   f->data[defs[(v)]].op == NYIR_CONST_I64 && (((out) = f->data[defs[(v)]].imm), true))
+  for (size_t i = 0; i < f->len && ok; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_ADD_I64 || in->dst < 0 || in->a < 0 || in->b < 0 ||
+        in->a >= f->next_value || in->b >= f->next_value)
+      continue;
+    for (int side = 0; side < 2; ++side) {
+      int base = side ? in->b : in->a;
+      int sv = side ? in->a : in->b;
+      int64_t tmp = 0;
+      if (NYR_AR_CONST(base, tmp) || defs[sv] < 0)
+        continue;
+      const nyr_inst_t *sh = &f->data[defs[sv]];
+      int64_t k = 0;
+      if (sh->op != NYIR_SHL_I64 || sh->a < 0 || sh->a >= f->next_value ||
+          !NYR_AR_CONST(sh->b, k) || k < 1 || k > 3)
+        continue;
+      int x = sh->a;
+      int64_t c = 0;
+      bool direct = true;
+      if (defs[x] >= 0) {
+        const nyr_inst_t *t = &f->data[defs[x]];
+        int64_t cv = 0;
+        if (t->op == NYIR_ADD_I64 && t->a >= 0 && t->b >= 0) {
+          if (NYR_AR_CONST(t->b, cv) && !NYR_AR_CONST(t->a, tmp)) {
+            x = t->a, c = cv, direct = false;
+          } else if (NYR_AR_CONST(t->a, cv) && !NYR_AR_CONST(t->b, tmp)) {
+            x = t->b, c = cv, direct = false;
+          }
+        } else if (t->op == NYIR_SUB_I64 && t->a >= 0 && t->b >= 0 &&
+                   NYR_AR_CONST(t->b, cv) && !NYR_AR_CONST(t->a, tmp) &&
+                   cv != INT64_MIN) {
+          x = t->a, c = -cv, direct = false;
+        }
+      }
+      if (!direct && (c > (INT64_C(1) << 40) || c < -(INT64_C(1) << 40)))
+        continue;
+      if (n == cap) {
+        size_t nc = cap ? cap * 2 : 32;
+        nyr_addr_reassoc_cand_t *nd = realloc(cands, nc * sizeof(*nd));
+        bool *ndir = realloc(is_direct, nc * sizeof(*ndir));
+        if (!nd || !ndir) {
+          cands = nd ? nd : cands;
+          is_direct = ndir ? ndir : is_direct;
+          ok = false;
+          break;
+        }
+        cands = nd, is_direct = ndir, cap = nc;
+      }
+      cands[n] = (nyr_addr_reassoc_cand_t){
+          .at = i, .base = base, .x = x, .k = k,
+          .disp = c * (INT64_C(1) << k), .shl_class = sh->scalar_class};
+      is_direct[n] = direct;
+      ++n;
+      break;
+    }
+  }
+#undef NYR_AR_CONST
+  /*
+   * One shared base per group, placed right after the later of the defs of
+   * B and x. Both dominate every member (each member reads them), so the
+   * base does too when B is in the entry block or in x's block (and vice
+   * versa). With several users the base is not re-split by ilp_reassociate.
+   */
+  typedef struct {
+    size_t at;
+    nyr_inst_t inst;
+  } nyr_ar_insert_t;
+  nyr_ar_insert_t *ins = NULL;
+  size_t ins_n = 0, ins_cap = 0;
+  int *group = ok && n ? malloc(n * sizeof(int)) : NULL;
+  nyr_cfg_t cfg = {0};
+  bool cfg_ok = false;
+  if (ok && n && !group)
+    ok = false;
+  if (ok && n) {
+    cfg_ok = nyr_cfg_build(f, &cfg);
+    if (!cfg_ok)
+      n = 0;
+  }
+  for (size_t i = 0; ok && i < n; ++i) {
+    group[i] = (int)i;
+    for (size_t j = 0; j < i; ++j)
+      if (nyr_addr_reassoc_key_eq(&cands[i], &cands[j])) {
+        group[i] = group[j];
+        break;
+      }
+  }
+  size_t entry_block = cfg_ok && f->len ? cfg.inst_block[0] : SIZE_MAX;
+  for (size_t g = 0; ok && g < n; ++g) {
+    if (group[g] != (int)g)
+      continue;
+    size_t members = 0, offset_members = 0;
+    for (size_t i = g; i < n; ++i)
+      if (group[i] == (int)g) {
+        ++members;
+        offset_members += !is_direct[i];
+      }
+    if (members < 2 || offset_members == 0)
+      continue;
+    const nyr_addr_reassoc_cand_t *c = &cands[g];
+    int dx = defs[c->x], db = defs[c->base];
+    if (dx < 0 || db < 0)
+      continue;
+    size_t bx = cfg.inst_block[dx], bb = cfg.inst_block[db];
+    size_t p;
+    if (bx == bb)
+      p = (size_t)(dx > db ? dx : db) + 1;
+    else if (bb == entry_block)
+      p = (size_t)dx + 1;
+    else if (bx == entry_block)
+      p = (size_t)db + 1;
+    else
+      continue;
+    while (p < f->len && f->data[p].op == NYIR_PHI &&
+           cfg.inst_block[p] == cfg.inst_block[p - 1])
+      ++p;
+    bool members_after = true;
+    for (size_t i = g; i < n; ++i)
+      if (group[i] == (int)g && cands[i].at < p)
+        members_after = false;
+    if (!members_after)
+      continue;
+    size_t need = ins_n + 3 + offset_members;
+    if (need > ins_cap) {
+      size_t nc = ins_cap ? ins_cap : 16;
+      while (nc < need)
+        nc *= 2;
+      nyr_ar_insert_t *nd = realloc(ins, nc * sizeof(*nd));
+      if (!nd) {
+        ok = false;
+        break;
+      }
+      ins = nd, ins_cap = nc;
+    }
+    const nyr_inst_t *first = &f->data[c->at];
+    /*
+     * The original shift amount only dominates the original shift, which
+     * may sit below p: materialize the amount at p as well.
+     */
+    int kv = f->next_value++, s2 = f->next_value++, b2 = f->next_value++;
+    nyr_inst_t kconst = {.op = NYIR_CONST_I64, .dst = kv, .a = -1, .b = -1,
+                         .c = -1, .d = -1, .e = -1, .f = -1, .imm = c->k,
+                         .debug = first->debug};
+    nyr_inst_t shl = {.op = NYIR_SHL_I64, .dst = s2, .a = c->x, .b = kv,
+                      .c = -1, .d = -1, .e = -1, .f = -1,
+                      .scalar_class = c->shl_class, .debug = first->debug};
+    nyr_inst_t add = shl;
+    add.op = NYIR_ADD_I64;
+    add.dst = b2;
+    add.a = c->base;
+    add.b = s2;
+    add.scalar_class = first->scalar_class;
+    add.alias_class = first->alias_class;
+    ins[ins_n++] = (nyr_ar_insert_t){p, kconst};
+    ins[ins_n++] = (nyr_ar_insert_t){p, shl};
+    ins[ins_n++] = (nyr_ar_insert_t){p, add};
+    for (size_t i = g; i < n; ++i) {
+      if (group[i] != (int)g)
+        continue;
+      nyr_inst_t *d = &f->data[cands[i].at];
+      if (is_direct[i] || cands[i].disp == 0) {
+        nir_make_copy(d, b2);
+        continue;
+      }
+      nyr_inst_t k = shl;
+      k.op = NYIR_CONST_I64;
+      k.dst = f->next_value++;
+      k.a = k.b = -1;
+      k.imm = cands[i].disp;
+      k.scalar_class = NYIR_SCALAR_UNKNOWN;
+      ins[ins_n++] = (nyr_ar_insert_t){p, k};
+      d->a = b2;
+      d->b = k.dst;
+      d->range = (nyr_range_t){0};
+    }
+  }
+  if (cfg_ok)
+    nyr_cfg_free(&cfg);
+  if (ok && ins_n && !nir_ensure_inst_space(f, ins_n))
+    ok = false;
+  /*
+   * Insert from the highest position down; entries for one position keep
+   * their order (shl, add, consts).
+   */
+  for (size_t r = ins_n; ok && r > 0;) {
+    size_t at = 0;
+    for (size_t j = 0; j < r; ++j)
+      if (ins[j].at > at)
+        at = ins[j].at;
+    size_t cnt = 0;
+    for (size_t j = 0; j < r; ++j)
+      cnt += ins[j].at == at;
+    memmove(&f->data[at + cnt], &f->data[at],
+            (f->len - at) * sizeof(nyr_inst_t));
+    f->len += cnt;
+    size_t w = 0, keep = 0;
+    for (size_t j = 0; j < r; ++j) {
+      if (ins[j].at == at)
+        f->data[at + w++] = ins[j].inst;
+      else
+        ins[keep++] = ins[j];
+    }
+    r = keep;
+  }
+  free(ins);
+  free(group);
+  free(cands);
+  free(is_direct);
+  free(defs);
+  return ok;
+}
+
+/*
+ * Remove a C heap allocation that nothing can observe: its pointer is only
+ * stored through (the stores are dead with it), compared against null, and
+ * passed to free. As in LLVM, an elided allocation is assumed to succeed, so
+ * null tests fold to "non-null". Loads, pointer arithmetic, escapes through
+ * calls or PHIs keep the allocation. C translation units only.
+ * NYTRIX_NO_DEAD_ALLOC=1 disables it.
+ */
+bool nyr_dead_alloc_elim(nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_DEAD_ALLOC");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !f || !f->untagged_values || f->next_value <= 0)
+    return true;
+  bool any = false;
+  for (size_t i = 0; i < f->len && !any; ++i)
+    any = f->data[i].op == NYIR_CALL && f->data[i].symbol &&
+          (f->data[i].flags & NYIR_INST_F_LIBC_ALLOC) &&
+          strcmp(f->data[i].symbol, "malloc") == 0;
+  if (!any)
+    return true;
+  int *defs = nyr_build_defs(f);
+  uint32_t *uses = calloc((size_t)f->next_value, sizeof(*uses));
+  if (!defs || !uses) {
+    free(defs);
+    free(uses);
+    return false;
+  }
+#define NYR_DA_COUNT(v)                                                        \
+  do {                                                                         \
+    if ((v) >= 0 && (v) < f->next_value)                                       \
+      uses[(v)]++;                                                             \
+  } while (0)
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    NYR_DA_COUNT(in->a);
+    NYR_DA_COUNT(in->b);
+    NYR_DA_COUNT(in->c);
+    NYR_DA_COUNT(in->d);
+    NYR_DA_COUNT(in->e);
+    NYR_DA_COUNT(in->f);
+    for (size_t k = 0; k < in->extra_args_len; ++k)
+      NYR_DA_COUNT(in->extra_args[k]);
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      NYR_DA_COUNT(in->phi_incoming[k].value);
+  }
+#undef NYR_DA_COUNT
+  for (size_t m = 0; m < f->len; ++m) {
+    const nyr_inst_t *alloc = &f->data[m];
+    if (alloc->op != NYIR_CALL || !alloc->symbol ||
+        !(alloc->flags & NYIR_INST_F_LIBC_ALLOC) ||
+        strcmp(alloc->symbol, "malloc") != 0 || alloc->dst < 0 ||
+        alloc->dst >= f->next_value)
+      continue;
+    int p = alloc->dst;
+    /* Classify every use; any unknown use keeps the allocation. */
+    uint32_t seen = 0;
+    bool ok = true;
+    for (size_t i = 0; i < f->len && ok; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      const int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+      uint32_t here = 0;
+      for (size_t k = 0; k < 6; ++k)
+        here += ops[k] == p;
+      for (size_t k = 0; k < in->extra_args_len; ++k)
+        here += in->extra_args[k] == p;
+      for (size_t k = 0; k < in->phi_incoming_len; ++k)
+        here += in->phi_incoming[k].value == p;
+      if (!here)
+        continue;
+      seen += here;
+      if (here != 1) {
+        ok = false;
+      } else if (in->op == NYIR_STORE_I64 && in->a == p) {
+        /* Storing into the block; the stored value must not be p. */
+        ok = !(in->flags & NYIR_INST_F_MEM_VOLATILE);
+      } else if (in->op == NYIR_CMP_I64 &&
+                 (in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE)) {
+        int other = in->a == p ? in->b : in->a;
+        ok = other >= 0 && other < f->next_value && defs[other] >= 0 &&
+             f->data[defs[other]].op == NYIR_CONST_I64 &&
+             f->data[defs[other]].imm == 0;
+      } else if (in->op == NYIR_CALL && in->symbol &&
+                 (in->flags & NYIR_INST_F_LIBC_ALLOC) &&
+                 strcmp(in->symbol, "free") == 0 && in->a == p &&
+                 !in->extra_args_len &&
+                 (in->dst < 0 ||
+                  (in->dst < f->next_value && uses[in->dst] == 0))) {
+      } else {
+        ok = false;
+      }
+    }
+    if (!ok || seen != uses[p])
+      continue;
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_STORE_I64 && in->a == p) {
+        (void)nyr_erase_instruction(f, i);
+      } else if (in->op == NYIR_CMP_I64 && (in->a == p || in->b == p)) {
+        int64_t v = in->cmp == NYIR_CMP_NE ? 1 : 0;
+        in->op = NYIR_CONST_I64;
+        in->a = in->b = -1;
+        in->imm = v;
+        nyr_clear_derived_facts(in);
+      } else if (in->op == NYIR_CALL && in->a == p && in->symbol &&
+                 strcmp(in->symbol, "free") == 0) {
+        (void)nyr_erase_instruction(f, i);
+      }
+    }
+    (void)nyr_erase_instruction(f, m);
+    uses[p] = 0;
+  }
+  free(defs);
+  free(uses);
+  nyr_refresh_metadata(f);
+  return true;
+}
+
+/*
+ * `if (c < L) goto X; if (c > H) goto X;` (a C `c >= L && c <= H` loop
+ * test, json-parser's digit scan) is one unsigned range check:
+ * c - L >u H - L. NYIR has no unsigned compare, so it is written in the
+ * sign-flipped form `((c - L) ^ MIN) >s ((H - L) ^ MIN)` that x86 lowering
+ * turns into `cmp; ja`. The second test's block keeps its fallthrough and
+ * loses its exit edge. Both exits must carry the same PHI values. The
+ * identity holds for the compared 64-bit words whatever they encode.
+ * NYTRIX_NO_RANGE_CHECK_FOLD=1 disables it.
+ */
+static bool nyr_rc_const(const nyr_func_t *f, const int *defs, int v,
+                         int64_t *out) {
+  if (v < 0 || v >= f->next_value || defs[v] < 0 ||
+      f->data[defs[v]].op != NYIR_CONST_I64)
+    return false;
+  *out = f->data[defs[v]].imm;
+  return true;
+}
+
+static int nyr_rc_strip(const nyr_func_t *f, const int *defs, int v) {
+  for (int depth = 0; depth < 16 && v >= 0 && v < f->next_value &&
+                      defs[v] >= 0 && f->data[defs[v]].op == NYIR_COPY;
+       ++depth)
+    v = f->data[defs[v]].a;
+  return v;
+}
+
+/* `t` tests "x < L" (lower=true) or "x > H" (lower=false) for constant. */
+static bool nyr_rc_bound(const nyr_func_t *f, const int *defs, int t,
+                         bool lower, int *x, int64_t *bound) {
+  if (t < 0 || t >= f->next_value || defs[t] < 0)
+    return false;
+  const nyr_inst_t *c = &f->data[defs[t]];
+  if (c->op != NYIR_CMP_I64 || c->a < 0 || c->b < 0 ||
+      nyr_effective_effects(c) != NYIR_EFFECT_NONE || c->flags)
+    return false;
+  int64_t k = 0;
+  if (nyr_rc_const(f, defs, c->b, &k) && !nyr_rc_const(f, defs, c->a, &k)) {
+    nyr_rc_const(f, defs, c->b, &k);
+    if (lower && c->cmp == NYIR_CMP_LT) { *x = c->a; *bound = k; return true; }
+    if (lower && c->cmp == NYIR_CMP_LE && k != INT64_MAX) {
+      *x = c->a; *bound = k + 1; return true;
+    }
+    if (!lower && c->cmp == NYIR_CMP_GT) { *x = c->a; *bound = k; return true; }
+    if (!lower && c->cmp == NYIR_CMP_GE && k != INT64_MIN) {
+      *x = c->a; *bound = k - 1; return true;
+    }
+  }
+  return false;
+}
+
+bool nyr_range_check_fold(nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_RANGE_CHECK_FOLD");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  if (disabled || !f || f->next_value <= 0)
+    return true;
+  bool any = false;
+  /*
+   * Single-branch form (Ny's `if c < L || c > H { break }` evaluates both
+   * compares and ORs them): rewrite the branch condition in place.
+   */
+  {
+    int *defs = nyr_build_defs(f);
+    if (!defs)
+      return false;
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *br = &f->data[i];
+      if (br->op != NYIR_BR_IF || br->a < 0 || br->a >= f->next_value ||
+          defs[br->a] < 0)
+        continue;
+      const nyr_inst_t *orv = &f->data[defs[br->a]];
+      if (orv->op != NYIR_OR_I64 || orv->a < 0 || orv->b < 0 || orv->flags)
+        continue;
+      int xl = -1, xh = -1;
+      int64_t lo = 0, hi = 0;
+      int lt = orv->a, gt = orv->b;
+      if (!nyr_rc_bound(f, defs, lt, true, &xl, &lo)) {
+        lt = orv->b, gt = orv->a;
+        if (!nyr_rc_bound(f, defs, lt, true, &xl, &lo))
+          continue;
+      }
+      if (!nyr_rc_bound(f, defs, gt, false, &xh, &hi) ||
+          nyr_rc_strip(f, defs, xl) != nyr_rc_strip(f, defs, xh) || hi < lo)
+        continue;
+      if (!nir_ensure_inst_space(f, 6)) {
+        free(defs);
+        return false;
+      }
+      br = &f->data[i];
+      int x = xl;
+      int lov = f->next_value++, dv = f->next_value++, mv = f->next_value++,
+          fv = f->next_value++, kv = f->next_value++, tv = f->next_value++;
+      nyr_inst_t base = {.dst = -1, .a = -1, .b = -1, .c = -1, .d = -1,
+                         .e = -1, .f = -1, .debug = br->debug,
+                         .scalar_class = NYIR_SCALAR_I64_RAW};
+      nyr_inst_t seq[6];
+      seq[0] = base, seq[0].op = NYIR_CONST_I64, seq[0].dst = lov,
+      seq[0].imm = lo;
+      seq[1] = base, seq[1].op = NYIR_SUB_I64, seq[1].dst = dv, seq[1].a = x,
+      seq[1].b = lov;
+      seq[2] = base, seq[2].op = NYIR_CONST_I64, seq[2].dst = mv,
+      seq[2].imm = INT64_MIN;
+      seq[3] = base, seq[3].op = NYIR_XOR_I64, seq[3].dst = fv, seq[3].a = dv,
+      seq[3].b = mv;
+      seq[4] = base, seq[4].op = NYIR_CONST_I64, seq[4].dst = kv,
+      seq[4].imm = (int64_t)((uint64_t)hi - (uint64_t)lo) ^ INT64_MIN;
+      seq[5] = base, seq[5].op = NYIR_CMP_I64, seq[5].dst = tv, seq[5].a = fv,
+      seq[5].b = kv, seq[5].cmp = NYIR_CMP_GT;
+      memmove(&f->data[i + 6], &f->data[i], (f->len - i) * sizeof(nyr_inst_t));
+      f->len += 6;
+      memcpy(&f->data[i], seq, sizeof(seq));
+      f->data[i + 6].a = tv;
+      i += 6;
+      any = true;
+      /* defs indices after i shifted; rebuild before the next match. */
+      free(defs);
+      defs = nyr_build_defs(f);
+      if (!defs)
+        return false;
+    }
+    free(defs);
+  }
+  for (int round = 0; round < 64; ++round) {
+    nyr_cfg_t cfg = {0};
+    int *defs = nyr_build_defs(f);
+    if (!defs || !nyr_cfg_build(f, &cfg)) {
+      free(defs);
+      nyr_cfg_free(&cfg);
+      return !defs ? false : true;
+    }
+    bool changed = false;
+    for (size_t a = 0; a < cfg.block_count && !changed; ++a) {
+      size_t aend = cfg.block_end[a];
+      while (aend > cfg.block_start[a] && f->data[aend - 1].op == NYIR_NOP)
+        --aend;
+      if (aend == cfg.block_start[a] || f->data[aend - 1].op != NYIR_BR_IF ||
+          cfg.succ_offsets[a + 1] - cfg.succ_offsets[a] != 2)
+        continue;
+      size_t abr = aend - 1;
+      int x = -1;
+      int64_t lo = 0, hi = 0;
+      if (!nyr_rc_bound(f, defs, f->data[abr].a, true, &x, &lo))
+        continue;
+      /* The fallthrough block B: label-less, single predecessor A. */
+      size_t b = a + 1;
+      if (b >= cfg.block_count || cfg.block_start[b] != cfg.block_end[a] ||
+          cfg.pred_offsets[b + 1] - cfg.pred_offsets[b] != 1 ||
+          cfg.succ_offsets[b + 1] - cfg.succ_offsets[b] != 2)
+        continue;
+      size_t bend = cfg.block_end[b];
+      while (bend > cfg.block_start[b] && f->data[bend - 1].op == NYIR_NOP)
+        --bend;
+      if (bend == cfg.block_start[b] || f->data[bend - 1].op != NYIR_BR_IF ||
+          f->data[bend - 1].imm != f->data[abr].imm)
+        continue;
+      size_t bbr = bend - 1;
+      int x2 = -1;
+      if (!nyr_rc_bound(f, defs, f->data[bbr].a, false, &x2, &hi) ||
+          nyr_rc_strip(f, defs, x2) != nyr_rc_strip(f, defs, x) || hi < lo)
+        continue;
+      /*
+       * B keeps running on its fallthrough path; on the `x > H` exit it no
+       * longer runs, so it must have no side effects (values it defines
+       * cannot reach X, which A also reaches, except through PHIs).
+       */
+      bool pure = true;
+      for (size_t i = cfg.block_start[b]; i < bbr && pure; ++i) {
+        const nyr_inst_t *in = &f->data[i];
+        pure = in->op == NYIR_NOP || in->op == NYIR_COPY ||
+               (in->op != NYIR_CALL && in->op != NYIR_PHI &&
+                in->op != NYIR_STORE_I64 && in->op != NYIR_STORE_LOCAL &&
+                in->op != NYIR_LOAD_I64 && in->op != NYIR_LOAD_LOCAL &&
+                in->op != NYIR_LABEL &&
+                nyr_effective_effects(in) == NYIR_EFFECT_NONE);
+      }
+      if (!pure)
+        continue;
+      /* Exit block X: PHIs must agree on the A and B edges. */
+      size_t xb = SIZE_MAX;
+      for (size_t k = 0; k < cfg.block_count; ++k)
+        if (cfg.block_label[k] == f->data[abr].imm)
+          xb = k;
+      if (xb == SIZE_MAX || xb == b)
+        continue;
+      int64_t la = cfg.block_label[a], lb = cfg.block_label[b];
+      bool phis_ok = true;
+      for (size_t i = cfg.block_start[xb]; i < cfg.block_end[xb]; ++i) {
+        const nyr_inst_t *phi = &f->data[i];
+        if (phi->op != NYIR_PHI)
+          continue;
+        /* Unlabeled preds cannot be named; PHIs make the edges ambiguous. */
+        if (la < 0 || lb < 0) {
+          phis_ok = false;
+          break;
+        }
+        int va = -2, vb = -2;
+        for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+          if (phi->phi_incoming[k].predecessor_label == la)
+            va = phi->phi_incoming[k].value;
+          if (phi->phi_incoming[k].predecessor_label == lb)
+            vb = phi->phi_incoming[k].value;
+        }
+        if (va != vb || va == -2) {
+          phis_ok = false;
+          break;
+        }
+      }
+      if (!phis_ok)
+        continue;
+      if (!nir_ensure_inst_space(f, 5))
+        break;
+      /* Plan: drop B's exit (and its now-dead compare), then rewrite A. */
+      nyr_inst_t *bc = &f->data[defs[f->data[bbr].a]];
+      (void)bc;
+      for (size_t i = cfg.block_start[xb]; i < cfg.block_end[xb]; ++i) {
+        nyr_inst_t *phi = &f->data[i];
+        if (phi->op != NYIR_PHI)
+          continue;
+        size_t kept = 0;
+        for (size_t k = 0; k < phi->phi_incoming_len; ++k)
+          if (phi->phi_incoming[k].predecessor_label != lb)
+            phi->phi_incoming[kept++] = phi->phi_incoming[k];
+        phi->phi_incoming_len = kept;
+      }
+      (void)nyr_erase_instruction(f, bbr);
+      nyr_inst_t old = f->data[abr];
+      int lov = f->next_value++, dv = f->next_value++, mv = f->next_value++,
+          fv = f->next_value++, kv = f->next_value++, tv = f->next_value++;
+      nyr_inst_t base = {.dst = -1, .a = -1, .b = -1, .c = -1, .d = -1,
+                         .e = -1, .f = -1, .debug = old.debug,
+                         .scalar_class = NYIR_SCALAR_I64_RAW};
+      nyr_inst_t seq[6];
+      seq[0] = base, seq[0].op = NYIR_CONST_I64, seq[0].dst = lov,
+      seq[0].imm = lo;
+      /* Reuse the exact `x < L` constant so GVN can share `x - L`. */
+      int lconst = -1;
+      {
+        const nyr_inst_t *ac = &f->data[defs[old.a]];
+        int64_t k = 0;
+        if (ac->cmp == NYIR_CMP_LT && nyr_rc_const(f, defs, ac->b, &k) &&
+            k == lo)
+          lconst = ac->b;
+      }
+      seq[1] = base, seq[1].op = NYIR_SUB_I64, seq[1].dst = dv, seq[1].a = x,
+      seq[1].b = lconst >= 0 ? lconst : lov;
+      seq[2] = base, seq[2].op = NYIR_CONST_I64, seq[2].dst = mv,
+      seq[2].imm = INT64_MIN;
+      seq[3] = base, seq[3].op = NYIR_XOR_I64, seq[3].dst = fv, seq[3].a = dv,
+      seq[3].b = mv;
+      seq[4] = base, seq[4].op = NYIR_CONST_I64, seq[4].dst = kv,
+      seq[4].imm = (int64_t)((uint64_t)hi - (uint64_t)lo) ^ INT64_MIN;
+      seq[5] = base, seq[5].op = NYIR_CMP_I64, seq[5].dst = tv, seq[5].a = fv,
+      seq[5].b = kv, seq[5].cmp = NYIR_CMP_GT;
+      memmove(&f->data[abr + 6], &f->data[abr],
+              (f->len - abr) * sizeof(nyr_inst_t));
+      f->len += 6;
+      memcpy(&f->data[abr], seq, sizeof(seq));
+      f->data[abr + 6].a = tv;
+      changed = true;
+    }
+    free(defs);
+    nyr_cfg_free(&cfg);
+    if (!changed)
+      break;
+    nyr_refresh_metadata(f);
+    any = true;
+  }
+  /* The new `x - L` usually repeats the digit value computed below. */
+  return !any || (nyr_copy_prop(f) && nyr_gvn_pre(f));
+}
+
 bool nyr_rewrite_fuel(nyr_func_t *f) {
   /*
    * Run the local rewrite group to a structural fixed point.  Instruction

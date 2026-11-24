@@ -1011,6 +1011,9 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_algebraic_combine, "algebraic_combine"},
     {nyr_double_neg, "double_neg"},
     {nyr_reassoc_add, "reassoc_add"},
+    {nyr_addr_reassoc, "addr_reassoc"},
+    {nyr_dead_alloc_elim, "dead_alloc_elim"},
+    {nyr_range_check_fold, "range_check_fold"},
     {nyr_memory_ssa_forward, "memory_ssa_forward"},
     {nyr_escape_sroa, "escape_sroa"},
     {nyr_tbuf_scalar_len, "tbuf_scalar_len"},
@@ -2442,12 +2445,17 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_if_convert,   nyr_select_chain_fold,
           nyr_peephole,     nyr_copy_prop,
           nyr_dce};
+      /* Join splitting may only reshape loops nothing will vectorize. */
+      nyr_ifconv_late = true;
       nyr_run_seq(f, cfg, 7, stats, dump, &ok);
+      nyr_ifconv_late = false;
     }
     if (ok && !nyr_pass_stopped) {
       static bool (*const gvn_cleanup[])(nyr_func_t *) = {
-          nyr_copy_prop, nyr_gvn_pre, nyr_dce, nyr_compact_if_sparse};
-      nyr_run_seq(f, gvn_cleanup, 4, stats, dump, &ok);
+          nyr_dead_alloc_elim, nyr_addr_reassoc, nyr_copy_prop,
+          nyr_gvn_pre,         nyr_range_check_fold, nyr_dce,
+          nyr_compact_if_sparse};
+      nyr_run_seq(f, gvn_cleanup, 7, stats, dump, &ok);
     }
     if (ok && !nyr_pass_stopped)
       nyr_run_pass(f, nyr_ipa_constprop, stats, dump, &ok);
