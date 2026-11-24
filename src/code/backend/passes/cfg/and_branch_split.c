@@ -97,6 +97,104 @@ static bool abs_sink_disabled(void) {
   return disabled != 0;
 }
 
+static bool abs_chain_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_AND_BRANCH_SPLIT_CHAIN");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+typedef struct {
+  int val;
+  const nyr_inst_t *cmp;
+  bool negated;
+} abs_chain_leaf_t;
+
+static nyr_inst_t abs_make_cmp(const nyr_inst_t *src, int dst, nyr_cmp_t cmp) {
+  nyr_inst_t in = *src;
+  in.op = NYIR_CMP_I64;
+  in.dst = dst;
+  in.cmp = cmp;
+  in.c = in.d = in.e = in.f = -1;
+  in.extra_args = NULL;
+  in.extra_args_len = 0;
+  in.arg_sizes = NULL;
+  in.phi_incoming = NULL;
+  in.phi_incoming_len = 0;
+  nyr_clear_derived_facts(&in);
+  in.effects = nyr_inst_effects(&in);
+  return in;
+}
+
+static nyr_inst_t abs_make_br_if(const nyr_inst_t *br_tmpl, int cond,
+                                 int64_t label) {
+  nyr_inst_t br = *br_tmpl;
+  br.op = NYIR_BR_IF;
+  br.dst = -1;
+  br.a = cond;
+  br.b = br.c = br.d = br.e = br.f = -1;
+  br.imm = label;
+  br.extra_args = NULL;
+  br.extra_args_len = 0;
+  br.arg_sizes = NULL;
+  br.phi_incoming = NULL;
+  br.phi_incoming_len = 0;
+  nyr_clear_derived_facts(&br);
+  br.effects = nyr_inst_effects(&br);
+  return br;
+}
+
+static bool abs_collect_and_chain(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                  const int *defs, size_t block, int v,
+                                  abs_chain_leaf_t leaves[4],
+                                  size_t *leaf_count, size_t and_pcs[4],
+                                  size_t *and_count, unsigned depth) {
+  if (depth > 4 || v < 0 || v >= f->next_value || defs[v] < 0)
+    return false;
+  size_t def_pc = (size_t)defs[v];
+  if (cfg->inst_block[def_pc] != block)
+    return false;
+  bool neg = false;
+  const nyr_inst_t *t = abs_test(f, defs, v, &neg);
+  if (t) {
+    if (*leaf_count >= 4)
+      return false;
+    for (size_t k = 0; k < *leaf_count; ++k)
+      if (leaves[k].val == v)
+        return false;
+    leaves[(*leaf_count)++] =
+        (abs_chain_leaf_t){.val = v, .cmp = t, .negated = neg};
+    return true;
+  }
+  const nyr_inst_t *in = &f->data[def_pc];
+  if (in->op != NYIR_AND_I64 || abs_uses(f, v) != 1 || *and_count >= 4)
+    return false;
+  and_pcs[(*and_count)++] = def_pc;
+  return abs_collect_and_chain(f, cfg, defs, block, in->a, leaves, leaf_count,
+                               and_pcs, and_count, depth + 1) &&
+         abs_collect_and_chain(f, cfg, defs, block, in->b, leaves, leaf_count,
+                               and_pcs, and_count, depth + 1);
+}
+
+static void abs_discard_leaf_if_dead(nyr_func_t *cand, const nyr_func_t *orig,
+                                     const nyr_cfg_t *cfg, const int *defs,
+                                     size_t block, const abs_chain_leaf_t *lf) {
+  if (abs_uses(orig, lf->val) != 1)
+    return;
+  int vp = defs[lf->val];
+  if (vp < 0 || cfg->inst_block[(size_t)vp] != block)
+    return;
+  nyr_inst_discard(&cand->data[vp]);
+  if (lf->negated && lf->cmp->dst >= 0 && lf->cmp->dst < orig->next_value &&
+      defs[lf->cmp->dst] >= 0 &&
+      cfg->inst_block[(size_t)defs[lf->cmp->dst]] == block &&
+      abs_uses(orig, lf->cmp->dst) == 1) {
+    nyr_inst_discard(&cand->data[defs[lf->cmp->dst]]);
+  }
+}
+
 static bool abs_block_has_phi(const nyr_func_t *f, const nyr_cfg_t *cfg,
                               int64_t label) {
   for (size_t b = 0; b < cfg->block_count; ++b) {
@@ -145,15 +243,9 @@ bool nyr_and_branch_split(nyr_func_t *f) {
         continue;
       size_t and_at = (size_t)defs[br->a];
       nyr_inst_t *andi = &f->data[and_at];
-      bool neg1 = false, neg2 = false;
-      const nyr_inst_t *t1 =
-          andi->op == NYIR_AND_I64 ? abs_test(f, defs, andi->a, &neg1) : NULL;
-      const nyr_inst_t *t2 =
-          andi->op == NYIR_AND_I64 ? abs_test(f, defs, andi->b, &neg2) : NULL;
-      if (andi->op != NYIR_AND_I64 || cfg.inst_block[and_at] != b || !t1 ||
-          !t2 || abs_uses(f, br->a) != 1)
+      if (andi->op != NYIR_AND_I64 || cfg.inst_block[and_at] != b ||
+          abs_uses(f, br->a) != 1)
         continue;
-      (void)neg2;
       /* Fall-through: a label-less block holding only `br exit`. */
       size_t nb = b + 1;
       size_t nb_end = nyr_block_last_non_nop(f, &cfg, nb);
@@ -166,6 +258,63 @@ bool nyr_and_branch_split(nyr_func_t *f) {
           abs_block_has_phi(f, &cfg, exit_label) ||
           abs_block_has_phi(f, &cfg, body_label))
         continue;
+      bool neg1 = false, neg2 = false;
+      const nyr_inst_t *t1 = abs_test(f, defs, andi->a, &neg1);
+      const nyr_inst_t *t2 = abs_test(f, defs, andi->b, &neg2);
+      if (!t1 || !t2) {
+        if (abs_chain_disabled())
+          continue;
+        abs_chain_leaf_t leaves[4] = {0};
+        size_t and_pcs[4] = {0};
+        size_t leaf_count = 0, and_count = 0;
+        if (!abs_collect_and_chain(f, &cfg, defs, b, br->a, leaves, &leaf_count,
+                                   and_pcs, &and_count, 0) ||
+            leaf_count < 3 || leaf_count > 4)
+          continue;
+        nyr_func_t cand = {0};
+        if (!nyr_ir_func_clone(f, &cand))
+          continue;
+        for (size_t k = 0; k < and_count; ++k)
+          nyr_inst_discard(&cand.data[and_pcs[k]]);
+        nyr_inst_t emitted[10];
+        size_t em_len = 0;
+        for (size_t m = 0; m + 1 < leaf_count; ++m) {
+          abs_discard_leaf_if_dead(&cand, f, &cfg, defs, b, &leaves[m]);
+          nyr_cmp_t inv_cmp = leaves[m].negated
+                                  ? leaves[m].cmp->cmp
+                                  : abs_invert(leaves[m].cmp->cmp);
+          int inv_v = cand.next_value++;
+          emitted[em_len++] = abs_make_cmp(leaves[m].cmp, inv_v, inv_cmp);
+          emitted[em_len++] = abs_make_br_if(br, inv_v, exit_label);
+        }
+        const abs_chain_leaf_t *last = &leaves[leaf_count - 1];
+        int last_cond = last->val;
+        if (abs_uses(f, last->val) == 1 &&
+            (!last->negated || abs_uses(f, last->cmp->dst) == 1)) {
+          abs_discard_leaf_if_dead(&cand, f, &cfg, defs, b, last);
+          nyr_cmp_t fwd_cmp =
+              last->negated ? abs_invert(last->cmp->cmp) : last->cmp->cmp;
+          last_cond = cand.next_value++;
+          emitted[em_len++] = abs_make_cmp(last->cmp, last_cond, fwd_cmp);
+        }
+        emitted[em_len++] = abs_make_br_if(br, last_cond, body_label);
+        if (em_len > 1 && nir_ensure_inst_space(&cand, em_len - 1)) {
+          nyr_inst_discard(&cand.data[br_at]);
+          memmove(&cand.data[br_at + em_len], &cand.data[br_at + 1],
+                  (cand.len - (br_at + 1)) * sizeof(*cand.data));
+          for (size_t k = 0; k < em_len; ++k)
+            cand.data[br_at + k] = emitted[k];
+          cand.len += em_len - 1;
+          char err[256] = {0};
+          if (nyr_ir_verify(&cand, err, sizeof(err))) {
+            nyr_func_replace(f, &cand);
+            done = true;
+            continue;
+          }
+        }
+        nyr_ir_func_free(&cand);
+        continue;
+      }
       const nyr_inst_t *c1 = t1;
       int c2 = andi->b;
       /* x = !c1, in place of the AND. */
