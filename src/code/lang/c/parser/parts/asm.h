@@ -450,6 +450,9 @@ static void asm_section_dispose(c_file_asm_section_t *section) {
   free(section->symbols);
 }
 
+/* An explicit "no section flags" request from file-scope assembly. */
+#define C_ASM_SECTION_NO_FLAGS UINT64_C(0x8000)
+
 static bool asm_standard_section_flags(const char *name, uint64_t *flags) {
   if (strcmp(name, ".text") == 0)
     *flags = 2u | 4u;

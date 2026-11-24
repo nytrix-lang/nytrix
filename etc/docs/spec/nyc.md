@@ -294,19 +294,14 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 
 - [ ] Make the unmodified-upstream gate clean. `nyc-kernel-boot-latest` clones
   the newest release tag (`v7.3`, no source patches), builds all 3002 C units
-  with NYC (no `CC` step without NYC, zero build errors) and boots
-  its `bzImage` to `/init` under QEMU TCG (`qemu64`): met. Two things remain.
-  The pristine tag identifies NYC as GCC 12, so Kbuild enables
-  `X86_KERNEL_IBT`, whose objtool pass reports 76 "unreachable instruction"
-  diagnostics, all at assembly entry symbols (`startup_64`,
-  `entry_SYSCALL_64`, the return thunks); the same untouched tree configured
-  with only `X86_KERNEL_IBT` off reports none and boots, and the host GCC
-  16.2 builds the same tree and config with IBT on and reports none either, so
-  the diagnostics come from NYC's objects under objtool's IBT pass (one is
-  inside NYC-compiled `___bpf_prog_run`); and the
-  same kernel hangs before `/init` under KVM with the host CPU model (it
-  idles in `default_idle` after `kprobes`, with the clock stopped), so only
-  software emulation is verified.
+  with NYC (no `CC` step without NYC, zero build errors) and boots its
+  `bzImage` to `/init` under QEMU TCG (`qemu64`): met. Two things remain. The
+  pristine tag identifies NYC as GCC 12, so Kbuild enables `X86_KERNEL_IBT`;
+  its objtool pass now reports one "unreachable instruction"
+  (`___bpf_prog_run+0x1146d`, the `endbr64` of a computed-goto label; the host
+  GCC reports none). And the kernel hangs before `/init` under KVM with the
+  host CPU model (it idles in `default_idle` after `kprobes` with the clock
+  stopped), so only software emulation is verified.
 - [ ] Establish assembly/direct-object/physical-machine parity over the native
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission without
@@ -3111,4 +3106,16 @@ run directory under `/tmp`.
   (every KVM variant tried, including with `USE_X86_SEG_SUPPORT` off, hangs the
   same way) and the patched tree gets as far as starting `/init`, which is then
   killed, so a KVM boot is a separate open defect.
+- IBT objtool reports (2026-11-24). Seventy-five of the 76 "unreachable
+  instruction" reports on the pristine kernel came from one object. Bisecting
+  with a wrapper that compiles chosen directories with NYC and the rest with
+  GCC (ten builds) narrowed them to `arch/x86/kernel/rethook.c`, whose
+  file-scope assembly says `.pushsection .discard.unwind_hints` without flags.
+  GNU as gives such a section no flags; NYC treated zero as "unset" and wrote
+  `"aw"`, so `vmlinux.o` held a second `.discard.unwind_hints` section that
+  objtool never read and the entry code lost its unwind hints. NYC now writes
+  `.section "...","",@progbits` for a section named without flags; the
+  `asm-section-noflags` check in `run.cmake` fails on the old output. The
+  untouched `v7.3` still builds and boots (`nyc-kernel-boot-latest`, 1042 s at
+  48 jobs).
 </details>

@@ -6960,6 +6960,14 @@ static bool collect_file_scope_asm(c_parser_t *p) {
         free(name);
         name = section_name;
         ok = name != NULL;
+      } else if (implicit_flags && flags == 0) {
+        /*
+         * GNU as gives an unknown section named without flags none at all
+         * (`.pushsection .discard.unwind_hints`). Say so explicitly: flags
+         * of zero would otherwise be written back as "aw", producing a
+         * second section the linker keeps apart and objtool never reads.
+         */
+        flags = C_ASM_SECTION_NO_FLAGS;
       }
       if (!ok || !asm_section_get(&sections, &section_count, &section_capacity,
                                   name, flags, entsize, &section_index)) {

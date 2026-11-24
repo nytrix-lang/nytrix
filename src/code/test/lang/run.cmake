@@ -4312,6 +4312,22 @@ foreach(route_case IN ITEMS shift-sext-fusion licm-dead-loop)
     endforeach()
   endforeach()
 endforeach()
+# File-scope asm naming a section without flags gets no flags, as with GNU as,
+# so the linker merges it with objects built by the host assembler.
+file(WRITE "${BINARY_DIR}/asm-section-noflags.c" [=[
+__asm__(".pushsection .discard.nyc_test\n.long 1\n.popsection\n");
+int f(void) { return 1; }
+]=])
+nyc_execute_output(
+  [=[nyc -S failed for the section-without-flags fixture\n${stdout}${stderr}]=]
+  "${BINARY_DIR}/asm-section-noflags.s"
+  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/asm-section-noflags.c"
+          -o "${BINARY_DIR}/asm-section-noflags.s")
+file(READ "${BINARY_DIR}/asm-section-noflags.s" asm_noflags_text)
+if(NOT asm_noflags_text MATCHES "\\.section \"\\.discard\\.nyc_test\",\"\",@progbits")
+  message(FATAL_ERROR
+    "a file-scope asm section without flags was written with flags:\n${asm_noflags_text}")
+endif()
 file(READ "${SOURCE_DIR}/c/complex-pointer-index.expected" complex_index_expected)
 foreach(complex_opt -O0 -O2)
   nyc_execute_ok(

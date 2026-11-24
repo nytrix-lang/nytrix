@@ -1263,6 +1263,9 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
       }
     }
     uint64_t flags = data->section_flags ? data->section_flags : 3;
+    const bool no_flags = flags == UINT64_C(0x8000);
+    if (no_flags)
+      flags = 0;
     if (flags & ~(UINT64_C(1) | UINT64_C(2) | UINT64_C(4) | UINT64_C(0x10) |
                   UINT64_C(0x20) | UINT64_C(0x400))) {
       snprintf(err, err_len,
