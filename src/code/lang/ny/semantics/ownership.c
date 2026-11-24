@@ -5245,11 +5245,11 @@ static bool stmt_ownership_rules_bind_borrow_capture(
   if (!bindings || !name || !*name)
     return true;
   for (size_t i = bindings->len; i > 0; --i) {
-    stmt_ownership_rules_borrow_binding_t *binding = &bindings->data[i - 1];
-    if (strcmp(binding->name, name) != 0)
+    stmt_ownership_rules_borrow_binding_t *bind = &bindings->data[i - 1];
+    if (strcmp(bind->name, name) != 0)
       continue;
-    binding->contains_borrow = contains_borrow || binding->source != NULL;
-    if (!binding->contains_borrow)
+    bind->contains_borrow = contains_borrow || bind->source != NULL;
+    if (!bind->contains_borrow)
       bindings->data[i - 1] = bindings->data[--bindings->len];
     return true;
   }
@@ -5942,12 +5942,12 @@ static bool stmt_ownership_rules_returns_borrow_mut_param(
       return false;
     const char *previous_alias = NULL;
     for (size_t i = 0; i + 1 < stmt->as.block.body.len; ++i) {
-      const stmt_t *binding = stmt->as.block.body.data[i];
-      if (!binding || binding->kind != NY_S_VAR || !binding->as.var.is_decl ||
-          binding->as.var.names.len != 1 || binding->as.var.exprs.len != 1 ||
-          !binding->as.var.names.data[0] || !binding->as.var.exprs.data[0])
+      const stmt_t *bind = stmt->as.block.body.data[i];
+      if (!bind || bind->kind != NY_S_VAR || !bind->as.var.is_decl ||
+          bind->as.var.names.len != 1 || bind->as.var.exprs.len != 1 ||
+          !bind->as.var.names.data[0] || !bind->as.var.exprs.data[0])
         return false;
-      const expr_t *value = binding->as.var.exprs.data[0];
+      const expr_t *value = bind->as.var.exprs.data[0];
       if (!previous_alias) {
         if (value->kind != NY_E_CALL || !value->as.call.callee ||
             value->as.call.callee->kind != NY_E_IDENT ||
@@ -5963,7 +5963,7 @@ static bool stmt_ownership_rules_returns_borrow_mut_param(
                  strcmp(value->as.ident.name, previous_alias) != 0) {
         return false;
       }
-      previous_alias = binding->as.var.names.data[0];
+      previous_alias = bind->as.var.names.data[0];
     }
     const stmt_t *ret = stmt->as.block.body.data[stmt->as.block.body.len - 1];
     return previous_alias && ret && ret->kind == NY_S_RETURN &&
@@ -6178,22 +6178,22 @@ stmt_ownership_rules_returns_shared_borrow_param(const stmt_t *function,
   const stmt_t *body = function->as.fn.body;
   if (body->as.block.body.len < 2 || body->as.block.body.len > 16)
     return false;
-  const stmt_t *binding = body->as.block.body.data[0];
+  const stmt_t *bind = body->as.block.body.data[0];
   const stmt_t *ret = body->as.block.body.data[body->as.block.body.len - 1];
-  if (!binding || binding->kind != NY_S_VAR || !binding->as.var.is_decl ||
-      binding->as.var.names.len != 1 || binding->as.var.exprs.len != 1 ||
-      !binding->as.var.names.data[0] || !binding->as.var.exprs.data[0] ||
+  if (!bind || bind->kind != NY_S_VAR || !bind->as.var.is_decl ||
+      bind->as.var.names.len != 1 || bind->as.var.exprs.len != 1 ||
+      !bind->as.var.names.data[0] || !bind->as.var.exprs.data[0] ||
       !ret || ret->kind != NY_S_RETURN || !ret->as.ret.value ||
       ret->as.ret.value->kind != NY_E_IDENT ||
       !ret->as.ret.value->as.ident.name ||
-      strcmp(ret->as.ret.value->as.ident.name, binding->as.var.names.data[0]) !=
+      strcmp(ret->as.ret.value->as.ident.name, bind->as.var.names.data[0]) !=
           0 ||
       !stmt_ownership_rules_shared_borrow_of_param(
-          binding->as.var.exprs.data[0], param_name))
+          bind->as.var.exprs.data[0], param_name))
     return false;
   for (size_t i = 1; i + 1 < body->as.block.body.len; ++i)
     if (!stmt_ownership_rules_shared_borrow_reassignments(
-            body->as.block.body.data[i], binding->as.var.names.data[0],
+            body->as.block.body.data[i], bind->as.var.names.data[0],
             param_name, 0))
       return false;
   return true;

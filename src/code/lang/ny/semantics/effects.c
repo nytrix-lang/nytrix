@@ -2723,35 +2723,6 @@ static bool ny_effect_hof_callback_summary(
   return found;
 }
 
-static bool ny_effect_append_member_path(const expr_t *expr, char *out,
-                                         size_t out_cap, size_t *out_len,
-                                         unsigned depth) {
-  if (!expr || !out || !out_len || depth >= 64)
-    return false;
-  if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
-    size_t len = strlen(expr->as.ident.name);
-    if (len >= out_cap - *out_len)
-      return false;
-    memcpy(out + *out_len, expr->as.ident.name, len);
-    *out_len += len;
-    out[*out_len] = '\0';
-    return true;
-  }
-  if (expr->kind != NY_E_MEMBER || !expr->as.member.target ||
-      !expr->as.member.name ||
-      !ny_effect_append_member_path(expr->as.member.target, out, out_cap,
-                                    out_len, depth + 1))
-    return false;
-  size_t name_len = strlen(expr->as.member.name);
-  if (*out_len + 1 >= out_cap || name_len >= out_cap - *out_len - 1)
-    return false;
-  out[(*out_len)++] = '.';
-  memcpy(out + *out_len, expr->as.member.name, name_len);
-  *out_len += name_len;
-  out[*out_len] = '\0';
-  return true;
-}
-
 static fun_sig *ny_effect_callback_sig(ny_effects_ctx *ctx,
                                        const expr_t *callback) {
   if (!ctx || !callback)

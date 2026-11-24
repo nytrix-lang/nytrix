@@ -2351,7 +2351,7 @@ static int eliminate_scaled_guard_iv_once(nyr_func_t *f, const nyr_cfg_t *cfg,
     if (bound_in->op != NYIR_CONST_I64)
       continue;
     int64_t bound_c = bound_in->imm;
-    __int128 diff = (__int128)bound_c - (__int128)prim->init;
+    ny_i128 diff = (ny_i128)bound_c - (ny_i128)prim->init;
     if (diff < 0 || diff > (INT64_MAX / 4))
       continue;
     for (size_t j = 0; j < lp->iv_count; ++j) {
@@ -2364,7 +2364,7 @@ static int eliminate_scaled_guard_iv_once(nyr_func_t *f, const nyr_cfg_t *cfg,
       int64_t scale = sc->step / prim->step;
       if (scale <= 1 || sc->init < INT64_MIN / 4 || sc->init > INT64_MAX / 4)
         continue;
-      __int128 new_bound = (__int128)sc->init + (__int128)scale * diff;
+      ny_i128 new_bound = (ny_i128)sc->init + (ny_i128)scale * diff;
       if (new_bound < INT64_MIN / 4 || new_bound > INT64_MAX / 4)
         continue;
       if (new_bound + sc->step > INT64_MAX / 2)

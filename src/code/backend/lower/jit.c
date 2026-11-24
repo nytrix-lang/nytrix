@@ -1323,7 +1323,7 @@ bool nyr_jit_run(const nyr_func_t *func, int64_t *result, char *err,
   }
 
   typedef int64_t (*nyr_entry_fn_t)(void);
-  int64_t value = ((nyr_entry_fn_t)image.entry)();
+  int64_t value = (__extension__ (nyr_entry_fn_t)image.entry)();
   nyr_jit_image_free(&image);
   *result = value;
   if (err && err_len)

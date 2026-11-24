@@ -2204,7 +2204,7 @@ static int repl_print_namespace_help(doc_list_t *docs, const char *query) {
 
 static void map_rt_syms_persistent(LLVMModuleRef mod,
                                    LLVMExecutionEngineRef ee) {
-#define RT_DEF(name, p, args, sig, doc) {name, (void *)p}, {#p, (void *)p},
+#define RT_DEF(name, p, args, sig, doc) {name, __extension__ (void *)p}, {#p, __extension__ (void *)p},
 #define RT_GV(name, p, t, doc) {name, (void *)&p},
 #ifdef _WIN32
 #ifdef rt_argc
@@ -2829,7 +2829,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         nyr_jit_image_free(&image);
         last_status = 1;
       } else {
-        int64_t result = ((int64_t (*)(void))image.entry)();
+        int64_t result = (__extension__ (int64_t (*)(void))image.entry)();
         rt_print_flush();
         if (!is_stmt && tty_in)
           printf("%lld\n", (long long)result);

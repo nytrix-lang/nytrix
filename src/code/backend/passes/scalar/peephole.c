@@ -235,7 +235,7 @@ static bool nir_simplify_boolean_compare(nyr_func_t *f, const int *defs,
       if (raw_bit >= 0 &&
           ((in->cmp == NYIR_CMP_NE && constant == c_base) ||
            (in->cmp == NYIR_CMP_EQ &&
-            (__int128)c_base + (__int128)c_nz == (__int128)constant))) {
+            (ny_i128)c_base + (ny_i128)c_nz == (ny_i128)constant))) {
         int repl = nir_boolean_value(f, defs, raw_bit, 0) ? raw_bit : and_v;
         nir_make_copy(in, repl);
         return true;

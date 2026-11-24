@@ -4601,7 +4601,7 @@ static void *rt_thread_trampoline(void *p) {
     res = ((int64_t (*)(int64_t))fn)(arg);
   } else {
     if (NY_NATIVE_IS(fn)) {
-      int64_t (*f)(int64_t) = (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
+      int64_t (*f)(int64_t) = __extension__ (int64_t (*)(int64_t))NY_NATIVE_DECODE(fn);
       res = rt_tag_v(f(rt_untag_v(arg)));
     } else if ((fn & 1) == 0) {
       res = ((int64_t (*)(int64_t))fn)(arg);

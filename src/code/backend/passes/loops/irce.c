@@ -538,8 +538,8 @@ static bool irce_affine_offset_range(const nyr_func_t *f, const int *defs,
                                depth + 1, &amin, &amax) &&
       irce_affine_offset_range(f, defs, iv_known, iv_min, iv_max, in->b,
                                depth + 1, &bmin, &bmax)) {
-    __int128 lo = (__int128)amin + bmin;
-    __int128 hi = (__int128)amax + bmax;
+    ny_i128 lo = (ny_i128)amin + bmin;
+    ny_i128 hi = (ny_i128)amax + bmax;
     if (hi <= INT64_MAX) {
       *min_out = (int64_t)lo;
       *max_out = (int64_t)hi;
@@ -567,8 +567,8 @@ static bool irce_affine_offset_range(const nyr_func_t *f, const int *defs,
     }
     if (c >= 0 && irce_affine_offset_range(f, defs, iv_known, iv_min, iv_max,
                                            variable, depth + 1, &amin, &amax)) {
-      __int128 lo = (__int128)amin * c;
-      __int128 hi = (__int128)amax * c;
+      ny_i128 lo = (ny_i128)amin * c;
+      ny_i128 hi = (ny_i128)amax * c;
       if (hi <= INT64_MAX) {
         *min_out = (int64_t)lo;
         *max_out = (int64_t)hi;
@@ -612,8 +612,8 @@ static void irce_elide_affine_const_checks(nyr_func_t *f,
                                       loop->header_block, in_loop,
                                       cfg->block_count))
       continue;
-    __int128 last =
-        (__int128)loop->init + (__int128)(loop->trip_count - 1) * loop->step;
+    ny_i128 last =
+        (ny_i128)loop->init + (ny_i128)(loop->trip_count - 1) * loop->step;
     if (last < 0 || last > INT64_MAX)
       continue;
     iv_known[loop->iv] = true;
@@ -736,7 +736,7 @@ bool nyr_irce(nyr_func_t *f) {
         !nyr_cfg_natural_loop_blocks(&cfg, l->latch_block, l->header_block,
                                       in_loop, cfg.block_count))
       continue;
-    __int128 last = (__int128)l->init + (__int128)(l->trip_count - 1) * l->step;
+    ny_i128 last = (ny_i128)l->init + (ny_i128)(l->trip_count - 1) * l->step;
     if (last < 0 || last > INT64_MAX)
       continue;
     for (size_t block = 0; block < cfg.block_count; ++block) {
@@ -749,7 +749,7 @@ bool nyr_irce(nyr_func_t *f) {
         uint64_t scale = 0;
         if (!scaled_iv(f, defs, check->b, l->iv, &scale))
           continue;
-        __int128 highest = (last + 1) * scale;
+        ny_i128 highest = (last + 1) * scale;
         int64_t bytes = 0;
         bool proved = false;
         if (check->c >= 0 && const_i64(f, defs, check->c, &bytes))

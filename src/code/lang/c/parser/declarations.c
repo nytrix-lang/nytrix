@@ -847,8 +847,7 @@ static void skip_initializer(ny_parser_t *p) {
         } else {
           skip_balanced(p, "[", "]");
         }
-        if (parse_accept(p, "="))
-          ;
+        (void)parse_accept(p, "=");
       }
     }
     skip_initializer(p);

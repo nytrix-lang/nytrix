@@ -426,7 +426,7 @@ static int ny_jit_safe_child(void *raw) {
 
 #ifndef _WIN32
 static int ny_native_cache_safe_child(void *raw) {
-  void (*entry)(void) = (void (*)(void))raw;
+  void (*entry)(void) = __extension__ (void (*)(void))raw;
   entry();
   rt_print_flush();
   ny_exit_if_threads_outlive_program(0);
@@ -614,7 +614,7 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     if (opt->do_timing)
       maybe_log_phase_time(true, "JIT Compile:", t_jit_compile);
     ny_native_jit_call_t call = {
-        .entry = (int64_t (*)(void))image.entry,
+        .entry = __extension__ (int64_t (*)(void))image.entry,
     };
     ny_tick_t t_jit_run = opt->do_timing ? ny_ticks_now() : 0;
     int rc =
@@ -2784,7 +2784,7 @@ int ny_pipeline_run(ny_options *opt) {
                              &cached_image, cache_err, sizeof(cache_err))) {
         ny_tick_t t_run = opt->do_timing ? ny_ticks_now() : 0;
         ny_native_jit_call_t call = {
-            .entry = (int64_t (*)(void))cached_image.entry,
+            .entry = __extension__ (int64_t (*)(void))cached_image.entry,
         };
         int rc =
             ny_safe_run_requested(&opt->safe_run)
@@ -4493,7 +4493,7 @@ skip_compilation:
                               (opt->sanitize && *opt->sanitize);
       if (jit_use_safe_run) {
         int rc = ny_safe_run_call(&opt->safe_run, ny_native_cache_safe_child,
-                                  (void *)native_cache_entry,
+                                  __extension__ (void *)native_cache_entry,
                                   opt->input_file ? opt->input_file
                                                   : "native JIT cache");
         if (rc != 0)

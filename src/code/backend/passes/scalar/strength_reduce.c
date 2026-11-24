@@ -902,10 +902,10 @@ bool nyr_strength_reduce(nyr_func_t *f) {
             uint64_t pow2s = UINT64_C(1) << s;
             uint64_t m = (pow2s + ud - 1ULL) / ud;
             uint64_t err = m * ud - pow2s;
-            if ((unsigned __int128)umax * (unsigned __int128)m <=
-                    (unsigned __int128)INT64_MAX &&
-                (unsigned __int128)err * (unsigned __int128)umax <
-                    (unsigned __int128)pow2s) {
+            if ((ny_u128)umax * (ny_u128)m <=
+                    (ny_u128)INT64_MAX &&
+                (ny_u128)err * (ny_u128)umax <
+                    (ny_u128)pow2s) {
               chosen_s = s;
               chosen_m = m;
               break;

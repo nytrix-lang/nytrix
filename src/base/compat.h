@@ -24,6 +24,13 @@
 #include <sys/time.h>
 #include <time.h>
 
+/* 128-bit integers are a GCC/Clang extension; declare them once so
+   -Wpedantic stays clean at every use. */
+#if defined(__SIZEOF_INT128__)
+__extension__ typedef __int128 ny_i128;
+__extension__ typedef unsigned __int128 ny_u128;
+#endif
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN 1

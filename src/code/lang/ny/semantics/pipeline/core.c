@@ -1581,7 +1581,7 @@ static const char *tp_literal_type(const literal_t *lit, token_t tok) {
   return "any";
 }
 
-static bool tp_eval_const_int_wide(const expr_t *e, __int128 *out,
+static bool tp_eval_const_int_wide(const expr_t *e, ny_i128 *out,
                                    unsigned depth) {
   if (!e || !out || depth > 32)
     return false;
@@ -1591,7 +1591,7 @@ static bool tp_eval_const_int_wide(const expr_t *e, __int128 *out,
     return true;
   }
   if (e->kind == NY_E_UNARY && e->as.unary.op && e->as.unary.right) {
-    __int128 value = 0;
+    ny_i128 value = 0;
     if (!tp_eval_const_int_wide(e->as.unary.right, &value, depth + 1))
       return false;
     if (strcmp(e->as.unary.op, "+") == 0) {
@@ -1606,7 +1606,7 @@ static bool tp_eval_const_int_wide(const expr_t *e, __int128 *out,
   }
   if (e->kind != NY_E_BINARY || !e->as.binary.op)
     return false;
-  __int128 left = 0, right = 0;
+  ny_i128 left = 0, right = 0;
   if (!tp_eval_const_int_wide(e->as.binary.left, &left, depth + 1) ||
       !tp_eval_const_int_wide(e->as.binary.right, &right, depth + 1))
     return false;
@@ -1621,10 +1621,10 @@ static bool tp_eval_const_int_wide(const expr_t *e, __int128 *out,
 }
 
 bool ny_tp_const_expr_promotes_bigint(const expr_t *e) {
-  __int128 value = 0;
+  ny_i128 value = 0;
   if (!tp_eval_const_int_wide(e, &value, 0))
     return false;
-  return value >= ((__int128)1 << 62) || value <= -((__int128)1 << 62);
+  return value >= ((ny_i128)1 << 62) || value <= -((ny_i128)1 << 62);
 }
 
 static const char *tp_enum_member_owner_name(ny_tp_ctx_t *ctx, expr_t *e) {

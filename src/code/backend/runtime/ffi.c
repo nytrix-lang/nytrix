@@ -35,23 +35,23 @@
                                           (intptr_t)(a2), (intptr_t)(a3),   \
                                           (intptr_t)(a4), (intptr_t)(a5))
 #else
-#define NY_NATIVE_RET0(fn) ((int64_t (*)(void))(fn))()
-#define NY_NATIVE_RET1(fn, a0) ((int64_t (*)(int64_t))(fn))((int64_t)(a0))
-#define NY_NATIVE_RET2(fn, a0, a1)                                    \
-  ((int64_t (*)(int64_t, int64_t))(fn))((int64_t)(a0), (int64_t)(a1))
-#define NY_NATIVE_RET3(fn, a0, a1, a2)                                         \
-  ((int64_t (*)(int64_t, int64_t, int64_t))(fn))((int64_t)(a0), (int64_t)(a1), \
+#define NY_NATIVE_RET0(fn) (__extension__ (int64_t (*)(void))(fn))()
+#define NY_NATIVE_RET1(fn, a0) (__extension__ (int64_t (*)(int64_t))(fn))((int64_t)(a0))
+#define NY_NATIVE_RET2(fn, a0, a1)                                                  \
+  (__extension__ (int64_t (*)(int64_t, int64_t))(fn))((int64_t)(a0), (int64_t)(a1))
+#define NY_NATIVE_RET3(fn, a0, a1, a2)                                                       \
+  (__extension__ (int64_t (*)(int64_t, int64_t, int64_t))(fn))((int64_t)(a0), (int64_t)(a1), \
                                                  (int64_t)(a2))
-#define NY_NATIVE_RET4(fn, a0, a1, a2, a3)                        \
-  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))(fn))(        \
+#define NY_NATIVE_RET4(fn, a0, a1, a2, a3)                                      \
+  (__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t))(fn))(        \
       (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3))
-#define NY_NATIVE_RET5(fn, a0, a1, a2, a3, a4)                      \
-  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))(fn))( \
-      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),   \
+#define NY_NATIVE_RET5(fn, a0, a1, a2, a3, a4)                                    \
+  (__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))(fn))( \
+      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),                 \
       (int64_t)(a4))
-#define NY_NATIVE_RET6(fn, a0, a1, a2, a3, a4, a5)                           \
-  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))(fn))( \
-      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),            \
+#define NY_NATIVE_RET6(fn, a0, a1, a2, a3, a4, a5)                                         \
+  (__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))(fn))( \
+      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),                          \
       (int64_t)(a4), (int64_t)(a5))
 #endif
 
@@ -1558,7 +1558,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    * address/8) instead of calling the callback.
    */
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn6)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn6)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(value), len, tag, 0, 0, 0));
   /*
    * Named user functions keep their declared typed ABI.  Sequence adapters
@@ -1632,7 +1632,7 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn6)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn6)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(left), left_len, left_tag, rt_any_to_i64(right),
         right_len, right_tag));
   if (dynamic_callable) {
@@ -1718,7 +1718,7 @@ int64_t rt_call_any3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn9)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn9)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2));
   if (dynamic_callable) {
@@ -1805,7 +1805,7 @@ int64_t rt_call_any4(int64_t f, int64_t a0, int64_t a1, int64_t a2,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn12)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn12)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3));
   if (dynamic_callable) {
@@ -2042,7 +2042,7 @@ int64_t rt_call_any5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn15)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn15)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4));
   if (dynamic_callable) {
@@ -2137,7 +2137,7 @@ int64_t rt_call_any6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn18)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn18)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5));
@@ -2240,7 +2240,7 @@ int64_t rt_call_any7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn21)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn21)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6));
@@ -2349,7 +2349,7 @@ int64_t rt_call_any8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn24)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn24)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -2466,7 +2466,7 @@ int64_t rt_call_any9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn27)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn27)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -2589,7 +2589,7 @@ int64_t rt_call_any10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn30)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn30)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -2717,7 +2717,7 @@ int64_t rt_call_any11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn33)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn33)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -2854,7 +2854,7 @@ int64_t rt_call_any12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn36)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn36)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -3000,7 +3000,7 @@ int64_t rt_call_any13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn39)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn39)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -3156,7 +3156,7 @@ int64_t rt_call_any14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn42)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn42)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -3321,7 +3321,7 @@ int64_t rt_call_any15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
-    return rt_any_callback_result(((rt_any_fn45)NY_NATIVE_DECODE(f))(
+    return rt_any_callback_result((__extension__ (rt_any_fn45)NY_NATIVE_DECODE(f))(
         rt_any_to_i64(a0), l0, t0, rt_any_to_i64(a1), l1, t1, rt_any_to_i64(a2),
         l2, t2, rt_any_to_i64(a3), l3, t3, rt_any_to_i64(a4), l4, t4,
         rt_any_to_i64(a5), l5, t5, rt_any_to_i64(a6), l6, t6, rt_any_to_i64(a7),
@@ -4016,7 +4016,7 @@ int64_t rt_call0_ptr(int64_t f) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void))NY_NATIVE_DECODE(f))();
+    void *res = (__extension__ (void *(*)(void))NY_NATIVE_DECODE(f))();
     return rt_ffi_callback_result(abi, (int64_t)(uintptr_t)res);
   }
   return 0;
@@ -4035,7 +4035,7 @@ int64_t rt_call0_i32(int64_t f) {
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    int32_t res = ((int32_t (*)(void))NY_NATIVE_DECODE(f))();
+    int32_t res = (__extension__ (int32_t (*)(void))NY_NATIVE_DECODE(f))();
     return rt_ffi_callback_result(abi, (int64_t)res);
   }
   return rt_call0(f);
@@ -4095,7 +4095,7 @@ int64_t rt_call1_ptr(int64_t f, int64_t a0) {
     return 0;
   if (NY_NATIVE_IS(f)) {
     uintptr_t arg = (uintptr_t)rt_ffi_callback_arg(abi, 0, a0);
-    void *res = ((void *(*)(void *))NY_NATIVE_DECODE(f))((void *)arg);
+    void *res = (__extension__ (void *(*)(void *))NY_NATIVE_DECODE(f))((void *)arg);
     return rt_ffi_callback_result(abi, (int64_t)(uintptr_t)res);
   }
   return 0;
@@ -4120,7 +4120,7 @@ int64_t rt_call1_i64(int64_t f, int64_t a0) {
     long long res = ((long long (*)(long long))NY_NATIVE_DECODE(f))(arg);
     return rt_ffi_callback_result(abi, (int64_t)res);
 #else
-    int64_t res_raw = ((int64_t (*)(int64_t))NY_NATIVE_DECODE(f))(
+    int64_t res_raw = (__extension__ (int64_t (*)(int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0));
     return rt_ffi_callback_result(abi, res_raw);
 #endif
@@ -4143,7 +4143,7 @@ int64_t rt_call1_u32(int64_t f, int64_t a0) {
     return 1;
   if (NY_NATIVE_IS(f)) {
     uint32_t arg = (uint32_t)rt_ffi_callback_arg(abi, 0, a0);
-    uint32_t res = ((uint32_t (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
+    uint32_t res = (__extension__ (uint32_t (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
     return rt_ffi_callback_result(abi, (int64_t)res);
   }
   return rt_call1(f, a0);
@@ -4192,7 +4192,7 @@ int64_t rt_call2_ptr(int64_t f, int64_t a0, int64_t a1) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void *, void *))NY_NATIVE_DECODE(f))(
+    void *res = (__extension__ (void *(*)(void *, void *))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1));
     return rt_ffi_callback_result(abi, (int64_t)(uintptr_t)res);
@@ -4214,7 +4214,7 @@ int64_t rt_call2_ptr_u32(int64_t f, int64_t a0, int64_t a1) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void *, uint32_t))NY_NATIVE_DECODE(f))(
+    void *res = (__extension__ (void *(*)(void *, uint32_t))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (uint32_t)rt_ffi_callback_arg(abi, 1, a1));
     return rt_ffi_callback_result(abi, (int64_t)(uintptr_t)res);
@@ -4269,7 +4269,7 @@ int64_t rt_call3_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void *, void *, void *))NY_NATIVE_DECODE(f))(
+    void *res = (__extension__ (void *(*)(void *, void *, void *))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2));
@@ -4293,7 +4293,7 @@ int64_t rt_call3_ptr_u64_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void *, uint64_t, void *))NY_NATIVE_DECODE(f))(
+    void *res = (__extension__ (void *(*)(void *, uint64_t, void *))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (uint64_t)rt_ffi_callback_arg(abi, 1, a1),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2));
@@ -4317,7 +4317,7 @@ int64_t rt_call3_ptr_u32_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void *, uint32_t, void *))NY_NATIVE_DECODE(f))(
+    void *res = (__extension__ (void *(*)(void *, uint32_t, void *))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (uint32_t)rt_ffi_callback_arg(abi, 1, a1),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2));
@@ -4341,7 +4341,7 @@ int64_t rt_call3_ptr_ptr_u32(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   if (NY_NATIVE_IS(f)) {
-    void *res = ((void *(*)(void *, void *, uint32_t))NY_NATIVE_DECODE(f))(
+    void *res = (__extension__ (void *(*)(void *, void *, uint32_t))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
         (uint32_t)rt_ffi_callback_arg(abi, 2, a2));
@@ -4409,7 +4409,7 @@ int64_t rt_call4_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2,
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   void *fn = NY_NATIVE_IS(f) ? NY_NATIVE_DECODE(f) : (void *)(uintptr_t)f;
-  void *res = ((void *(*)(void *, void *, void *, void *))fn)(
+  void *res = (__extension__ (void *(*)(void *, void *, void *, void *))fn)(
       (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
       (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
       (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2),
@@ -4433,7 +4433,7 @@ int64_t rt_call3_ptr_u64_ptr_i32(int64_t f, int64_t a0, int64_t a1,
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    int32_t res = ((int32_t (*)(void *, uint64_t, void *))NY_NATIVE_DECODE(f))(
+    int32_t res = (__extension__ (int32_t (*)(void *, uint64_t, void *))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (uint64_t)rt_ffi_callback_arg(abi, 1, a1),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2));
@@ -4464,7 +4464,7 @@ int64_t rt_call4_ptr_ptr_ptr_ptr_i32(int64_t f, int64_t a0, int64_t a1,
     return 1;
   if (NY_NATIVE_IS(f)) {
     int32_t res =
-        ((int32_t (*)(void *, void *, void *, void *))NY_NATIVE_DECODE(f))(
+        (__extension__ (int32_t (*)(void *, void *, void *, void *))NY_NATIVE_DECODE(f))(
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2),
@@ -4495,7 +4495,7 @@ int64_t rt_call4_ptr_u32_u64_ptr_i32(int64_t f, int64_t a0, int64_t a1,
     return 1;
   if (NY_NATIVE_IS(f)) {
     int32_t res =
-        ((int32_t (*)(void *, uint32_t, uint64_t, void *))NY_NATIVE_DECODE(f))(
+        (__extension__ (int32_t (*)(void *, uint32_t, uint64_t, void *))NY_NATIVE_DECODE(f))(
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
             (uint32_t)rt_ffi_callback_arg(abi, 1, a1),
             (uint64_t)rt_ffi_callback_arg(abi, 2, a2),
@@ -4525,7 +4525,7 @@ int64_t rt_call4_ptr_u64_ptr_ptr_i32(int64_t f, int64_t a0, int64_t a1,
     return 1;
   if (NY_NATIVE_IS(f)) {
     int32_t res =
-        ((int32_t (*)(void *, uint64_t, void *, void *))NY_NATIVE_DECODE(f))(
+        (__extension__ (int32_t (*)(void *, uint64_t, void *, void *))NY_NATIVE_DECODE(f))(
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
             (uint64_t)rt_ffi_callback_arg(abi, 1, a1),
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2),
@@ -4555,7 +4555,7 @@ int64_t rt_call4_ptr_ptr_ptr_u64_i32(int64_t f, int64_t a0, int64_t a1,
     return 1;
   if (NY_NATIVE_IS(f)) {
     int32_t res =
-        ((int32_t (*)(void *, void *, void *, uint64_t))NY_NATIVE_DECODE(f))(
+        (__extension__ (int32_t (*)(void *, void *, void *, uint64_t))NY_NATIVE_DECODE(f))(
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
             (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2),
@@ -4585,7 +4585,7 @@ int64_t rt_call5_ptr_ptr_ptr_u64_i32_i32(int64_t f, int64_t a0, int64_t a1,
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    int32_t res = ((int32_t (*)(void *, void *, void *, uint64_t,
+    int32_t res = (__extension__ (int32_t (*)(void *, void *, void *, uint64_t,
                                 int32_t))NY_NATIVE_DECODE(f))(
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
         (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
@@ -4656,7 +4656,7 @@ int64_t rt_call5_ptr(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if ((uintptr_t)(f) < 0x1000)
     return 0;
   void *fn = NY_NATIVE_IS(f) ? NY_NATIVE_DECODE(f) : (void *)(uintptr_t)f;
-  void *res = ((void *(*)(void *, void *, void *, void *, void *))fn)(
+  void *res = (__extension__ (void *(*)(void *, void *, void *, void *, void *))fn)(
       (void *)(uintptr_t)rt_ffi_callback_arg(abi, 0, a0),
       (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1),
       (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2),
@@ -4702,7 +4702,7 @@ int64_t rt_call7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    return rt_tag_v(((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
+    return rt_tag_v((__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
                                   int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
         rt_ffi_native_word(a3), rt_ffi_native_word(a4), rt_ffi_native_word(a5),
@@ -4732,7 +4732,7 @@ int64_t rt_call8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v((
-        (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+        __extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
         rt_ffi_native_word(a3), rt_ffi_native_word(a4), rt_ffi_native_word(a5),
@@ -4762,7 +4762,7 @@ int64_t rt_call9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v((
-        (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+        __extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
         rt_ffi_native_word(a3), rt_ffi_native_word(a4), rt_ffi_native_word(a5),
@@ -4795,7 +4795,7 @@ int64_t rt_call10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v((
-        (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+        __extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
         rt_ffi_native_word(a3), rt_ffi_native_word(a4), rt_ffi_native_word(a5),
@@ -4827,7 +4827,7 @@ int64_t rt_call11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    return rt_tag_v(((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
+    return rt_tag_v((__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
                                   int64_t, int64_t, int64_t, int64_t, int64_t,
                                   int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
@@ -4861,7 +4861,7 @@ int64_t rt_call12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    return rt_tag_v(((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
+    return rt_tag_v((__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
                                   int64_t, int64_t, int64_t, int64_t, int64_t,
                                   int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
@@ -4896,7 +4896,7 @@ int64_t rt_call13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if ((uintptr_t)(f) < 0x1000)
     return 1;
   if (NY_NATIVE_IS(f)) {
-    return rt_tag_v(((int64_t (*)(
+    return rt_tag_v((__extension__ (int64_t (*)(
         int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
         int64_t, int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
@@ -4935,7 +4935,7 @@ int64_t rt_call14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v((
-        (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+        __extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
@@ -4975,7 +4975,7 @@ int64_t rt_call15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
     return 1;
   if (NY_NATIVE_IS(f)) {
     return rt_tag_v((
-        (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+        __extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                      int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_native_word(a0), rt_ffi_native_word(a1), rt_ffi_native_word(a2),
@@ -5012,7 +5012,7 @@ int64_t rt_call0_void(int64_t f) {
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(void))NY_NATIVE_DECODE(f))();
+    (__extension__ (void (*)(void))NY_NATIVE_DECODE(f))();
     return rt_ffi_callback_result(abi, 0);
   }
   rt_call0(f);
@@ -5030,7 +5030,7 @@ int64_t rt_call1_void(int64_t f, int64_t a0) {
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t))NY_NATIVE_DECODE(f))(rt_ffi_callback_arg(abi, 0, a0));
+    (__extension__ (void (*)(int64_t))NY_NATIVE_DECODE(f))(rt_ffi_callback_arg(abi, 0, a0));
     return rt_ffi_callback_result(abi, 0);
   }
   rt_call1(f, a0);
@@ -5048,7 +5048,7 @@ int64_t rt_call1_u32_void(int64_t f, int64_t a0) {
     return 1;
   if (NY_NATIVE_IS(f)) {
     uint32_t arg = (uint32_t)rt_ffi_callback_arg(abi, 0, a0);
-    ((void (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
+    (__extension__ (void (*)(uint32_t))NY_NATIVE_DECODE(f))(arg);
     return 1;
   }
   return rt_call1(f, a0);
@@ -5063,7 +5063,7 @@ int64_t rt_call2_void(int64_t f, int64_t a0, int64_t a1) {
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t))NY_NATIVE_DECODE(f))(
+    (__extension__ (void (*)(int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1));
     return rt_ffi_callback_result(abi, 0);
   }
@@ -5080,7 +5080,7 @@ int64_t rt_call3_void(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
+    (__extension__ (void (*)(int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2));
     return rt_ffi_callback_result(abi, 0);
@@ -5099,7 +5099,7 @@ int64_t rt_call4_void(int64_t f, int64_t a0, int64_t a1, int64_t a2,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3));
     return rt_ffi_callback_result(abi, 0);
@@ -5125,7 +5125,7 @@ int64_t rt_call4_ptr_ptr_ptr_ptr_void(int64_t f, int64_t a0, int64_t a1,
     void *p1 = (void *)(uintptr_t)rt_ffi_callback_arg(abi, 1, a1);
     void *p2 = (void *)(uintptr_t)rt_ffi_callback_arg(abi, 2, a2);
     void *p3 = (void *)(uintptr_t)rt_ffi_callback_arg(abi, 3, a3);
-    ((void (*)(void *, void *, void *, void *))NY_NATIVE_DECODE(f))(p0, p1, p2,
+    (__extension__ (void (*)(void *, void *, void *, void *))NY_NATIVE_DECODE(f))(p0, p1, p2,
                                                                     p3);
     return rt_ffi_callback_result(abi, 0);
   }
@@ -5143,7 +5143,7 @@ int64_t rt_call5_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t, int64_t))NY_NATIVE_DECODE(
         f))(rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
             rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3),
             rt_ffi_callback_arg(abi, 4, a4));
@@ -5163,7 +5163,7 @@ int64_t rt_call6_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t, int64_t,
                int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3),
@@ -5184,7 +5184,7 @@ int64_t rt_call7_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3),
@@ -5206,7 +5206,7 @@ int64_t rt_call8_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3),
@@ -5229,7 +5229,7 @@ int64_t rt_call9_void(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3),
@@ -5253,7 +5253,7 @@ int64_t rt_call10_void(int64_t f, int64_t a0, int64_t a1, int64_t a2,
   if (!f || (uintptr_t)(f) < 0x1000)
     return rt_ffi_callback_result(abi, 0);
   if (NY_NATIVE_IS(f)) {
-    ((void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+    (__extension__ (void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                int64_t, int64_t, int64_t))NY_NATIVE_DECODE(f))(
         rt_ffi_callback_arg(abi, 0, a0), rt_ffi_callback_arg(abi, 1, a1),
         rt_ffi_callback_arg(abi, 2, a2), rt_ffi_callback_arg(abi, 3, a3),
@@ -5285,7 +5285,7 @@ int64_t rt_call1_f32_void(int64_t f, int64_t a) {
   void *fn = rt_ffi_fn(f);
   if (!fn)
     return rt_ffi_callback_result(abi, 0);
-  ((void (*)(float))fn)(rt_ffi_callback_f32_arg(abi, 0, a));
+  (__extension__ (void (*)(float))fn)(rt_ffi_callback_f32_arg(abi, 0, a));
   return rt_ffi_callback_result(abi, 0);
 }
 
@@ -5301,7 +5301,7 @@ int64_t rt_call2_f32_void(int64_t f, int64_t a, int64_t b) {
   void *fn = rt_ffi_fn(f);
   if (!fn)
     return rt_ffi_callback_result(abi, 0);
-  ((void (*)(float, float))fn)(rt_ffi_callback_f32_arg(abi, 0, a),
+  (__extension__ (void (*)(float, float))fn)(rt_ffi_callback_f32_arg(abi, 0, a),
                                rt_ffi_callback_f32_arg(abi, 1, b));
   return rt_ffi_callback_result(abi, 0);
 }
@@ -5319,7 +5319,7 @@ int64_t rt_call3_f32_void(int64_t f, int64_t a, int64_t b, int64_t c) {
   void *fn = rt_ffi_fn(f);
   if (!fn)
     return rt_ffi_callback_result(abi, 0);
-  ((void (*)(float, float, float))fn)(rt_ffi_callback_f32_arg(abi, 0, a),
+  (__extension__ (void (*)(float, float, float))fn)(rt_ffi_callback_f32_arg(abi, 0, a),
                                       rt_ffi_callback_f32_arg(abi, 1, b),
                                       rt_ffi_callback_f32_arg(abi, 2, c));
   return rt_ffi_callback_result(abi, 0);
@@ -5340,7 +5340,7 @@ int64_t rt_call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c,
   void *fn = rt_ffi_fn(f);
   if (!fn)
     return rt_ffi_callback_result(abi, 0);
-  ((void (*)(float, float, float, float))fn)(
+  (__extension__ (void (*)(float, float, float, float))fn)(
       rt_ffi_callback_f32_arg(abi, 0, a), rt_ffi_callback_f32_arg(abi, 1, b),
       rt_ffi_callback_f32_arg(abi, 2, c), rt_ffi_callback_f32_arg(abi, 3, d));
   return rt_ffi_callback_result(abi, 0);

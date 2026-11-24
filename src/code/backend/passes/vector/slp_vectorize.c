@@ -239,8 +239,8 @@ static addr_form_t slp_addr(const nyr_func_t *f, const int *defs, int value,
       return (addr_form_t){.ok = true, .root = value, .offset = 0};
     }
     addr_form_t a = slp_addr(f, defs, base, block_start, depth + 1);
-    if (!a.ok || (__int128)a.offset + k < INT64_MIN ||
-        (__int128)a.offset + k > INT64_MAX)
+    if (!a.ok || (ny_i128)a.offset + k < INT64_MIN ||
+        (ny_i128)a.offset + k > INT64_MAX)
       return bad;
     a.offset += k;
     return a;
@@ -253,7 +253,7 @@ static bool slp_contiguous(const nyr_func_t *f, const int *defs, int a0, int a1,
   addr_form_t x = slp_addr(f, defs, a0, block_start, 0);
   addr_form_t y = slp_addr(f, defs, a1, block_start, 0);
   return x.ok && y.ok && x.root == y.root &&
-         (__int128)y.offset - (__int128)x.offset == 8;
+         (ny_i128)y.offset - (ny_i128)x.offset == 8;
 }
 
 static bool slp_contiguous4(const nyr_func_t *f, const int *defs,
@@ -265,7 +265,7 @@ static bool slp_contiguous4(const nyr_func_t *f, const int *defs,
       return false;
   }
   for (size_t lane = 1; lane < 4; ++lane)
-    if ((__int128)a[lane].offset - (__int128)a[0].offset != (__int128)lane * 8)
+    if ((ny_i128)a[lane].offset - (ny_i128)a[0].offset != (ny_i128)lane * 8)
       return false;
   return true;
 }
@@ -824,7 +824,7 @@ static bool slp_addrs_disjoint(const nyr_func_t *f, const int *defs,
   if (!sa.ok || !la.ok)
     return false;
   if (sa.root == la.root) {
-    __int128 d = (__int128)sa.offset - (__int128)la.offset;
+    ny_i128 d = (ny_i128)sa.offset - (ny_i128)la.offset;
     return d >= 8 || d <= -8;
   }
   int sr = slp_alloc_root(f, defs, sa.root, -1, 0);

@@ -3254,7 +3254,8 @@ ordinary_call:
      * (for example `...block.stream.core`) and prepend that module to an
      * already-qualified `core.os...` spelling.
      */
-    bool absolute_core = strncmp(name, "core.", 5) == 0;
+    bool absolute_core =
+        name_dot && name_dot - name == 4 && memcmp(name, "core", 4) == 0;
     if (name_dot && name_dot > name && !absolute_core) {
       size_t alias_len = (size_t)(name_dot - name);
       if (alias_len < 256) {
@@ -14096,9 +14097,6 @@ ordinary_call:
     /* Aggregate results escape the call and are owned by the caller.  Stack
      * alloca storage made `free(result)` corrupt the allocator; use the same
      * heap ownership contract as ordinary C aggregate wrappers. */
-    if ((uint64_t)ext->ret_aggregate_size > (uint64_t)INT64_MAX) {
-      return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
-    }
     int aggregate_size = nyr_emit_const(b, (int64_t)ext->ret_aggregate_size);
     aggregate_ret_ptr =
         aggregate_size < 0

@@ -2188,10 +2188,10 @@ static void tp_param_scan_pattern(tp_param_mutation_scan_t *scan,
   else if (pattern && pattern->kind == NY_E_MEMCALL)
     args = &pattern->as.memcall.args;
   for (size_t i = 0; args && i < args->len; ++i) {
-    expr_t *binding = args->data[i].val;
-    if (binding && binding->kind == NY_E_IDENT && binding->as.ident.name &&
-        strcmp(binding->as.ident.name, "_") != 0)
-      tp_param_scan_name(scan, binding->as.ident.name);
+    expr_t *bind = args->data[i].val;
+    if (bind && bind->kind == NY_E_IDENT && bind->as.ident.name &&
+        strcmp(bind->as.ident.name, "_") != 0)
+      tp_param_scan_name(scan, bind->as.ident.name);
   }
 }
 
@@ -3655,16 +3655,16 @@ static bool tp_contract_structural_pattern_children(
     size_t child_count = 0;
     for (size_t field = 0; field < member->fields.len; ++field) {
       const char *field_type = member->fields.data[field].type_name;
-      expr_t *binding = args[field].val;
-      if (!tp_contract_is_enum_type(ctx->tp->cg, field_type) || !binding ||
-          binding->kind != NY_E_IDENT || !binding->as.ident.name ||
-          strcmp(binding->as.ident.name, "_") == 0)
+      expr_t *bind = args[field].val;
+      if (!tp_contract_is_enum_type(ctx->tp->cg, field_type) || !bind ||
+          bind->kind != NY_E_IDENT || !bind->as.ident.name ||
+          strcmp(bind->as.ident.name, "_") == 0)
         continue;
       bool duplicate = false;
       for (size_t j = 0; j < child_count; ++j)
-        duplicate |= strcmp(children[j], binding->as.ident.name) == 0;
+        duplicate |= strcmp(children[j], bind->as.ident.name) == 0;
       if (!duplicate)
-        children[child_count++] = binding->as.ident.name;
+        children[child_count++] = bind->as.ident.name;
     }
     if (!child_count)
       continue;
@@ -4017,7 +4017,7 @@ static bool tp_requires_proof_expr_pre(ny_visitor_t *visitor, expr_t *expr) {
   if (ctx && ctx->current_fn && ctx->current_fn->requires_cond && is_call) {
     const expr_t *callee_expr = expr->as.call.callee;
     int target_kind = expr->semantic.canonical_callee_stmt
-                          ? expr->semantic.canonical_callee_stmt->kind
+                          ? (int)expr->semantic.canonical_callee_stmt->kind
                           : -1;
     ny_proof_debug_at(
         2, expr->tok,
@@ -5522,7 +5522,7 @@ static void tp_emit_index_proof_json(ny_tp_json_t *j, bool *first,
 
 static void tp_emit_discriminant_json(ny_tp_json_t *j, bool *first,
                                       const char *subject, const char *variant,
-                                      const char *source, const char *binding) {
+                                      const char *source, const char *bind) {
   if (!j || !first || !variant || !*variant)
     return;
   if (!*first)
@@ -5535,7 +5535,7 @@ static void tp_emit_discriminant_json(ny_tp_json_t *j, bool *first,
   tp_append(j, ",\"source\":");
   tp_json_str(j, source ? source : "match");
   tp_append(j, ",\"binding\":");
-  tp_json_str(j, binding ? binding : "");
+  tp_json_str(j, bind ? bind : "");
   tp_append(j, "}");
 }
 

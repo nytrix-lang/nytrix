@@ -1331,12 +1331,9 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
     size_t total_words = scalar_color_count + (vector_color_count ? 3 : 0) +
                          vector_color_count * 4;
     if (getenv("NYC_FRAME_STATS")) {
-      size_t pinned = 0, blocklocal = 0;
-      for (size_t i = 0; i < root_count; ++i) {
-        size_t rr = root_order[i];
-        pinned += root_pinned[rr];
-        blocklocal += !root_pinned[rr];
-      }
+      size_t pinned = 0;
+      for (size_t i = 0; i < root_count; ++i)
+        pinned += root_pinned[root_order[i]];
       fprintf(stderr, "FRAMESTAT %s locals=%d roots=%zu pinned=%zu colors=%zu len=%zu\n",
               c->epilogue_label, c->max_local_slot, root_count, pinned, scalar_color_count,
               c->nyir->len);
@@ -1514,9 +1511,6 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
               owner[in->dst] < 0 && in->op != NYIR_LOAD_I64 &&
               in->op != NYIR_CMP_I64)
             owner[in->dst] = touched;
-          if (in->dst >= 0 && (size_t)in->dst < n_vals &&
-              owner[in->dst] >= 0 && touched < 0)
-            ; /* alloca value itself defined here */
         }
     }
     if (getenv("NYC_FRAME_STATS") && share)

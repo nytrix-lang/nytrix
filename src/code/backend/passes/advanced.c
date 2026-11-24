@@ -6662,7 +6662,9 @@ bool nyr_addr_reassoc(nyr_func_t *f) {
       int base = side ? in->b : in->a;
       int sv = side ? in->a : in->b;
       int64_t tmp = 0;
-      if (NYR_AR_CONST(base, tmp) || defs[sv] < 0)
+      bool base_const = NYR_AR_CONST(base, tmp);
+      (void)tmp;
+      if (base_const || defs[sv] < 0)
         continue;
       const nyr_inst_t *sh = &f->data[defs[sv]];
       int64_t k = 0;
@@ -8855,9 +8857,9 @@ static void nyr_polyhedral_descending_ranges(nyr_func_t *f,
     if (!step_known || step <= 0)
       continue;
 
-    __int128 span = (__int128)entry - (__int128)limit;
-    __int128 rounds = (span + step - 1) / step;
-    __int128 fail = (__int128)entry - rounds * step;
+    ny_i128 span = (ny_i128)entry - (ny_i128)limit;
+    ny_i128 rounds = (span + step - 1) / step;
+    ny_i128 fail = (ny_i128)entry - rounds * step;
     if (fail < INT64_MIN || fail > INT64_MAX)
       continue;
     int64_t iv_min = (int64_t)fail;

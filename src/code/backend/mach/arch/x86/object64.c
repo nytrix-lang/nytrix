@@ -1017,6 +1017,11 @@ static bool mach_is_known_copy(const nyr_mach_inst_t *in) {
 #define MACH_LOOP_GPR_MAX_RANGE_CELLS 1048576u
 #define MACH_LOOP_GPR_MAX_BLOCKS 2048u
 #define MACH_LOOP_GPR_WORK_BUDGET 400000u
+/* The 256-bit set type only crosses static inline helpers in this file, so
+   the AVX return-ABI note for non-AVX builds does not apply. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wpsabi"
+#endif
 typedef uint64_t mach_set_t __attribute__((vector_size(32)));
 static inline mach_set_t mach_set_bit(size_t b) {
   mach_set_t s = {0, 0, 0, 0};

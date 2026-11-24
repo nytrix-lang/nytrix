@@ -537,12 +537,12 @@ static bool ny_tiny_program_set_binding(ny_tiny_program_t *program,
   if (!program || !name)
     return false;
   for (size_t i = 0; i < program->binding_len; ++i) {
-    ny_tiny_binding_t *binding = &program->bindings[i];
-    if (strlen(binding->name) == name_len &&
-        memcmp(binding->name, name, name_len) == 0) {
-      if (!binding->is_mutable)
+    ny_tiny_binding_t *bind = &program->bindings[i];
+    if (strlen(bind->name) == name_len &&
+        memcmp(bind->name, name, name_len) == 0) {
+      if (!bind->is_mutable)
         return false;
-      binding->value = value;
+      bind->value = value;
       return true;
     }
   }

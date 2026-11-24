@@ -815,7 +815,7 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
     }
     const nyr_mach_block_t *block = &mach->blocks[seg->block];
     if (block->inst_count) {
-      if (block->inst_count > SIZE_MAX - (size_t)block->first_inst) {
+      if (block->inst_count > UINT32_MAX - block->first_inst) {
         if (debug)
           fprintf(stderr, "[regalloc-verify] overflowing block %u\n",
                   seg->block);

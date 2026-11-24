@@ -96,7 +96,7 @@ typedef struct {
  */
 typedef struct {
   int64_t coeff[NY_SMT_MAX_VARS];
-  __int128 rhs;
+  ny_i128 rhs;
   int nvars;
 } ny_smt_cons_t;
 
@@ -145,7 +145,7 @@ static int ny_smt_env_add_binding(codegen_t *cg, scope *scopes, size_t depth,
 }
 
 static bool ny_smt_mul_i64(int64_t a, int64_t b, int64_t *out) {
-  __int128 p = (__int128)a * b;
+  ny_i128 p = (ny_i128)a * b;
   if (p < INT64_MIN || p > INT64_MAX)
     return false;
   *out = (int64_t)p;
@@ -178,13 +178,13 @@ static bool ny_smt_const_i64_expr(const expr_t *expr, int64_t *out,
   if (!ny_smt_const_i64_expr(expr->as.binary.left, &left, depth + 1) ||
       !ny_smt_const_i64_expr(expr->as.binary.right, &right, depth + 1))
     return false;
-  __int128 result;
+  ny_i128 result;
   if (strcmp(expr->as.binary.op, "+") == 0)
-    result = (__int128)left + right;
+    result = (ny_i128)left + right;
   else if (strcmp(expr->as.binary.op, "-") == 0)
-    result = (__int128)left - right;
+    result = (ny_i128)left - right;
   else if (strcmp(expr->as.binary.op, "*") == 0)
-    result = (__int128)left * right;
+    result = (ny_i128)left * right;
   else if (strcmp(expr->as.binary.op, "/") == 0 ||
            strcmp(expr->as.binary.op, "%") == 0) {
     if (right == 0 || (left == INT64_MIN && right == -1))
@@ -383,7 +383,7 @@ bool ny_proof_try_contract_solver(codegen_t *cg, scope *scopes, size_t depth,
 
 typedef struct {
   int64_t coeff[NY_SMT_MAX_VARS];
-  __int128 cconst;
+  ny_i128 cconst;
   bool ok;
 } ny_smt_lin_t;
 
@@ -421,7 +421,7 @@ static bool ny_smt_lin_build(codegen_t *cg, scope *scopes, size_t depth,
       if (__builtin_sub_overflow((int64_t)0, inner.coeff[i], &out->coeff[i]))
         return (out->ok = false);
     }
-    if (__builtin_sub_overflow((__int128)0, inner.cconst, &out->cconst))
+    if (__builtin_sub_overflow((ny_i128)0, inner.cconst, &out->cconst))
       return (out->ok = false);
     return true;
   }
@@ -449,7 +449,7 @@ static bool ny_smt_lin_build(codegen_t *cg, scope *scopes, size_t depth,
       if (overflow)
         return (out->ok = false);
       for (int i = 0; i < env->nvars; ++i) {
-        __int128 t = (__int128)l.coeff[i] + (__int128)sgn * r.coeff[i];
+        ny_i128 t = (ny_i128)l.coeff[i] + (ny_i128)sgn * r.coeff[i];
         if (t < INT64_MIN || t > INT64_MAX)
           return (out->ok = false);
         out->coeff[i] = (int64_t)t;
@@ -480,10 +480,10 @@ static bool ny_smt_lin_build(codegen_t *cg, scope *scopes, size_t depth,
         return true;
       }
       if (r_const) {
-        __int128 k = r.cconst;
+        ny_i128 k = r.cconst;
         for (int i = 0; i < env->nvars; ++i) {
-          __int128 p;
-          if (__builtin_mul_overflow((__int128)l.coeff[i], k, &p) ||
+          ny_i128 p;
+          if (__builtin_mul_overflow((ny_i128)l.coeff[i], k, &p) ||
               p < INT64_MIN || p > INT64_MAX)
             return (out->ok = false);
           out->coeff[i] = (int64_t)p;
@@ -493,10 +493,10 @@ static bool ny_smt_lin_build(codegen_t *cg, scope *scopes, size_t depth,
         return true;
       }
       if (l_const) {
-        __int128 k = l.cconst;
+        ny_i128 k = l.cconst;
         for (int i = 0; i < env->nvars; ++i) {
-          __int128 p;
-          if (__builtin_mul_overflow((__int128)r.coeff[i], k, &p) ||
+          ny_i128 p;
+          if (__builtin_mul_overflow((ny_i128)r.coeff[i], k, &p) ||
               p < INT64_MIN || p > INT64_MAX)
             return (out->ok = false);
           out->coeff[i] = (int64_t)p;
@@ -574,9 +574,9 @@ static bool ny_smt_fm_unsat(const ny_smt_cons_t *cons, int ncons, int nvars) {
                 __builtin_sub_overflow(p1, p2, &nc.coeff[i]))
               ok = false;
           }
-          __int128 t1 = 0, t2 = 0;
-          if (ok && (__builtin_mul_overflow((__int128)a_u, lo[l].rhs, &t1) ||
-                     __builtin_mul_overflow((__int128)a_l, up[u].rhs, &t2) ||
+          ny_i128 t1 = 0, t2 = 0;
+          if (ok && (__builtin_mul_overflow((ny_i128)a_u, lo[l].rhs, &t1) ||
+                     __builtin_mul_overflow((ny_i128)a_l, up[u].rhs, &t2) ||
                      __builtin_sub_overflow(t1, t2, &nc.rhs)))
             ok = false;
           if (ok) {
@@ -620,7 +620,7 @@ static bool ny_smt_add_premises(const ny_smt_env_t *env, ny_smt_cons_t *out,
     memset(&c, 0, sizeof(c));
     c.nvars = env->nvars;
     c.coeff[v] = -1;
-    c.rhs = -(__int128)env->vars[v].lo; /* -x ≤ -lo  ⟺  x ≥ lo */
+    c.rhs = -(ny_i128)env->vars[v].lo; /* -x ≤ -lo  ⟺  x ≥ lo */
     out[(*nout)++] = c;
     if (*nout >= NY_SMT_MAX_CONS)
       return false;
@@ -688,7 +688,7 @@ static void ny_smt_dnf_reset(ny_smt_dnf_t *d) { ny_smt_dnf_dispose(d); }
  * Presburger builder must return unknown rather than wrap an overflowing
  * coefficient or bound into a different proposition.
  */
-static bool ny_smt_i128_to_i64(__int128 value, int64_t *out) {
+static bool ny_smt_i128_to_i64(ny_i128 value, int64_t *out) {
   if (!out || value < INT64_MIN || value > INT64_MAX)
     return false;
   *out = (int64_t)value;
@@ -718,7 +718,7 @@ static int ny_smt_cmp_branches(codegen_t *cg, scope *scopes, size_t depth,
   ny_smt_lin_t diff;
   ny_smt_lin_zero(&diff);
   for (int i = 0; i < env->nvars; ++i) {
-    if (!ny_smt_i128_to_i64((__int128)ll.coeff[i] - rr.coeff[i],
+    if (!ny_smt_i128_to_i64((ny_i128)ll.coeff[i] - rr.coeff[i],
                             &diff.coeff[i]))
       return 0;
   }
@@ -769,23 +769,23 @@ static int ny_smt_cmp_branches(codegen_t *cg, scope *scopes, size_t depth,
       rel = negate ? 0 : 3;
     int64_t neg_coeff[NY_SMT_MAX_VARS];
     for (int i = 0; i < env->nvars; ++i) {
-      if (!ny_smt_i128_to_i64(-(__int128)diff.coeff[i], &neg_coeff[i]))
+      if (!ny_smt_i128_to_i64(-(ny_i128)diff.coeff[i], &neg_coeff[i]))
         return 0;
     }
     ny_smt_branch_t b;
     memset(&b, 0, sizeof(b));
-    __int128 rhs = 0;
+    ny_i128 rhs = 0;
     switch (rel) {
     case 0: /* LT: diff <= -1 */
-      if (__builtin_sub_overflow(-(__int128)1, diff.cconst, &rhs))
+      if (__builtin_sub_overflow(-(ny_i128)1, diff.cconst, &rhs))
         return 0;
       break;
     case 1: /* LE: diff <= 0 */
-      if (__builtin_sub_overflow((__int128)0, diff.cconst, &rhs))
+      if (__builtin_sub_overflow((ny_i128)0, diff.cconst, &rhs))
         return 0;
       break;
     case 2: /* GT: -diff <= -1 */
-      if (__builtin_sub_overflow(diff.cconst, (__int128)1, &rhs))
+      if (__builtin_sub_overflow(diff.cconst, (ny_i128)1, &rhs))
         return 0;
       break;
     default: /* GE: -diff <= 0 */
@@ -806,12 +806,12 @@ static int ny_smt_cmp_branches(codegen_t *cg, scope *scopes, size_t depth,
         return 0;
       ny_smt_branch_t b;
       memset(&b, 0, sizeof(b));
-      __int128 rhs_forward = 0;
-      if (__builtin_sub_overflow((__int128)0, diff.cconst, &rhs_forward))
+      ny_i128 rhs_forward = 0;
+      if (__builtin_sub_overflow((ny_i128)0, diff.cconst, &rhs_forward))
         return 0;
       NY_SMT_PUSH_CONS(&b, diff.coeff, rhs_forward);
       for (int i = 0; i < env->nvars; ++i) {
-        if (!ny_smt_i128_to_i64(-(__int128)diff.coeff[i], &b.cons[1].coeff[i]))
+        if (!ny_smt_i128_to_i64(-(ny_i128)diff.coeff[i], &b.cons[1].coeff[i]))
           return 0;
       }
       b.cons[1].nvars = env->nvars;
@@ -828,13 +828,13 @@ static int ny_smt_cmp_branches(codegen_t *cg, scope *scopes, size_t depth,
     ny_smt_branch_t b1, b2;
     memset(&b1, 0, sizeof(b1));
     memset(&b2, 0, sizeof(b2));
-    __int128 rhs1 = 0, rhs2 = 0;
-    if (__builtin_sub_overflow(-(__int128)1, diff.cconst, &rhs1) ||
-        __builtin_sub_overflow(diff.cconst, (__int128)1, &rhs2))
+    ny_i128 rhs1 = 0, rhs2 = 0;
+    if (__builtin_sub_overflow(-(ny_i128)1, diff.cconst, &rhs1) ||
+        __builtin_sub_overflow(diff.cconst, (ny_i128)1, &rhs2))
       return 0;
     NY_SMT_PUSH_CONS(&b1, diff.coeff, rhs1);
     for (int i = 0; i < env->nvars; ++i) {
-      if (!ny_smt_i128_to_i64(-(__int128)diff.coeff[i], &b2.cons[0].coeff[i]))
+      if (!ny_smt_i128_to_i64(-(ny_i128)diff.coeff[i], &b2.cons[0].coeff[i]))
         return 0;
     }
     b2.cons[0].nvars = env->nvars;
@@ -2221,13 +2221,13 @@ static bool ny_polc_eval_expr(expr_t *e, ny_smt_env_t *env, const int64_t *vals,
       *out = strcmp(op, "/") == 0 ? l / r : l % r;
       return true;
     }
-    __int128 wide;
+    ny_i128 wide;
     if (strcmp(op, "+") == 0)
-      wide = (__int128)l + r;
+      wide = (ny_i128)l + r;
     else if (strcmp(op, "-") == 0)
-      wide = (__int128)l - r;
+      wide = (ny_i128)l - r;
     else if (strcmp(op, "*") == 0)
-      wide = (__int128)l * r;
+      wide = (ny_i128)l * r;
     else
       return false;
     if (wide < INT64_MIN || wide > INT64_MAX)
@@ -2288,7 +2288,7 @@ static bool ny_polc_bounded_enum_proves(expr_t *e, ny_smt_env_t *env) {
     const ny_smt_var_t *var = &env->vars[i];
     if (!var->has_range)
       return false;
-    __int128 width = (__int128)var->hi - (__int128)var->lo + 1;
+    ny_i128 width = (ny_i128)var->hi - (ny_i128)var->lo + 1;
     if (width <= 0 || width > NY_PROOF_MAX_ENUM_ASSIGNMENTS ||
         assignments > NY_PROOF_MAX_ENUM_ASSIGNMENTS / (uint64_t)width)
       return false;

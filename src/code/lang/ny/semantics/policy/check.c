@@ -649,7 +649,7 @@ static bool pol_parse_certificate(const char *text, pol_certificate_t *cert,
 
 typedef struct {
   int64_t coeff[POL_MAX_VARS];
-  __int128 cst; /* Σ coeff·x + cst <= 0; endpoint differences need 65 bits. */
+  ny_i128 cst; /* Σ coeff·x + cst <= 0; endpoint differences need 65 bits. */
   bool interval_safe;
   int interval_left, interval_right;
 } pol_cons_t;
@@ -659,11 +659,11 @@ typedef struct {
  */
 typedef struct {
   int64_t coeff[POL_MAX_VARS];
-  __int128 cst;
+  ny_i128 cst;
 } pol_lin_t;
 
 static bool pol_add_i64(int64_t a, int64_t b, int64_t *out) {
-  __int128 r = (__int128)a + b;
+  ny_i128 r = (ny_i128)a + b;
   if (r < INT64_MIN || r > INT64_MAX)
     return false;
   *out = (int64_t)r;
@@ -671,17 +671,17 @@ static bool pol_add_i64(int64_t a, int64_t b, int64_t *out) {
 }
 
 static bool pol_mul_i64(int64_t a, int64_t b, int64_t *out) {
-  __int128 r = (__int128)a * b;
+  ny_i128 r = (ny_i128)a * b;
   if (r < INT64_MIN || r > INT64_MAX)
     return false;
   *out = (int64_t)r;
   return true;
 }
 
-static bool pol_lin_scale(const pol_lin_t *in, __int128 k, pol_lin_t *out) {
+static bool pol_lin_scale(const pol_lin_t *in, ny_i128 k, pol_lin_t *out) {
   for (int i = 0; i < POL_MAX_VARS; ++i) {
-    __int128 value;
-    if (__builtin_mul_overflow((__int128)in->coeff[i], k, &value) ||
+    ny_i128 value;
+    if (__builtin_mul_overflow((ny_i128)in->coeff[i], k, &value) ||
         value < INT64_MIN || value > INT64_MAX)
       return false;
     out->coeff[i] = (int64_t)value;
@@ -860,9 +860,9 @@ static int pol_fm_unsat(const pol_cons_t *cons, int ncons, int nvars,
               __builtin_sub_overflow(p1, p2, &merged.coeff[v]))
             ok = false;
         }
-        __int128 r1, r2, rc;
-        if (ok && (__builtin_mul_overflow((__int128)ap, neg[j].cst, &r1) ||
-                   __builtin_mul_overflow((__int128)an, pos[i].cst, &r2) ||
+        ny_i128 r1, r2, rc;
+        if (ok && (__builtin_mul_overflow((ny_i128)ap, neg[j].cst, &r1) ||
+                   __builtin_mul_overflow((ny_i128)an, pos[i].cst, &r2) ||
                    __builtin_sub_overflow(r1, r2, &rc)))
           ok = false;
         if (!ok)
@@ -971,7 +971,7 @@ static void pol_poly_add_term(pol_poly_t *p, int64_t coeff,
     return;
   for (int i = 0; i < p->count; ++i) {
     if (memcmp(p->terms[i].exponents, exponents, POL_MAX_VARS) == 0) {
-      __int128 sum = (__int128)p->terms[i].coeff + coeff;
+      ny_i128 sum = (ny_i128)p->terms[i].coeff + coeff;
       if (sum < INT64_MIN || sum > INT64_MAX) {
         p->overflow = true;
         return;
@@ -998,7 +998,7 @@ static void pol_poly_mul(pol_poly_t *out, const pol_poly_t *a,
   memset(out, 0, sizeof(*out));
   for (int i = 0; i < a->count; ++i) {
     for (int j = 0; j < b->count; ++j) {
-      __int128 c = (__int128)a->terms[i].coeff * b->terms[j].coeff;
+      ny_i128 c = (ny_i128)a->terms[i].coeff * b->terms[j].coeff;
       if (c < INT64_MIN || c > INT64_MAX) {
         out->overflow = true;
         return;
@@ -1023,7 +1023,7 @@ static void pol_poly_mul(pol_poly_t *out, const pol_poly_t *a,
 
 static void pol_poly_accum(pol_poly_t *out, const pol_poly_t *add, int sign) {
   for (int i = 0; i < add->count; ++i) {
-    __int128 c = (__int128)add->terms[i].coeff * sign;
+    ny_i128 c = (ny_i128)add->terms[i].coeff * sign;
     if (c < INT64_MIN || c > INT64_MAX) {
       out->overflow = true;
       return;
@@ -1125,7 +1125,7 @@ typedef struct {
   bool inconsistent;
 } pol_interval_env_t;
 
-static bool pol_i128_to_i64(__int128 value, int64_t *out) {
+static bool pol_i128_to_i64(ny_i128 value, int64_t *out) {
   if (value < INT64_MIN || value > INT64_MAX)
     return false;
   *out = (int64_t)value;
@@ -1154,40 +1154,40 @@ static bool pol_interval_env_init(const pol_parser_t *ps,
   return true;
 }
 
-static __int128 pol_floor_div(__int128 numerator, __int128 denominator,
+static ny_i128 pol_floor_div(ny_i128 numerator, ny_i128 denominator,
                               bool *ok) {
-  const __int128 min_i128 = -((__int128)1 << 126) * 2;
+  const ny_i128 min_i128 = -((ny_i128)1 << 126) * 2;
   if (denominator == 0 || (numerator == min_i128 && denominator == -1)) {
     *ok = false;
     return 0;
   }
-  __int128 quotient = numerator / denominator;
-  __int128 remainder = numerator % denominator;
+  ny_i128 quotient = numerator / denominator;
+  ny_i128 remainder = numerator % denominator;
   if (remainder != 0 && ((remainder < 0) != (denominator < 0)))
     quotient--;
   *ok = true;
   return quotient;
 }
 
-static __int128 pol_ceil_div(__int128 numerator, __int128 denominator,
+static ny_i128 pol_ceil_div(ny_i128 numerator, ny_i128 denominator,
                              bool *ok) {
-  const __int128 min_i128 = -((__int128)1 << 126) * 2;
+  const ny_i128 min_i128 = -((ny_i128)1 << 126) * 2;
   if (denominator == 0 || (numerator == min_i128 && denominator == -1)) {
     *ok = false;
     return 0;
   }
-  __int128 quotient = numerator / denominator;
-  __int128 remainder = numerator % denominator;
+  ny_i128 quotient = numerator / denominator;
+  ny_i128 remainder = numerator % denominator;
   if (remainder != 0 && ((remainder < 0) == (denominator < 0)))
     quotient++;
   *ok = true;
   return quotient;
 }
 
-static bool pol_interval_add_product(__int128 *sum, int64_t coefficient,
+static bool pol_interval_add_product(ny_i128 *sum, int64_t coefficient,
                                      int64_t value) {
-  __int128 product;
-  return !__builtin_mul_overflow((__int128)coefficient, (__int128)value,
+  ny_i128 product;
+  return !__builtin_mul_overflow((ny_i128)coefficient, (ny_i128)value,
                                  &product) &&
          !__builtin_add_overflow(*sum, product, sum);
 }
@@ -1195,10 +1195,10 @@ static bool pol_interval_add_product(__int128 *sum, int64_t coefficient,
 static bool pol_interval_constraint_bound(const pol_cons_t *constraint,
                                           const pol_interval_env_t *env,
                                           int excluded, bool maximum,
-                                          __int128 *bound) {
+                                          ny_i128 *bound) {
   if (!constraint || !env || !bound)
     return false;
-  __int128 sum = constraint->cst;
+  ny_i128 sum = constraint->cst;
   for (int i = 0; i < POL_MAX_VARS; ++i) {
     if (i == excluded || !constraint->coeff[i])
       continue;
@@ -1226,7 +1226,7 @@ static void pol_interval_env_add_constraint(pol_interval_env_t *env,
                                             const pol_cons_t *constraint) {
   if (!constraint->interval_safe)
     return;
-  __int128 minimum;
+  ny_i128 minimum;
   if (pol_interval_constraint_bound(constraint, env, -1, false, &minimum) &&
       minimum > 0) {
     env->inconsistent = true;
@@ -1236,13 +1236,13 @@ static void pol_interval_env_add_constraint(pol_interval_env_t *env,
     int64_t coefficient = constraint->coeff[i];
     if (!coefficient)
       continue;
-    __int128 maximum_other, numerator;
+    ny_i128 maximum_other, numerator;
     if (!pol_interval_constraint_bound(constraint, env, i, true,
                                        &maximum_other) ||
-        __builtin_sub_overflow((__int128)0, maximum_other, &numerator))
+        __builtin_sub_overflow((ny_i128)0, maximum_other, &numerator))
       continue;
     bool div_ok = false;
-    __int128 bound = coefficient > 0
+    ny_i128 bound = coefficient > 0
                          ? pol_floor_div(numerator, coefficient, &div_ok)
                          : pol_ceil_div(numerator, coefficient, &div_ok);
     if (!div_ok)
@@ -1355,8 +1355,8 @@ static bool pol_interval_eval(const pol_parser_t *ps,
     pol_interval_t inner;
     if (!pol_interval_eval(ps, ob, env, n->left, depth + 1, &inner))
       return false;
-    return pol_i128_to_i64(-(__int128)inner.hi, &out->lo) &&
-           pol_i128_to_i64(-(__int128)inner.lo, &out->hi);
+    return pol_i128_to_i64(-(ny_i128)inner.hi, &out->lo) &&
+           pol_i128_to_i64(-(ny_i128)inner.lo, &out->hi);
   }
   if (n->kind != POL_NODE_BIN ||
       (n->op != POL_OP_ADD && n->op != POL_OP_SUB && n->op != POL_OP_MUL &&
@@ -1388,11 +1388,11 @@ static bool pol_interval_eval(const pol_parser_t *ps,
     if ((right.lo <= 0 && right.hi >= 0) ||
         (left.lo == INT64_MIN && right.lo <= -1 && right.hi >= -1))
       return false;
-    __int128 abs_lo = right.lo < 0 ? -(__int128)right.lo : right.lo;
-    __int128 abs_hi = right.hi < 0 ? -(__int128)right.hi : right.hi;
-    __int128 max_remainder = (abs_lo > abs_hi ? abs_lo : abs_hi) - 1;
-    __int128 lo = -max_remainder;
-    __int128 hi = max_remainder;
+    ny_i128 abs_lo = right.lo < 0 ? -(ny_i128)right.lo : right.lo;
+    ny_i128 abs_hi = right.hi < 0 ? -(ny_i128)right.hi : right.hi;
+    ny_i128 max_remainder = (abs_lo > abs_hi ? abs_lo : abs_hi) - 1;
+    ny_i128 lo = -max_remainder;
+    ny_i128 hi = max_remainder;
     if (left.lo >= 0) {
       lo = 0;
       if (hi > left.hi)
@@ -1404,22 +1404,22 @@ static bool pol_interval_eval(const pol_parser_t *ps,
     }
     return pol_i128_to_i64(lo, &out->lo) && pol_i128_to_i64(hi, &out->hi);
   }
-  __int128 lo, hi;
+  ny_i128 lo, hi;
   if (n->op == POL_OP_ADD) {
-    lo = (__int128)left.lo + right.lo;
-    hi = (__int128)left.hi + right.hi;
+    lo = (ny_i128)left.lo + right.lo;
+    hi = (ny_i128)left.hi + right.hi;
   } else if (n->op == POL_OP_SUB) {
-    lo = (__int128)left.lo - right.hi;
-    hi = (__int128)left.hi - right.lo;
+    lo = (ny_i128)left.lo - right.hi;
+    hi = (ny_i128)left.hi - right.lo;
   } else if (pol_nodes_same(ps, n->left, n->right, 0)) {
-    __int128 a = (__int128)left.lo * left.lo;
-    __int128 b = (__int128)left.hi * left.hi;
+    ny_i128 a = (ny_i128)left.lo * left.lo;
+    ny_i128 b = (ny_i128)left.hi * left.hi;
     lo = left.lo <= 0 && left.hi >= 0 ? 0 : (a < b ? a : b);
     hi = a > b ? a : b;
   } else {
-    __int128 products[4] = {
-        (__int128)left.lo * right.lo, (__int128)left.lo * right.hi,
-        (__int128)left.hi * right.lo, (__int128)left.hi * right.hi};
+    ny_i128 products[4] = {
+        (ny_i128)left.lo * right.lo, (ny_i128)left.lo * right.hi,
+        (ny_i128)left.hi * right.lo, (ny_i128)left.hi * right.hi};
     lo = hi = products[0];
     for (int i = 1; i < 4; ++i) {
       if (products[i] < lo)
@@ -1505,7 +1505,7 @@ static bool pol_interval_relation_direct(pol_parser_t *ps,
 static void pol_interval_split_candidate(const pol_parser_t *ps,
                                          const pol_interval_env_t *env, int idx,
                                          int depth, int *best_var,
-                                         __int128 *best_width) {
+                                         ny_i128 *best_width) {
   if (idx < 0 || idx >= ps->count || depth > POL_MAX_DEPTH)
     return;
   const pol_node_t *node = &ps->nodes[idx];
@@ -1514,8 +1514,8 @@ static void pol_interval_split_candidate(const pol_parser_t *ps,
         env->lo[node->name] == INT64_MIN || env->hi[node->name] == INT64_MAX ||
         env->lo[node->name] >= env->hi[node->name])
       return;
-    __int128 width =
-        (__int128)env->hi[node->name] - (__int128)env->lo[node->name];
+    ny_i128 width =
+        (ny_i128)env->hi[node->name] - (ny_i128)env->lo[node->name];
     if (width > *best_width) {
       *best_width = width;
       *best_var = node->name;
@@ -1560,7 +1560,7 @@ static bool pol_interval_relation_split(pol_parser_t *ps,
   if (depth >= POL_MAX_INTERVAL_SPLIT_DEPTH || *budget <= 0)
     return true;
   int split_var = -1;
-  __int128 split_width = 0;
+  ny_i128 split_width = 0;
   pol_interval_split_candidate(ps, env, n->left, 0, &split_var, &split_width);
   pol_interval_split_candidate(ps, env, n->right, 0, &split_var, &split_width);
   if (split_var < 0)
@@ -1569,7 +1569,7 @@ static bool pol_interval_relation_split(pol_parser_t *ps,
 
   int64_t lo = env->lo[split_var];
   int64_t hi = env->hi[split_var];
-  int64_t mid = (int64_t)((__int128)lo + ((__int128)hi - (__int128)lo) / 2);
+  int64_t mid = (int64_t)((ny_i128)lo + ((ny_i128)hi - (ny_i128)lo) / 2);
   pol_interval_env_t lower = *env;
   pol_interval_env_t upper = *env;
   lower.hi[split_var] = mid;
@@ -1751,7 +1751,7 @@ static bool pol_dnf_atom(pol_parser_t *ps, pol_dnf_t *d, int idx, bool negate,
     slot->interval_safe = interval_constraint_safe;                     \
     slot->interval_left = n->left;                                      \
     slot->interval_right = n->right;                                    \
-    if (__builtin_add_overflow((lin).cst, (__int128)(k), &slot->cst)) { \
+    if (__builtin_add_overflow((lin).cst, (ny_i128)(k), &slot->cst)) {  \
       pol_fail(st, "overflow building a constraint");                   \
       return false;                                                     \
     }                                                                   \
@@ -1964,7 +1964,7 @@ static int pol_decide(pol_parser_t *ps, const pol_obligation_t *ob, int root,
           nsys++;
           memset(&sys[nsys], 0, sizeof(pol_cons_t));
           sys[nsys].coeff[v] = 1;
-          sys[nsys].cst = -(__int128)ob->ranges[r].hi; /* x - hi <= 0 */
+          sys[nsys].cst = -(ny_i128)ob->ranges[r].hi; /* x - hi <= 0 */
           nsys++;
         }
         if (ok && nsys + branches[b].count <= POL_MAX_CONS &&
@@ -2109,13 +2109,13 @@ static bool pol_eval(pol_parser_t *ps, int idx, const pol_env_t *env,
       *out = l != r;
       break;
     case POL_OP_ADD:
-      *out = (int64_t)((__int128)l + r);
+      *out = (int64_t)((ny_i128)l + r);
       break;
     case POL_OP_SUB:
-      *out = (int64_t)((__int128)l - r);
+      *out = (int64_t)((ny_i128)l - r);
       break;
     case POL_OP_MUL:
-      *out = (int64_t)((__int128)l * r);
+      *out = (int64_t)((ny_i128)l * r);
       break;
     case POL_OP_DIV:
     case POL_OP_MOD:

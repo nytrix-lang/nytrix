@@ -2,6 +2,7 @@
  * Multi-object static ELF64 linker for relocatable code and archives.
  */
 #include <nyr/nyr.h>
+#include "base/compat.h"
 #include "base/parallel.h"
 #include "code/backend/core/target.h"
 
@@ -553,9 +554,9 @@ static bool l_apply(unsigned char *segment, size_t seg_len, size_t off,
   if (type == L_R_AARCH64_CALL26) {
     if (!l_range(seg_len, off, sizeof(uint32_t)))
       return false;
-    __int128 delta = (__int128)s + addend - p;
-    if ((delta & 3) != 0 || delta < -((__int128)1 << 27) ||
-        delta >= ((__int128)1 << 27))
+    ny_i128 delta = (ny_i128)s + addend - p;
+    if ((delta & 3) != 0 || delta < -((ny_i128)1 << 27) ||
+        delta >= ((ny_i128)1 << 27))
       return false;
     uint32_t instruction;
     memcpy(&instruction, segment + off, sizeof(instruction));
@@ -567,10 +568,10 @@ static bool l_apply(unsigned char *segment, size_t seg_len, size_t off,
   if (type == L_R_AARCH64_ADR_PREL_PG_HI21) {
     if (!l_range(seg_len, off, sizeof(uint32_t)))
       return false;
-    __int128 pages = (((__int128)s + addend) & ~(__int128)0xfff) -
-                     ((__int128)p & ~(__int128)0xfff);
-    if ((pages & 0xfff) != 0 || pages < -((__int128)1 << 32) ||
-        pages >= ((__int128)1 << 32))
+    ny_i128 pages = (((ny_i128)s + addend) & ~(ny_i128)0xfff) -
+                     ((ny_i128)p & ~(ny_i128)0xfff);
+    if ((pages & 0xfff) != 0 || pages < -((ny_i128)1 << 32) ||
+        pages >= ((ny_i128)1 << 32))
       return false;
     uint32_t imm = (uint32_t)(int64_t)(pages >> 12);
     uint32_t instruction;
@@ -587,21 +588,21 @@ static bool l_apply(unsigned char *segment, size_t seg_len, size_t off,
     memcpy(&instruction, segment + off, sizeof(instruction));
     instruction =
         (instruction & ~(0xfffu << 10)) |
-        (((uint32_t)((uint64_t)((__int128)s + addend) & 0xfffu)) << 10);
+        (((uint32_t)((uint64_t)((ny_i128)s + addend) & 0xfffu)) << 10);
     memcpy(segment + off, &instruction, sizeof(instruction));
     return true;
   }
   if (type == L_R_AARCH64_ABS64) {
     if (!l_range(seg_len, off, sizeof(uint64_t)))
       return false;
-    uint64_t value = (uint64_t)((__int128)s + addend);
+    uint64_t value = (uint64_t)((ny_i128)s + addend);
     memcpy(segment + off, &value, sizeof(value));
     return true;
   }
   if (type == L_R_AARCH64_PREL32) {
     if (!l_range(seg_len, off, sizeof(uint32_t)))
       return false;
-    __int128 value = (__int128)s + addend - p;
+    ny_i128 value = (ny_i128)s + addend - p;
     if (value < INT32_MIN || value > INT32_MAX)
       return false;
     int32_t signed_value = (int32_t)value;
@@ -611,16 +612,16 @@ static bool l_apply(unsigned char *segment, size_t seg_len, size_t off,
   size_t width = type == L_R_X86_64_64 ? 8 : 4;
   if (!l_range(seg_len, off, width))
     return false;
-  __int128 value;
+  ny_i128 value;
   switch (type) {
   case L_R_X86_64_64:
   case L_R_X86_64_32:
   case L_R_X86_64_32S:
-    value = (__int128)s + addend;
+    value = (ny_i128)s + addend;
     break;
   case L_R_X86_64_PC32:
   case L_R_X86_64_PLT32:
-    value = (__int128)s + addend - p;
+    value = (ny_i128)s + addend - p;
     break;
   default:
     return false;

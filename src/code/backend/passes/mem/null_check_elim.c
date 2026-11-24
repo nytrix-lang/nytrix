@@ -94,8 +94,8 @@ static bool value_nonnull_at(const nyr_func_t *f, const int *defs,
       const nyr_scev_loop_t *l = &scev_info->loops[li];
       if (l->iv == value && l->init_is_const && l->init > 0 && l->step > 0 &&
           l->trip_count_known && l->trip_count > 0) {
-        __int128 last = (__int128)l->init +
-                        (__int128)(l->trip_count - 1) * (__int128)l->step;
+        ny_i128 last = (ny_i128)l->init +
+                        (ny_i128)(l->trip_count - 1) * (ny_i128)l->step;
         if (last <= INT64_MAX)
           return true;
       }

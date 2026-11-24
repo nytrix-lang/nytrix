@@ -889,7 +889,7 @@ bool ny_jit_native_cache_load(const char *so_path, void **out_handle,
       fprintf(stderr, "[cache] native load failed: %s\n", dlerror());
     return false;
   }
-  void (*entry)(void) = (void (*)(void))dlsym(h, "_ny_top_entry");
+  void (*entry)(void) = __extension__ (void (*)(void))dlsym(h, "_ny_top_entry");
   if (!entry) {
     dlclose(h);
     return false;
@@ -1084,9 +1084,9 @@ bool ny_jit_stencil_cache_load(const char *so_path, void **out_handle,
   void *h = dlopen(so_path, RTLD_LAZY | RTLD_GLOBAL);
   if (!h)
     return false;
-  void (*entry)(void) = (void (*)(void))dlsym(h, "_ny_top_entry");
+  void (*entry)(void) = __extension__ (void (*)(void))dlsym(h, "_ny_top_entry");
   if (!entry)
-    entry = (void (*)(void))dlsym(h, "rt_main");
+    entry = __extension__ (void (*)(void))dlsym(h, "rt_main");
   if (!entry) {
     dlclose(h);
     return false;

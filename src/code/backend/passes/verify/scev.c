@@ -54,7 +54,7 @@ static bool const_value(const nyr_func_t *f, const int *defs, int value,
 static bool compute_trip(nyr_scev_loop_t *l) {
   if (!l->init_is_const || !l->limit_is_const || l->step == 0)
     return false;
-  __int128 start = l->init, limit = l->limit, step = l->step, n = 0;
+  ny_i128 start = l->init, limit = l->limit, step = l->step, n = 0;
   /*
    * `i != limit` counted loops. The exit count is exact only when the
    * recurrence lands on the limit: the distance must be a whole multiple of
@@ -64,7 +64,7 @@ static bool compute_trip(nyr_scev_loop_t *l) {
    * counted loop rather than guessing from the comparison alone.
    */
   if (l->predicate == NYIR_CMP_NE) {
-    __int128 delta = limit - start;
+    ny_i128 delta = limit - start;
     if (step > 0) {
       if (delta <= 0 || delta % step != 0)
         return false;
@@ -74,7 +74,7 @@ static bool compute_trip(nyr_scev_loop_t *l) {
         return false;
       n = (-delta) / (-step);
     }
-    __int128 ne_exit = start + n * step;
+    ny_i128 ne_exit = start + n * step;
     if (n <= 0 || n > UINT64_MAX || ne_exit != limit || ne_exit < INT64_MIN ||
         ne_exit > INT64_MAX)
       return false;
@@ -96,7 +96,7 @@ static bool compute_trip(nyr_scev_loop_t *l) {
     } else
       return false;
   } else {
-    __int128 mag = -step;
+    ny_i128 mag = -step;
     if (l->predicate == NYIR_CMP_GT) {
       if (start <= limit)
         n = 0;
@@ -118,7 +118,7 @@ static bool compute_trip(nyr_scev_loop_t *l) {
    * otherwise wrapping can make the loop continue (or reverse direction)
    * even though the unbounded-integer recurrence would have exited.
    */
-  __int128 exit_value = start + n * step;
+  ny_i128 exit_value = start + n * step;
   if (exit_value < INT64_MIN || exit_value > INT64_MAX)
     return false;
   l->trip_count = (uint64_t)n;
@@ -231,7 +231,7 @@ static void compute_range_bounds(const nyr_func_t *f,
    */
   if ((ir.has_max && ir.max == INT64_MAX) || (lr.has_max && lr.max == INT64_MAX))
     return;
-  __int128 body_lo, body_hi, exit_edge, iv_lo, iv_hi, span;
+  ny_i128 body_lo, body_hi, exit_edge, iv_lo, iv_hi, span;
   if (up) {
     /*
      * `lr.max - 1` must stay representable before it is used.
@@ -239,24 +239,24 @@ static void compute_range_bounds(const nyr_func_t *f,
     if (lr.max <= INT64_MIN)
       return;
     body_lo = ir.min;
-    body_hi = (__int128)lr.max - (l->predicate == NYIR_CMP_LT ? 1 : 0);
+    body_hi = (ny_i128)lr.max - (l->predicate == NYIR_CMP_LT ? 1 : 0);
     exit_edge = body_hi + l->step;
     if (exit_edge > INT64_MAX)
       return;
     iv_lo = ir.min;
     iv_hi = ir.max > exit_edge ? ir.max : exit_edge;
-    span = (__int128)lr.max - ir.min;
+    span = (ny_i128)lr.max - ir.min;
   } else {
     if (lr.min >= INT64_MAX)
       return;
-    body_lo = (__int128)lr.min + (l->predicate == NYIR_CMP_GT ? 1 : 0);
+    body_lo = (ny_i128)lr.min + (l->predicate == NYIR_CMP_GT ? 1 : 0);
     body_hi = ir.max;
     exit_edge = body_lo + l->step;
     if (exit_edge < INT64_MIN)
       return;
     iv_lo = ir.min < exit_edge ? ir.min : exit_edge;
     iv_hi = ir.max;
-    span = (__int128)ir.max - lr.min;
+    span = (ny_i128)ir.max - lr.min;
   }
   if (body_lo >= INT64_MIN && body_hi <= INT64_MAX && body_hi >= body_lo) {
     l->body_bounds_known = true;
@@ -271,9 +271,9 @@ static void compute_range_bounds(const nyr_func_t *f,
   /*
    * The same interval bounds the iteration count from above.
    */
-  __int128 mag = up ? (__int128)l->step : -(__int128)l->step;
+  ny_i128 mag = up ? (ny_i128)l->step : -(ny_i128)l->step;
   if (span > 0) {
-    __int128 bound = (span + mag - 1) / mag;
+    ny_i128 bound = (span + mag - 1) / mag;
     if (bound > 0 && bound <= UINT64_MAX) {
       l->trip_bound_known = true;
       l->trip_bound = (uint64_t)bound;
@@ -404,16 +404,16 @@ static bool compute_trip_expr(const nyr_func_t *f,
   l->exit_value_const = l->predicate == NYIR_CMP_LE ? 1 : 0;
   if (l->predicate == NYIR_CMP_LE && lr.max == INT64_MAX)
     l->exit_value_known = false;
-  __int128 exit_lb_init =
-      l->predicate == NYIR_CMP_LT ? (__int128)ir.min + 1 : (__int128)ir.min;
+  ny_i128 exit_lb_init =
+      l->predicate == NYIR_CMP_LT ? (ny_i128)ir.min + 1 : (ny_i128)ir.min;
   if (exit_lb_init < lr.min)
     exit_lb_init = lr.min;
   if (exit_lb_init >= INT64_MIN && exit_lb_init <= INT64_MAX) {
     l->exit_lb_known = true;
     l->exit_lb = (int64_t)exit_lb_init;
   }
-  __int128 upper =
-      (__int128)lr.max - ir.min + (l->predicate == NYIR_CMP_LE ? 1 : 0);
+  ny_i128 upper =
+      (ny_i128)lr.max - ir.min + (l->predicate == NYIR_CMP_LE ? 1 : 0);
   if (upper > INT64_MAX)
     return false;
   l->trip_expr_known = true;
@@ -530,8 +530,8 @@ static bool scev_sext32_safe(const nyr_scev_loop_t *l) {
   if (l->trip_count_known && l->init_is_const && l->init >= INT32_MIN &&
       l->init <= INT32_MAX && l->trip_count <= (uint64_t)UINT32_MAX + 2ULL &&
       l->step >= INT32_MIN && l->step <= INT32_MAX) {
-    __int128 exit_val =
-        (__int128)l->init + (__int128)l->trip_count * (__int128)l->step;
+    ny_i128 exit_val =
+        (ny_i128)l->init + (ny_i128)l->trip_count * (ny_i128)l->step;
     return exit_val >= INT32_MIN && exit_val <= INT32_MAX;
   }
   return false;
@@ -996,9 +996,9 @@ static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
     }
     if (loop->trip_count == 0)
       continue;
-    __int128 last =
-        (__int128)loop->init + (__int128)(loop->trip_count - 1) * loop->step;
-    __int128 exit = last + loop->step;
+    ny_i128 last =
+        (ny_i128)loop->init + (ny_i128)(loop->trip_count - 1) * loop->step;
+    ny_i128 exit = last + loop->step;
     if (last < INT64_MIN || last > INT64_MAX || exit < INT64_MIN ||
         exit > INT64_MAX)
       continue;
@@ -1060,7 +1060,7 @@ static bool scev_affine_add_term(nyr_scev_affine_t *out, int iv,
   for (size_t i = 0; i < 2; ++i) {
     if (out->iv[i] != iv)
       continue;
-    __int128 sum = (__int128)out->coefficient[i] + coefficient;
+    ny_i128 sum = (ny_i128)out->coefficient[i] + coefficient;
     if (sum < INT64_MIN || sum > INT64_MAX)
       return false;
     out->coefficient[i] = (int64_t)sum;
@@ -1082,7 +1082,7 @@ static bool scev_affine_combine(nyr_scev_affine_t *out,
   if (!out || !a || !b || (sign != 1 && sign != -1))
     return false;
   scev_affine_init(out);
-  __int128 constant = (__int128)a->constant + sign * (__int128)b->constant;
+  ny_i128 constant = (ny_i128)a->constant + sign * (ny_i128)b->constant;
   if (constant < INT64_MIN || constant > INT64_MAX)
     return false;
   out->constant = (int64_t)constant;
@@ -1091,7 +1091,7 @@ static bool scev_affine_combine(nyr_scev_affine_t *out,
         !scev_affine_add_term(out, a->iv[i], a->coefficient[i]))
       return false;
     if (b->iv[i] >= 0) {
-      __int128 coefficient = sign * (__int128)b->coefficient[i];
+      ny_i128 coefficient = sign * (ny_i128)b->coefficient[i];
       if (coefficient < INT64_MIN || coefficient > INT64_MAX ||
           !scev_affine_add_term(out, b->iv[i], (int64_t)coefficient))
         return false;
@@ -1105,14 +1105,14 @@ static bool scev_affine_scale(nyr_scev_affine_t *out,
   if (!out || !in)
     return false;
   scev_affine_init(out);
-  __int128 constant = (__int128)in->constant * scale;
+  ny_i128 constant = (ny_i128)in->constant * scale;
   if (constant < INT64_MIN || constant > INT64_MAX)
     return false;
   out->constant = (int64_t)constant;
   for (size_t i = 0; i < 2; ++i) {
     if (in->iv[i] < 0)
       continue;
-    __int128 coefficient = (__int128)in->coefficient[i] * scale;
+    ny_i128 coefficient = (ny_i128)in->coefficient[i] * scale;
     if (coefficient < INT64_MIN || coefficient > INT64_MAX ||
         !scev_affine_add_term(out, in->iv[i], (int64_t)coefficient))
       return false;
@@ -1190,7 +1190,7 @@ static bool scev_affine_bound(const nyr_func_t *f, const nyr_scev_info_t *info,
                               nyr_scev_affine_t *out) {
   if (!f || !info || !defs || !cfg || !out)
     return false;
-  __int128 lo = out->constant, hi = out->constant;
+  ny_i128 lo = out->constant, hi = out->constant;
   for (size_t i = 0; i < 2; ++i) {
     if (out->iv[i] < 0 || out->coefficient[i] == 0)
       continue;
@@ -1198,8 +1198,8 @@ static bool scev_affine_bound(const nyr_func_t *f, const nyr_scev_info_t *info,
     if (!scev_loop_iv_bounds_at(f, info, defs, cfg, out->iv[i], at, &iv_min,
                                 &iv_max))
       return false;
-    __int128 first = (__int128)out->coefficient[i] * iv_min;
-    __int128 last = (__int128)out->coefficient[i] * iv_max;
+    ny_i128 first = (ny_i128)out->coefficient[i] * iv_min;
+    ny_i128 last = (ny_i128)out->coefficient[i] * iv_max;
     if (first < last) {
       lo += first;
       hi += last;
@@ -1601,7 +1601,7 @@ static bool scev_guard_proves_offset(const nyr_func_t *f,
   if (loop->predicate == NYIR_CMP_LT ? offset.constant > 0
                                      : offset.constant >= 0)
     return false;
-  __int128 lowest = (__int128)scale * loop->init + offset.constant;
+  ny_i128 lowest = (ny_i128)scale * loop->init + offset.constant;
   if (lowest < 0)
     return false;
   int base = check->c;
@@ -1660,8 +1660,8 @@ typedef struct {
 static bool scev_exit_form_combine(scev_exit_form_t *out,
                                    const scev_exit_form_t *a,
                                    const scev_exit_form_t *b, int sign) {
-  __int128 scale = (__int128)a->scale + sign * (__int128)b->scale;
-  __int128 constant = (__int128)a->constant + sign * (__int128)b->constant;
+  ny_i128 scale = (ny_i128)a->scale + sign * (ny_i128)b->scale;
+  ny_i128 constant = (ny_i128)a->constant + sign * (ny_i128)b->constant;
   if (scale < INT64_MIN || scale > INT64_MAX || constant < INT64_MIN ||
       constant > INT64_MAX)
     return false;
@@ -1709,8 +1709,8 @@ static bool scev_exit_form_build(const nyr_func_t *f, const int *defs, int iv,
     }
     if (!scev_exit_form_build(f, defs, iv, exit_const, variable, depth + 1, &a))
       return false;
-    __int128 new_scale = (__int128)a.scale * scale;
-    __int128 new_const = (__int128)a.constant * scale;
+    ny_i128 new_scale = (ny_i128)a.scale * scale;
+    ny_i128 new_const = (ny_i128)a.constant * scale;
     if (new_scale < INT64_MIN || new_scale > INT64_MAX ||
         new_const < INT64_MIN || new_const > INT64_MAX)
       return false;
@@ -1726,8 +1726,8 @@ static bool scev_exit_form_build(const nyr_func_t *f, const int *defs, int iv,
     if (!scev_exit_form_build(f, defs, iv, exit_const, in->a, depth + 1, &a))
       return false;
     int64_t scale = INT64_C(1) << (unsigned)shift;
-    __int128 new_scale = (__int128)a.scale * scale;
-    __int128 new_const = (__int128)a.constant * scale;
+    ny_i128 new_scale = (ny_i128)a.scale * scale;
+    ny_i128 new_const = (ny_i128)a.constant * scale;
     if (new_scale < INT64_MIN || new_scale > INT64_MAX ||
         new_const < INT64_MIN || new_const > INT64_MAX)
       return false;
@@ -1810,7 +1810,7 @@ static bool scev_exit_proves_check(const nyr_func_t *f,
         offset.scale != length.scale ||
         offset.constant >= length.constant)
       continue;
-    __int128 low = (__int128)offset.scale * loop->exit_lb + offset.constant;
+    ny_i128 low = (ny_i128)offset.scale * loop->exit_lb + offset.constant;
     if (low < 0)
       continue;
     proved = true;
@@ -1984,7 +1984,7 @@ bool nyr_scev_lite(nyr_func_t *f) {
      * Include that final tested value (`init + trip*step`) in the header
      * range.  Use wide arithmetic and discard the fact on overflow.
      */
-    __int128 exit_value = (__int128)l->init + (__int128)l->trip_count * l->step;
+    ny_i128 exit_value = (ny_i128)l->init + (ny_i128)l->trip_count * l->step;
     if (exit_value < INT64_MIN || exit_value > INT64_MAX)
       continue;
     int64_t exit_i = (int64_t)exit_value;

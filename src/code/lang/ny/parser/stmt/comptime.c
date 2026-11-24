@@ -2256,8 +2256,8 @@ static void ct_clone_call_args(parser_t *p, ny_call_arg_list *dst,
                                ny_call_arg_list *src, ct_reflect_ctx_t *ctx) {
   for (size_t i = 0; src && i < src->len; i++) {
     expr_t *value = src->data[i].val;
-    const ct_value_t *binding = ct_placeholder_value(p, value, ctx);
-    if (binding && binding->kind == CT_VALUE_AST_LIST) {
+    const ct_value_t *bind = ct_placeholder_value(p, value, ctx);
+    if (bind && bind->kind == CT_VALUE_AST_LIST) {
       if (src->data[i].name) {
         parser_error(p, value->tok,
                      "a code list cannot expand into a named call argument",
@@ -2265,7 +2265,7 @@ static void ct_clone_call_args(parser_t *p, ny_call_arg_list *dst,
         continue;
       }
       ny_expr_list expanded = {0};
-      ct_append_expr_value(p, &expanded, binding, value->tok, ctx);
+      ct_append_expr_value(p, &expanded, bind, value->tok, ctx);
       for (size_t j = 0; j < expanded.len; j++)
         vec_push_arena(p->arena, dst,
                        ((call_arg_t){.name = NULL, .val = expanded.data[j]}));

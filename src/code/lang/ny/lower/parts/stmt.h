@@ -5089,8 +5089,8 @@ static bool nyr_lower_for_range(nyr_builder_t *b, const stmt_t *s) {
     if (known_suffix && !s->as.fr.iter_index_var &&
         nyr_const_i64_expr(lo_expr, &lo_const, 0) &&
         nyr_const_i64_expr(hi_expr, &hi_const, 0)) {
-      __int128 trips =
-          hi_const < lo_const ? 0 : (__int128)hi_const - (__int128)lo_const + 1;
+      ny_i128 trips =
+          hi_const < lo_const ? 0 : (ny_i128)hi_const - (ny_i128)lo_const + 1;
       if (trips >= 0 && trips <= INT64_MAX) {
         repeat_append = true;
         repeat_count = (int64_t)trips;
@@ -11728,13 +11728,13 @@ nyr_find_global_var_init_cached(ny_native_fn_collector_t *col,
 
 static bool nyr_expr_has_dyn_list_shape_in_scope(const program_t *prog,
                                                  ny_native_fn_collector_t *col,
-                                                 const stmt_t *scope,
+                                                 const stmt_t *scope_ref,
                                                  const expr_t *e,
                                                  unsigned depth) {
   if (!e || depth > 32)
     return false;
   if (e->kind == NY_E_IDENT && prog) {
-    const expr_t *init = nyr_find_var_init_in_stmt(scope, e->as.ident.name, 0);
+    const expr_t *init = nyr_find_var_init_in_stmt(scope_ref, e->as.ident.name, 0);
     if (init && e->tok.filename && init->tok.filename &&
         strcmp(e->tok.filename, init->tok.filename) != 0)
       init = NULL;
@@ -11743,7 +11743,7 @@ static bool nyr_expr_has_dyn_list_shape_in_scope(const program_t *prog,
                                              e->tok.filename);
     }
     if (init && init != e)
-      return nyr_expr_has_dyn_list_shape_in_scope(prog, col, scope, init,
+      return nyr_expr_has_dyn_list_shape_in_scope(prog, col, scope_ref, init,
                                                   depth + 1);
     return false;
   }
@@ -13548,11 +13548,11 @@ static void ny_native_scan_stmt_for_calls(const stmt_t *s,
         /* Defer bodies are closures too. Their environment layout must be
          * known before helper functions are emitted, including lexical
          * resource scopes in rt_main. Registration is too late. */
-        const stmt_t *scope =
+        const stmt_t *scope_ref =
             col->scope_fn ? col->scope_fn->as.fn.body : col->query_scope;
-        if (scope && scope->kind == NY_S_FUNC)
-          scope = scope->as.fn.body;
-        ny_native_lambda_capture_locals(scope, entry->expr, entry, col, 0);
+        if (scope_ref && scope_ref->kind == NY_S_FUNC)
+          scope_ref = scope_ref->as.fn.body;
+        ny_native_lambda_capture_locals(scope_ref, entry->expr, entry, col, 0);
       }
       if (entry && col->prog) {
         const char *module =

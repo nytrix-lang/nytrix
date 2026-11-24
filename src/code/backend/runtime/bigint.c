@@ -2980,13 +2980,13 @@ static int64_t _bi_from_limbs(int sign, const uint64_t *limbs, size_t words) {
 static inline int64_t
 _bi_from_limbs_or_small_int(int sign, const uint64_t *limbs, size_t words);
 
-static inline int64_t _bi_from_i128_value(__int128 v, int compact) {
-  if (compact && v >= (__int128)NY_SMALL_INT_MIN &&
-      v <= (__int128)NY_SMALL_INT_MAX)
+static inline int64_t _bi_from_i128_value(ny_i128 v, int compact) {
+  if (compact && v >= (ny_i128)NY_SMALL_INT_MIN &&
+      v <= (ny_i128)NY_SMALL_INT_MAX)
     return rt_tag_v((int64_t)v);
   int sign = v < 0 ? -1 : (v > 0 ? 1 : 0);
-  unsigned __int128 mag =
-      v < 0 ? (unsigned __int128)(-(v + 1)) + 1u : (unsigned __int128)v;
+  ny_u128 mag =
+      v < 0 ? (ny_u128)(-(v + 1)) + 1u : (ny_u128)v;
   uint64_t limbs[2] = {(uint64_t)mag, (uint64_t)(mag >> 64)};
   size_t words = limbs[1] ? 2 : (limbs[0] ? 1 : 0);
   return compact ? _bi_from_limbs_or_small_int(sign, limbs, words)
@@ -2997,9 +2997,9 @@ static inline bool _bi_try_submul_i64_int_pair(int64_t a, int64_t q_raw,
                                                int64_t b, int64_t *out) {
   if (!is_int(a) || !is_int(b))
     return false;
-  __int128 av = (__int128)rt_untag_v(a);
-  __int128 bv = (__int128)rt_untag_v(b);
-  *out = _bi_from_i128_value(av - (__int128)q_raw * bv, 1);
+  ny_i128 av = (ny_i128)rt_untag_v(a);
+  ny_i128 bv = (ny_i128)rt_untag_v(b);
+  *out = _bi_from_i128_value(av - (ny_i128)q_raw * bv, 1);
   return true;
 }
 
@@ -3007,14 +3007,14 @@ static inline bool _bi_try_add_int_pair(int64_t a, int64_t b, int sub_b,
                                         int64_t *out) {
   if (!is_int(a) || !is_int(b))
     return false;
-  __int128 av = (__int128)rt_untag_v(a);
-  __int128 bv = (__int128)rt_untag_v(b);
+  ny_i128 av = (ny_i128)rt_untag_v(a);
+  ny_i128 bv = (ny_i128)rt_untag_v(b);
   *out = _bi_from_i128_value(sub_b ? av - bv : av + bv, 1);
   return true;
 }
 
-static inline bool _bi_try_i128_small_tag(__int128 v, int64_t *out) {
-  if (v < (__int128)NY_SMALL_INT_MIN || v > (__int128)NY_SMALL_INT_MAX)
+static inline bool _bi_try_i128_small_tag(ny_i128 v, int64_t *out) {
+  if (v < (ny_i128)NY_SMALL_INT_MIN || v > (ny_i128)NY_SMALL_INT_MAX)
     return false;
   *out = rt_tag_v((int64_t)v);
   return true;
@@ -3025,15 +3025,15 @@ static inline bool _bi_try_submul_i64_int_pair_small(int64_t a, int64_t q_raw,
   if (!is_int(a) || !is_int(b))
     return false;
   return _bi_try_i128_small_tag(
-      (__int128)rt_untag_v(a) - (__int128)q_raw * (__int128)rt_untag_v(b), out);
+      (ny_i128)rt_untag_v(a) - (ny_i128)q_raw * (ny_i128)rt_untag_v(b), out);
 }
 
 static inline bool _bi_try_add_int_pair_small(int64_t a, int64_t b, int sub_b,
                                               int64_t *out) {
   if (!is_int(a) || !is_int(b))
     return false;
-  __int128 av = (__int128)rt_untag_v(a);
-  __int128 bv = (__int128)rt_untag_v(b);
+  ny_i128 av = (ny_i128)rt_untag_v(a);
+  ny_i128 bv = (ny_i128)rt_untag_v(b);
   return _bi_try_i128_small_tag(sub_b ? av - bv : av + bv, out);
 }
 
@@ -3087,8 +3087,8 @@ static inline bool _bi_try_add_limb2_kind(int64_t a, int64_t b, int sub_b,
     if (compact)
       _bi_try_add_int_pair(a, b, sub_b, out);
     else {
-      __int128 av = (__int128)rt_untag_v(a);
-      __int128 bv = (__int128)rt_untag_v(b);
+      ny_i128 av = (ny_i128)rt_untag_v(a);
+      ny_i128 bv = (ny_i128)rt_untag_v(b);
       *out = _bi_from_i128_value(sub_b ? av - bv : av + bv, 0);
     }
     return true;
@@ -3101,8 +3101,8 @@ static inline bool _bi_try_add_limb2_kind(int64_t a, int64_t b, int sub_b,
   if (sub_b)
     bs = -bs;
   if (aw <= 1 && bw <= 1) {
-    __int128 av = as < 0 ? -(__int128)al[0] : (as > 0 ? (__int128)al[0] : 0);
-    __int128 bv = bs < 0 ? -(__int128)bl[0] : (bs > 0 ? (__int128)bl[0] : 0);
+    ny_i128 av = as < 0 ? -(ny_i128)al[0] : (as > 0 ? (ny_i128)al[0] : 0);
+    ny_i128 bv = bs < 0 ? -(ny_i128)bl[0] : (bs > 0 ? (ny_i128)bl[0] : 0);
     *out = _bi_from_i128_value(av + bv, compact);
     return true;
   }
@@ -3705,9 +3705,9 @@ static inline bool _bi_try_submul_i64_limb2(int64_t a, int64_t q_raw, int64_t b,
     return true;
   }
   if (aw <= 1 && bw <= 1) {
-    __int128 av = as < 0 ? -(__int128)al[0] : (as > 0 ? (__int128)al[0] : 0);
-    __int128 bv = bs < 0 ? -(__int128)bl[0] : (bs > 0 ? (__int128)bl[0] : 0);
-    *out = _bi_from_i128_value(av - (__int128)q_raw * bv, 1);
+    ny_i128 av = as < 0 ? -(ny_i128)al[0] : (as > 0 ? (ny_i128)al[0] : 0);
+    ny_i128 bv = bs < 0 ? -(ny_i128)bl[0] : (bs > 0 ? (ny_i128)bl[0] : 0);
+    *out = _bi_from_i128_value(av - (ny_i128)q_raw * bv, 1);
     return true;
   }
   int qs = q_raw < 0 ? -1 : 1;
@@ -4692,7 +4692,7 @@ static int64_t rt_bigint_from_element_bytes(uintptr_t base, size_t count,
       count - 1u > (UINTPTR_MAX - base) / stride)
     return _bi_from_i64(0);
 
-  uint8_t stack_bytes[256];
+  uint8_t stack_bytes[256] = {0};
   uint8_t *bytes =
       count <= sizeof(stack_bytes) ? stack_bytes : (uint8_t *)malloc(count);
   if (!bytes)

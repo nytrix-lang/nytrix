@@ -79,32 +79,32 @@ static bool op_proven_no_overflow(const nyr_func_t *f,
    */
   switch (op) {
   case NYIR_ADD_I64: {
-    __int128 hi = (__int128)amax + (__int128)bmax;
-    __int128 lo = (__int128)amin + (__int128)bmin;
+    ny_i128 hi = (ny_i128)amax + (ny_i128)bmax;
+    ny_i128 lo = (ny_i128)amin + (ny_i128)bmin;
     if (lo >= INT64_MIN && hi <= INT64_MAX)
       return true;
     break;
   }
 
   case NYIR_SUB_I64: {
-    __int128 hi = (__int128)amax - (__int128)bmin;
-    __int128 lo = (__int128)amin - (__int128)bmax;
+    ny_i128 hi = (ny_i128)amax - (ny_i128)bmin;
+    ny_i128 lo = (ny_i128)amin - (ny_i128)bmax;
     if (lo >= INT64_MIN && hi <= INT64_MAX)
       return true;
     break;
   }
 
   case NYIR_MUL_I64: {
-    __int128 p1 = (__int128)amin * (__int128)bmin;
-    __int128 p2 = (__int128)amin * (__int128)bmax;
-    __int128 p3 = (__int128)amax * (__int128)bmin;
-    __int128 p4 = (__int128)amax * (__int128)bmax;
-    __int128 hi = p1 > p2 ? p1 : p2;
+    ny_i128 p1 = (ny_i128)amin * (ny_i128)bmin;
+    ny_i128 p2 = (ny_i128)amin * (ny_i128)bmax;
+    ny_i128 p3 = (ny_i128)amax * (ny_i128)bmin;
+    ny_i128 p4 = (ny_i128)amax * (ny_i128)bmax;
+    ny_i128 hi = p1 > p2 ? p1 : p2;
     if (p3 > hi)
       hi = p3;
     if (p4 > hi)
       hi = p4;
-    __int128 lo = p1 < p2 ? p1 : p2;
+    ny_i128 lo = p1 < p2 ? p1 : p2;
     if (p3 < lo)
       lo = p3;
     if (p4 < lo)
@@ -165,26 +165,26 @@ static bool eliminate_const_overflow(nyr_func_t *f, const int *defs,
   bool b_const = get_const_value(f, defs, in->b, &bval);
 
   if (a_const && b_const) {
-    __int128 result = 0;
+    ny_i128 result = 0;
     bool overflow = false;
     switch (in->op) {
     case NYIR_ADD_I64:
-      result = (__int128)aval + bval;
+      result = (ny_i128)aval + bval;
       overflow = result < INT64_MIN || result > INT64_MAX;
       break;
     case NYIR_SUB_I64:
-      result = (__int128)aval - bval;
+      result = (ny_i128)aval - bval;
       overflow = result < INT64_MIN || result > INT64_MAX;
       break;
     case NYIR_MUL_I64:
-      result = (__int128)aval * bval;
+      result = (ny_i128)aval * bval;
       overflow = result < INT64_MIN || result > INT64_MAX;
       break;
     case NYIR_SHL_I64:
       if (bval < 0 || bval >= 64)
         overflow = true;
       else
-        result = (__int128)aval << bval,
+        result = (ny_i128)aval << bval,
         overflow = result < INT64_MIN || result > INT64_MAX;
       break;
     default:

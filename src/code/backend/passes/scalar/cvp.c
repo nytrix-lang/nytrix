@@ -144,7 +144,7 @@ bool nyr_cvp(nyr_func_t *f) {
             info[rb].affine_b >= 0 && info[rb].affine_b < 64) {
           info[rd].has_affine = true;
           info[rd].affine_a = 0;
-          info[rd].affine_b = (__int128)info[ra].affine_b << info[rb].affine_b;
+          info[rd].affine_b = (ny_i128)info[ra].affine_b << info[rb].affine_b;
           info[rd].base_var = -1;
         }
       }

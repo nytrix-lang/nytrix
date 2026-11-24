@@ -1272,10 +1272,10 @@ static uint64_t ny_ct_memo_hash_expr(codegen_t *cg, const expr_t *e) {
   case NY_E_IDENT: {
     if (!e->as.ident.name)
       return hash;
-    const void *binding = ny_ct_memo_ident_binding(cg, e);
+    const void *bind = ny_ct_memo_ident_binding(cg, e);
     hash =
         ny_ct_memo_hash_bytes(hash, e->as.ident.name, strlen(e->as.ident.name));
-    return ny_ct_memo_hash_bytes(hash, &binding, sizeof(binding));
+    return ny_ct_memo_hash_bytes(hash, &bind, sizeof(bind));
   }
   case NY_E_LITERAL: {
     const literal_t *literal = &e->as.literal;
@@ -1819,12 +1819,12 @@ static bool ny_ct_expr_memo_read(codegen_t *cg, const expr_t *expr,
   if (!cg || !out || !ny_ct_expr_memo_closed(cg, expr, 0))
     return false;
   codegen_env_cache_t *cache = &cg->env_cache;
-  const void *binding = ny_ct_memo_ident_binding(cg, expr);
+  const void *bind = ny_ct_memo_ident_binding(cg, expr);
   uint64_t key_hash = ny_ct_memo_hash_expr(cg, expr);
   for (size_t i = 0; i < cache->comptime_expr_memo_len; ++i) {
     codegen_comptime_expr_memo_entry_t *entry = &cache->comptime_expr_memo[i];
     if (!entry->occupied || entry->key_hash != key_hash ||
-        entry->binding != binding ||
+        entry->binding != bind ||
         !ny_ct_memo_expr_equal(cg, entry->expr, expr))
       continue;
     memset(out, 0, sizeof(*out));
@@ -1843,7 +1843,7 @@ static void ny_ct_expr_memo_write(codegen_t *cg, const expr_t *expr,
   if (!cg || !value || !ny_ct_expr_memo_closed(cg, expr, 0))
     return;
   codegen_env_cache_t *cache = &cg->env_cache;
-  const void *binding = ny_ct_memo_ident_binding(cg, expr);
+  const void *bind = ny_ct_memo_ident_binding(cg, expr);
   uint64_t key_hash = ny_ct_memo_hash_expr(cg, expr);
   ny_ct_fast_val_t owned_value = {0};
   if (!ny_ct_fast_val_clone(value, &owned_value))
@@ -1851,7 +1851,7 @@ static void ny_ct_expr_memo_write(codegen_t *cg, const expr_t *expr,
   for (size_t i = 0; i < cache->comptime_expr_memo_len; ++i) {
     codegen_comptime_expr_memo_entry_t *entry = &cache->comptime_expr_memo[i];
     if (entry->occupied && entry->key_hash == key_hash &&
-        entry->binding == binding &&
+        entry->binding == bind &&
         ny_ct_memo_expr_equal(cg, entry->expr, expr)) {
       ny_ct_fast_val_free(&entry->value);
       entry->value = owned_value;
@@ -1873,7 +1873,7 @@ static void ny_ct_expr_memo_write(codegen_t *cg, const expr_t *expr,
     fprintf(stderr, "[memwrite] kind=%d i=%lld\n", (int)value->kind,
             (long long)(value->kind == NY_CT_FAST_INT ? value->i : -1));
   *entry = (codegen_comptime_expr_memo_entry_t){.expr = expr,
-                                                .binding = binding,
+                                                .binding = bind,
                                                 .key_hash = key_hash,
                                                 .value = owned_value,
                                                 .occupied = true};

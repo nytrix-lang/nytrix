@@ -130,9 +130,9 @@ static bool sroa_private_stack_fields(nyr_func_t *f, bool *changed) {
           int other = in->a == value ? in->b : in->a;
           if (!is_var && other >= 0 && known[other]) {
             int64_t delta = constants[other];
-            __int128 offset =
-                (__int128)offsets[value] +
-                (in->op == NYIR_SUB_I64 ? -(__int128)delta : delta);
+            ny_i128 offset =
+                (ny_i128)offsets[value] +
+                (in->op == NYIR_SUB_I64 ? -(ny_i128)delta : delta);
             if (offset < 0 || offset > allocation->imm) {
               safe = false;
               break;

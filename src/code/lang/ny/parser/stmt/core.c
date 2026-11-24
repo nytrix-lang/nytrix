@@ -1545,6 +1545,12 @@ static bool type_src_expand(parser_t *p, const char *src, size_t len,
  * Source text of a type between two source positions, whitespace collapsed
  * and type-level definitions expanded.
  */
+/* parser_intern copies into the arena; GCC cannot see that through the
+   `!p` early return it inlines, and flags `raw`/`out` as escaping. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wreturn-local-addr"
+#endif
 const char *parser_type_src_text(parser_t *p, const char *start,
                                  const char *end) {
   if (!p || !start || !end || end <= start || end - start > 2048)
@@ -1567,6 +1573,9 @@ const char *parser_type_src_text(parser_t *p, const char *start,
     return parser_intern(p, raw, r);
   return parser_intern(p, out, used);
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /*
  * Function type spelling `fn(T1, T2) R` (R optional).  Returns the

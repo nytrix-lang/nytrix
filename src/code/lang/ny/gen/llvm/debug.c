@@ -63,7 +63,7 @@ static ny_di_insert_at_end_fn ny_resolve_di_insert(const char *primary,
   void *sym = dlsym(RTLD_DEFAULT, primary);
   if (!sym && fallback)
     sym = dlsym(RTLD_DEFAULT, fallback);
-  return (ny_di_insert_at_end_fn)sym;
+  return __extension__ (ny_di_insert_at_end_fn)sym;
 #endif
 }
 
@@ -80,9 +80,9 @@ static void ny_maybe_enable_new_dbg_info_format(LLVMModuleRef module) {
     set_new_dbg = (ny_llvm_set_new_dbg_info_format_fn)ny_resolve_symbol_win(
         "LLVMSetIsNewDbgInfoFormat");
 #else
-    is_new_dbg = (ny_llvm_is_new_dbg_info_format_fn)dlsym(
+    is_new_dbg = __extension__ (ny_llvm_is_new_dbg_info_format_fn)dlsym(
         RTLD_DEFAULT, "LLVMIsNewDbgInfoFormat");
-    set_new_dbg = (ny_llvm_set_new_dbg_info_format_fn)dlsym(
+    set_new_dbg = __extension__ (ny_llvm_set_new_dbg_info_format_fn)dlsym(
         RTLD_DEFAULT, "LLVMSetIsNewDbgInfoFormat");
 #endif
     resolved = true;

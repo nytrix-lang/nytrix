@@ -11,7 +11,7 @@
 
 nyFfiState_t gNyFfi = {0};
 
-static int64_t stub_i_v(void *fn) { return ((int64_t (*)(void))fn)(); }
+static int64_t stub_i_v(void *fn) { return (__extension__ (int64_t (*)(void))fn)(); }
 
 static int64_t stub_i_i(void *fn, int64_t a0) {
   return nyFfiFastII((int64_t)(uintptr_t)fn, a0);
@@ -27,35 +27,35 @@ static int64_t stub_i_iii(void *fn, int64_t a0, int64_t a1, int64_t a2) {
 
 static int64_t stub_i_iiii(void *fn, int64_t a0, int64_t a1, int64_t a2,
                            int64_t a3) {
-  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))fn)(a0, a1, a2, a3);
+  return (__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t))fn)(a0, a1, a2, a3);
 }
 
 static int64_t stub_i_iiiii(void *fn, int64_t a0, int64_t a1, int64_t a2,
                             int64_t a3, int64_t a4) {
-  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))fn)(
+  return (__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))fn)(
       a0, a1, a2, a3, a4);
 }
 
-static void stub_v_i(void *fn, int64_t a0) { ((void (*)(int64_t))fn)(a0); }
+static void stub_v_i(void *fn, int64_t a0) { (__extension__ (void (*)(int64_t))fn)(a0); }
 
 static void stub_v_ii(void *fn, int64_t a0, int64_t a1) {
-  ((void (*)(int64_t, int64_t))fn)(a0, a1);
+  (__extension__ (void (*)(int64_t, int64_t))fn)(a0, a1);
 }
 
 static void stub_v_iii(void *fn, int64_t a0, int64_t a1, int64_t a2) {
-  ((void (*)(int64_t, int64_t, int64_t))fn)(a0, a1, a2);
+  (__extension__ (void (*)(int64_t, int64_t, int64_t))fn)(a0, a1, a2);
 }
 
 static int64_t stub_p_p(void *fn, int64_t a0) {
-  return (int64_t)((void *(*)(void *))fn)((void *)a0);
+  return (int64_t)(__extension__ (void *(*)(void *))fn)((void *)a0);
 }
 
 static int64_t stub_p_pp(void *fn, int64_t a0, int64_t a1) {
-  return (int64_t)((void *(*)(void *, void *))fn)((void *)a0, (void *)a1);
+  return (int64_t)(__extension__ (void *(*)(void *, void *))fn)((void *)a0, (void *)a1);
 }
 
 static int64_t stub_p_pi(void *fn, int64_t a0, int64_t a1) {
-  return (int64_t)((void *(*)(void *, int64_t))fn)((void *)a0, a1);
+  return (int64_t)(__extension__ (void *(*)(void *, int64_t))fn)((void *)a0, a1);
 }
 
 void nyFfiGates_init(void) {
@@ -72,18 +72,18 @@ void nyFfiGates_init(void) {
   if (!gNyFfi.gates)
     gNyFfi.gate_capacity = 0;
   gNyFfi.gate_count = 0;
-  nyFfiRegisterGate(NY_FFI_SIG_I_V, "i_v", (void *)stub_i_v);
-  nyFfiRegisterGate(NY_FFI_SIG_I_I, "i_i", (void *)stub_i_i);
-  nyFfiRegisterGate(NY_FFI_SIG_I_II, "i_ii", (void *)stub_i_ii);
-  nyFfiRegisterGate(NY_FFI_SIG_I_III, "i_iii", (void *)stub_i_iii);
-  nyFfiRegisterGate(NY_FFI_SIG_I_IIII, "i_iiii", (void *)stub_i_iiii);
-  nyFfiRegisterGate(NY_FFI_SIG_I_IIIII, "i_iiiii", (void *)stub_i_iiiii);
-  nyFfiRegisterGate(NY_FFI_SIG_V_I, "v_i", (void *)stub_v_i);
-  nyFfiRegisterGate(NY_FFI_SIG_V_II, "v_ii", (void *)stub_v_ii);
-  nyFfiRegisterGate(NY_FFI_SIG_V_III, "v_iii", (void *)stub_v_iii);
-  nyFfiRegisterGate(NY_FFI_SIG_P_P, "p_p", (void *)stub_p_p);
-  nyFfiRegisterGate(NY_FFI_SIG_P_PP, "p_pp", (void *)stub_p_pp);
-  nyFfiRegisterGate(NY_FFI_SIG_P_PI, "p_pi", (void *)stub_p_pi);
+  nyFfiRegisterGate(NY_FFI_SIG_I_V, "i_v", __extension__ (void *)stub_i_v);
+  nyFfiRegisterGate(NY_FFI_SIG_I_I, "i_i", __extension__ (void *)stub_i_i);
+  nyFfiRegisterGate(NY_FFI_SIG_I_II, "i_ii", __extension__ (void *)stub_i_ii);
+  nyFfiRegisterGate(NY_FFI_SIG_I_III, "i_iii", __extension__ (void *)stub_i_iii);
+  nyFfiRegisterGate(NY_FFI_SIG_I_IIII, "i_iiii", __extension__ (void *)stub_i_iiii);
+  nyFfiRegisterGate(NY_FFI_SIG_I_IIIII, "i_iiiii", __extension__ (void *)stub_i_iiiii);
+  nyFfiRegisterGate(NY_FFI_SIG_V_I, "v_i", __extension__ (void *)stub_v_i);
+  nyFfiRegisterGate(NY_FFI_SIG_V_II, "v_ii", __extension__ (void *)stub_v_ii);
+  nyFfiRegisterGate(NY_FFI_SIG_V_III, "v_iii", __extension__ (void *)stub_v_iii);
+  nyFfiRegisterGate(NY_FFI_SIG_P_P, "p_p", __extension__ (void *)stub_p_p);
+  nyFfiRegisterGate(NY_FFI_SIG_P_PP, "p_pp", __extension__ (void *)stub_p_pp);
+  nyFfiRegisterGate(NY_FFI_SIG_P_PI, "p_pi", __extension__ (void *)stub_p_pi);
   gNyFfi.initialized = true;
   gNyFfi.fast_calls_enabled = rt_env_enabled("NYTRIX_FFIG_FAST_CALLS");
 }
@@ -277,18 +277,18 @@ int64_t nyFfiCallPPi(void *fn, int64_t a0, int64_t a1) {
 
 int64_t nyFfiCallPII(void *fn, int64_t a0, int64_t a1) {
   gNyFfi.stats.fast_calls++;
-  return ((int64_t (*)(int64_t, int64_t))fn)(a0, a1);
+  return (__extension__ (int64_t (*)(int64_t, int64_t))fn)(a0, a1);
 }
 
 int64_t nyFfiCallPIIi(void *fn, int64_t a0, int64_t a1, int64_t a2) {
   gNyFfi.stats.fast_calls++;
-  return ((int64_t (*)(int64_t, int64_t, int64_t))fn)(a0, a1, a2);
+  return (__extension__ (int64_t (*)(int64_t, int64_t, int64_t))fn)(a0, a1, a2);
 }
 
 int64_t nyFfiCallPIIii(void *fn, int64_t a0, int64_t a1, int64_t a2,
                        int64_t a3) {
   gNyFfi.stats.fast_calls++;
-  return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))fn)(a0, a1, a2, a3);
+  return (__extension__ (int64_t (*)(int64_t, int64_t, int64_t, int64_t))fn)(a0, a1, a2, a3);
 }
 
 int64_t nyFfiCallGeneric(void *fn, int64_t *args, size_t argc) {

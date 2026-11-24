@@ -1132,8 +1132,6 @@ static int clone_add_source(CClone *c, const char *path, int lang) {
   char *content = ny_read_file_raw(path, &len);
   if (!content) {
     c->stats.read_failures++;
-    if (!c->cfg.legacy_min_set)
-      ; /* keep the branch explicit: read failures are reported below */
     return 1;
   }
   if (!clone_grow((void **)&c->src, &c->src_cap, c->nsrc + 1,

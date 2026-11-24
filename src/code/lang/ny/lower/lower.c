@@ -14393,12 +14393,12 @@ static const stmt_t *nyr_find_user_function_in_stmt(const stmt_t *s,
 
 static const stmt_t *
 nyr_find_user_function_in_stmt_cached(const nyr_builder_impl_t *b,
-                                      const stmt_t *scope, const char *name) {
-  if (!scope || !name)
+                                      const stmt_t *scope_ref, const char *name) {
+  if (!scope_ref || !name)
     return NULL;
   ny_native_fn_index_t *index = ny_native_fn_index_for(b);
   if (!index)
-    return nyr_find_user_function_in_stmt(scope, name, 0);
+    return nyr_find_user_function_in_stmt(scope_ref, name, 0);
   if (!index->trace_lookup_stats_initialized) {
     index->trace_lookup_stats = getenv("NYTRIX_TRACE_LOOKUPS") != NULL;
     index->trace_lookup_stats_initialized = true;
@@ -14413,7 +14413,7 @@ nyr_find_user_function_in_stmt_cached(const nyr_builder_impl_t *b,
   if (index->user_fn_scope_cache_disabled) {
     if (index->trace_lookup_stats)
       index->user_fn_scope_scans++;
-    return nyr_find_user_function_in_stmt(scope, name, 0);
+    return nyr_find_user_function_in_stmt(scope_ref, name, 0);
   }
   /*
    * Module-scoped imports are the common hot path here. The scope walk below
@@ -14424,13 +14424,13 @@ nyr_find_user_function_in_stmt_cached(const nyr_builder_impl_t *b,
    * names because package surfaces expose child-module declarations through
    * their parent package.
    */
-  if (scope->kind == NY_S_MODULE && scope->as.module.name &&
-      scope->tok.filename && index->functions.prog == b->prog &&
+  if (scope_ref->kind == NY_S_MODULE && scope_ref->as.module.name &&
+      scope_ref->tok.filename && index->functions.prog == b->prog &&
       index->fn_leaf_next) {
     const char *leaf = ny_name_leaf(name);
     uint32_t slot =
         ny_fn_name_hash(leaf ? leaf : name) & (NY_FN_BUCKET_SIZE - 1);
-    const size_t scope_len = strlen(scope->as.module.name);
+    const size_t scope_len = strlen(scope_ref->as.module.name);
     const int32_t *heads[] = {index->fn_leaf_user_buckets,
                               index->fn_leaf_stdlib_buckets};
     for (size_t h = 0; h < sizeof(heads) / sizeof(heads[0]); ++h) {
@@ -14440,11 +14440,11 @@ nyr_find_user_function_in_stmt_cached(const nyr_builder_impl_t *b,
             !ny_native_name_matches(fn->as.fn.name, name))
           continue;
         const char *module = index->functions.modules[i];
-        if (!module || strncmp(module, scope->as.module.name, scope_len) != 0 ||
+        if (!module || strncmp(module, scope_ref->as.module.name, scope_len) != 0 ||
             (module[scope_len] != '\0' && module[scope_len] != '.'))
           continue;
         if (!fn->tok.filename ||
-            !nyr_same_source_file(scope->tok.filename, fn->tok.filename))
+            !nyr_same_source_file(scope_ref->tok.filename, fn->tok.filename))
           continue;
         if (index->trace_lookup_stats)
           index->user_fn_scope_hits++;
@@ -14468,18 +14468,18 @@ nyr_find_user_function_in_stmt_cached(const nyr_builder_impl_t *b,
   if (name_len >= sizeof(((ny_native_user_fn_scope_entry_t *)0)->name)) {
     if (index->trace_lookup_stats)
       index->user_fn_scope_scans++;
-    return nyr_find_user_function_in_stmt(scope, name, 0);
+    return nyr_find_user_function_in_stmt(scope_ref, name, 0);
   }
   uint32_t name_hash = ny_fn_name_hash(name);
   ny_native_user_fn_scope_entry_t *entry = NULL;
   if (index->user_fn_scopes) {
-    uintptr_t scope_hash = (uintptr_t)scope;
+    uintptr_t scope_hash = (uintptr_t)scope_ref;
     scope_hash ^= scope_hash >> 17;
     scope_hash ^= scope_hash >> 9;
     size_t slot =
         (name_hash ^ (uint32_t)scope_hash) & (NY_USER_FN_SCOPE_CACHE_SIZE - 1u);
     entry = &index->user_fn_scopes[slot];
-    if (entry->resolved && entry->scope == scope &&
+    if (entry->resolved && entry->scope == scope_ref &&
         entry->name_hash == name_hash && strcmp(entry->name, name) == 0) {
       if (index->trace_lookup_stats)
         index->user_fn_scope_hits++;
@@ -14488,9 +14488,9 @@ nyr_find_user_function_in_stmt_cached(const nyr_builder_impl_t *b,
   }
   if (index->trace_lookup_stats)
     index->user_fn_scope_scans++;
-  const stmt_t *fn = nyr_find_user_function_in_stmt(scope, name, 0);
+  const stmt_t *fn = nyr_find_user_function_in_stmt(scope_ref, name, 0);
   if (entry) {
-    entry->scope = scope;
+    entry->scope = scope_ref;
     entry->name_hash = name_hash;
     memcpy(entry->name, name, name_len + 1);
     entry->fn = fn;
@@ -18595,13 +18595,13 @@ static bool nyr_fold_top_level_int_impl(const nyr_builder_impl_t *b,
      * its runtime load; folding it here freezes loop-carried state.
      */
     if (b) {
-      const stmt_t *binding =
+      const stmt_t *bind =
           e->tok.filename ? nyr_find_top_level_var_in_source_in_prog(
                                 b, prog, e->as.ident.name, e->tok.filename)
                           : NULL;
-      if (!binding)
-        binding = nyr_find_top_level_var_in_prog(b, prog, e->as.ident.name);
-      if (binding && binding->kind == NY_S_VAR && binding->as.var.is_mut)
+      if (!bind)
+        bind = nyr_find_top_level_var_in_prog(b, prog, e->as.ident.name);
+      if (bind && bind->kind == NY_S_VAR && bind->as.var.is_mut)
         return false;
     }
     ny_native_tlv_ensure_build(b, prog);
@@ -18822,9 +18822,9 @@ static bool nyr_fold_top_level_int_in_module(const nyr_builder_impl_t *b,
       for (const char *p = e->as.member.name; *p; ++p)
         qualified_h = (qualified_h ^ (uint8_t)*p) * 16777619u;
     }
-    for (unsigned scope = 0; scope < (owner ? 2u : 1u); ++scope) {
-      uint32_t bucket = (scope ? qualified_h : h) % NY_TLV_BUCKETS;
-      if (scope && bucket == h % NY_TLV_BUCKETS)
+    for (unsigned scope_ref = 0; scope_ref < (owner ? 2u : 1u); ++scope_ref) {
+      uint32_t bucket = (scope_ref ? qualified_h : h) % NY_TLV_BUCKETS;
+      if (scope_ref && bucket == h % NY_TLV_BUCKETS)
         continue;
       for (int32_t it = cache->tlv_head ? cache->tlv_head[bucket] : -1; it >= 0;
            it = cache->tlv_ents[it].next) {
@@ -18860,25 +18860,25 @@ static bool nyr_fold_top_level_int_in_module(const nyr_builder_impl_t *b,
      * inside a loop).  Refuse the fold when this identifier names mutable
      * module storage, preferring its source file to avoid same-name imports.
      */
-    const stmt_t *binding =
+    const stmt_t *bind =
         e->tok.filename ? nyr_find_top_level_var_in_source_in_prog(
                               b, prog, e->as.ident.name, e->tok.filename)
                         : NULL;
-    if (!binding)
-      binding = nyr_find_top_level_var_in_prog(b, prog, e->as.ident.name);
+    if (!bind)
+      bind = nyr_find_top_level_var_in_prog(b, prog, e->as.ident.name);
     if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
       ny_dbg_heuristic_event(
           "native-constant",
           "function=%s identifier=%s module=%s binding=%s mutable=%s "
           "action=%s",
           b->current_fn_name ? b->current_fn_name : "<entry>", e->as.ident.name,
-          module_name, binding ? "found" : "missing",
-          binding && binding->kind == NY_S_VAR && binding->as.var.is_mut ? "yes"
+          module_name, bind ? "found" : "missing",
+          bind && bind->kind == NY_S_VAR && bind->as.var.is_mut ? "yes"
                                                                          : "no",
-          binding && binding->kind == NY_S_VAR && binding->as.var.is_mut
+          bind && bind->kind == NY_S_VAR && bind->as.var.is_mut
               ? "keep-runtime-load"
               : "inspect-initializer");
-    if (binding && binding->kind == NY_S_VAR && binding->as.var.is_mut)
+    if (bind && bind->kind == NY_S_VAR && bind->as.var.is_mut)
       return false;
     ny_native_tlv_ensure_build(b, prog);
     const nyr_builder_impl_t *owner = b->cache_owner ? b->cache_owner : b;
@@ -22509,20 +22509,20 @@ static void ny_type_query_hash_rebuild(nyr_builder_impl_t *b, size_t want_cap) {
 }
 
 static size_t ny_type_context_hash_slot(const expr_t *expr,
-                                        const nyr_builder_impl_t *scope,
+                                        const nyr_builder_impl_t *scope_ref,
                                         size_t mask) {
   uint64_t e = (uint64_t)(uintptr_t)expr * UINT64_C(0x9E3779B97F4A7C15);
-  uint64_t s = (uint64_t)(uintptr_t)scope * UINT64_C(0xD6E8FEB86659FD93);
+  uint64_t s = (uint64_t)(uintptr_t)scope_ref * UINT64_C(0xD6E8FEB86659FD93);
   return (size_t)(((e ^ (e >> 29) ^ s ^ (s >> 31)) >> 32) & mask);
 }
 
 static const char *ny_type_context_cache_get(const nyr_builder_impl_t *owner,
                                              const expr_t *expr,
-                                             const nyr_builder_impl_t *scope) {
+                                             const nyr_builder_impl_t *scope_ref) {
   if (!owner || !owner->type_query_context_hash_cap)
     return NULL;
   size_t mask = owner->type_query_context_hash_cap - 1;
-  size_t slot = ny_type_context_hash_slot(expr, scope, mask);
+  size_t slot = ny_type_context_hash_slot(expr, scope_ref, mask);
   for (;;) {
     size_t entry_index = owner->type_query_context_hash[slot];
     if (!entry_index)
@@ -22531,7 +22531,7 @@ static const char *ny_type_context_cache_get(const nyr_builder_impl_t *owner,
         &owner->type_query_context_cache[entry_index - 1];
     if (entry->generation != owner->type_query_context_generation)
       return NULL;
-    if (entry->expr == expr && entry->scope == scope)
+    if (entry->expr == expr && entry->scope == scope_ref)
       return entry->type_name;
     slot = (slot + 1) & mask;
   }
@@ -22585,9 +22585,9 @@ static bool ny_type_context_cache_rebuild(nyr_builder_impl_t *owner,
 
 static void ny_type_context_cache_put(nyr_builder_impl_t *owner,
                                       const expr_t *expr,
-                                      const nyr_builder_impl_t *scope,
+                                      const nyr_builder_impl_t *scope_ref,
                                       const char *type_name) {
-  if (!owner || !expr || !scope || !type_name)
+  if (!owner || !expr || !scope_ref || !type_name)
     return;
   size_t next_count = owner->type_query_context_count + 1;
   if (next_count > SIZE_MAX / 4)
@@ -22618,11 +22618,11 @@ static void ny_type_context_cache_put(nyr_builder_impl_t *owner,
   size_t index = owner->type_query_context_count;
   owner->type_query_context_cache[index] = (ny_native_type_context_entry_t){
       .expr = expr,
-      .scope = scope,
+      .scope = scope_ref,
       .type_name = type_name,
       .generation = owner->type_query_context_generation};
   size_t mask = owner->type_query_context_hash_cap - 1;
-  size_t slot = ny_type_context_hash_slot(expr, scope, mask);
+  size_t slot = ny_type_context_hash_slot(expr, scope_ref, mask);
   while (owner->type_query_context_hash[slot]) {
     size_t old_index = owner->type_query_context_hash[slot] - 1;
     if (owner->type_query_context_cache[old_index].generation !=

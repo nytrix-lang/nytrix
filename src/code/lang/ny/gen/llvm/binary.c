@@ -449,18 +449,6 @@ static void ny_raw_int_call_pop(const fun_sig *sig) {
   }
 }
 
-static expr_t *ny_single_return_expr(stmt_t *s) {
-  if (!s)
-    return NULL;
-  if (s->kind == NY_S_RETURN)
-    return s->as.ret.value;
-  if (s->kind == NY_S_EXPR)
-    return s->as.expr.expr;
-  if (s->kind == NY_S_BLOCK && s->as.block.body.len == 1)
-    return ny_single_return_expr(s->as.block.body.data[0]);
-  return NULL;
-}
-
 static bool ny_extract_simple_block_return(stmt_t *body, stmt_var_t **vars,
                                            size_t *var_count, size_t max_vars,
                                            expr_t **ret_out) {

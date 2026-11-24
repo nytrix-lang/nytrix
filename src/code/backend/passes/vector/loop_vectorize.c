@@ -542,10 +542,10 @@ static bool affine_add(affine_t a, affine_t b, bool subtract, affine_t *out) {
     return false;
   if (a.root >= 0 && b.root >= 0)
     return false;
-  __int128 off =
-      (__int128)a.offset + (subtract ? -(__int128)b.offset : b.offset);
-  __int128 stride =
-      (__int128)a.stride + (subtract ? -(__int128)b.stride : b.stride);
+  ny_i128 off =
+      (ny_i128)a.offset + (subtract ? -(ny_i128)b.offset : b.offset);
+  ny_i128 stride =
+      (ny_i128)a.stride + (subtract ? -(ny_i128)b.stride : b.stride);
   if (off < INT64_MIN || off > INT64_MAX || stride < INT64_MIN ||
       stride > INT64_MAX)
     return false;
@@ -665,10 +665,10 @@ static affine_t affine_value(const nyr_func_t *f, const int *defs,
     else
       return bad;
     affine_t a = affine_value(f, defs, cfg, in_loop, other, iv, depth + 1);
-    if (!a.ok || a.root >= 0 || (__int128)a.offset * k < INT64_MIN ||
-        (__int128)a.offset * k > INT64_MAX ||
-        (__int128)a.stride * k < INT64_MIN ||
-        (__int128)a.stride * k > INT64_MAX)
+    if (!a.ok || a.root >= 0 || (ny_i128)a.offset * k < INT64_MIN ||
+        (ny_i128)a.offset * k > INT64_MAX ||
+        (ny_i128)a.stride * k < INT64_MIN ||
+        (ny_i128)a.stride * k > INT64_MAX)
       return bad;
     a.offset *= k;
     a.stride *= k;
@@ -681,11 +681,11 @@ static affine_t affine_value(const nyr_func_t *f, const int *defs,
     affine_t a = affine_value(f, defs, cfg, in_loop, in->a, iv, depth + 1);
     if (!a.ok || a.root >= 0)
       return bad;
-    __int128 scale = (__int128)1 << shift;
-    if ((__int128)a.offset * scale < INT64_MIN ||
-        (__int128)a.offset * scale > INT64_MAX ||
-        (__int128)a.stride * scale < INT64_MIN ||
-        (__int128)a.stride * scale > INT64_MAX)
+    ny_i128 scale = (ny_i128)1 << shift;
+    if ((ny_i128)a.offset * scale < INT64_MIN ||
+        (ny_i128)a.offset * scale > INT64_MAX ||
+        (ny_i128)a.stride * scale < INT64_MIN ||
+        (ny_i128)a.stride * scale > INT64_MAX)
       return bad;
     a.offset *= (int64_t)scale;
     a.stride *= (int64_t)scale;
@@ -852,10 +852,10 @@ static tbuf_offset_t tbuf_offset_value(const nyr_func_t *f, const int *defs,
   if (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) {
     a = tbuf_offset_value(f, defs, cfg, in_loop, in->a, iv, depth + 1);
     b = tbuf_offset_value(f, defs, cfg, in_loop, in->b, iv, depth + 1);
-    __int128 off = (__int128)a.offset +
-                   (in->op == NYIR_SUB_I64 ? -(__int128)b.offset : b.offset);
-    __int128 stride = (__int128)a.stride +
-                      (in->op == NYIR_SUB_I64 ? -(__int128)b.stride : b.stride);
+    ny_i128 off = (ny_i128)a.offset +
+                   (in->op == NYIR_SUB_I64 ? -(ny_i128)b.offset : b.offset);
+    ny_i128 stride = (ny_i128)a.stride +
+                      (in->op == NYIR_SUB_I64 ? -(ny_i128)b.stride : b.stride);
     if (!a.ok || !b.ok || off < INT64_MIN || off > INT64_MAX ||
         stride < INT64_MIN || stride > INT64_MAX)
       return bad;
@@ -886,8 +886,8 @@ static tbuf_offset_t tbuf_offset_value(const nyr_func_t *f, const int *defs,
   if (operand < 0)
     return bad;
   a = tbuf_offset_value(f, defs, cfg, in_loop, operand, iv, depth + 1);
-  __int128 off = (__int128)a.offset * scale;
-  __int128 stride = (__int128)a.stride * scale;
+  ny_i128 off = (ny_i128)a.offset * scale;
+  ny_i128 stride = (ny_i128)a.stride * scale;
   if (!a.ok || off < INT64_MIN || off > INT64_MAX || stride < INT64_MIN ||
       stride > INT64_MAX)
     return bad;
@@ -992,10 +992,10 @@ static bool tbuf_address_parts(const nyr_func_t *f, const int *defs,
     int dynamic_key = -1;
     if (!tbuf_merge_dynamic_key(base, term, &has_dynamic_key, &dynamic_key))
       continue;
-    __int128 offset = (__int128)base.offset + term.offset;
-    __int128 stride = (__int128)base.stride + term.stride;
-    __int128 min = (__int128)base.min + term.min;
-    __int128 max = (__int128)base.max + term.max;
+    ny_i128 offset = (ny_i128)base.offset + term.offset;
+    ny_i128 stride = (ny_i128)base.stride + term.stride;
+    ny_i128 min = (ny_i128)base.min + term.min;
+    ny_i128 max = (ny_i128)base.max + term.max;
     if (root < 0 || !base.ok || !term.ok || offset < INT64_MIN ||
         offset > INT64_MAX || stride < INT64_MIN || stride > INT64_MAX ||
         !base.has_range || !term.has_range || min < INT64_MIN ||
@@ -1150,8 +1150,8 @@ static bool affine_memory_range(const nyr_func_t *f, const int *defs,
   int64_t bytes = 0;
   if (!known_alloc_bytes(f, defs, access->root, &bytes))
     return false;
-  __int128 first = (__int128)access->offset + (__int128)access->stride * init;
-  __int128 end = first + (__int128)access->stride * (trip - 1) + 8;
+  ny_i128 first = (ny_i128)access->offset + (ny_i128)access->stride * init;
+  ny_i128 end = first + (ny_i128)access->stride * (trip - 1) + 8;
   if (first < 0 || end > bytes)
     return false;
   access->has_byte_range = true;
@@ -1298,8 +1298,8 @@ static bool bounds_check_safe(const nyr_func_t *f, const int *defs,
   int64_t bytes = 0;
   if (!known_alloc_bytes(f, defs, access.root, &bytes))
     return false;
-  __int128 last =
-      (__int128)access.offset + (__int128)access.stride * (trip - 1);
+  ny_i128 last =
+      (ny_i128)access.offset + (ny_i128)access.stride * (trip - 1);
   bool ok = last >= 0 && last + 8 <= bytes;
   return ok;
 }
@@ -1472,16 +1472,16 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
       !nyr_const_i64(f, defs, cmp->b, &limit) ||
       (inclusive ? init > limit : init >= limit))
     return false;
-  __int128 distance = (__int128)limit - init - (inclusive ? 0 : 1);
+  ny_i128 distance = (ny_i128)limit - init - (inclusive ? 0 : 1);
   if (distance < 0)
     return false;
-  __int128 n = distance / step;
-  __int128 max = (__int128)init + n * step;
+  ny_i128 n = distance / step;
+  ny_i128 max = (ny_i128)init + n * step;
   if (init_is_bound) {
     /*
      * Unknown exact start: only the guard bounds the value.
      */
-    max = (__int128)limit - (inclusive ? 0 : 1);
+    max = (ny_i128)limit - (inclusive ? 0 : 1);
   }
   if (max < INT64_MIN || max > INT64_MAX || max + step > INT64_MAX)
     return false;
@@ -1569,8 +1569,8 @@ static bool derived_induction_range(const nyr_func_t *f, const int *defs,
         other_latch != latch ||
         !guarded_induction_range(f, defs, cfg, use_pc, other->dst, &guarded))
       continue;
-    __int128 steps = ((__int128)guarded.max - guarded.min) / other_step;
-    __int128 max = (__int128)init_range.max + steps * step;
+    ny_i128 steps = ((ny_i128)guarded.max - guarded.min) / other_step;
+    ny_i128 max = (ny_i128)init_range.max + steps * step;
     if (steps < 0 || max > INT64_MAX)
       return false;
     *out = (nyr_range_t){.has_min = true,
@@ -1591,7 +1591,7 @@ static bool value_range_under_guards(const nyr_func_t *f, const int *defs,
       depth > 32)
     return false;
   if (value == loop_iv) {
-    __int128 max = (__int128)init + trip - 1;
+    ny_i128 max = (ny_i128)init + trip - 1;
     if (trip <= 0 || max > INT64_MAX)
       return false;
     *out = (nyr_range_t){
@@ -1641,16 +1641,16 @@ static bool value_range_under_guards(const nyr_func_t *f, const int *defs,
   bool have_b = value_range_under_guards(f, defs, cfg, use_pc, in->b, loop_iv,
                                          init, trip, depth + 1, &b);
   if (have_a && have_b && a.has_min && a.has_max && b.has_min && b.has_max) {
-    __int128 lo = 0, hi = 0;
+    ny_i128 lo = 0, hi = 0;
     if (in->op == NYIR_ADD_I64) {
-      lo = (__int128)a.min + b.min;
-      hi = (__int128)a.max + b.max;
+      lo = (ny_i128)a.min + b.min;
+      hi = (ny_i128)a.max + b.max;
     } else if (in->op == NYIR_SUB_I64) {
-      lo = (__int128)a.min - b.max;
-      hi = (__int128)a.max - b.min;
+      lo = (ny_i128)a.min - b.max;
+      hi = (ny_i128)a.max - b.min;
     } else if (in->op == NYIR_MUL_I64) {
-      __int128 products[4] = {(__int128)a.min * b.min, (__int128)a.min * b.max,
-                              (__int128)a.max * b.min, (__int128)a.max * b.max};
+      ny_i128 products[4] = {(ny_i128)a.min * b.min, (ny_i128)a.min * b.max,
+                              (ny_i128)a.max * b.min, (ny_i128)a.max * b.max};
       lo = hi = products[0];
       for (size_t k = 1; k < 4; ++k) {
         if (products[k] < lo)
@@ -1660,12 +1660,12 @@ static bool value_range_under_guards(const nyr_func_t *f, const int *defs,
       }
     } else if (in->op == NYIR_SHL_I64 && b.min == b.max && b.min >= 0 &&
                b.min <= 62) {
-      __int128 scale = (__int128)1 << (unsigned)b.min;
-      lo = (__int128)a.min * scale;
-      hi = (__int128)a.max * scale;
+      ny_i128 scale = (ny_i128)1 << (unsigned)b.min;
+      lo = (ny_i128)a.min * scale;
+      hi = (ny_i128)a.max * scale;
     } else {
-      lo = (__int128)INT64_MAX + 1;
-      hi = (__int128)INT64_MIN - 1;
+      lo = (ny_i128)INT64_MAX + 1;
+      hi = (ny_i128)INT64_MIN - 1;
     }
     if (lo >= INT64_MIN && hi <= INT64_MAX) {
       *out = (nyr_range_t){.has_min = true,
@@ -2328,12 +2328,12 @@ static bool emit_vec8_iv_init(nyr_func_t *f, size_t at, bool const_init,
                               size_t *inserted_out) {
   if (!f || step == 0 || at > f->len)
     return false;
-  __int128 s4 = (__int128)4 * step;
+  ny_i128 s4 = (ny_i128)4 * step;
   if (s4 < INT64_MIN || s4 > INT64_MAX)
     return false;
   int64_t steps[3] = {0, 0, 0};
   for (int k = 1; k <= 3; ++k) {
-    __int128 ks = (__int128)k * step;
+    ny_i128 ks = (ny_i128)k * step;
     if (ks < INT64_MIN || ks > INT64_MAX)
       return false;
     steps[k - 1] = (int64_t)ks;
@@ -2341,7 +2341,7 @@ static bool emit_vec8_iv_init(nyr_func_t *f, size_t at, bool const_init,
   int64_t cvals[4] = {0, 0, 0, 0};
   if (const_init) {
     for (int k = 0; k < 4; ++k) {
-      __int128 v = (__int128)const_init_val + (__int128)k * step;
+      ny_i128 v = (ny_i128)const_init_val + (ny_i128)k * step;
       if (v < INT64_MIN || v > INT64_MAX)
         return false;
       cvals[k] = (int64_t)v;
@@ -3085,11 +3085,11 @@ static uint64_t vector_trip_estimate(const nyr_func_t *f, const int *defs,
   bool have_max = range->has_max && range->max > init;
   uint64_t min_trip = 0, max_trip = 0;
   if (have_min) {
-    __int128 d = (__int128)range->min - (__int128)init;
+    ny_i128 d = (ny_i128)range->min - (ny_i128)init;
     min_trip = d > UINT64_MAX ? UINT64_MAX : (uint64_t)d;
   }
   if (have_max) {
-    __int128 d = (__int128)range->max - (__int128)init;
+    ny_i128 d = (ny_i128)range->max - (ny_i128)init;
     max_trip = d > UINT64_MAX ? UINT64_MAX : (uint64_t)d;
   } else if (range->has_max) {
     /*
@@ -3693,7 +3693,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         }
       }
       if (have_lo && have_hi && w_hi > w_lo &&
-          (__int128)w_hi - (__int128)w_lo <= (__int128)INT64_MAX) {
+          (ny_i128)w_hi - (ny_i128)w_lo <= (ny_i128)INT64_MAX) {
         window_init = w_lo;
         window_trip = w_hi - w_lo;
       }
@@ -3984,11 +3984,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             up_val >= 0 && (size_t)up_val < uses.value_count &&
             uses.offsets[up_val + 1] == uses.offsets[up_val] + 1 &&
             uses.users[uses.offsets[up_val]] == extra_phis[e].phi_idx;
-        __int128 s4 = (__int128)4 * extra_phis[e].step;
+        ny_i128 s4 = (ny_i128)4 * extra_phis[e].step;
         bool step_ok = s4 >= INT64_MIN && s4 <= INT64_MAX;
         if (step_ok && extra_phis[e].const_init) {
-          __int128 c3 = (__int128)extra_phis[e].const_init_val +
-                        (__int128)3 * extra_phis[e].step;
+          ny_i128 c3 = (ny_i128)extra_phis[e].const_init_val +
+                        (ny_i128)3 * extra_phis[e].step;
           if (c3 < INT64_MIN || c3 > INT64_MAX)
             step_ok = false;
         }
@@ -5608,7 +5608,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         continue;
       size_t eu = extra_phis[e].update_idx;
       int wide_step = f->next_value++;
-      __int128 scaled = (__int128)extra_phis[e].step * vector_step;
+      ny_i128 scaled = (ny_i128)extra_phis[e].step * vector_step;
       if (scaled < INT64_MIN || scaled > INT64_MAX) {
         free(saved_body);
         free(vec);

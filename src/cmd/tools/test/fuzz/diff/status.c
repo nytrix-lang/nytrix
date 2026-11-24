@@ -8981,7 +8981,6 @@ static int cmd_public_fuzz_all_preflight(int argc, char **argv) {
     free(status_ny_bin);
     free(status_ny_bin_hash);
     free(status_nytrix_git_head);
-    free(status_nytrix_git_head);
     status_next_script =
         summary_string_from_report(status_summary.data, "next_script");
     status_latest_full_pressure_report = summary_string_from_report(
@@ -9293,7 +9292,6 @@ static int cmd_public_fuzz_all_preflight(int argc, char **argv) {
   free(status_coverage_next_preview_command);
   free(status_ny_bin);
   free(status_ny_bin_hash);
-  free(status_nytrix_git_head);
   free(status_nytrix_git_head);
   free(completion_eta_local);
   free(extra.data);

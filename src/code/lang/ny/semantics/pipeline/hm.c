@@ -2741,9 +2741,9 @@ static const expr_t *hm_refinement_global_value(const program_t *program,
                        ? stmt->as.var.names.len
                        : stmt->as.var.exprs.len;
     for (size_t j = 0; j < count; ++j) {
-      const char *binding = stmt->as.var.names.data[j];
+      const char *bind = stmt->as.var.names.data[j];
       const expr_t *value = stmt->as.var.exprs.data[j];
-      if (!binding || strcmp(binding, name) != 0 || !value)
+      if (!bind || strcmp(bind, name) != 0 || !value)
         continue;
       if (found)
         return NULL;
@@ -7266,7 +7266,7 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
     }
     if ((size_t)used + 1 < sizeof(type_name))
       type_name[used++] = '>';
-    type_name[used < (int)sizeof(type_name) ? used : sizeof(type_name) - 1] =
+    type_name[used < (int)sizeof(type_name) ? (size_t)used : sizeof(type_name) - 1] =
         '\0';
   }
 
@@ -7890,7 +7890,7 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                   hm, env, args->data[i].val, self_name,
                   allow_dynamic_literal_args);
               if (param < params->len && params->data[param].type) {
-                ny_hm_type_t *param_t =
+                ny_hm_type_t *param_ty =
                     hm_parse_type_name(hm, params->data[param].type, self_name);
                 if (!hm_type_is_refined_instance(hm, arg_t,
                                                  params->data[param].type))
@@ -7905,9 +7905,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                       hm, params->data[param].type, args->data[i].val,
                       args->data[i].val ? args->data[i].val->tok : tok);
                 hm_check_refinement_return(
-                    hm, param_t, arg_t, args->data[i].val,
+                    hm, param_ty, arg_t, args->data[i].val,
                     args->data[i].val ? args->data[i].val->tok : tok);
-                hm_unify(hm, param_t, arg_t,
+                hm_unify(hm, param_ty, arg_t,
                          args->data[i].val ? args->data[i].val->tok : tok,
                          "function argument");
               }
@@ -7960,7 +7960,7 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
               hm, env, args->data[i].val, self_name,
               allow_dynamic_literal_args);
           if (param < params->len && params->data[param].type) {
-            ny_hm_type_t *param_t =
+            ny_hm_type_t *param_ty =
                 hm_parse_type_name(hm, params->data[param].type, self_name);
             if (!hm_type_is_refined_instance(hm, arg_t,
                                              params->data[param].type))
@@ -7975,9 +7975,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                   hm, params->data[param].type, args->data[i].val,
                   args->data[i].val ? args->data[i].val->tok : tok);
             hm_check_refinement_return(
-                hm, param_t, arg_t, args->data[i].val,
+                hm, param_ty, arg_t, args->data[i].val,
                 args->data[i].val ? args->data[i].val->tok : tok);
-            hm_unify(hm, param_t, arg_t,
+            hm_unify(hm, param_ty, arg_t,
                      args->data[i].val ? args->data[i].val->tok : tok,
                      "function argument");
           }
@@ -8113,7 +8113,7 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
               hm_subst_param_type_text(hm, scheme->stmt, param, args, offset);
           const char *param_type_text =
               subst_param ? subst_param : sparams->data[param].type;
-          ny_hm_type_t *param_t =
+          ny_hm_type_t *param_ty =
               hm_parse_type_name(hm, param_type_text, self_name);
           hm_check_sigma_initializer(
               hm, env, param_type_text, args->data[i].val, self_name,
@@ -8128,11 +8128,11 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
             hm_check_refinement_initializer(
                 hm, param_type_text, args->data[i].val,
                 args->data[i].val ? args->data[i].val->tok : tok);
-          hm_check_refinement_return(hm, param_t, arg_t, args->data[i].val,
+          hm_check_refinement_return(hm, param_ty, arg_t, args->data[i].val,
                                      args->data[i].val ? args->data[i].val->tok
                                                        : tok);
           if (subst_param) {
-            hm_unify(hm, param_t, arg_t,
+            hm_unify(hm, param_ty, arg_t,
                      args->data[i].val ? args->data[i].val->tok : tok,
                      "function argument");
             param_substituted = true;
@@ -10975,7 +10975,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       }
       if (init && decl && strcmp(decl, "i64") == 0 &&
           hm_is_name(it, "bigint")) {
-        __int128 value = 0;
+        ny_i128 value = 0;
         if (tp_eval_const_int_wide(init, &value, 0) && value >= INT64_MIN &&
             value <= INT64_MAX) {
           it = final_t;

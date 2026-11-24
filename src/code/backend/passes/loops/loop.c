@@ -513,9 +513,9 @@ static bool bitasm_trip_count(const nyr_func_t *f, const int *defs,
     }
   if (!found)
     return false;
-  __int128 mag = -(__int128)loop->step;
-  __int128 limit = loop->limit;
-  __int128 n = 0;
+  ny_i128 mag = -(ny_i128)loop->step;
+  ny_i128 limit = loop->limit;
+  ny_i128 n = 0;
   if (loop->predicate == NYIR_CMP_GE) {
     if (start < limit)
       return false;
@@ -529,7 +529,7 @@ static bool bitasm_trip_count(const nyr_func_t *f, const int *defs,
   }
   if (n < 1 || n > 62)
     return false;
-  __int128 exit_value = (__int128)start + n * loop->step;
+  ny_i128 exit_value = (ny_i128)start + n * loop->step;
   if (exit_value < INT64_MIN || exit_value > INT64_MAX)
     return false;
   *out = (uint64_t)n;
@@ -707,7 +707,7 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
        */
       int64_t right_shift = 0, left_shift = 0;
       if (back && back->op == NYIR_SAR_I64 && init >= 0 &&
-          (((__int128)init + 1) << trip) - 1 <= INT32_MAX &&
+          (((ny_i128)init + 1) << trip) - 1 <= INT32_MAX &&
           const_i64_val(f, defs, back->b, &right_shift) && right_shift == 32) {
         const nyr_inst_t *left = bitasm_def(f, defs, back->a);
         if (left && left->op == NYIR_SHL_I64 &&
@@ -1100,7 +1100,7 @@ static bool loop_idiom_fold_eq_step_once(nyr_func_t *f) {
         continue;
       int64_t n = (int64_t)loop->trip_count;
       int64_t start = loop->init;
-      if ((__int128)start + n > INT32_MAX || (__int128)start - n < INT32_MIN)
+      if ((ny_i128)start + n > INT32_MAX || (ny_i128)start - n < INT32_MIN)
         continue;
       int x0_root = idiom_root_copy(f, defs, x0);
       if (x0_root < 0 || x0_root >= f->next_value || defs[x0_root] < 0)
@@ -1116,11 +1116,11 @@ static bool loop_idiom_fold_eq_step_once(nyr_func_t *f) {
         continue;
       }
       if (had_sext32) {
-        if (xmin < INT32_MIN || (__int128)xmax + 2 * (__int128)n > INT32_MAX)
+        if (xmin < INT32_MIN || (ny_i128)xmax + 2 * (ny_i128)n > INT32_MAX)
           continue;
       } else {
         if (xmin < INT64_MIN / 2 ||
-            (__int128)xmax + 2 * (__int128)n > INT64_MAX / 2)
+            (ny_i128)xmax + 2 * (ny_i128)n > INT64_MAX / 2)
           continue;
       }
       size_t term = nyr_block_last_non_nop(f, &cfg, pre);
@@ -1644,9 +1644,9 @@ static bool interchange_address_from_root(const nyr_func_t *f,
                                            operands[1 - base_index], at, 0,
                                            &offset))
       continue;
-    __int128 constant = (__int128)base.offset.constant + offset.constant;
-    __int128 minimum = (__int128)base.offset.range.min + offset.range.min;
-    __int128 maximum = (__int128)base.offset.range.max + offset.range.max;
+    ny_i128 constant = (ny_i128)base.offset.constant + offset.constant;
+    ny_i128 minimum = (ny_i128)base.offset.range.min + offset.range.min;
+    ny_i128 maximum = (ny_i128)base.offset.range.max + offset.range.max;
     if (constant < INT64_MIN || constant > INT64_MAX || minimum < INT64_MIN ||
         minimum > INT64_MAX || maximum < INT64_MIN || maximum > INT64_MAX)
       return false;
@@ -1714,11 +1714,11 @@ static bool interchange_store_is_injective(const nyr_scev_affine_t *address,
       !inner->trip_count_known || outer->trip_count == 0 ||
       inner->trip_count == 0)
     return false;
-  __int128 outer_delta =
-      (__int128)interchange_affine_coefficient(address, outer->iv) *
+  ny_i128 outer_delta =
+      (ny_i128)interchange_affine_coefficient(address, outer->iv) *
       outer->step;
-  __int128 inner_delta =
-      (__int128)interchange_affine_coefficient(address, inner->iv) *
+  ny_i128 inner_delta =
+      (ny_i128)interchange_affine_coefficient(address, inner->iv) *
       inner->step;
   if (outer_delta < 0)
     outer_delta = -outer_delta;
@@ -1729,8 +1729,8 @@ static bool interchange_store_is_injective(const nyr_scev_affine_t *address,
     return false;
   if (outer->trip_count <= 1 || inner->trip_count <= 1)
     return true;
-  __int128 outer_span = outer_delta * (outer->trip_count - 1);
-  __int128 inner_span = inner_delta * (inner->trip_count - 1);
+  ny_i128 outer_span = outer_delta * (outer->trip_count - 1);
+  ny_i128 inner_span = inner_delta * (inner->trip_count - 1);
   return outer_delta > inner_span || inner_delta > outer_span;
 }
 
@@ -1749,8 +1749,8 @@ static bool interchange_store_ranges_disjoint(const nyr_scev_affine_t *a,
   if (!a || !b || !a->range.has_min || !a->range.has_max || !b->range.has_min ||
       !b->range.has_max)
     return false;
-  return (__int128)a->range.max + 8 <= b->range.min ||
-         (__int128)b->range.max + 8 <= a->range.min;
+  return (ny_i128)a->range.max + 8 <= b->range.min ||
+         (ny_i128)b->range.max + 8 <= a->range.min;
 }
 
 static bool interchange_allocation_uses_confined(
@@ -2562,9 +2562,6 @@ static bool jam_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
    * stage-A liveness check).
    */
   {
-    bool carried[32];
-    for (int q = 0; q < phi_count; ++q)
-      carried[q] = true;
     for (size_t i = body_begin; i + 1 < lend; ++i) {
       const nyr_inst_t *in = &work->data[i];
       int d = in->dst;
@@ -3484,9 +3481,9 @@ static bool last_overwrite_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
    * A known SCEV trip count is useful only when the final iteration and the
    * post-loop IV are representable in the language's wrapping i64 domain.
    */
-  __int128 last_wide =
-      (__int128)loop->init + (__int128)(loop->trip_count - 1u) * loop->step;
-  __int128 exit_wide = last_wide + loop->step;
+  ny_i128 last_wide =
+      (ny_i128)loop->init + (ny_i128)(loop->trip_count - 1u) * loop->step;
+  ny_i128 exit_wide = last_wide + loop->step;
   if (last_wide < INT64_MIN || last_wide > INT64_MAX || exit_wide < INT64_MIN ||
       exit_wide > INT64_MAX)
     LAST_OVERWRITE_REJECT("final-induction-overflow");
@@ -5660,7 +5657,7 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
         carry = mapped >= 0 ? mapped : prior;
       }
       if (phi->dst == loop->iv) {
-        __int128 iv = (__int128)loop->init + (__int128)k * loop->step;
+        ny_i128 iv = (ny_i128)loop->init + (ny_i128)k * loop->step;
         if (iv < INT64_MIN || iv > INT64_MAX || next_value == INT_MAX)
           goto done;
         map[phi->dst] = next_value++;
@@ -5709,7 +5706,7 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
                                          .imm = labels[k * nb + b]};
       if (b == h) {
         int iv = map[loop->iv];
-        __int128 value = (__int128)loop->init + (__int128)k * loop->step;
+        ny_i128 value = (ny_i128)loop->init + (ny_i128)k * loop->step;
         if (iv < 0 || value < INT64_MIN || value > INT64_MAX ||
             clone_len >= clone_cap)
           goto done;
@@ -6277,7 +6274,7 @@ static bool lu_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
         carry = maps[k - 1][prior];
       }
       if (phi->dst == loop->iv) {
-        __int128 iv = (__int128)loop->init + (__int128)k * loop->step;
+        ny_i128 iv = (ny_i128)loop->init + (ny_i128)k * loop->step;
         if (iv < INT64_MIN || iv > INT64_MAX || work->next_value == INT_MAX)
           goto done;
         int constant = work->next_value++;
@@ -6308,7 +6305,7 @@ static bool lu_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
     goto done;
   for (size_t k = 0; k < const_count; ++k) {
     int iv_id = maps[k][loop->iv];
-    __int128 iv = (__int128)loop->init + (__int128)k * loop->step;
+    ny_i128 iv = (ny_i128)loop->init + (ny_i128)k * loop->step;
     iv_consts[extra_const_at++] =
         (nyr_inst_t){.op = NYIR_CONST_I64,
                      .dst = iv_id,

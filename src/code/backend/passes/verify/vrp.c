@@ -55,20 +55,20 @@ static void vrp_compute_binop(vrp_range_t *dst, nyr_op_t op,
 
   int64_t amin = a->min, amax = a->max;
   int64_t bmin = b->min, bmax = b->max;
-  __int128 rmin, rmax;
+  ny_i128 rmin, rmax;
 
   switch (op) {
   case NYIR_ADD_I64:
-    rmin = (__int128)amin + bmin;
-    rmax = (__int128)amax + bmax;
+    rmin = (ny_i128)amin + bmin;
+    rmax = (ny_i128)amax + bmax;
     break;
   case NYIR_SUB_I64:
-    rmin = (__int128)amin - bmax;
-    rmax = (__int128)amax - bmin;
+    rmin = (ny_i128)amin - bmax;
+    rmax = (ny_i128)amax - bmin;
     break;
   case NYIR_MUL_I64: {
-    __int128 vals[4] = {(__int128)amin * bmin, (__int128)amin * bmax,
-                        (__int128)amax * bmin, (__int128)amax * bmax};
+    ny_i128 vals[4] = {(ny_i128)amin * bmin, (ny_i128)amin * bmax,
+                        (ny_i128)amax * bmin, (ny_i128)amax * bmax};
     rmin = vals[0];
     rmax = vals[0];
     for (int i = 1; i < 4; ++i) {
@@ -103,21 +103,21 @@ static void vrp_compute_binop(vrp_range_t *dst, nyr_op_t op,
     if (mask > (uint64_t)INT64_MAX)
       return;
     rmin = 0;
-    rmax = (__int128)mask;
+    rmax = (ny_i128)mask;
     break;
   }
   case NYIR_SHL_I64:
     if (bmin < 0 || bmax >= 63)
       return;
     if (bmin == bmax) {
-      __int128 scale = ((__int128)1) << (int)bmin;
-      rmin = (__int128)amin * scale;
-      rmax = (__int128)amax * scale;
+      ny_i128 scale = ((ny_i128)1) << (int)bmin;
+      rmin = (ny_i128)amin * scale;
+      rmax = (ny_i128)amax * scale;
     } else {
       if (amin < 0)
         return;
-      rmin = (__int128)amin << (int)bmin;
-      rmax = (__int128)amax << (int)bmax;
+      rmin = (ny_i128)amin << (int)bmin;
+      rmax = (ny_i128)amax << (int)bmax;
     }
     break;
   case NYIR_SAR_I64: {
@@ -140,7 +140,7 @@ static void vrp_compute_binop(vrp_range_t *dst, nyr_op_t op,
       return;
     int64_t av[2] = {amin, amax};
     int64_t bv[2] = {bmin, bmax};
-    __int128 vals[4];
+    ny_i128 vals[4];
     size_t n = 0;
     for (size_t i = 0; i < 2; ++i)
       for (size_t j = 0; j < 2; ++j) {
@@ -167,9 +167,9 @@ static void vrp_compute_binop(vrp_range_t *dst, nyr_op_t op,
       int64_t y = bmax < 0 ? -bmax : bmax;
       magnitude = (x > y ? x : y) - 1;
     }
-    rmin = amax <= 0   ? -(__int128)magnitude
+    rmin = amax <= 0   ? -(ny_i128)magnitude
            : amin >= 0 ? 0
-                       : -(__int128)magnitude;
+                       : -(ny_i128)magnitude;
     rmax = amin >= 0 ? magnitude : amax <= 0 ? 0 : magnitude;
     break;
   }
@@ -290,10 +290,10 @@ static void vrp_seed_affine_bounds(vrp_range_t *dst, int64_t init,
                                    int64_t step, uint64_t trip_count) {
   if (trip_count > (uint64_t)INT64_MAX)
     return;
-  __int128 lo = init;
-  __int128 hi = (__int128)init + (__int128)trip_count * (__int128)step;
+  ny_i128 lo = init;
+  ny_i128 hi = (ny_i128)init + (ny_i128)trip_count * (ny_i128)step;
   if (lo > hi) {
-    __int128 tmp = lo;
+    ny_i128 tmp = lo;
     lo = hi;
     hi = tmp;
   }
@@ -537,10 +537,10 @@ bool nyr_vrp(nyr_func_t *f) {
           if (in->op == NYIR_SUB_I64 && affines[in->a].valid &&
               affines[in->b].valid &&
               affines[in->a].loop_idx == affines[in->b].loop_idx) {
-            __int128 dinit =
-                (__int128)affines[in->a].init - affines[in->b].init;
-            __int128 dstep =
-                (__int128)affines[in->a].step - affines[in->b].step;
+            ny_i128 dinit =
+                (ny_i128)affines[in->a].init - affines[in->b].init;
+            ny_i128 dstep =
+                (ny_i128)affines[in->a].step - affines[in->b].step;
             if (dinit >= INT64_MIN && dinit <= INT64_MAX &&
                 dstep >= INT64_MIN && dstep <= INT64_MAX) {
               vrp_range_t exact = {0};
@@ -559,10 +559,10 @@ bool nyr_vrp(nyr_func_t *f) {
           } else if (in->op == NYIR_ADD_I64 && affines[in->a].valid &&
                      affines[in->b].valid &&
                      affines[in->a].loop_idx == affines[in->b].loop_idx) {
-            __int128 sinit =
-                (__int128)affines[in->a].init + affines[in->b].init;
-            __int128 sstep =
-                (__int128)affines[in->a].step + affines[in->b].step;
+            ny_i128 sinit =
+                (ny_i128)affines[in->a].init + affines[in->b].init;
+            ny_i128 sstep =
+                (ny_i128)affines[in->a].step + affines[in->b].step;
             if (sinit >= INT64_MIN && sinit <= INT64_MAX &&
                 sstep >= INT64_MIN && sstep <= INT64_MAX) {
               vrp_range_t exact = {0};
@@ -602,9 +602,9 @@ bool nyr_vrp(nyr_func_t *f) {
             if (vrp_const_i64(f, defs, num_values, in->b, &sh) && sh >= 0 &&
                 sh <= 62) {
               size_t li = affines[in->a].loop_idx;
-              __int128 scale = ((__int128)1) << (int)sh;
-              __int128 sinit = (__int128)affines[in->a].init * scale;
-              __int128 sstep = (__int128)affines[in->a].step * scale;
+              ny_i128 scale = ((ny_i128)1) << (int)sh;
+              ny_i128 sinit = (ny_i128)affines[in->a].init * scale;
+              ny_i128 sstep = (ny_i128)affines[in->a].step * scale;
               if (sinit >= INT64_MIN && sinit <= INT64_MAX &&
                   sstep >= INT64_MIN && sstep <= INT64_MAX) {
                 affines[in->dst] = (vrp_affine_t){.valid = true,
@@ -634,8 +634,8 @@ bool nyr_vrp(nyr_func_t *f) {
               aff_v = in->b;
             if (aff_v >= 0) {
               size_t li = affines[aff_v].loop_idx;
-              __int128 sinit = (__int128)affines[aff_v].init * k;
-              __int128 sstep = (__int128)affines[aff_v].step * k;
+              ny_i128 sinit = (ny_i128)affines[aff_v].init * k;
+              ny_i128 sstep = (ny_i128)affines[aff_v].step * k;
               if (sinit >= INT64_MIN && sinit <= INT64_MAX &&
                   sstep >= INT64_MIN && sstep <= INT64_MAX) {
                 affines[in->dst] = (vrp_affine_t){.valid = true,
@@ -672,15 +672,15 @@ bool nyr_vrp(nyr_func_t *f) {
             }
             if (aff_v >= 0) {
               size_t li = affines[aff_v].loop_idx;
-              __int128 sinit =
+              ny_i128 sinit =
                   in->op == NYIR_ADD_I64
-                      ? (__int128)affines[aff_v].init + c
-                      : (const_lhs ? (__int128)c - affines[aff_v].init
-                                   : (__int128)affines[aff_v].init - c);
-              __int128 sstep =
+                      ? (ny_i128)affines[aff_v].init + c
+                      : (const_lhs ? (ny_i128)c - affines[aff_v].init
+                                   : (ny_i128)affines[aff_v].init - c);
+              ny_i128 sstep =
                   (in->op == NYIR_SUB_I64 && const_lhs)
-                      ? -(__int128)affines[aff_v].step
-                      : (__int128)affines[aff_v].step;
+                      ? -(ny_i128)affines[aff_v].step
+                      : (ny_i128)affines[aff_v].step;
               if (sinit >= INT64_MIN && sinit <= INT64_MAX &&
                   sstep >= INT64_MIN && sstep <= INT64_MAX) {
                 affines[in->dst] = (vrp_affine_t){.valid = true,

@@ -1335,9 +1335,9 @@ int64_t rt_shl(int64_t a, int64_t b) {
        * reinterpret the wrapped value as a tagged integer), which corrupted
        * both the high-bit and negative-boundary cases.
        */
-      __int128 shifted = (__int128)av * ((__int128)1 << (unsigned)bv);
-      if (shifted >= (__int128)NY_SMALL_INT_MIN &&
-          shifted <= (__int128)NY_SMALL_INT_MAX)
+      ny_i128 shifted = (ny_i128)av * ((ny_i128)1 << (unsigned)bv);
+      if (shifted >= (ny_i128)NY_SMALL_INT_MIN &&
+          shifted <= (ny_i128)NY_SMALL_INT_MAX)
         return rt_tag_v((int64_t)shifted);
     }
   }
@@ -1373,9 +1373,9 @@ int64_t rt_shl_raw(int64_t a, int64_t b) {
     return a;
   }
   if (b < 64) {
-    __int128 shifted = (__int128)a * ((__int128)1 << (unsigned)b);
-    if (shifted >= (__int128)NY_SMALL_INT_MIN &&
-        shifted <= (__int128)NY_SMALL_INT_MAX)
+    ny_i128 shifted = (ny_i128)a * ((ny_i128)1 << (unsigned)b);
+    if (shifted >= (ny_i128)NY_SMALL_INT_MIN &&
+        shifted <= (ny_i128)NY_SMALL_INT_MAX)
       return (int64_t)shifted;
   }
   return rt_bigint_shl(rt_bigint_from_i64_raw(a), rt_tag_v(b));

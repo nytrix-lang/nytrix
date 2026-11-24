@@ -2323,7 +2323,7 @@ static void ny_orc_perf_remove_tracker(LLVMOrcResourceTrackerRef tracker) {
         while (getline(&line, &cap, in) >= 0) {
           uint64_t addr = 0;
           char name[2048];
-          if (sscanf(line, "%" SCNx64 " %*" SCNx64 " %2047s", &addr, name) !=
+          if (sscanf(line, "%" SCNx64 " %*s %2047s", &addr, name) !=
               2) {
             fputs(line, out);
             continue;

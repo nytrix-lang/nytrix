@@ -48,6 +48,8 @@ static void cny_sb_add(cny_sb_t *b, const char *s) {
 }
 
 static void cny_sb_addn(cny_sb_t *b, const char *s, size_t n) {
+  if (n >= SIZE_MAX / 2 - b->len)
+    return;
   if (cny_sb_grow(b, b->len + n + 1)) {
     memcpy(b->data + b->len, s, n);
     b->len += n;

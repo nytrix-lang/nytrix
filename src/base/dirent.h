@@ -89,6 +89,8 @@ static inline int closedir(DIR *d) {
 
 #else
 #if defined(__GNUC__) || defined(__clang__)
+/* include_next is the point of this wrapper; keep -Wpedantic quiet on it. */
+#pragma GCC system_header
 #include_next <dirent.h>
 #else
 #include <dirent.h>

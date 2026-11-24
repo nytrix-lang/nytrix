@@ -48,12 +48,12 @@ bool ny_curl_init(ny_curl_state_t *state) {
   state->strerror = (curl_easy_strerror_t)GetProcAddress(state->handle, "curl_easy_strerror");
   state->global_init = (curl_global_init_t)GetProcAddress(state->handle, "curl_global_init");
 #else
-  state->init = (curl_easy_init_t)dlsym(state->handle, "curl_easy_init");
-  state->setopt = (curl_easy_setopt_t)dlsym(state->handle, "curl_easy_setopt");
-  state->perform = (curl_easy_perform_t)dlsym(state->handle, "curl_easy_perform");
-  state->cleanup = (curl_easy_cleanup_t)dlsym(state->handle, "curl_easy_cleanup");
-  state->strerror = (curl_easy_strerror_t)dlsym(state->handle, "curl_easy_strerror");
-  state->global_init = (curl_global_init_t)dlsym(state->handle, "curl_global_init");
+  state->init = __extension__ (curl_easy_init_t)dlsym(state->handle, "curl_easy_init");
+  state->setopt = __extension__ (curl_easy_setopt_t)dlsym(state->handle, "curl_easy_setopt");
+  state->perform = __extension__ (curl_easy_perform_t)dlsym(state->handle, "curl_easy_perform");
+  state->cleanup = __extension__ (curl_easy_cleanup_t)dlsym(state->handle, "curl_easy_cleanup");
+  state->strerror = __extension__ (curl_easy_strerror_t)dlsym(state->handle, "curl_easy_strerror");
+  state->global_init = __extension__ (curl_global_init_t)dlsym(state->handle, "curl_global_init");
 #endif
 
   if (!state->init || !state->setopt || !state->perform || !state->cleanup) {

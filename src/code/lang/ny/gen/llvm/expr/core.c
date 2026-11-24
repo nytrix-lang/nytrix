@@ -187,15 +187,15 @@ bool ny_legacy_expr_is_raw_int_arg(codegen_t *cg, scope *scopes, size_t depth,
     size_t name_len = (size_t)expr->tok.len;
     if (name_len == 0)
       name_len = strlen(expr->as.ident.name);
-    binding *binding = lookup_binding_hash(
+    binding *bind = lookup_binding_hash(
         cg, scopes, depth, expr->as.ident.name, name_len, expr->as.ident.hash);
-    expr_t *init = binding && !binding->is_mut
-                       ? ny_binding_var_init_expr(binding, expr->as.ident.name)
+    expr_t *init = bind && !bind->is_mut
+                       ? ny_binding_var_init_expr(bind, expr->as.ident.name)
                        : NULL;
     if (ny_legacy_expr_is_bigint_to_int_call(init))
       return true;
-    bool result = binding && binding->is_int_direct &&
-                  binding->is_int_raw_direct && binding->raw_int_value;
+    bool result = bind && bind->is_int_direct &&
+                  bind->is_int_raw_direct && bind->raw_int_value;
     return result;
   }
   /*

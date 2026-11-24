@@ -2176,6 +2176,11 @@ function(nytrix_add_tool tool_target tool_name)
     target_compile_options(${tool_target} PRIVATE /W4)
   elseif (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${tool_target} PRIVATE -Wall -Wextra -Wunused -Wmissing-prototypes)
+    if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+      # Same policy as the compiler targets: bounded snprintf truncation is
+      # intended and checked at the call sites.
+      target_compile_options(${tool_target} PRIVATE -Wno-format-truncation)
+    endif()
     if (NYTRIX_STRICT_WARNINGS)
       # Tool help texts are single long literals and src/base/time.h wraps the
       # system header with include_next; both are deliberate.

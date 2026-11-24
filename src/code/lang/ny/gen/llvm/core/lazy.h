@@ -196,19 +196,6 @@ bool ny_lazy_emit_stdlib_var_needed(codegen_t *cg, stmt_t *s,
   return false;
 }
 
-static bool ny_lazy_emit_is_conservative_keep(const char *final_name) {
-  if (!final_name || !*final_name)
-    return true;
-  const char *tail = ny_name_leaf(final_name);
-  if (!tail || !*tail)
-    return true;
-
-  if (strncmp(final_name, "core.math.nt.__", 14) == 0 ||
-      strncmp(final_name, "core.math.matrix.__", 18) == 0)
-    return true;
-  return false;
-}
-
 static void ny_lazy_emit_collect_stmt(codegen_t *cg, stmt_t *s);
 
 typedef struct {
@@ -953,59 +940,6 @@ void ny_lazy_emit_prepare_reachable(codegen_t *cg) {
   ny_lazy_emit_build_reachable_set(cg);
 }
 
-static bool ny_lazy_emit_should_emit_func(codegen_t *cg, stmt_t *s,
-                                          const char *final_name) {
-  if (!cg || !cg->lazy_emit_stdlib_enabled || !s || !ny_is_stdlib_tok(s->tok))
-    return true;
-  if (ny_codegen_stmt_is_source_file(cg, s))
-    return true;
-  if (ny_lazy_emit_is_conservative_keep(final_name))
-    return true;
-  return ny_lazy_emit_function_reached(cg, final_name);
-}
-
-static void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
-                               const char *cur_mod) {
-  if (s->kind == NY_S_FUNC) {
-    fun_sig *sig = ny_lazy_emit_attached_sig_for_stmt(cg, s);
-    const char *fn_mod = ny_lazy_emit_stmt_module(cg, s, cur_mod);
-    if (!ny_emit_module_match(cg, fn_mod))
-      return;
-    cg->current_module_name = fn_mod;
-    const char *final_name =
-        sig && sig->name ? sig->name : codegen_qname(cg, s->as.fn.name, fn_mod);
-    if (!ny_lazy_emit_should_emit_func(cg, s, final_name))
-      return;
-    if (cg->lazy_emit_stdlib_enabled &&
-        ny_env_enabled("NYTRIX_TRACE_LAZY_STDLIB_EMIT") &&
-        ny_is_stdlib_tok(s->tok)) {
-      fprintf(stderr, "[lazy-stdlib-codegen] emit_top %s\n",
-              final_name ? final_name : "(nil)");
-    }
-    gen_func(cg, s, final_name, gsc, gd, NULL);
-  } else if (s->kind == NY_S_LEMMA) {
-    /*
-     * Lemmas are erased at runtime, no runtime codegen needed.
-     */
-  } else if (s->kind == NY_S_IMPL) {
-    for (size_t i = 0; i < s->as.impl.methods.len; i++)
-      emit_top_functions(cg, s->as.impl.methods.data[i], gsc, gd, cur_mod);
-  } else if (s->kind == NY_S_STRUCT) {
-    for (size_t i = 0; i < s->as.struc.methods.len; i++)
-      emit_top_functions(cg, s->as.struc.methods.data[i], gsc, gd, cur_mod);
-  } else if (s->kind == NY_S_LAYOUT) {
-    for (size_t i = 0; i < s->as.layout.methods.len; i++)
-      emit_top_functions(cg, s->as.layout.methods.data[i], gsc, gd, cur_mod);
-  } else if (s->kind == NY_S_MODULE) {
-    for (size_t i = 0; i < s->as.module.body.len; i++)
-      emit_top_functions(cg, s->as.module.body.data[i], gsc, gd,
-                         s->as.module.name);
-  } else if (s->kind == NY_S_BLOCK && s->as.block.transparent) {
-    for (size_t i = 0; i < s->as.block.body.len; i++)
-      emit_top_functions(cg, s->as.block.body.data[i], gsc, gd, cur_mod);
-  }
-}
-
 static bool ny_fn_has_body(LLVMValueRef fn) {
   return fn && LLVMGetFirstBasicBlock(fn) != NULL;
 }
@@ -1088,50 +1022,5 @@ void ny_lazy_emit_demand_referenced(codegen_t *cg, scope *gsc, size_t gd,
   if (ny_env_enabled("NYTRIX_TRACE_LAZY_STDLIB_CODEGEN")) {
     fprintf(stderr, "[lazy-stdlib-codegen] %s_demand_rounds=%zu\n",
             phase && *phase ? phase : "unknown", rounds > 0 ? rounds - 1 : 0);
-  }
-}
-
-static bool ny_stmt_contains_top_function(stmt_t *s) {
-  if (!s)
-    return false;
-  switch (s->kind) {
-  case NY_S_FUNC:
-    return true;
-  case NY_S_LEMMA:
-    return true;
-  case NY_S_IMPL:
-    for (size_t i = 0; i < s->as.impl.methods.len; i++) {
-      if (ny_stmt_contains_top_function(s->as.impl.methods.data[i]))
-        return true;
-    }
-    return false;
-  case NY_S_STRUCT:
-    for (size_t i = 0; i < s->as.struc.methods.len; i++) {
-      if (ny_stmt_contains_top_function(s->as.struc.methods.data[i]))
-        return true;
-    }
-    return false;
-  case NY_S_LAYOUT:
-    for (size_t i = 0; i < s->as.layout.methods.len; i++) {
-      if (ny_stmt_contains_top_function(s->as.layout.methods.data[i]))
-        return true;
-    }
-    return false;
-  case NY_S_MODULE:
-    for (size_t i = 0; i < s->as.module.body.len; i++) {
-      if (ny_stmt_contains_top_function(s->as.module.body.data[i]))
-        return true;
-    }
-    return false;
-  case NY_S_BLOCK:
-    if (!s->as.block.transparent)
-      return false;
-    for (size_t i = 0; i < s->as.block.body.len; i++) {
-      if (ny_stmt_contains_top_function(s->as.block.body.data[i]))
-        return true;
-    }
-    return false;
-  default:
-    return false;
   }
 }

@@ -634,17 +634,17 @@ const char *ny_parser_gensym(parser_t *p, const char *prefix) {
   const char *module = p->current_module;
   char *namespace = NULL;
   if (module && *module) {
-    parser_gensym_scope *scope = p->gensym_scopes;
-    while (scope && strcmp(scope->module, module) != 0)
-      scope = scope->next;
-    if (!scope) {
-      scope = arena_alloc(p->arena, sizeof(*scope));
-      scope->module = parser_intern(p, module, strlen(module));
-      scope->counter = 0;
-      scope->next = p->gensym_scopes;
-      p->gensym_scopes = scope;
+    parser_gensym_scope *scope_ref = p->gensym_scopes;
+    while (scope_ref && strcmp(scope_ref->module, module) != 0)
+      scope_ref = scope_ref->next;
+    if (!scope_ref) {
+      scope_ref = arena_alloc(p->arena, sizeof(*scope_ref));
+      scope_ref->module = parser_intern(p, module, strlen(module));
+      scope_ref->counter = 0;
+      scope_ref->next = p->gensym_scopes;
+      p->gensym_scopes = scope_ref;
     }
-    counter = &scope->counter;
+    counter = &scope_ref->counter;
     /*
      * Encode the entire module name reversibly. A hash would permit two
      * library namespaces to produce the same generated identifier.
@@ -765,15 +765,15 @@ parser_enter_module_origin(parser_t *p, const char *name, token_t *module_tok) {
 }
 
 void parser_leave_module_origin(parser_t *p,
-                                parser_module_origin_scope_t scope) {
+                                parser_module_origin_scope_t scope_ref) {
   if (!p)
     return;
-  p->current_module = scope.module;
-  p->current_module_id = scope.module_id;
-  p->current_module_features = scope.module_features;
-  if (scope.module) {
-    p->cur.module_id = scope.module_id;
-    p->cur.module_features = scope.module_features;
+  p->current_module = scope_ref.module;
+  p->current_module_id = scope_ref.module_id;
+  p->current_module_features = scope_ref.module_features;
+  if (scope_ref.module) {
+    p->cur.module_id = scope_ref.module_id;
+    p->cur.module_features = scope_ref.module_features;
   } else {
     /*
      * A parser can cross the bundled-stdlib/user split while unwinding the

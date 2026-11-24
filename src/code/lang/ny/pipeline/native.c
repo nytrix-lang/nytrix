@@ -384,9 +384,9 @@ ny_pipeline_llvm_debug_scope(void *userdata, LLVMMetadataRef parent_scope,
     return NULL;
   LLVMMetadataRef previous_scope = cg->di_scope;
   cg->di_scope = parent_scope;
-  LLVMMetadataRef scope = codegen_debug_loc_scope(cg, tok);
+  LLVMMetadataRef scope_ref = codegen_debug_loc_scope(cg, tok);
   cg->di_scope = previous_scope;
-  return scope;
+  return scope_ref;
 }
 
 static LLVMMetadataRef
@@ -709,11 +709,11 @@ static bool ny_native_stmt_in_dump_scope(const ny_options *opt,
                                          const stmt_t *s) {
   if (!s)
     return false;
-  ny_dump_scope_t scope = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
-  if (scope == NY_DUMP_SCOPE_BOTH)
+  ny_dump_scope_t scope_ref = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
+  if (scope_ref == NY_DUMP_SCOPE_BOTH)
     return true;
   bool is_std = ny_is_stdlib_tok(s->tok);
-  return scope == NY_DUMP_SCOPE_LIB ? is_std : !is_std;
+  return scope_ref == NY_DUMP_SCOPE_LIB ? is_std : !is_std;
 }
 
 static bool ny_native_program_dump_view(const program_t *prog,

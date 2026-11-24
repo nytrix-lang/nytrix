@@ -1098,13 +1098,13 @@ scalar_multiply:
                 ? ny_sem_rep_name(e->as.binary.left->semantic.rep)
                 : "unres",
             e->as.binary.left && e->as.binary.left->semantic.resolved ? 1 : 0,
-            dl ? dl->semantic_rep : -1, dl ? dl->is_f64 : -1,
+            dl ? (int)dl->semantic_rep : -1, dl ? dl->is_f64 : -1,
             dl ? dl->is_f32 : -1, dl ? dl->is_any : -1, dr ? dr->name : "-",
             e->as.binary.right && e->as.binary.right->semantic.resolved
                 ? ny_sem_rep_name(e->as.binary.right->semantic.rep)
                 : "unres",
             e->as.binary.right && e->as.binary.right->semantic.resolved ? 1 : 0,
-            dr ? dr->semantic_rep : -1);
+            dr ? (int)dr->semantic_rep : -1);
   }
   /* A binary expression can inherit a stale floating semantic rep from an
    * untyped sequence element.  Its actual index ABI is authoritative: bare

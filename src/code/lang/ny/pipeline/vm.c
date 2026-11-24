@@ -1238,84 +1238,84 @@ static bool ny_native_vm_call_resolve_impl(void *opaque, const char *symbol,
 #define NY_VM_ARG(n) (args ? args[n] : 0)
     switch (arg_count) {
     case 0:
-      res = ((fn0_t)sym_ptr)();
+      res = (__extension__ (fn0_t)sym_ptr)();
       break;
     case 1:
-      res = ((fn1_t)sym_ptr)(args ? args[0] : 0);
+      res = (__extension__ (fn1_t)sym_ptr)(args ? args[0] : 0);
       break;
     case 2:
-      res = ((fn2_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0);
+      res = (__extension__ (fn2_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0);
       break;
     case 3:
-      res = ((fn3_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0,
+      res = (__extension__ (fn3_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0,
                              args ? args[2] : 0);
       break;
     case 4:
-      res = ((fn4_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0,
+      res = (__extension__ (fn4_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0,
                              args ? args[2] : 0, args ? args[3] : 0);
       break;
     case 5:
-      res = ((fn5_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0,
+      res = (__extension__ (fn5_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0,
                              args ? args[2] : 0, args ? args[3] : 0,
                              args ? args[4] : 0);
       break;
     case 6:
-      res = ((fn6_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn6_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                              NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5));
       break;
     case 7:
-      res = ((fn7_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn7_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                              NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5),
                              NY_VM_ARG(6));
       break;
     case 8:
-      res = ((fn8_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn8_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                              NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5),
                              NY_VM_ARG(6), NY_VM_ARG(7));
       break;
     case 9:
-      res = ((fn9_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn9_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                              NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5),
                              NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8));
       break;
     case 10:
-      res = ((fn10_t)sym_ptr)(
+      res = (__extension__ (fn10_t)sym_ptr)(
           NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2), NY_VM_ARG(3), NY_VM_ARG(4),
           NY_VM_ARG(5), NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8), NY_VM_ARG(9));
       break;
     case 11:
-      res = ((fn11_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn11_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                               NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5),
                               NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8),
                               NY_VM_ARG(9), NY_VM_ARG(10));
       break;
     case 12:
-      res = ((fn12_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn12_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                               NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5),
                               NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8),
                               NY_VM_ARG(9), NY_VM_ARG(10), NY_VM_ARG(11));
       break;
     case 13:
-      res = ((fn13_t)sym_ptr)(
+      res = (__extension__ (fn13_t)sym_ptr)(
           NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2), NY_VM_ARG(3), NY_VM_ARG(4),
           NY_VM_ARG(5), NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8), NY_VM_ARG(9),
           NY_VM_ARG(10), NY_VM_ARG(11), NY_VM_ARG(12));
       break;
     case 14:
-      res = ((fn14_t)sym_ptr)(
+      res = (__extension__ (fn14_t)sym_ptr)(
           NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2), NY_VM_ARG(3), NY_VM_ARG(4),
           NY_VM_ARG(5), NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8), NY_VM_ARG(9),
           NY_VM_ARG(10), NY_VM_ARG(11), NY_VM_ARG(12), NY_VM_ARG(13));
       break;
     case 15:
-      res = ((fn15_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
+      res = (__extension__ (fn15_t)sym_ptr)(NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2),
                               NY_VM_ARG(3), NY_VM_ARG(4), NY_VM_ARG(5),
                               NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8),
                               NY_VM_ARG(9), NY_VM_ARG(10), NY_VM_ARG(11),
                               NY_VM_ARG(12), NY_VM_ARG(13), NY_VM_ARG(14));
       break;
     case 16:
-      res = ((fn16_t)sym_ptr)(
+      res = (__extension__ (fn16_t)sym_ptr)(
           NY_VM_ARG(0), NY_VM_ARG(1), NY_VM_ARG(2), NY_VM_ARG(3), NY_VM_ARG(4),
           NY_VM_ARG(5), NY_VM_ARG(6), NY_VM_ARG(7), NY_VM_ARG(8), NY_VM_ARG(9),
           NY_VM_ARG(10), NY_VM_ARG(11), NY_VM_ARG(12), NY_VM_ARG(13),
