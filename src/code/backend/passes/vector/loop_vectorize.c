@@ -577,6 +577,15 @@ static bool lv_const_div_enabled(void) {
   return on != 0;
 }
 
+static bool lv_const_div_use_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_VEC_CONST_DIV_USE");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 static bool lv_two_level_iv_enabled(void) {
   static int on = -1;
   if (on < 0) {
@@ -1834,7 +1843,8 @@ static bool use_allowed(const nyr_func_t *f, const nyr_cfg_t *cfg,
    * masks, invariant splats) when the analysis marked them for rewriting.
    */
   if ((in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64 ||
-       in->op == NYIR_CMP_I64 || in->op == NYIR_SELECT_I64) &&
+       in->op == NYIR_CMP_I64 || in->op == NYIR_SELECT_I64 ||
+       (in->op == NYIR_DIV_I64 && !lv_const_div_use_disabled())) &&
       rewritten && rewritten[user])
     return true;
   if (!op_is_vec_i64_bin(in->op) && !op_is_vec_f64_bin(in->op))
