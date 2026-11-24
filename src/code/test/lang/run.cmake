@@ -4171,6 +4171,43 @@ foreach(once_opt -O0 -O2)
   )
 endforeach()
 nyc_execute_ok(
+  [=[nyc failed to compile the patchable-entry fixture (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S -fpatchable-function-entry=5,3 -pg -mfentry -mrecord-mcount
+            "${NY_C_CORPUS_patchable-entry.c}" -o "${BINARY_DIR}/patchable-entry.s"
+)
+nyc_execute_ok(
+  [=[the host assembler rejected the patchable-entry output (${status})\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -c "${BINARY_DIR}/patchable-entry.s" -o "${BINARY_DIR}/patchable-entry.o"
+)
+if(OBJDUMP)
+  nyc_execute_ok(
+    [=[objdump failed on the patchable-entry object (${status})\n${stdout}${stderr}]=]
+    COMMAND "${OBJDUMP}" -dr -j .text "${BINARY_DIR}/patchable-entry.o"
+  )
+  # Three NOPs sit before the symbol, two after it, then the profiling call.
+  if(NOT stdout MATCHES "nop[^\n]*\n[^\n]*nop[^\n]*\n[^\n]*nop[^\n]*\n\n?[^\n]*<patchable_entry>:\n[^\n]*nop[^\n]*\n[^\n]*nop[^\n]*\n")
+    message(FATAL_ERROR "patchable entry padding is not 3 before and 2 after the symbol\n${stdout}")
+  endif()
+  nyc_execute_ok(
+    [=[objdump -h failed (${status})\n${stdout}${stderr}]=]
+    COMMAND "${OBJDUMP}" -h "${BINARY_DIR}/patchable-entry.o"
+  )
+  if(NOT stdout MATCHES "__patchable_function_entries" OR NOT stdout MATCHES "__mcount_loc")
+    message(FATAL_ERROR "missing __patchable_function_entries or __mcount_loc\n${stdout}")
+  endif()
+endif()
+nyc_execute_ok(
+  [=[-c must reject -fpatchable-function-entry instead of ignoring it]=]
+  COMMAND "${CMAKE_COMMAND}" -E true
+)
+execute_process(
+  COMMAND "${NYC}" -c -O2 -fpatchable-function-entry=5,3 "${NY_C_CORPUS_patchable-entry.c}"
+          -o "${BINARY_DIR}/patchable-entry-reject.o"
+  RESULT_VARIABLE reject_status OUTPUT_QUIET ERROR_QUIET)
+if(reject_status EQUAL 0)
+  message(FATAL_ERROR "nyc -c silently accepted -fpatchable-function-entry")
+endif()
+nyc_execute_ok(
   [=[nyc failed to compile the global byte array alignment fixture (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_global-byte-array-alignment.c}"
             -o "${BINARY_DIR}/global-byte-array-alignment.s"

@@ -1419,6 +1419,111 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
                     data->name, target->symbol_prefix, data->name);
 }
 
+/*
+ * -fpatchable-function-entry=N[,M] and -mrecord-mcount shape the assembly text
+ * of each function (NOP padding with a __patchable_function_entries record,
+ * and a __mcount_loc record per profiling call). Set while parsing options.
+ */
+static unsigned nyc_patchable_total, nyc_patchable_before;
+static bool nyc_record_mcount;
+static size_t nyc_function_note_counter;
+
+/* Insert a formatted note into a malloc'd text at `at` (an offset). */
+static char *nyc_text_insert(char *text, size_t at, const char *note) {
+  size_t length = strlen(text), note_length = strlen(note);
+  char *grown = realloc(text, length + note_length + 1);
+  if (!grown)
+    return NULL;
+  memmove(grown + at + note_length, grown + at, length - at + 1);
+  memcpy(grown + at, note, note_length);
+  return grown;
+}
+
+/*
+ * Apply the patchable-entry padding and the mcount records to one function's
+ * assembly. Returns a new malloc'd text, or NULL on allocation failure.
+ */
+static char *nyc_apply_entry_notes(const char *name, const char *text) {
+  char *out = strdup(text);
+  if (!out)
+    return NULL;
+  if (nyc_record_mcount) {
+    static const char *const calls[] = {"\tcall\t__fentry__\n",
+                                        "\tcall\tmcount\n"};
+    for (size_t c = 0; c < 2; ++c) {
+      size_t from = 0;
+      char *at;
+      while ((at = strstr(out + from, calls[c]))) {
+        char note[256];
+        size_t id = nyc_function_note_counter++;
+        snprintf(note, sizeof(note),
+                 ".Lnyc_mcount_%zu:\n", id);
+        size_t offset = (size_t)(at - out);
+        out = nyc_text_insert(out, offset, note);
+        if (!out)
+          return NULL;
+        at = out + offset + strlen(note);
+        size_t after = (size_t)(at - out) + strlen(calls[c]);
+        snprintf(note, sizeof(note),
+                 "\t.pushsection __mcount_loc,\"a\",@progbits\n"
+                 "\t.quad .Lnyc_mcount_%zu\n\t.popsection\n",
+                 id);
+        out = nyc_text_insert(out, after, note);
+        if (!out)
+          return NULL;
+        from = after + strlen(note);
+      }
+    }
+  }
+  if (nyc_patchable_total) {
+    size_t id = nyc_function_note_counter++;
+    char label[512];
+    snprintf(label, sizeof(label), "\n%s:\n", name);
+    char *at = strstr(out, label);
+    if (!at)
+      return out;
+    size_t label_offset = (size_t)(at - out) + 1;
+    /* NOPs after the label (and after an endbr landing pad). */
+    size_t body = label_offset + strlen(name) + 2;
+    if (!strncmp(out + body, "\tendbr64\n", 10))
+      body += 10;
+    unsigned after_count = nyc_patchable_total - nyc_patchable_before;
+    if (after_count) {
+      size_t note_size = (size_t)after_count * 5 + 1;
+      char *nops = malloc(note_size);
+      if (!nops) {
+        free(out);
+        return NULL;
+      }
+      nops[0] = '\0';
+      for (unsigned i = 0; i < after_count; ++i)
+        strcat(nops, "\tnop\n");
+      out = nyc_text_insert(out, body, nops);
+      free(nops);
+      if (!out)
+        return NULL;
+    }
+    /* NOPs before the label, recorded in __patchable_function_entries. */
+    size_t note_size = 256 + (size_t)nyc_patchable_before * 5 + strlen(name);
+    char *prefix = malloc(note_size);
+    if (!prefix) {
+      free(out);
+      return NULL;
+    }
+    int n = snprintf(prefix, note_size,
+                     "\t.pushsection __patchable_function_entries,"
+                     "\"awo\",@progbits,%s\n\t.align 8\n"
+                     "\t.quad .Lnyc_pfe_%zu\n\t.popsection\n"
+                     ".Lnyc_pfe_%zu:\n",
+                     name, id, id);
+    for (unsigned i = 0; i < nyc_patchable_before; ++i)
+      n += snprintf(prefix + n, note_size - (size_t)n, "\tnop\n");
+    out = nyc_text_insert(out, label_offset, prefix);
+    free(prefix);
+  }
+  return out;
+}
+
 static bool write_c_function_assembly_text(
     nyr_writer_t *assembly, const char *function_assembly, const char *name,
     const nyr_func_t *function, bool cf_protection_branch, bool is_x86_64);
@@ -1504,6 +1609,13 @@ write_c_function_assembly(nyr_writer_t *assembly, const char *function_assembly,
       }
     }
     free(label);
+  }
+  if (is_x86_64 && (nyc_patchable_total || nyc_record_mcount)) {
+    char *noted = nyc_apply_entry_notes(name, stripped);
+    free(stripped);
+    if (!noted)
+      return false;
+    stripped = noted;
   }
   bool ok = write_c_function_assembly_text(assembly, stripped, name, function,
                                            cf_protection_branch, is_x86_64);
@@ -4062,6 +4174,25 @@ int main(int argc, char **argv) {
       driver.fentry_calls = true;
       continue;
     }
+    if (strcmp(option, "-mrecord-mcount") == 0) {
+      nyc_record_mcount = true;
+      continue;
+    }
+    if (strncmp(option, "-fpatchable-function-entry=", 27) == 0) {
+      char *end = NULL;
+      unsigned long total = strtoul(option + 27, &end, 10);
+      unsigned long before = 0;
+      if (end && *end == ',')
+        before = strtoul(end + 1, &end, 10);
+      if (!end || *end || end == option + 27 || before > total ||
+          total > 65535) {
+        fprintf(stderr, "nyc: invalid option '%s'\n", option);
+        return 2;
+      }
+      nyc_patchable_total = (unsigned)total;
+      nyc_patchable_before = (unsigned)before;
+      continue;
+    }
     if (strcmp(option, "-foptimize-sibling-calls") == 0)
       continue;
     if (strcmp(option, "-fasynchronous-unwind-tables") == 0)
@@ -4262,6 +4393,12 @@ int main(int argc, char **argv) {
   }
   if (object_mode && driver.assembly_output) {
     fputs("nyc: -c and -S cannot be combined\n", stderr);
+    goto done;
+  }
+  if (object_mode && (nyc_patchable_total || nyc_record_mcount)) {
+    fputs("nyc: -fpatchable-function-entry and -mrecord-mcount shape the "
+          "assembly text; use -S and assemble the result\n",
+          stderr);
     goto done;
   }
   if (driver.omit_frame_pointer && !driver.compile_unit && !driver.preprocess) {

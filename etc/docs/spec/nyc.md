@@ -2996,4 +2996,16 @@ run directory under `/tmp`.
   globals, fields, locals and parameters declared with them (the fixture
   covers `bool_fn_t` in each position). Arrays of function pointers and
   function-pointer returns do not carry it.
+- Kernel tracing flags (2026-11-24). `-fpatchable-function-entry=N[,M]` and
+  `-mrecord-mcount` are implemented for assembly output: M NOPs go before each
+  function symbol and N-M after it (after an `endbr64`), with a
+  `__patchable_function_entries` record of the first NOP, and each `-pg` call
+  to `__fentry__`/`mcount` gets a `__mcount_loc` entry. `-c` rejects both
+  options rather than ignoring them, because the direct object encoder does
+  not print this text. The kernel build, which passes
+  `-fpatchable-function-entry=16,16`, now produces the padding and records on
+  every unit and still boots; function alignment is not adjusted, so the
+  16-byte prefix is not guaranteed to be 16-byte aligned as with GCC's
+  `-fmin-function-alignment=16`. The `patchable-entry` fixture checks the
+  three-before, two-after layout and both sections after the host assembler.
 </details>
