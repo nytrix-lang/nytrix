@@ -292,31 +292,15 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 
 ### Required acceptance
 
-- [x] From unmodified upstream Linux 7.3 sources and a fresh output tree,
-  produce x86-64 `vmlinux`, `bzImage`, and all configured modules. Compile every
-  target C translation unit with NYC, including dependency generation; GNU
-  `as` may assemble the output and the host compiler may build host tools.
-  No target-C fallback, stale output reuse, GCC dependency-generation
-  workaround, or modified kernel sources count.
-- [x] Fit both upstream real-mode setup constraints. Boot the resulting
-  protected `bzImage` in QEMU and verify initramfs `/init` executes. Direct
-  PVH ELF boots and focused relinks are diagnostic, not acceptance.
-- [x] Review the complete compiler, assembler, linker, modpost, and `objtool`
-  diagnostics. Fix unsafe output and optimizer verifier failures without
-  suppressing warnings or removing configured protections.
-- [x] Record the configuration, source and compiler identity, toolchain,
-  exact commands, configured target object inventory, and compiler provenance
-  for every object. Count actual target C units; classify failures,
-  unsupported cases, and any workarounds. Keep the accepted build and QEMU
-  smoke test as a permanent regression.
 - [ ] Establish assembly/direct-object/physical-machine parity over the native
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission without
   the stack encoder, then remove the obsolete fallback.
-- [ ] Close the open C boundary cases: remaining complex forms, kernel tracing
-  flags, direct-object assembly annotations, and incomplete FS/GS address-space
-  forms and execution coverage. The specification records the narrower verified
-  subsets.
+- [ ] Close the open C boundary cases: `long double _Complex` (it needs the
+  x87 `long double`), complex file-scope initializers of the form `a + b*I`,
+  and FS/GS execution coverage under QEMU. Kernel tracing flags, direct-object
+  assembly annotations and the FS/GS rejections are done and recorded in the
+  evidence.
 
 ### Correctness verification programme
 
@@ -347,8 +331,6 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 - [ ] **P4 — Conformance.** Pair positive execution and negative diagnostic
   tests for supported C and GNU C constructs encountered in Linux, SQLite,
   system headers, and other real workloads. Do not count untested features.
-- [x] **P5 — System acceptance.** Fulfil the protected kernel artifact,
-  provenance, diagnostic, and boot gates above.
 - [ ] **P6 — Reproducibility.** Preserve compiler revision, flags, dependencies,
   target, checksums, seeds, object provenance, and reproduction commands.
   Consider self-hosting only if it serves the existing architecture; identical
