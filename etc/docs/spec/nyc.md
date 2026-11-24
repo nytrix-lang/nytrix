@@ -300,8 +300,10 @@ user-visible changes in the [changelog](../CHANGELOG.md).
   `X86_KERNEL_IBT`, whose objtool pass reports 76 "unreachable instruction"
   diagnostics, all at assembly entry symbols (`startup_64`,
   `entry_SYSCALL_64`, the return thunks); the same untouched tree configured
-  with only `X86_KERNEL_IBT` off reports none and boots, so the IBT objtool
-  path needs fixing rather than the kernel; and the
+  with only `X86_KERNEL_IBT` off reports none and boots, and the host GCC
+  16.2 builds the same tree and config with IBT on and reports none either, so
+  the diagnostics come from NYC's objects under objtool's IBT pass (one is
+  inside NYC-compiled `___bpf_prog_run`); and the
   same kernel hangs before `/init` under KVM with the host CPU model (it
   idles in `default_idle` after `kprobes`, with the clock stopped), so only
   software emulation is verified.
