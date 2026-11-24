@@ -11,6 +11,7 @@ bool nyr_inst_err(char *err, size_t err_len, const nyr_inst_t *inst,
 bool nyr_local_label_symbol_id(const char *symbol, int64_t *label);
 bool nyr_label_referenced(const nyr_func_t *f, int64_t label);
 bool nyr_prune_phis(nyr_func_t *f);
+bool nyr_temp_recycle(nyr_func_t *f);
 bool nyr_promote_private_entry_globals(nyr_func_t *f);
 bool nyr_recursive_add_to_loop(nyr_func_t *f, const char *func_name);
 const char *nyr_scalar_class_name(nyr_scalar_class_t scalar_class);

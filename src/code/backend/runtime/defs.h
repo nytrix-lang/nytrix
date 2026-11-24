@@ -30,6 +30,20 @@ RT_DEF("__calloc_raw", rt_calloc_raw, 1, "fn __calloc_raw(int n) ptr",
        "Allocates unmanaged zero-initialized raw bytes.")
 RT_DEF("__free_raw", rt_free_raw, 1, "fn __free_raw(p)",
        "Frees unmanaged raw bytes.")
+RT_DEF("__free_temp", rt_free_temp, 1, "fn __free_temp(p)",
+       "Recycles a temporary BigInt or BigFloat object.")
+RT_DEF("__free_temp_guard1", rt_free_temp_guard1, 2,
+       "fn __free_temp_guard1(p, g0)",
+       "Recycles a temporary BigInt/BigFloat unless aliased to g0.")
+RT_DEF("__free_temp_guard2", rt_free_temp_guard2, 3,
+       "fn __free_temp_guard2(p, g0, g1)",
+       "Recycles a temporary BigInt/BigFloat unless aliased to g0 or g1.")
+RT_DEF("__free_temp_guard3", rt_free_temp_guard3, 4,
+       "fn __free_temp_guard3(p, g0, g1, g2)",
+       "Recycles a temporary BigInt/BigFloat unless aliased to g0..g2.")
+RT_DEF("__free_temp_loop", rt_free_temp_loop, 4,
+       "fn __free_temp_loop(old_v, init_v, next_v, owned)",
+       "Recycles an overwritten loop-carried BigInt/BigFloat accumulator.")
 RT_DEF("__drop_owned", rt_drop_owned, 1, "fn __drop_owned(p)",
        "Drops an owned heap value if it is currently heap-backed.")
 RT_DEF("__drop_owned_slot", rt_drop_owned_slot, 1, "fn __drop_owned_slot(slot)",

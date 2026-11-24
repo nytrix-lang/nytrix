@@ -15457,6 +15457,189 @@ static bool nyr_fork_lower_functions(
 }
 #endif
 
+static void nyr_prune_mark_index(size_t idx, unsigned char *keep, size_t *queue,
+                                 size_t *tail) {
+  if (idx != SIZE_MAX && !keep[idx]) {
+    keep[idx] = 1;
+    queue[(*tail)++] = idx;
+  }
+}
+
+static bool nyr_prune_mod_alias_matches(const char *cand, const char *fully) {
+  const char *last_dot = strrchr(cand, '.');
+  if (!last_dot || last_dot == cand)
+    return false;
+  const char *seg_start = last_dot;
+  while (seg_start > cand && seg_start[-1] != '.')
+    --seg_start;
+  size_t seg_len = (size_t)(last_dot - seg_start);
+  if (seg_len < 4 || strncmp(seg_start + seg_len - 4, "_mod", 4) != 0)
+    return false;
+  size_t prefix_len = (size_t)(seg_start - cand);
+  if (prefix_len < 1 || prefix_len >= 256)
+    return false;
+  char munged[256];
+  size_t k = 0;
+  if (prefix_len > 1) {
+    memcpy(munged, cand, prefix_len - 1);
+    k = prefix_len - 1;
+  }
+  munged[k] = '\0';
+  return strcmp(munged, fully) == 0;
+}
+
+static void nyr_prune_mark_symbol(const nyr_build_name_map_t *map,
+                                  const char **func_names, size_t n,
+                                  const char **miss_seen, size_t miss_mask,
+                                  const char *symbol, unsigned char *keep,
+                                  size_t *queue, size_t *tail) {
+  if (!symbol || !*symbol || symbol[0] == '.' ||
+      strncmp(symbol, "rt_", 3) == 0 || strncmp(symbol, "ny_str_", 7) == 0 ||
+      strncmp(symbol, "ny_arr_", 7) == 0 || strncmp(symbol, "ny_g_", 5) == 0 ||
+      strncmp(symbol, "ny_c_", 5) == 0)
+    return;
+  size_t idx = nyr_build_name_map_find(map, symbol);
+  if (idx != SIZE_MAX) {
+    nyr_prune_mark_index(idx, keep, queue, tail);
+    return;
+  }
+  const char *fully = nyr_build_name_normalize(symbol);
+  if (!fully || !*fully)
+    return;
+  if (strncmp(fully, "core.", 5) == 0) {
+    idx = nyr_build_name_map_find(map, fully + 5);
+    if (idx != SIZE_MAX) {
+      nyr_prune_mark_index(idx, keep, queue, tail);
+      return;
+    }
+  }
+  if (miss_seen && miss_mask) {
+    size_t slot = (size_t)nyr_build_name_hash(fully) & miss_mask;
+    for (size_t probes = 0; probes < 16; ++probes) {
+      const char *present = miss_seen[slot];
+      if (!present) {
+        miss_seen[slot] = fully;
+        break;
+      }
+      if (strcmp(present, fully) == 0)
+        return;
+      slot = (slot + 1u) & miss_mask;
+    }
+  }
+  size_t fully_len = strlen(fully);
+  for (size_t z = 0; z < n; ++z) {
+    const char *cand = nyr_build_name_normalize(func_names[z]);
+    if (!cand || !*cand)
+      continue;
+    if (nyr_prune_mod_alias_matches(cand, fully)) {
+      nyr_prune_mark_index(z, keep, queue, tail);
+      continue;
+    }
+    size_t cand_len = strlen(cand);
+    if ((cand_len > fully_len && cand[cand_len - fully_len - 1] == '.' &&
+         strcmp(cand + cand_len - fully_len, fully) == 0) ||
+        (fully_len > cand_len && fully[fully_len - cand_len - 1] == '.' &&
+         strcmp(fully + fully_len - cand_len, cand) == 0)) {
+      nyr_prune_mark_index(z, keep, queue, tail);
+    }
+  }
+}
+
+static bool nyr_prune_keep_all(const ny_options *opt) {
+  if (getenv("NY_DUMP_FN") != NULL)
+    return true;
+  if (!opt)
+    return false;
+  return (opt->emit_module && *opt->emit_module) || opt->emit_shapes ||
+         opt->stop_after != NY_STOP_AFTER_NONE || opt->nyr_stop_after ||
+         opt->emit_ir_path || opt->emit_ir_pre_path || opt->emit_bc_path ||
+         opt->emit_asm_path || opt->emit_wasm_path || opt->emit_artifact_path ||
+         opt->emit_report_path || opt->mode == NY_MODE_REPL ||
+         opt->mode == NY_MODE_BUNDLE || opt->repl_explicit || opt->repl_plain ||
+         opt->dump_funcs || opt->dump_obj_full || opt->native_dump_ir ||
+         opt->native_dump_ir_path || opt->nyr_dump_text || opt->nyr_dump_raw ||
+         opt->nyr_dump_cfg || opt->nyr_dump_stats || opt->nyr_dump_bin ||
+         opt->nyr_dump_bin_path || opt->callgraph || opt->callgraph_json ||
+         opt->mixed_disasm || opt->dbg_elf_dump;
+}
+
+static void nyr_prune_unreachable_funcs(const ny_options *opt,
+                                        const nyr_func_t *rt_main,
+                                        nyr_func_t *funcs,
+                                        const char **func_names,
+                                        size_t *func_count_io,
+                                        bool trace_timing) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *v = getenv("NYTRIX_NO_NYIR_DEAD_FN_PRUNE");
+    enabled = (v && v[0] == '1' && !v[1]) ? 0 : 1;
+  }
+  if (!enabled || !rt_main || !funcs || !func_names || !func_count_io ||
+      *func_count_io == 0 || nyr_prune_keep_all(opt))
+    return;
+  size_t n = *func_count_io;
+  nyr_build_name_map_t map = {0};
+  size_t miss_cap = 1024;
+  while (miss_cap < n * 4u)
+    miss_cap <<= 1;
+  const char **miss_seen = calloc(miss_cap, sizeof(*miss_seen));
+  unsigned char *keep = calloc(n, 1);
+  size_t *queue = malloc(n * sizeof(*queue));
+  if (!keep || !queue || !nyr_build_name_map_init(&map, func_names, n)) {
+    free(map.slots);
+    free(miss_seen);
+    free(keep);
+    free(queue);
+    return;
+  }
+  size_t miss_mask = miss_seen ? miss_cap - 1u : 0;
+  size_t head = 0, tail = 0;
+  for (size_t i = 0; i < n; ++i) {
+    const char *norm = nyr_build_name_normalize(func_names[i]);
+    if (!norm)
+      continue;
+    if (strcmp(norm, "main") == 0 || strcmp(norm, "ny_main") == 0 ||
+        strncmp(norm, "__ny_", 5) == 0 || strncmp(norm, "ny_init", 7) == 0) {
+      keep[i] = 1;
+      queue[tail++] = i;
+    }
+  }
+  for (size_t k = 0; k < rt_main->len; ++k)
+    nyr_prune_mark_symbol(&map, func_names, n, miss_seen, miss_mask,
+                          rt_main->data[k].symbol, keep, queue, &tail);
+  while (head < tail) {
+    const nyr_func_t *f = &funcs[queue[head++]];
+    for (size_t k = 0; k < f->len; ++k)
+      nyr_prune_mark_symbol(&map, func_names, n, miss_seen, miss_mask,
+                            f->data[k].symbol, keep, queue, &tail);
+  }
+  size_t kept = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (keep[i]) {
+      if (kept != i) {
+        funcs[kept] = funcs[i];
+        func_names[kept] = func_names[i];
+      }
+      ++kept;
+    } else {
+      nyr_ir_func_free(&funcs[i]);
+    }
+  }
+  for (size_t i = kept; i < n; ++i) {
+    memset(&funcs[i], 0, sizeof(funcs[i]));
+    func_names[i] = NULL;
+  }
+  *func_count_io = kept;
+  if (trace_timing || ny_env_enabled("NYTRIX_TRACE_NYIR_DEAD_FN_PRUNE")) {
+    fprintf(stderr, "[nyir-dead-fn-prune] kept=%zu/%zu dropped=%zu\n", kept, n,
+            n - kept);
+  }
+  free(map.slots);
+  free(miss_seen);
+  free(keep);
+  free(queue);
+}
+
 bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                   nyr_func_t *rt_main_out, nyr_func_t *funcs_out,
                   size_t *func_count, const char **func_names_out,
@@ -16555,6 +16738,20 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     }
   }
   NY_NATIVE_STAGE_TIMED("rt-main-post-inline-opt");
+  if (ok) {
+    nyr_prune_unreachable_funcs(opt, rt_main_out, funcs_out, func_names,
+                                func_count, trace_stage_timing);
+  }
+  NY_NATIVE_STAGE_TIMED("dead-fn-prune");
+  if (ok && opt_level >= 2) {
+    for (size_t i = 0; funcs_out && i < *func_count; ++i) {
+      if (nyr_temp_recycle(&funcs_out[i]))
+        nyr_refresh_metadata(&funcs_out[i]);
+    }
+    if (rt_main_out && nyr_temp_recycle(rt_main_out))
+      nyr_refresh_metadata(rt_main_out);
+  }
+  NY_NATIVE_STAGE_TIMED("temp-recycle");
   /* Keep the pass oracle installed through
    * rt_main's registry and post-inline
    * optimization pipelines. Disabling it

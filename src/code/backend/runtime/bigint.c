@@ -3327,16 +3327,13 @@ static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
   return true;
 }
 
-static inline bool _bi_try_mul_small_heap(int64_t a, int64_t b, int64_t *out) {
-  int as = 0, bs = 0;
-  size_t aw = 0, bw = 0;
-  uint64_t asmall[1], bsmall[1];
-  const uint64_t *al = NULL, *bl = NULL;
-  if (!_bi_read_heap_limbs(a, &as, &al, &aw, asmall) ||
-      !_bi_read_heap_limbs(b, &bs, &bl, &bw, bsmall))
-    return false;
+static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
+                                         size_t aw, int64_t b, int bs,
+                                         const uint64_t *bl, size_t bw,
+                                         int64_t *out) {
   if (aw == 0 || bw == 0) {
-    *out = _bi_from_limbs(0, asmall, 0);
+    uint64_t z = 0;
+    *out = _bi_from_limbs(0, &z, 0);
     return *out != 0;
   }
   /*
@@ -3492,6 +3489,25 @@ static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
   return remainder;
 }
 
+static int g_bi_div_pow2_disabled = -1;
+static int g_bi_small_cache_disabled = -1;
+
+static inline bool _bi_div_pow2_enabled(void) {
+  if (__builtin_expect(g_bi_div_pow2_disabled < 0, 0)) {
+    const char *e = getenv("NYTRIX_NO_BIGINT_DIV_POW2");
+    g_bi_div_pow2_disabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return g_bi_div_pow2_disabled == 0;
+}
+
+static inline bool _bi_small_cache_enabled(void) {
+  if (__builtin_expect(g_bi_small_cache_disabled < 0, 0)) {
+    const char *e = getenv("NYTRIX_NO_BIGINT_SMALL_CACHE");
+    g_bi_small_cache_disabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return g_bi_small_cache_disabled == 0;
+}
+
 static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
                                            const uint64_t *bl, size_t bw,
                                            int want_remainder, int64_t *out) {
@@ -3509,6 +3525,51 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
   }
   uint64_t rem = 0;
   uint64_t d = bl[0];
+  if (__builtin_expect((d & (d - 1u)) == 0u, 0) && _bi_div_pow2_enabled()) {
+    unsigned shift = (unsigned)__builtin_ctzll(d);
+    if (want_remainder) {
+      rem = shift ? (al[0] & (d - 1u)) : 0ULL;
+      uint64_t floor_rem = rem;
+      int rem_sign = 0;
+      if (rem != 0) {
+        rem_sign = bs;
+        if (as != bs)
+          floor_rem = d - rem;
+      }
+      *out = _bi_from_limbs(rem_sign, &floor_rem, floor_rem != 0 ? 1u : 0u);
+      return *out != 0;
+    }
+    if (shift == 0) {
+      int64_t result = _bi_alloc(aw);
+      if (!result)
+        return false;
+      if (aw > 0)
+        memcpy((void *)(uintptr_t)(result + 16), al, aw * sizeof(uint64_t));
+      int sign = aw == 0 || as == 0 ? 0 : (as == bs ? 1 : -1);
+      *(int64_t *)(uintptr_t)result = rt_tag_v(sign);
+      *out = result;
+      return true;
+    }
+    size_t orig_aw = aw;
+    if ((al[aw - 1] >> shift) == 0u)
+      --aw;
+    int64_t result = _bi_alloc(aw);
+    if (!result)
+      return false;
+    if (aw > 0) {
+      uint64_t *q = (uint64_t *)(uintptr_t)(result + 16);
+      unsigned inv = 64u - shift;
+      for (size_t i = 0; i < aw; ++i) {
+        uint64_t lo = al[i] >> shift;
+        uint64_t hi = (i + 1u < orig_aw) ? (al[i + 1u] << inv) : 0ULL;
+        q[i] = lo | hi;
+      }
+    }
+    int sign = aw == 0 || as == 0 ? 0 : (as == bs ? 1 : -1);
+    *(int64_t *)(uintptr_t)result = rt_tag_v(sign);
+    *out = result;
+    return true;
+  }
   if (want_remainder) {
     if (aw == 1) {
       rem = al[0] % d;
@@ -3827,24 +3888,11 @@ int64_t rt_bigint_sub(int64_t a, int64_t b) {
   return _bi_add_slow(a, b, 1);
 }
 
-static __attribute__((noinline)) int64_t _bi_mul_large(int64_t a, int64_t b) {
-  _bn_t na, nb;
-  _bn_init(&na);
-  _bn_init(&nb);
-  uint64_t small_a[1], small_b[1];
-  const uint64_t *al = NULL, *bl = NULL;
-  if (!_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a)) {
-    a = _bi_coerce_fallback(a);
-    (void)_bi_read_heap_limbs(a, &na.sign, &al, &na.count, small_a);
-  }
-  if (!_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b)) {
-    b = _bi_coerce_fallback(b);
-    (void)_bi_read_heap_limbs(b, &nb.sign, &bl, &nb.count, small_b);
-  }
-  na.d = (uint64_t *)al;
-  nb.d = (uint64_t *)bl;
-  size_t words = na.count + nb.count;
-  if (words < na.count || words > (SIZE_MAX / sizeof(uint64_t) - 64) / 8)
+static __attribute__((noinline)) int64_t
+_bi_mul_large_limbs(int as, const uint64_t *al, size_t aw, int bs,
+                    const uint64_t *bl, size_t bw) {
+  size_t words = aw + bw;
+  if (words < aw || words > (SIZE_MAX / sizeof(uint64_t) - 64) / 8)
     return 0;
   int64_t result = _bi_alloc(words);
   if (!result)
@@ -3857,12 +3905,11 @@ static __attribute__((noinline)) int64_t _bi_mul_large(int64_t a, int64_t b) {
   if (!work)
     return 0;
   uint64_t *product = (uint64_t *)(uintptr_t)(result + 16);
-  _bn_words_mul(product, na.d, na.count, nb.d, nb.count, work);
+  _bn_words_mul(product, al, aw, bl, bw, work);
   if (work != stack_work)
     free(work);
   words = _bi_norm_words(product, words);
-  *(int64_t *)(uintptr_t)result =
-      rt_tag_v(words ? (na.sign == nb.sign ? 1 : -1) : 0);
+  *(int64_t *)(uintptr_t)result = rt_tag_v(words ? (as == bs ? 1 : -1) : 0);
   *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
   return result;
 }
@@ -3871,9 +3918,21 @@ int64_t rt_bigint_mul(int64_t a, int64_t b) {
   int64_t fast = 0;
   if (_bi_try_small_mul_alloc(a, b, &fast))
     return fast;
-  if (_bi_try_mul_small_heap(a, b, &fast))
+  int as = 0, bs = 0;
+  size_t aw = 0, bw = 0;
+  uint64_t asmall[1], bsmall[1];
+  const uint64_t *al = NULL, *bl = NULL;
+  if (!_bi_read_heap_limbs(a, &as, &al, &aw, asmall)) {
+    a = _bi_coerce_fallback(a);
+    (void)_bi_read_heap_limbs(a, &as, &al, &aw, asmall);
+  }
+  if (!_bi_read_heap_limbs(b, &bs, &bl, &bw, bsmall)) {
+    b = _bi_coerce_fallback(b);
+    (void)_bi_read_heap_limbs(b, &bs, &bl, &bw, bsmall);
+  }
+  if (_bi_try_mul_decoded(a, as, al, aw, b, bs, bl, bw, &fast))
     return fast;
-  return _bi_mul_large(a, b);
+  return _bi_mul_large_limbs(as, al, aw, bs, bl, bw);
 }
 
 static int64_t _bi_submul_owned_result(int64_t value) {
@@ -4652,7 +4711,11 @@ int64_t rt_bigint_f64buf_store(int64_t buf, int64_t i_v, int64_t a) {
   return buf;
 }
 
-int64_t rt_bigint_from_i64_raw(int64_t v) {
+enum { BI_SMALL_CACHE_LO = -16, BI_SMALL_CACHE_HI = 255 };
+static int64_t g_bi_small_cache[BI_SMALL_CACHE_HI - BI_SMALL_CACHE_LO + 1];
+static _Atomic int g_bi_small_cache_state = 0;
+
+static int64_t _bi_alloc_i64_fresh(int64_t v) {
   int sign = v < 0 ? -1 : (v == 0 ? 0 : 1);
   uint64_t mag = v < 0 ? (uint64_t)(-(v + 1)) + 1u : (uint64_t)v;
   size_t wc = (sign == 0) ? 0 : 1;
@@ -4663,6 +4726,46 @@ int64_t rt_bigint_from_i64_raw(int64_t v) {
   if (wc > 0)
     *(uint64_t *)((char *)p + 16) = mag;
   return p;
+}
+
+static __attribute__((noinline)) void _bi_small_cache_init(void) {
+  int expected = 0;
+  if (atomic_compare_exchange_strong_explicit(
+          &g_bi_small_cache_state, &expected, 1, memory_order_acq_rel,
+          memory_order_acquire)) {
+    bool all_ok = true;
+    for (int64_t v = BI_SMALL_CACHE_LO; v <= BI_SMALL_CACHE_HI; ++v) {
+      int64_t p = _bi_alloc_i64_fresh(v);
+      if (!p) {
+        all_ok = false;
+        break;
+      }
+      /* Mark header offset +16 (p - 16) as immortal singleton. */
+      *(uint64_t *)((char *)(uintptr_t)p - 16) = 1ULL;
+      g_bi_small_cache[v - BI_SMALL_CACHE_LO] = p;
+    }
+    atomic_store_explicit(&g_bi_small_cache_state, all_ok ? 2 : 0,
+                          memory_order_release);
+  } else {
+    while (atomic_load_explicit(&g_bi_small_cache_state, memory_order_acquire) ==
+           1) {
+    }
+  }
+}
+
+int64_t rt_bigint_from_i64_raw(int64_t v) {
+  if (v >= BI_SMALL_CACHE_LO && v <= BI_SMALL_CACHE_HI &&
+      _bi_small_cache_enabled() && rt_bigint_cache_allowed()) {
+    if (__builtin_expect(atomic_load_explicit(&g_bi_small_cache_state,
+                                              memory_order_acquire) != 2,
+                         0))
+      _bi_small_cache_init();
+    if (__builtin_expect(atomic_load_explicit(&g_bi_small_cache_state,
+                                              memory_order_relaxed) == 2,
+                         1))
+      return g_bi_small_cache[v - BI_SMALL_CACHE_LO];
+  }
+  return _bi_alloc_i64_fresh(v);
 }
 
 int64_t rt_bigint_from_int(int64_t n) {

@@ -275,6 +275,16 @@ static const nyr_runtime_effect_entry_t nyr_runtime_effects[] = {
     /*
      * Tag tests update private runtime lookup caches in some cases.
      */
+    {"rt_free_temp",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY},
+    {"rt_free_temp_guard1",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY},
+    {"rt_free_temp_guard2",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY},
+    {"rt_free_temp_guard3",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY},
+    {"rt_free_temp_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY},
     {"rt_native_has_tag", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                               NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP},
     {"rt_value_tag", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |

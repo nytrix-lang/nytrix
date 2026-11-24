@@ -269,12 +269,6 @@ static void rt_map_oracle_expand_bounds(uintptr_t start, uintptr_t end) {
   }
 }
 
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
 _Atomic(_Atomic(uint64_t) *) g_rt_oracle_pages[1u << RT_ORACLE_PAGE_ROOT_BITS];
 
 /*
@@ -329,30 +323,17 @@ static void rt_map_oracle_mark_pages(uintptr_t s, uintptr_t e) {
 static __thread uintptr_t rt_oracle_dedup_s[RT_ORACLE_DEDUP];
 static __thread uintptr_t rt_oracle_dedup_e[RT_ORACLE_DEDUP];
 static __thread uint32_t rt_oracle_dedup_idx;
+static _Atomic uint64_t g_rt_oracle_forget_gen = 0;
+static __thread uint64_t rt_oracle_dedup_gen = 0;
 
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
-
-__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
-__thread uint32_t g_rt_probe_cache_next;
+static int g_oracle_dedup_first_disabled = -1;
+static inline bool rt_oracle_dedup_first_enabled(void) {
+  if (__builtin_expect(g_oracle_dedup_first_disabled < 0, 0)) {
+    const char *e = getenv("NYTRIX_NO_ORACLE_DEDUP_FIRST");
+    g_oracle_dedup_first_disabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return g_oracle_dedup_first_disabled == 0;
+}
 
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
@@ -361,6 +342,26 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
   uintptr_t e = (start + (uintptr_t)size + 4095u) & ~(uintptr_t)4095u;
   if (e <= s)
     return;
+  uintptr_t *dedup_s = rt_oracle_dedup_s, *dedup_e = rt_oracle_dedup_e;
+#define dedup_idx rt_oracle_dedup_idx
+  bool dedup_first = rt_oracle_dedup_first_enabled();
+  if (dedup_first) {
+    uint64_t fg = atomic_load_explicit(&g_rt_oracle_forget_gen,
+                                       memory_order_acquire);
+    if (__builtin_expect(rt_oracle_dedup_gen != fg, 0)) {
+      for (uint32_t i = 0; i < RT_ORACLE_DEDUP; ++i)
+        dedup_s[i] = dedup_e[i] = 0;
+      rt_oracle_mark_last_s = rt_oracle_mark_last_e = 0;
+      rt_oracle_dedup_gen = fg;
+    }
+    uint32_t recent = (dedup_idx - 1u) % RT_ORACLE_DEDUP;
+    if (dedup_e[recent] && s >= dedup_s[recent] && e <= dedup_e[recent])
+      return;
+    for (uint32_t i = 0; i < RT_ORACLE_DEDUP; ++i) {
+      if (dedup_e[i] && s >= dedup_s[i] && e <= dedup_e[i])
+        return;
+    }
+  }
   rt_map_oracle_mark_pages(s, e);
   /*
    * Once the exact-range table is full, keep extending the conservative
@@ -371,17 +372,16 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
     rt_map_oracle_expand_bounds(s, e);
     return;
   }
-  uintptr_t *dedup_s = rt_oracle_dedup_s, *dedup_e = rt_oracle_dedup_e;
-#define dedup_idx rt_oracle_dedup_idx
   /*
    * Adjacent allocations usually share the most recently registered pages.
    * Check that same cached range before scanning the other dedup entries.
    */
   uint32_t recent = (dedup_idx - 1u) % RT_ORACLE_DEDUP;
-  if (dedup_e[recent] && s >= dedup_s[recent] && e <= dedup_e[recent])
+  if (!dedup_first && dedup_e[recent] && s >= dedup_s[recent] &&
+      e <= dedup_e[recent])
     return;
   for (uint32_t i = 0; i < RT_ORACLE_DEDUP; ++i) {
-    if (dedup_e[i] && s >= dedup_s[i] && e <= dedup_e[i])
+    if (!dedup_first && dedup_e[i] && s >= dedup_s[i] && e <= dedup_e[i])
       return;
     if (dedup_s[i] >= s && dedup_e[i] && dedup_e[i] <= e) {
       dedup_s[i] = 0;
@@ -501,6 +501,7 @@ void rt_map_oracle_forget(uintptr_t start, size_t size) {
       __atomic_store_n(&g_rt_oracle_extra[i].end, (uintptr_t)0,
                        __ATOMIC_RELEASE);
   atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
+  atomic_fetch_add_explicit(&g_rt_oracle_forget_gen, 1, memory_order_release);
 }
 
 static _Atomic(uintptr_t) *rt_tbuf_segment(uint32_t index) {
@@ -1011,6 +1012,21 @@ static int64_t rt_tbuf_new_impl(int64_t count, int64_t elem_size, int tracked,
     base = zero_elements ? calloc(1, bytes) : (unsigned char *)malloc(bytes);
   if (!base)
     return 0;
+#if !defined(_WIN32) && defined(MADV_HUGEPAGE)
+  if (bytes >= ((size_t)2 << 20)) {
+    static int tbuf_hugepage = -1;
+    if (tbuf_hugepage < 0) {
+      const char *v = getenv("NYTRIX_NO_TBUF_HUGEPAGE");
+      tbuf_hugepage = (v && v[0] == '1' && !v[1]) ? 0 : 1;
+    }
+    if (tbuf_hugepage) {
+      uintptr_t start = ((uintptr_t)base + 4095u) & ~(uintptr_t)4095u;
+      uintptr_t end = ((uintptr_t)base + bytes) & ~(uintptr_t)4095u;
+      if (end > start)
+        (void)madvise((void *)start, (size_t)(end - start), MADV_HUGEPAGE);
+    }
+  }
+#endif
   int64_t *hdr = (int64_t *)base;
   hdr[0] = (int64_t)NY_NATIVE_TBUF_MAGIC;
   hdr[1] = count;

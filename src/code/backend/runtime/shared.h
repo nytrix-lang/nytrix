@@ -616,6 +616,28 @@ bool rt_gc_owns_pointer(uintptr_t value);
  * the map oracle, so checks that rely on "every runtime object lies on a
  * registered page" must not be skipped after that. */
 extern _Atomic int g_rt_gc_heap_used;
+extern _Atomic(uintptr_t) g_rt_chunk0_start;
+extern _Atomic(uintptr_t) g_rt_chunk0_end;
+extern _Atomic(uintptr_t) g_rt_chunk0_live;
+
+static inline bool rt_heap_ptr_registry_has_fast(uintptr_t value) {
+  if (!value || value == UINTPTR_MAX)
+    return false;
+  uintptr_t c_end = atomic_load_explicit(&g_rt_chunk0_end, memory_order_acquire);
+  if (__builtin_expect(c_end != 0, 1)) {
+    uintptr_t c_start =
+        atomic_load_explicit(&g_rt_chunk0_start, memory_order_relaxed);
+    if (__builtin_expect(value >= c_start && value < c_end, 1)) {
+      if (__builtin_expect((value & 15u) != 0, 0))
+        return false;
+      const _Atomic(uint8_t) *live = (const _Atomic(uint8_t) *)
+          atomic_load_explicit(&g_rt_chunk0_live, memory_order_relaxed);
+      return atomic_load_explicit(&live[(value - c_start) >> 4],
+                                  memory_order_acquire) != 0;
+    }
+  }
+  return rt_heap_ptr_registry_has(value);
+}
 
 /*
  * Heap collector (memory.c). Lists, dictionaries and strings allocated by the
@@ -843,7 +865,7 @@ static inline bool is_valid_heap_ptr(int64_t v) {
   if (!(v > 0x1000 && (v & 15) == 0))
     return false;
   uintptr_t p = (uintptr_t)v;
-  if (__builtin_expect(rt_heap_ptr_registry_has(p), 1))
+  if (__builtin_expect(rt_heap_ptr_registry_has_fast(p), 1))
     return true;
   return __builtin_expect(
              atomic_load_explicit(&g_rt_gc_heap_used, memory_order_acquire) !=
@@ -1272,6 +1294,13 @@ void rt_raw_ptr_register_range(int64_t ptr, size_t size);
 bool rt_raw_ptr_unregister(int64_t ptr);
 int64_t rt_malloc_uninit(int64_t n);
 int64_t rt_free(int64_t ptr);
+bool rt_bigint_cache_allowed(void);
+int64_t rt_free_temp(int64_t ptr);
+int64_t rt_free_temp_guard1(int64_t ptr, int64_t g0);
+int64_t rt_free_temp_guard2(int64_t ptr, int64_t g0, int64_t g1);
+int64_t rt_free_temp_guard3(int64_t ptr, int64_t g0, int64_t g1, int64_t g2);
+int64_t rt_free_temp_loop(int64_t old_v, int64_t init_v, int64_t next_v,
+                           int64_t owned);
 int64_t rt_ptr_add(int64_t ptr, int64_t offset);
 int64_t rt_ptr_sub(int64_t ptr, int64_t offset);
 int64_t rt_ptr_add_i64(int64_t ptr, int64_t offset);

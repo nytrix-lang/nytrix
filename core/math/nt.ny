@@ -47,6 +47,7 @@ fn is_bigint(any x) bool {
    __tagof(x) == _TAG_BIGINT || (is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107)
 }
 
+@inline
 fn Z(any n) bigint {
    "Construct BigInt from int or string. SageMath style: Z(123) or Z('123...')."
    nt_bigint(n)
@@ -69,8 +70,8 @@ fn Integer(any n) bigint {
 
 fn nt_bigint(any x) bigint {
    "Convert int, string, or BigInt to BigInt."
-   if is_bigint(x) { return x }
    if is_int(x) { return __bigint_from_int(x) }
+   if is_bigint(x) { return x }
    if is_str(x) {
       def s0 = str_mod.strip(x)
       if str_mod.startswith(s0, "-0x") || str_mod.startswith(s0, "-0X") { return bigint_neg(hex_to_bigint(str_mod.str_slice(s0, 3, s0.len))) }
