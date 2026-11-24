@@ -3569,15 +3569,31 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
       fail(p, "cannot assign through a pointer to const complex data");
       return false;
     }
+    c_type_t complex_type = address.type == C_C64_PTR    ? C_C64
+                            : address.type == C_C128_PTR ? C_C128
+                                                         : C_C_LDOUBLE;
+    c_agg_type_t *complex_agg = c_complex_aggregate(complex_type);
+    {
+      int compound = lower_complex_compound_assignment(
+          p, (c_value_t){address.value, C_AGG, complex_agg}, true);
+      if (compound)
+        return compound > 0;
+    }
     if (!expect(p, "="))
       return false;
     c_value_t value = parse_expr(p, 1);
     if (value.value < 0)
       return false;
-    c_type_t complex_type = address.type == C_C64_PTR    ? C_C64
-                            : address.type == C_C128_PTR ? C_C128
-                                                         : C_C_LDOUBLE;
-    c_agg_type_t *complex_agg = c_complex_aggregate(complex_type);
+    if (complex_type != C_C_LDOUBLE &&
+        (c_type_is_float(value.type) || c_type_is_integer(value.type) ||
+         (value.type == C_AGG && value.agg &&
+          value.agg->scope_id == SIZE_MAX &&
+          value.agg->size != complex_agg->size))) {
+      c_value_t converted =
+          lower_complex_convert(p, value, complex_type == C_C64);
+      if (converted.value >= 0)
+        value = converted;
+    }
     if (value.type != C_AGG || !value.agg || value.agg->scope_id != SIZE_MAX ||
         value.agg->size != complex_agg->size) {
       fail(p, "complex pointer assignment requires a matching complex value");

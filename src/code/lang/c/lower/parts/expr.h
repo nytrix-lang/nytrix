@@ -3233,6 +3233,14 @@ static c_value_t lower_pointer_index_rvalue(c_parser_t *p, c_value_t value) {
     }
     int address = lower_pointer_index_address_for(p, value.type, value.agg,
                                                   value.value, index.value);
+    if (element_type == C_C64 || element_type == C_C128) {
+      if (address < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      value = (c_value_t){address, C_AGG,
+                          element_type == C_C64 ? &lower_complex_value_f32
+                                                : &lower_complex_value_f64};
+      continue;
+    }
     if (element_type == C_AGG) {
       if (address < 0 || !record_lvalue(p, address, address, C_AGG,
                                         c_value_pointee_volatile(value)))
@@ -6036,6 +6044,10 @@ static c_value_t parse_primary(c_parser_t *p) {
       p->last_value_const = local->is_const && !c_type_is_pointer(local->type);
       if (indexed < local->array_rank)
         return (c_value_t){address, c_array_pointer_type(local->type), NULL};
+      if (local->type == C_C64 || local->type == C_C128)
+        return (c_value_t){address, C_AGG,
+                           local->type == C_C64 ? &lower_complex_value_f32
+                                                : &lower_complex_value_f64};
       int loaded = emit_value(
           p, (nyr_inst_t){
                  .op = NYIR_LOAD_I64,

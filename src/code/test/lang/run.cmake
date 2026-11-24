@@ -4235,7 +4235,7 @@ file(READ "${BINARY_DIR}/segment-cast-ok.s" segment_cast_asm)
 if(NOT segment_cast_asm MATCHES "%gs:")
   message(FATAL_ERROR "the segment cast lost its %gs prefix\n${segment_cast_asm}")
 endif()
-foreach(complex_case IN ITEMS complex-forms complex-compound)
+foreach(complex_case IN ITEMS complex-forms complex-compound complex-arrays)
 file(READ "${SOURCE_DIR}/c/${complex_case}.expected" complex_forms_expected)
 foreach(complex_opt -O0 -O2)
   nyc_execute_ok(

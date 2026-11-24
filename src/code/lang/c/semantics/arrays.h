@@ -27,6 +27,8 @@ static c_type_t c_array_pointer_type(c_type_t type) {
          : type == C_U64           ? C_U64_PTR
          : type == C_F32           ? C_F32_PTR
          : type == C_F64           ? C_F64_PTR
+         : type == C_C64           ? C_C64_PTR
+         : type == C_C128          ? C_C128_PTR
          : type == C_AGG           ? C_AGG_PTR
          : type == C_CHAR_PTR      ? C_CHAR_PTR_PTR
          : type == C_I8_PTR        ? C_I8_PTR_PTR

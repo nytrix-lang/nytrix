@@ -225,6 +225,12 @@ static c_type_t c_remove_pointer_levels(c_type_t type, unsigned levels) {
     case C_AGG_PTR:
       type = C_AGG;
       break;
+    case C_C64_PTR:
+      type = C_C64;
+      break;
+    case C_C128_PTR:
+      type = C_C128;
+      break;
     case C_AGG_ARRAY_PTR:
       type = C_AGG_PTR;
       break;
@@ -364,6 +370,10 @@ static int64_t c_pointer_scale(nyc_abi_t abi, c_type_t type) {
     return 2;
   if (type == C_I32_PTR || type == C_U32_PTR || type == C_F32_PTR)
     return 4;
+  if (type == C_C64_PTR)
+    return 8;
+  if (type == C_C128_PTR)
+    return 16;
   return (int64_t)c_type_size(abi, C_VOID_PTR);
 }
 

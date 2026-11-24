@@ -3041,7 +3041,9 @@ run directory under `/tmp`.
   with GCC at `-O0` and `-O2`); the complex arithmetic moved into
   `lower_complex_binary` so both paths share it. Subscripts on complex pointers
   (`p[i]` read and write, `p[i] * q[i]` in loops) work through a host driver
-  (`complex-pointer-index`, compared with GCC at `-O0` and `-O2`). Still
-  unsupported: local and global arrays of complex values, `p[i] += x`, and
-  `long double _Complex` promotion.
+  (`complex-pointer-index`, compared with GCC at `-O0` and `-O2`). Local arrays of
+  complex values (brace initializers, `a[i]` read and write, `a[i] op= x`,
+  `p[i] op= x`) follow in `complex-arrays`, also GCC-compared at `-O0` and
+  `-O2`. Still unsupported: file-scope complex variables and arrays (the
+  declaration is not recognised as data) and `long double _Complex` promotion.
 </details>

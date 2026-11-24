@@ -2863,7 +2863,15 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                 break;
               }
               c_value_t element = parse_expr(p, 1);
+              bool complex_element = type == C_C64 || type == C_C128;
+              if (complex_element && element.value >= 0) {
+                c_value_t converted =
+                    lower_complex_convert(p, element, type == C_C64);
+                if (converted.value >= 0)
+                  element = converted;
+              }
               bool compatible =
+                  (complex_element && element.type == C_AGG) ||
                   (element.type == type &&
                    (type != C_AGG || element.agg == decl_agg)) ||
                   c_pointer_compatible(element.type, type) ||
@@ -2877,7 +2885,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                 declaration_ok = false;
                 break;
               }
-              if (type == C_AGG) {
+              if (type == C_AGG || complex_element) {
                 for (size_t index = first; index <= last; ++index) {
                   int address = lower_add_const(
                       p, base, (int64_t)(index * (size_t)width));

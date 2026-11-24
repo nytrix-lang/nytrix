@@ -290,7 +290,7 @@ static bool lower_store_u16_field(c_parser_t *p, int address, int value,
                                   c_type_t type, bool is_volatile);
 
 static int lower_local_load(c_parser_t *p, const c_local_t *local) {
-  if (c_type_is_complex(local->type)) {
+  if (c_type_is_complex(local->type) && !local->array_count) {
     fail(p, "complex values are not supported yet");
     return -1;
   }
