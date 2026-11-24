@@ -312,10 +312,11 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 - [ ] **P2 — Automated bug discovery (remaining targets).** `ny-fuzz` covers
   integer conversions, aggregates, bit-fields, variadics, aliasing/punning,
   loops, SSA/CFG, scalar and loop optimization, register allocation and
-  linking. Atomics (`__atomic_*`, `__sync_*`), `__builtin_popcount*` and
-  register-operand inline asm are rejected by NYC (the `atomic` and `gnu`
-  profiles report every such program as unsupported), so those areas have no
-  differential coverage until the builtins exist.
+  linking. Atomics (`__atomic_*`, `__sync_*`) and register-operand inline asm
+  are rejected by NYC (the `atomic` and `gnu` profiles report such programs as
+  unsupported), so those areas have no differential coverage until NYC
+  provides them. `__builtin_popcount{,l,ll}` now lowers to a 64-bit SWAR
+  sequence (`builtin-popcount` matches GCC).
 - [ ] **P3 — Compiler invariants (remaining).** `NYC_VERIFY=1` verifies the
   NYIR after every pass (SSA dominance, PHI edges, optimizer rewrites) and the
   whole frontend suite and the fuzzer pass under it. Still open: machine

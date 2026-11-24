@@ -1207,6 +1207,49 @@ static c_value_t parse_ctzl_builtin(c_parser_t *p) {
   return lower_ctz_value(p, value.value);
 }
 
+/* Logical right shift of a 64-bit value built from SAR and a mask. */
+static int lower_logical_shift_right(c_parser_t *p, int value, unsigned count) {
+  int shifted = lower_bitfield_binary(p, NYIR_SAR_I64, value, count);
+  return shifted < 0 || count == 0
+             ? shifted
+             : lower_bitfield_binary(p, NYIR_AND_I64, shifted,
+                                     UINT64_MAX >> count);
+}
+
+/* __builtin_popcount{,l,ll}: the classic SWAR sequence over 64 bits. */
+static c_value_t parse_popcount_builtin(c_parser_t *p, bool is_32bit) {
+  c_value_t value = parse_expr(p, 1);
+  if (value.value < 0 || !c_type_is_integer(value.type) || !expect(p, ")")) {
+    fail(p, "__builtin_popcount requires one integer argument");
+    return (c_value_t){-1, C_BAD, NULL};
+  }
+  int x = is_32bit ? normalize_u32(p, value.value) : value.value;
+  int half = lower_logical_shift_right(p, x, 1);
+  half = half < 0 ? -1
+                  : lower_bitfield_binary(p, NYIR_AND_I64, half,
+                                          UINT64_C(0x5555555555555555));
+  x = x < 0 || half < 0 ? -1 : emit_i64_binary(p, NYIR_SUB_I64, x, half);
+  int quarter = x < 0 ? -1 : lower_logical_shift_right(p, x, 2);
+  quarter = quarter < 0 ? -1
+                        : lower_bitfield_binary(p, NYIR_AND_I64, quarter,
+                                                UINT64_C(0x3333333333333333));
+  int low_pairs = x < 0 ? -1
+                        : lower_bitfield_binary(p, NYIR_AND_I64, x,
+                                                UINT64_C(0x3333333333333333));
+  x = low_pairs < 0 || quarter < 0
+          ? -1
+          : emit_i64_binary(p, NYIR_ADD_I64, low_pairs, quarter);
+  int nibble = x < 0 ? -1 : lower_logical_shift_right(p, x, 4);
+  x = x < 0 || nibble < 0 ? -1 : emit_i64_binary(p, NYIR_ADD_I64, x, nibble);
+  x = x < 0 ? -1
+            : lower_bitfield_binary(p, NYIR_AND_I64, x,
+                                    UINT64_C(0x0f0f0f0f0f0f0f0f));
+  int ones = emit_i64_constant(p, INT64_C(0x0101010101010101));
+  x = x < 0 || ones < 0 ? -1 : emit_i64_binary(p, NYIR_MUL_I64, x, ones);
+  x = x < 0 ? -1 : lower_logical_shift_right(p, x, 56);
+  return x < 0 ? (c_value_t){-1, C_BAD, NULL} : (c_value_t){x, C_I32, NULL};
+}
+
 static c_value_t parse_ffs_builtin(c_parser_t *p) {
   c_value_t value = parse_expr(p, 1);
   if (value.value < 0 || !c_type_is_integer(value.type) || !expect(p, ")")) {
@@ -2029,6 +2072,11 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
     return parse_ctzl_builtin(p);
   if (ny_ctok_eq(name, "__builtin_ffs"))
     return parse_ffs_builtin(p);
+  if (ny_ctok_eq(name, "__builtin_popcount"))
+    return parse_popcount_builtin(p, true);
+  if (ny_ctok_eq(name, "__builtin_popcountl") ||
+      ny_ctok_eq(name, "__builtin_popcountll"))
+    return parse_popcount_builtin(p, false);
   if (ny_ctok_eq(name, "__builtin_add_overflow") ||
       ny_ctok_eq(name, "__builtin_sub_overflow") ||
       ny_ctok_eq(name, "__builtin_mul_overflow"))
@@ -9654,6 +9702,170 @@ static c_value_t lower_complex_binary(c_parser_t *p, ny_ctok_t op,
   return left;
 }
 
+static bool c_tok_is_binary_pure_op(ny_ctok_t tok) {
+  return ny_ctok_eq(tok, "+") || ny_ctok_eq(tok, "-") ||
+         ny_ctok_eq(tok, "*") || ny_ctok_eq(tok, "/") ||
+         ny_ctok_eq(tok, "%") || ny_ctok_eq(tok, "<<") ||
+         ny_ctok_eq(tok, ">>") || ny_ctok_eq(tok, "&") ||
+         ny_ctok_eq(tok, "|") || ny_ctok_eq(tok, "^") ||
+         ny_ctok_eq(tok, "&&") || ny_ctok_eq(tok, "||") ||
+         ny_ctok_eq(tok, "==") || ny_ctok_eq(tok, "!=") ||
+         ny_ctok_eq(tok, "<") || ny_ctok_eq(tok, "<=") ||
+         ny_ctok_eq(tok, ">") || ny_ctok_eq(tok, ">=") ||
+         ny_ctok_eq(tok, "?") || ny_ctok_eq(tok, ":");
+}
+
+static bool c_tok_is_unary_pure_op(ny_ctok_t tok) {
+  return ny_ctok_eq(tok, "+") || ny_ctok_eq(tok, "-") ||
+         ny_ctok_eq(tok, "!") || ny_ctok_eq(tok, "~");
+}
+
+static bool can_inplace_compound_literal_rhs(c_parser_t *p,
+                                             const c_agg_type_t *target_agg,
+                                             int target_address,
+                                             bool target_volatile,
+                                             unsigned segment_flags,
+                                             const c_local_t *target_local,
+                                             size_t *lbrace_out) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *v = getenv("NYTRIX_NO_C_INPLACE_COMPOUND_LIT");
+    enabled = (v && v[0] == '1' && !v[1]) ? 0 : 1;
+  }
+  if (!enabled || !target_agg || !target_agg->complete ||
+      target_agg->is_int128 || target_agg->scope_id == SIZE_MAX ||
+      target_address < 0 || target_volatile || segment_flags)
+    return false;
+  if (!tok_is(p, p->pos, "(") || tok_is(p, p->pos + 1, "("))
+    return false;
+  c_parser_t tp = *p;
+  tp.pos = p->pos + 1;
+  tp.err = NULL;
+  tp.err_len = 0;
+  tp.type_lookahead = true;
+  c_type_t cast_type = C_BAD;
+  if (!parse_type(&tp, &cast_type, true) || !tok_is(&tp, tp.pos, ")") ||
+      cast_type != C_AGG || tp.last_type_array_size != 0)
+    return false;
+  if (complete_tag(p, tp.last_type_agg) != target_agg)
+    return false;
+  size_t lbrace = tp.pos + 1;
+  if (!tok_is(p, lbrace, "{"))
+    return false;
+  size_t after = skip_balanced(p, lbrace, "{", "}");
+  if (after <= lbrace + 1 || after >= p->token_count ||
+      !tok_is(p, after - 1, "}"))
+    return false;
+  ny_ctok_t after_tok = p->tokens[after];
+  if (!ny_ctok_eq(after_tok, ";") && !ny_ctok_eq(after_tok, ",") &&
+      !ny_ctok_eq(after_tok, ")") && !ny_ctok_eq(after_tok, ":") &&
+      !ny_ctok_eq(after_tok, "]"))
+    return false;
+  size_t rbrace = after - 1;
+  bool prev_is_value = false;
+  for (size_t i = lbrace + 1; i < rbrace; ++i) {
+    ny_ctok_t tok = p->tokens[i];
+    if (tok.kind == NY_CTOK_NUMBER || tok.kind == NY_CTOK_CHAR ||
+        tok.kind == NY_CTOK_STRING) {
+      if (prev_is_value)
+        return false;
+      prev_is_value = true;
+      continue;
+    }
+    if (tok_is(p, i, "(")) {
+      if (prev_is_value)
+        return false;
+      c_parser_t ctp = *p;
+      ctp.pos = i + 1;
+      ctp.err = NULL;
+      ctp.err_len = 0;
+      ctp.type_lookahead = true;
+      c_type_t ct = C_BAD;
+      if (parse_type(&ctp, &ct, true) && tok_is(&ctp, ctp.pos, ")")) {
+        if (c_type_is_pointer(ct) || ct == C_BAD || ct == C_VA_LIST ||
+            ctp.last_type_array_size != 0)
+          return false;
+        i = ctp.pos;
+        prev_is_value = false;
+        continue;
+      }
+      prev_is_value = false;
+      continue;
+    }
+    if (tok_is(p, i, ")")) {
+      prev_is_value = true;
+      continue;
+    }
+    if (tok_is(p, i, "{") || tok_is(p, i, "}") || tok_is(p, i, ",")) {
+      prev_is_value = false;
+      continue;
+    }
+    if (tok_is(p, i, ".")) {
+      if (!prev_is_value && i + 2 < rbrace && tok_ident(p->tokens[i + 1]) &&
+          tok_is(p, i + 2, "=")) {
+        i += 2;
+        prev_is_value = false;
+        continue;
+      }
+      return false;
+    }
+    if (tok.kind == NY_CTOK_PUNCT) {
+      if (prev_is_value ? c_tok_is_binary_pure_op(tok)
+                        : c_tok_is_unary_pure_op(tok)) {
+        prev_is_value = false;
+        continue;
+      }
+      return false;
+    }
+    if (tok.kind == NY_CTOK_IDENT) {
+      if (prev_is_value)
+        return false;
+      if (find_enum_constant(p, tok) || tok_is(p, i, "true") ||
+          tok_is(p, i, "false")) {
+        prev_is_value = true;
+        continue;
+      }
+      const c_local_t *loc = find_local(p, tok);
+      if (!loc || loc == target_local || loc->static_name.len ||
+          loc->address_taken || loc->is_volatile || loc->type == C_AGG ||
+          loc->type == C_VA_LIST || c_type_is_pointer(loc->type) ||
+          loc->array_count != 0 || loc->array_rank != 0)
+        return false;
+      prev_is_value = true;
+      continue;
+    }
+    return false;
+  }
+  *lbrace_out = lbrace;
+  return true;
+}
+
+static bool lower_inplace_compound_literal_at(c_parser_t *p,
+                                              const c_agg_type_t *agg,
+                                              int address, size_t lbrace) {
+  p->pos = lbrace;
+  if ((agg->size && !lower_zero_fill(p, address, agg->size)) ||
+      !init_aggregate(p, NULL, agg, NULL, 0, 0, address))
+    return false;
+  return true;
+}
+
+static bool try_inplace_compound_literal_stmt(
+    c_parser_t *p, const c_agg_type_t *target_agg, int target_address,
+    bool target_volatile, unsigned segment_flags, const c_local_t *target_local,
+    bool expect_semicolon, bool *handled_out) {
+  *handled_out = false;
+  size_t lbrace = 0;
+  if (!can_inplace_compound_literal_rhs(p, target_agg, target_address,
+                                        target_volatile, segment_flags,
+                                        target_local, &lbrace))
+    return true;
+  *handled_out = true;
+  if (!lower_inplace_compound_literal_at(p, target_agg, target_address, lbrace))
+    return false;
+  return !expect_semicolon || expect(p, ";");
+}
+
 static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
   c_value_t left = parse_unary(p);
   if (left.value < 0 && !(min_precedence == 0 && tok_is(p, p->pos, ",") &&
@@ -9674,6 +9886,25 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
            errors. */
       }
       ++p->pos;
+      c_local_t *early_local = target && target->is_local
+                                   ? find_local_slot(p, target->local_slot)
+                                   : NULL;
+      size_t literal_lbrace = 0;
+      if (ny_ctok_eq(assignment, "=") && left.type == C_AGG && target &&
+          target->type == C_AGG && !target->bitfield &&
+          (!target->is_local ||
+           (early_local && !early_local->is_const &&
+            !early_local->is_volatile)) &&
+          can_inplace_compound_literal_rhs(
+              p, target->agg, target->address, target->is_volatile,
+              target->segment_flags, early_local, &literal_lbrace)) {
+        if (!lower_inplace_compound_literal_at(p, target->agg, target->address,
+                                               literal_lbrace))
+          return (c_value_t){-1, C_BAD, NULL};
+        left = (c_value_t){target->address, C_AGG, target->agg};
+        p->last_value_null_pointer_constant = false;
+        continue;
+      }
       c_value_t right = parse_expr(p, 1);
       if (right.value < 0)
         return right;
