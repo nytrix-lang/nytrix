@@ -586,6 +586,15 @@ static bool lv_const_div_use_disabled(void) {
   return disabled != 0;
 }
 
+static bool lv_red_copy_use_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_VEC_RED_COPY_USE");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 static bool lv_two_level_iv_enabled(void) {
   static int on = -1;
   if (on < 0) {
@@ -1810,7 +1819,11 @@ static nyr_inst_t lv_make_inst(nyr_op_t op, int dst, int a, int b, int c,
   return in;
 }
 
+static int vec_resolve_copy(const nyr_func_t *f, const int *defs,
+                            size_t val_count, int v);
+
 static bool use_allowed(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                        const int *defs, size_t val_count,
                         const bool *in_loop, const bool *vec_value,
                         const bool *mask_value, const bool *rewritten,
                         const bool *broadcast_value, size_t user,
@@ -1828,9 +1841,18 @@ static bool use_allowed(const nyr_func_t *f, const nyr_cfg_t *cfg,
     if (reduction_kind == VEC_RED_SMAX || reduction_kind == VEC_RED_SMIN)
       return in->op == NYIR_SELECT_I64 && reduction_term >= 0 &&
              vec_value[reduction_term];
+    int lhs = (!lv_red_copy_use_disabled() && defs && in->a >= 0)
+                  ? vec_resolve_copy(f, defs, val_count, in->a)
+                  : in->a;
+    int rhs = (!lv_red_copy_use_disabled() && defs && in->b >= 0)
+                  ? vec_resolve_copy(f, defs, val_count, in->b)
+                  : in->b;
+    int red = (!lv_red_copy_use_disabled() && defs && reduction_term >= 0)
+                  ? vec_resolve_copy(f, defs, val_count, reduction_term)
+                  : reduction_term;
     return (in->op == NYIR_ADD_I64 || in->op == NYIR_ADD_F64) &&
-           ((in->a == reduction_term && in->b >= 0) ||
-            (in->b == reduction_term && in->a >= 0)) &&
+           reduction_term >= 0 &&
+           ((lhs == red && in->b >= 0) || (rhs == red && in->a >= 0)) &&
            vec_value[reduction_term];
   }
   if (in->op == NYIR_STORE_I64)
@@ -4765,9 +4787,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             }
           if (skip_vec_extra)
             continue;
-          if (!use_allowed(f, &cfg, in_loop, vec, vmask, rewrite,
-                           broadcast_value, user, reduction_update_idx,
-                           reduction_cmp_idx, reduction_kind, reduction_term)) {
+          if (!use_allowed(f, &cfg, defs, scalar_value_count, in_loop, vec,
+                           vmask, rewrite, broadcast_value, user,
+                           reduction_update_idx, reduction_cmp_idx,
+                           reduction_kind, reduction_term)) {
             bad = true;
             reject_reason =
                 "vector value has an unsupported scalar/out-of-loop consumer";
