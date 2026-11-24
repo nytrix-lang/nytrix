@@ -2733,6 +2733,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->is_const = declarator_is_const;
           local->is_volatile = declarator_is_volatile;
           local->pointee_volatile = pointee_volatile;
+          if (pointee_seg != C_SEG_NONE && type == C_AGG_PTR) {
+            fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+            declaration_ok = false;
+            break;
+          }
           local->pointee_seg = pointee_seg;
           local->function_result_type = decl_function_result_type;
           local->function_bool_params = decl_function_bool_params;
@@ -2991,6 +2996,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             local->agg = decl_function_result_agg;
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
           local->pointee_volatile = pointee_volatile;
+          if (pointee_seg != C_SEG_NONE && type == C_AGG_PTR) {
+            fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+            declaration_ok = false;
+            break;
+          }
           local->pointee_seg = pointee_seg;
           local->pointee_array_size = local_pointee_array_size
                                           ? local_pointee_array_size
@@ -3148,6 +3158,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
           local->is_volatile = declarator_is_volatile;
           local->pointee_volatile = pointee_volatile;
+          if (pointee_seg != C_SEG_NONE && type == C_AGG_PTR) {
+            fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+            declaration_ok = false;
+            break;
+          }
           local->pointee_seg = pointee_seg;
           local->pointee_array_size = local_pointee_array_size
                                           ? local_pointee_array_size

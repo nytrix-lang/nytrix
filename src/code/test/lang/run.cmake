@@ -4207,6 +4207,24 @@ execute_process(
 if(reject_status EQUAL 0)
   message(FATAL_ERROR "nyc -c silently accepted -fpatchable-function-entry")
 endif()
+foreach(seg_form IN ITEMS SEG_AGGREGATE_PARAM SEG_FIELD SEG_TYPEDEF)
+  execute_process(
+    COMMAND "${NYC}" -O2 -S "-D${seg_form}" "${NY_C_CORPUS_segment-unsupported-forms.c}"
+            -o "${BINARY_DIR}/segment-unsupported-${seg_form}.s"
+    RESULT_VARIABLE seg_status OUTPUT_QUIET ERROR_VARIABLE seg_error)
+  if(seg_status EQUAL 0 OR NOT seg_error MATCHES "qualify only scalar pointers")
+    message(FATAL_ERROR "${seg_form}: a segment qualifier on an unsupported form was accepted or rejected without the explanation\n${seg_error}")
+  endif()
+endforeach()
+nyc_execute_ok(
+  [=[the supported segment cast form stopped compiling (${status})\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S -DSEG_CAST_OK "${NY_C_CORPUS_segment-unsupported-forms.c}"
+          -o "${BINARY_DIR}/segment-cast-ok.s"
+)
+file(READ "${BINARY_DIR}/segment-cast-ok.s" segment_cast_asm)
+if(NOT segment_cast_asm MATCHES "%gs:")
+  message(FATAL_ERROR "the segment cast lost its %gs prefix\n${segment_cast_asm}")
+endif()
 nyc_execute_ok(
   [=[nyc failed to compile the global byte array alignment fixture (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_global-byte-array-alignment.c}"

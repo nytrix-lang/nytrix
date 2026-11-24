@@ -2547,6 +2547,10 @@ static bool parse_field_declarator(c_parser_t *p, c_type_t type,
   }
   field->is_signed_byte = type == C_CHAR || type == C_I8_PTR;
   field->is_volatile = p->last_type_volatile;
+  if (p->last_type_seg != C_SEG_NONE) {
+    fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+    return false;
+  }
   ny_ctok_t name;
   if (tok_is(p, p->pos, "(") && tok_is(p, p->pos + 1, "*")) {
     size_t name_pos = p->pos + 1;
@@ -16419,6 +16423,10 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             p->last_type_volatile && c_type_is_arithmetic_pointer(type);
         unsigned char pointee_seg =
             c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
+        if (pointee_seg != C_SEG_NONE && (type == C_AGG_PTR || type == C_AGG)) {
+          fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+          goto error;
+        }
         ny_ctok_t param_name = {0};
         unsigned nested_function_pointers = 0;
         if (parse_nested_function_pointer_declarator(
@@ -16884,6 +16892,10 @@ static bool collect_functions(c_parser_t *p) {
       if (!parse_type(p, &alias_type, true))
         return false;
       bool alias_is_bool = p->last_type_bool;
+      if (p->last_type_seg != C_SEG_NONE) {
+        fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+        return false;
+      }
       bool alias_is_array = p->last_type_is_array;
       c_array_shape_t alias_array_shape = p->last_type_array;
       c_type_t function_result_type = alias_type;

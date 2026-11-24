@@ -3008,4 +3008,15 @@ run directory under `/tmp`.
   16-byte prefix is not guaranteed to be 16-byte aligned as with GCC's
   `-fmin-function-alignment=16`. The `patchable-entry` fixture checks the
   three-before, two-after layout and both sections after the host assembler.
+- FS/GS address-space forms (2026-11-24). A probe of ten forms against the
+  assembly output found that a `__seg_gs`/`__seg_fs` qualifier on an aggregate
+  pointer (`p->b`), a struct field holding a segment pointer, a typedef of a
+  segment type and an array of segment pointers all emitted no `%gs:` prefix,
+  silently reading the wrong segment. Casts and scalar pointers (the forms the
+  kernel uses: `*(__seg_gs int *)offset`, subscripts, stores, increments) were
+  correct. Aggregate-pointer parameters and locals and globals, fields and
+  typedefs are now rejected with "qualify only scalar pointers and casts";
+  arrays of segment pointers are still not caught. The
+  `segment-unsupported-forms` fixture checks each rejection and the cast form.
+  The kernel builds without warnings and boots with the rejections in place.
 </details>
