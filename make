@@ -2694,7 +2694,7 @@ def bench_gcc_compare(build_root: Path, kind: str, extra: list[str]) -> int:
     if not shutil.which("perf"):
         print("bench-gcc needs perf", file=sys.stderr)
         return 2
-    shapes = sorted((ROOT / "etc" / "tests" / "bench").rglob("*.nshape"))
+    shapes = sorted((ROOT / "etc" / "labs" / "tests" / "bench").rglob("*.nshape"))
     source_re = lambda lang: re.compile(
         rf"source {lang} <<'(\w+)'\n(.*?)\n\1\n", re.S)
     # Shapes may need a library the plain reference link line does not carry
@@ -3574,7 +3574,7 @@ def _load_web_demo_manifest() -> list[dict[str, object]]:
     return out
 
 def _load_web_test_manifest() -> list[dict[str, object]]:
-    path = ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "tests.json"
+    path = ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "tests.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -4198,7 +4198,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     if run_web_demos(build_root, kind, ["--out", str(out_dir), "--clean", "--require-ny-wasm"]) != 0:
         return 1
     negative = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "portability.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "portability.nshape",
         build_root, "unsupported-process", "test_unsupported_process",
     )
     try:
@@ -4256,7 +4256,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             server.kill()
     dom = result.stdout if 'result' in locals() else ""
     audio = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "audio.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "audio.nshape",
         build_root, "audio-init", "test_audio_init",
     )
     if run_web_check(build_root, kind, [str(audio)]) != 0:
@@ -4269,7 +4269,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     if audio_data.get("ok") is not True or audio_data.get("unsupported") != []:
         raise SystemExit("web-test: browser audio lifecycle imports are not fully hosted")
     requests = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "window.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "window.nshape",
         build_root, "window-requests", "test_window_requests",
     )
     if run_web_check(build_root, kind, [str(requests)]) != 0:
@@ -4334,10 +4334,10 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: browser audio did not remain gesture-gated and visible")
     ok("web-test: browser audio is visible and waits for a user gesture")
     decode = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "audio.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "audio.nshape",
         build_root, "audio-decode", "test_audio_decode",
     )
-    decode_assets = ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "assets"
+    decode_assets = ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "assets"
     decode_dir = build_root / "web" / "audio-decode"
     if run_web(build_root, kind, [str(decode), "--out", str(decode_dir),
                                   "--assets", str(decode_assets), "--preload-all"]) != 0:
@@ -4371,7 +4371,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: browser did not decode and start the packed audio asset")
     ok("web-test: browser decoded and started the packed audio asset")
     asset_read = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "filesystem.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "filesystem.nshape",
         build_root, "filesystem-asset-read", "test_filesystem_asset_read",
     )
     if run_web_check(build_root, kind, [str(asset_read)]) != 0:
@@ -4409,7 +4409,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: packaged asset was not readable through core.os.file_read")
     ok("web-test: packaged asset read through core.os.file_read")
     persistence = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "filesystem.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "filesystem.nshape",
         build_root, "filesystem-persistence", "test_filesystem_persistence",
     )
     if run_web_check(build_root, kind, [str(persistence)]) != 0:
@@ -4454,7 +4454,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
             continue
         ok(f"web-test: browser fixture passed: {item['id']}")
     renderer3d = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "renderer.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "renderer.nshape",
         build_root, "renderer-3d", "test_renderer_3d",
     )
     target = "wasm-bare"
@@ -4478,7 +4478,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit(f"web-test: {target} 3D baseline did not reach the WebGL2 draw path")
     ok(f"web-test: {target} 3D baseline reached the WebGL2 draw path")
     pointer = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "input.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "input.nshape",
         build_root, "input-pointer", "test_input_pointer",
     )
     if run_web_check(build_root, kind, [str(pointer)]) != 0:
@@ -4513,7 +4513,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: browser pointer input fixture did not execute")
     ok("web-test: browser pointer input facade executed")
     touch = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "input.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "input.nshape",
         build_root, "input-touch", "test_input_touch",
     )
     if run_web_check(build_root, kind, [str(touch)]) != 0:
@@ -4552,7 +4552,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: browser touch input did not flow through the public facade")
     ok("web-test: browser touch input flowed through the public facade")
     gamepad = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "input.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "input.nshape",
         build_root, "input-gamepad", "test_input_gamepad",
     )
     if run_web_check(build_root, kind, [str(gamepad)]) != 0:
@@ -4591,7 +4591,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: browser gamepad mapping did not flow through the public facade")
     ok("web-test: browser gamepad mapping flowed through the public facade")
     framebuf = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "renderer.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "renderer.nshape",
         build_root, "renderer-framebuffer", "test_renderer_framebuffer",
     )
     if run_web_check(build_root, kind, [str(framebuf)]) != 0:
@@ -4633,7 +4633,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
         raise SystemExit("web-test: browser framebuffer probe did not round-trip through the host")
     ok("web-test: browser framebuffer probe round-tripped through the host")
     texture = _materialize_web_fixture_source(
-        ROOT / "etc" / "tests" / "lang" / "interop" / "web" / "renderer.nshape",
+        ROOT / "etc" / "labs" / "tests" / "lang" / "interop" / "web" / "renderer.nshape",
         build_root, "renderer-2d-texture", "test_renderer_2d_texture",
     )
     if run_web_check(build_root, kind, [str(texture)]) != 0:
@@ -6205,7 +6205,7 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
 def _gate_source_paths():
     """Fixture and library source roots whose mutation invalidates a verdict."""
     return (
-        ROOT / "etc" / "tests",
+        ROOT / "etc" / "labs" / "tests",
         ROOT / "core",
     )
 
@@ -6213,7 +6213,7 @@ def _gate_source_paths():
 def _bench_gate_source_paths():
     """Benchmark inputs whose mutation invalidates a performance verdict."""
     return (
-        ROOT / "etc" / "tests" / "bench",
+        ROOT / "etc" / "labs" / "tests" / "bench",
         ROOT / "core",
     )
 
@@ -6279,7 +6279,7 @@ def _gate_source_changes(paths, before):
 
 def check_source_hygiene() -> int:
     """Reject accidental binary source and temporary print-debugging probes."""
-    source_roots = (ROOT / "src", ROOT / "core", ROOT / "etc" / "tests")
+    source_roots = (ROOT / "src", ROOT / "core", ROOT / "etc" / "labs" / "tests")
     suffixes = {".c", ".h", ".ny"}
     debug_print = re.compile(
         r'\b(?:printf|fprintf)\s*\(\s*"(?:DEBUG|XXX|TODO DEBUG)'
@@ -6621,7 +6621,7 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     env = _vendor_env(build_root)
     env.setdefault("NYTRIX_STD_CACHE", "0")
     env.setdefault("NYTRIX_STD_BC_CACHE_AUTO", "0")
-    opt_dir = ROOT / "etc" / "tests" / "native" / "optimizer" / "optcheck"
+    opt_dir = ROOT / "etc" / "labs" / "tests" / "native" / "optimizer" / "optcheck"
     if not opt_dir.is_dir():
         raise SystemExit("optcheck: missing fixture directory " + str(opt_dir))
     result = subprocess.run(
@@ -9602,14 +9602,12 @@ def main() -> int:
             # Dispatch-specific value flags go first: `--list-bench` treats the
             # following token as an optional root dir, so trailing `--jobs N`
             # used to be consumed as `--jobs/etc/labs/tests/bench`.
+            # Without an explicit count the runner picks half the physical
+            # cores (NYTRIX_BENCH_JOBS overrides). Passing every logical CPU
+            # here put ~50 fixtures on SMT siblings at once and swung
+            # microsecond kernels 1.3x-8.9x between identical runs.
             if requested_jobs is not None and requested_jobs > 0:
                 bench_extra = ["--jobs", str(requested_jobs), *bench_extra]
-            elif not any(arg == "--jobs" or arg.startswith("--jobs=") or arg == "-j"
-                         for arg in bench_extra):
-                bench_env = (os.environ.get("NYTRIX_BENCH_JOBS") or "").strip()
-                cpu_count = os.cpu_count() or 1
-                bench_jobs = int(bench_env) if bench_env.isdigit() and int(bench_env) > 0 else cpu_count
-                bench_extra = ["--jobs", str(bench_jobs), *bench_extra]
             if not os.environ.get("OMP_NUM_THREADS"):
                 os.environ["OMP_NUM_THREADS"] = "1"
             if not os.environ.get("OMP_THREAD_LIMIT"):
