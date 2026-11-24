@@ -3071,4 +3071,15 @@ run directory under `/tmp`.
   segments, and the segments carried from them, into reloads;
   `regalloc-carry-spill` is the regression. After the fix 1500 built-in seeds
   and the yarpgen seeds that NYC accepts agree with GCC.
+- Remaining-gap measurements (2026-11-24). `long double` in NYC is an
+  eight-byte double, not the x87 80-bit, 16-byte-aligned type of the System V
+  ABI, so `long double _Complex` cannot match GCC's layout or calling
+  convention until x87 arithmetic and the memory-class passing rules exist;
+  that is the whole of the open complex work. yarpgen programs (`--std=c`)
+  often declare multi-dimensional arrays whose `.bss` reaches hundreds of
+  gigabytes (one measured 442 GB); the reference binary then dies at load with
+  SIGSEGV, which `ny-fuzz` reports as an invalid case, not a NYC failure.
+  `ny-stdlib-debug-path` fails because the debug IR for `use core.str` plus
+  `"...".len` no longer contains a `DIFile` for `str.ny`; `nytrix-addr-probe-device`
+  fails on the host's vvar page layout. Neither involves the C frontend.
 </details>
