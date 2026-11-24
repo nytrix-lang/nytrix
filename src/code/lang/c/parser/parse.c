@@ -1188,6 +1188,8 @@ static bool parse_global_const_expr(c_parser_t *p, size_t *at, int64_t *value);
 static bool global_const_cast_type(c_parser_t *p, size_t open, size_t close);
 static bool preproc_attribute_accepted(const char *name, size_t name_len);
 static bool parse_global_float_add(c_parser_t *p, size_t *at, double *value);
+static bool parse_global_complex_add(c_parser_t *p, size_t *at, double *re,
+                                     double *im);
 static bool initialize_data_pointer(c_parser_t *p, c_global_t *data,
                                     size_t offset, unsigned char *bytes);
 static bool
@@ -8680,16 +8682,20 @@ static bool parse_global_array_element(c_parser_t *p, c_type_t type,
   size_t element_size = c_type_size(p->abi, type);
   unsigned char element[32] = {0};
   if (type == C_F32 || type == C_F64 || type == C_C64 || type == C_C128) {
-    double value = 0;
-    if (!parse_global_float_add(p, &p->pos, &value)) {
+    double value = 0, imag = 0;
+    bool is_complex = type == C_C64 || type == C_C128;
+    if (is_complex ? !parse_global_complex_add(p, &p->pos, &value, &imag)
+                   : !parse_global_float_add(p, &p->pos, &value)) {
       fail(p, "file-scope floating arrays require constant elements");
       return false;
     }
     if (type == C_F32 || type == C_C64) {
-      float narrowed = (float)value;
+      float narrowed = (float)value, narrowed_imag = (float)imag;
       memcpy(element, &narrowed, sizeof(narrowed));
+      memcpy(element + sizeof(narrowed), &narrowed_imag, sizeof(narrowed_imag));
     } else {
       memcpy(element, &value, sizeof(value));
+      memcpy(element + sizeof(value), &imag, sizeof(imag));
     }
   } else {
     int64_t value = 0;
@@ -9870,6 +9876,101 @@ static bool parse_global_float_primary(c_parser_t *p, size_t *at,
     }
   }
   return false;
+}
+
+/*
+ * Constant complex expression for a file-scope initializer: real and
+ * imaginary literals (`2.0`, `3.0iF`, the expansion of `I`), parentheses, `+`,
+ * `-` and `*` over them, so `1.0 + 2.0 * I` folds to (1, 2).
+ */
+static bool parse_global_complex_add(c_parser_t *p, size_t *at, double *re,
+                                     double *im);
+
+static bool parse_global_complex_factor(c_parser_t *p, size_t *at, double *re,
+                                        double *im) {
+  while (tok_is(p, *at, "__extension__"))
+    ++*at;
+  if (tok_is(p, *at, "-") || tok_is(p, *at, "+")) {
+    bool negate = tok_is(p, *at, "-");
+    ++*at;
+    if (!parse_global_complex_factor(p, at, re, im))
+      return false;
+    if (negate) {
+      *re = -*re;
+      *im = -*im;
+    }
+    return true;
+  }
+  if (tok_is(p, *at, "(")) {
+    ++*at;
+    if (!parse_global_complex_add(p, at, re, im) || !tok_is(p, *at, ")"))
+      return false;
+    ++*at;
+    return true;
+  }
+  ny_ctok_t token = p->tokens[*at];
+  if (token.kind == NY_CTOK_NUMBER && token.len > 1 && token.len < 128) {
+    char text[128];
+    memcpy(text, token.start, token.len);
+    text[token.len] = '\0';
+    char *suffix = text + strlen(text);
+    while (suffix > text && strchr("fFlLiIjJ", suffix[-1]))
+      --suffix;
+    bool imaginary = false;
+    for (char *c = suffix; *c; ++c)
+      imaginary |= *c == 'i' || *c == 'I' || *c == 'j' || *c == 'J';
+    if (imaginary) {
+      *suffix = '\0';
+      errno = 0;
+      char *end = NULL;
+      double value = strtod(text, &end);
+      if (errno || end == text || *end)
+        return false;
+      *re = 0;
+      *im = value;
+      ++*at;
+      return true;
+    }
+  }
+  double real = 0;
+  if (!parse_global_float_primary(p, at, &real))
+    return false;
+  *re = real;
+  *im = 0;
+  return true;
+}
+
+static bool parse_global_complex_mul(c_parser_t *p, size_t *at, double *re,
+                                     double *im) {
+  if (!parse_global_complex_factor(p, at, re, im))
+    return false;
+  while (tok_is(p, *at, "*")) {
+    ++*at;
+    double r = 0, i = 0;
+    if (!parse_global_complex_factor(p, at, &r, &i))
+      return false;
+    double next_re = *re * r - *im * i;
+    double next_im = *re * i + *im * r;
+    *re = next_re;
+    *im = next_im;
+  }
+  return true;
+}
+
+static bool parse_global_complex_add(c_parser_t *p, size_t *at, double *re,
+                                     double *im) {
+  if (!parse_global_complex_mul(p, at, re, im))
+    return false;
+  while (tok_is(p, *at, "+") || tok_is(p, *at, "-")) {
+    bool subtract = tok_is(p, *at, "-");
+    ++*at;
+    double r = 0, i = 0;
+    if (!parse_global_complex_mul(p, at, &r, &i))
+      return false;
+    *re += subtract ? -r : r;
+    *im += subtract ? -i : i;
+  }
+  return true;
 }
 
 static bool parse_global_float_mul(c_parser_t *p, size_t *at, double *value) {
@@ -15901,17 +16002,24 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       reloc_count = initializer.reloc_count;
     } else {
       if (type == C_F32 || type == C_F64 || type == C_C64 || type == C_C128) {
-        double value;
-        if (!parse_global_float_add(p, &p->pos, &value)) {
+        double value, imag = 0;
+        bool is_complex = type == C_C64 || type == C_C128;
+        if (is_complex ? !parse_global_complex_add(p, &p->pos, &value, &imag)
+                       : !parse_global_float_add(p, &p->pos, &value)) {
           free(bytes);
           fail(p, "invalid file-scope floating initializer");
           return false;
         }
         if (type == C_C64 || type == C_F32) {
-          float narrowed = (float)value; /* real lane; imaginary stays zero */
+          float narrowed = (float)value, narrowed_imag = (float)imag;
           memcpy(bytes, &narrowed, sizeof(narrowed));
+          if (is_complex)
+            memcpy(bytes + sizeof(narrowed), &narrowed_imag,
+                   sizeof(narrowed_imag));
         } else {
           memcpy(bytes, &value, sizeof(value));
+          if (is_complex)
+            memcpy(bytes + sizeof(value), &imag, sizeof(imag));
         }
       } else {
         c_global_t address_data = {.relocs = relocs,

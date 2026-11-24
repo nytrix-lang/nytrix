@@ -296,11 +296,6 @@ user-visible changes in the [changelog](../CHANGELOG.md).
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission without
   the stack encoder, then remove the obsolete fallback.
-- [ ] Close the open C boundary cases: `long double _Complex` (it needs the
-  x87 `long double`), complex file-scope initializers of the form `a + b*I`,
-  and FS/GS execution coverage under QEMU. Kernel tracing flags, direct-object
-  assembly annotations and the FS/GS rejections are done and recorded in the
-  evidence.
 
 ### Correctness verification programme
 
@@ -3071,4 +3066,17 @@ run directory under `/tmp`.
   (v7.3 today), clones it shallow into the build tree, cleans it, builds it
   with NYC and boots it (`ctest -L kernel`, about fifteen minutes plus the
   download).
+- C boundary cases closed (2026-11-24). Complex file-scope initializers fold
+  real and imaginary literals, parentheses, `+`, `-` and `*` (`1.0 + 2.0 * I`,
+  `-I`, `(a + b*I) * (c - d*I)`) for scalars and arrays; the
+  `complex-global-initializers` fixture matches GCC at `-O0` and `-O2`.
+  FS/GS execution is covered by `segment-gs-exec`, which installs a block with
+  `arch_prctl(ARCH_SET_GS)` and runs %gs-relative loads, stores, `++`, `+=` and
+  subscripts at `-O0` and `-O2` against GCC's output; the kernel boot gate
+  additionally runs NYC-compiled per-CPU code through %gs. `long double
+  _Complex` keeps the ABI layout (32 bytes, 16-byte aligned) and every use of
+  its components is rejected with a diagnostic (`complex-long-double` fixture);
+  an arithmetic-capable `long double _Complex` would need an x87 `long double`,
+  which NYC does not provide (its scalar `long double` is binary64), so it
+  stays rejected by design rather than miscompiled.
 </details>
