@@ -5308,10 +5308,23 @@ static bool lu_clone_reject(const nyr_scev_loop_t *loop, const char *reason) {
  */
 #define LU_CFG_CLONE_MAX_EXPANDED_INSTS 1024u
 
+static bool lu_try_clone_cfg_values(nyr_func_t *work,
+                                    const nyr_scev_loop_t *loop,
+                                    const nyr_cfg_t *cfg, const bool *members,
+                                    const int64_t *iv_values);
+
 static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
                              const nyr_cfg_t *cfg, const bool *members) {
+  return lu_try_clone_cfg_values(work, loop, cfg, members, NULL);
+}
+
+static bool lu_try_clone_cfg_values(nyr_func_t *work,
+                                    const nyr_scev_loop_t *loop,
+                                    const nyr_cfg_t *cfg, const bool *members,
+                                    const int64_t *iv_values) {
   if (!work || !loop || !cfg || !members || !loop->trip_count_known ||
-      loop->trip_count < 2 || loop->trip_count > 32 || loop->step == 0 ||
+      loop->trip_count < 2 || loop->trip_count > 32 ||
+      (!iv_values && loop->step == 0) ||
       loop->iv < 0 || loop->iv >= work->next_value)
     return lu_clone_reject(loop, "loop-shape");
 
@@ -5657,7 +5670,8 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
         carry = mapped >= 0 ? mapped : prior;
       }
       if (phi->dst == loop->iv) {
-        ny_i128 iv = (ny_i128)loop->init + (ny_i128)k * loop->step;
+        ny_i128 iv = iv_values ? (ny_i128)iv_values[k]
+                               : (ny_i128)loop->init + (ny_i128)k * loop->step;
         if (iv < INT64_MIN || iv > INT64_MAX || next_value == INT_MAX)
           goto done;
         map[phi->dst] = next_value++;
@@ -5706,7 +5720,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
                                          .imm = labels[k * nb + b]};
       if (b == h) {
         int iv = map[loop->iv];
-        ny_i128 value = (ny_i128)loop->init + (ny_i128)k * loop->step;
+        ny_i128 value = iv_values
+                            ? (ny_i128)iv_values[k]
+                            : (ny_i128)loop->init + (ny_i128)k * loop->step;
         if (iv < 0 || value < INT64_MIN || value > INT64_MAX ||
             clone_len >= clone_cap)
           goto done;
@@ -6453,6 +6469,301 @@ static bool lu_divisor_proven_positive(const nyr_func_t *f, const int *defs,
          (loop->predicate == NYIR_CMP_LT || loop->predicate == NYIR_CMP_LE);
 }
 
+static bool lu_geometric_unroll_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_UNROLL_GEOMETRIC");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+static bool lu_geometric_match_header_cmp(const nyr_func_t *f, const int *defs,
+                                          const nyr_inst_t *cmp, int iv,
+                                          nyr_cmp_t *pred_out,
+                                          int64_t *limit_out) {
+  if (!cmp || cmp->op != NYIR_CMP_I64 || cmp->dst < 0 || !defs)
+    return false;
+  int a = idiom_root_copy(f, defs, cmp->a);
+  int b = idiom_root_copy(f, defs, cmp->b);
+  nyr_cmp_t pred = cmp->cmp;
+  int lim_v = -1;
+  if (a == iv) {
+    lim_v = b;
+  } else if (b == iv) {
+    lim_v = a;
+    if (pred == NYIR_CMP_LT)
+      pred = NYIR_CMP_GT;
+    else if (pred == NYIR_CMP_LE)
+      pred = NYIR_CMP_GE;
+    else if (pred == NYIR_CMP_GT)
+      pred = NYIR_CMP_LT;
+    else if (pred == NYIR_CMP_GE)
+      pred = NYIR_CMP_LE;
+    else
+      return false;
+  } else {
+    return false;
+  }
+  if (pred != NYIR_CMP_LT && pred != NYIR_CMP_LE)
+    return false;
+  int64_t limit = 0;
+  if (!const_i64_val(f, defs, lim_v, &limit) || limit <= 0)
+    return false;
+  *pred_out = pred;
+  *limit_out = limit;
+  return true;
+}
+
+static bool lu_geometric_match_step(const nyr_func_t *f, const int *defs,
+                                    int iv, int next_v, bool *is_shl_out,
+                                    int64_t *param_out,
+                                    bool *wrapped_sext32_out) {
+  if (!f || !defs || next_v < 0 || next_v >= f->next_value)
+    return false;
+  int di = defs[next_v];
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyr_inst_t *inc = &f->data[(size_t)di];
+  bool wrapped_sext32 = false;
+  if (inc->op == NYIR_SAR_I64) {
+    int64_t sh_r = 0, sh_l = 0;
+    int shl_v = idiom_root_copy(f, defs, inc->a);
+    int shl_di = (shl_v >= 0 && shl_v < f->next_value) ? defs[shl_v] : -1;
+    if (const_i64_val(f, defs, inc->b, &sh_r) && sh_r == 32 && shl_di >= 0 &&
+        (size_t)shl_di < f->len && f->data[(size_t)shl_di].op == NYIR_SHL_I64 &&
+        const_i64_val(f, defs, f->data[(size_t)shl_di].b, &sh_l) &&
+        sh_l == 32) {
+      int raw_v = idiom_root_copy(f, defs, f->data[(size_t)shl_di].a);
+      int raw_di = (raw_v >= 0 && raw_v < f->next_value) ? defs[raw_v] : -1;
+      if (raw_di >= 0 && (size_t)raw_di < f->len) {
+        inc = &f->data[(size_t)raw_di];
+        wrapped_sext32 = true;
+      }
+    }
+  }
+  bool is_shl = false;
+  int64_t param = 0;
+  if (inc->op == NYIR_SHL_I64) {
+    if (idiom_root_copy(f, defs, inc->a) != iv ||
+        !const_i64_val(f, defs, inc->b, &param) || param < 1 || param > 8)
+      return false;
+    is_shl = true;
+  } else if (inc->op == NYIR_MUL_I64) {
+    int a = idiom_root_copy(f, defs, inc->a);
+    int b = idiom_root_copy(f, defs, inc->b);
+    if (a == iv && const_i64_val(f, defs, b, &param)) {
+    } else if (b == iv && const_i64_val(f, defs, a, &param)) {
+    } else {
+      return false;
+    }
+    if (param < 2 || param > 256)
+      return false;
+  } else {
+    return false;
+  }
+  *is_shl_out = is_shl;
+  *param_out = param;
+  *wrapped_sext32_out = wrapped_sext32;
+  return true;
+}
+
+static bool lu_geometric_compute_trips(int64_t init, nyr_cmp_t pred,
+                                       int64_t limit, bool is_shl,
+                                       int64_t param, bool wrapped_sext32,
+                                       int64_t iv_values[16],
+                                       size_t *trips_out) {
+  if (init <= 0 || limit <= 0)
+    return false;
+  if (wrapped_sext32 && init > INT32_MAX)
+    return false;
+  ny_i128 cur = init;
+  ny_i128 max_val = wrapped_sext32 ? (ny_i128)INT32_MAX : (ny_i128)INT64_MAX;
+  size_t trips = 0;
+  for (;;) {
+    bool cond = (pred == NYIR_CMP_LT) ? (cur < (ny_i128)limit)
+                                      : (cur <= (ny_i128)limit);
+    if (!cond)
+      break;
+    if (trips >= 16)
+      return false;
+    iv_values[trips++] = (int64_t)cur;
+    ny_i128 next = is_shl ? (cur << param) : (cur * (ny_i128)param);
+    if (next <= cur || next > max_val)
+      return false;
+    cur = next;
+  }
+  if (trips < 2)
+    return false;
+  *trips_out = trips;
+  return true;
+}
+
+static bool lu_geometric_div_mod_safe(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                      const int *defs, const bool *members,
+                                      int iv) {
+  bool no_mod = getenv("NYTRIX_NO_UNROLL_MOD") != NULL;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!members[b])
+      continue;
+    for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->op != NYIR_DIV_I64 && in->op != NYIR_MOD_I64)
+        continue;
+      if (in->op == NYIR_MOD_I64 && no_mod)
+        return false;
+      int64_t divisor = 0;
+      if (const_i64_val(f, defs, in->b, &divisor)) {
+        if (divisor <= 0)
+          return false;
+      } else if (idiom_root_copy(f, defs, in->b) != iv) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool lu_try_geometric_unroll_one(nyr_func_t *f, const nyr_cfg_t *cfg,
+                                        const int *defs) {
+  if (!f || !cfg || !defs)
+    return false;
+  for (size_t latch = 0; latch < cfg->block_count; ++latch) {
+    for (size_t e = cfg->succ_offsets[latch]; e < cfg->succ_offsets[latch + 1];
+         ++e) {
+      size_t header = cfg->succ_blocks[e];
+      if (!nyr_cfg_is_backedge(cfg, latch, header))
+        continue;
+      size_t preheader = SIZE_MAX, outside = 0, inside = 0;
+      for (size_t p = cfg->pred_offsets[header];
+           p < cfg->pred_offsets[header + 1]; ++p) {
+        size_t pred = cfg->pred_blocks[p];
+        if (!nyr_cfg_dominates(cfg, header, pred)) {
+          preheader = pred;
+          outside++;
+        } else {
+          inside++;
+        }
+      }
+      if (outside != 1 || inside != 1 || preheader == SIZE_MAX)
+        continue;
+      if (cfg->block_label[preheader] < 0 || cfg->block_label[latch] < 0)
+        continue;
+      size_t header_end = nyr_block_last_non_nop(f, cfg, header);
+      const nyr_inst_t *control =
+          header_end > cfg->block_start[header] ? &f->data[header_end - 1u]
+                                                : NULL;
+      if (!control || control->op != NYIR_BR_IF)
+        continue;
+      size_t taken_block = cfg->block_count;
+      for (size_t b = 0; b < cfg->block_count; ++b) {
+        if (cfg->block_label[b] == control->imm) {
+          taken_block = b;
+          break;
+        }
+      }
+      if (taken_block >= cfg->block_count)
+        continue;
+      bool *members = calloc(cfg->block_count, sizeof(*members));
+      if (!members)
+        return false;
+      if (!nyr_cfg_natural_loop_blocks(cfg, latch, header, members,
+                                       cfg->block_count) ||
+          !members[taken_block]) {
+        free(members);
+        continue;
+      }
+      int cond_v = idiom_root_copy(f, defs, control->a);
+      int cond_di = (cond_v >= 0 && cond_v < f->next_value) ? defs[cond_v] : -1;
+      const nyr_inst_t *cmp =
+          (cond_di >= 0 && (size_t)cond_di >= cfg->block_start[header] &&
+           (size_t)cond_di < cfg->block_end[header])
+              ? &f->data[(size_t)cond_di]
+              : NULL;
+      for (size_t i = cfg->block_start[header]; i < cfg->block_end[header];
+           ++i) {
+        const nyr_inst_t *phi = &f->data[i];
+        if (phi->op != NYIR_PHI || phi->phi_incoming_len != 2 || phi->dst < 0)
+          continue;
+        int init_v = -1, next_v = -1;
+        for (size_t k = 0; k < 2; ++k) {
+          int64_t lbl = phi->phi_incoming[k].predecessor_label;
+          int val = idiom_root_copy(f, defs, phi->phi_incoming[k].value);
+          if (lbl == cfg->block_label[preheader])
+            init_v = val;
+          else if (lbl == cfg->block_label[latch])
+            next_v = val;
+        }
+        int64_t init = 0;
+        if (init_v < 0 || next_v < 0 || !const_i64_val(f, defs, init_v, &init) ||
+            init <= 0)
+          continue;
+        nyr_cmp_t pred = NYIR_CMP_EQ;
+        int64_t limit = 0;
+        if (!lu_geometric_match_header_cmp(f, defs, cmp, phi->dst, &pred,
+                                           &limit))
+          continue;
+        bool is_shl = false, wrapped_sext32 = false;
+        int64_t param = 0;
+        if (!lu_geometric_match_step(f, defs, phi->dst, next_v, &is_shl, &param,
+                                     &wrapped_sext32))
+          continue;
+        int64_t iv_values[16];
+        size_t trips = 0;
+        if (!lu_geometric_compute_trips(init, pred, limit, is_shl, param,
+                                        wrapped_sext32, iv_values, &trips))
+          continue;
+        if (!lu_geometric_div_mod_safe(f, cfg, defs, members, phi->dst))
+          continue;
+        nyr_scev_loop_t loop = {.header_block = header,
+                                .latch_block = latch,
+                                .preheader_block = preheader,
+                                .header_index = cfg->block_start[header],
+                                .latch_index = cfg->block_end[latch] - 1u,
+                                .header_label = cfg->block_label[header],
+                                .iv = phi->dst,
+                                .init_value = init_v,
+                                .next_value = next_v,
+                                .limit_value = -1,
+                                .init = init,
+                                .init_is_const = true,
+                                .step = 0,
+                                .limit = limit,
+                                .predicate = pred,
+                                .limit_is_const = true,
+                                .trip_count_known = true,
+                                .trip_count = trips};
+        nyr_func_t candidate = {0};
+        if (!nyr_ir_func_clone(f, &candidate)) {
+          free(members);
+          return false;
+        }
+        bool changed =
+            lu_try_clone_cfg_values(&candidate, &loop, cfg, members, iv_values);
+        char err[128] = {0};
+        if (changed && nyr_ir_verify(&candidate, err, sizeof(err))) {
+          if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+            ny_dbg_heuristic_event("LOOP_UNROLL_GEOM",
+                                   "decision=accept header=L%lld trips=%zu",
+                                   (long long)loop.header_label, trips);
+          nyr_func_replace(f, &candidate);
+          free(members);
+          return true;
+        }
+        if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+          ny_dbg_heuristic_event("LOOP_UNROLL_GEOM",
+                                 "decision=reject header=L%lld reason=%s",
+                                 (long long)loop.header_label,
+                                 changed ? (err[0] ? err : "verification")
+                                         : "clone-reject");
+        nyr_ir_func_free(&candidate);
+      }
+      free(members);
+    }
+  }
+  return false;
+}
+
 bool nyr_loop_unroll_ssa(nyr_func_t *f) {
   if (!f || f->len < 8 || f->next_value <= 0)
     return true;
@@ -6558,6 +6869,14 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
             (long long)loop->header_label,
             changed ? (err[0] ? err : "verification") : "shape-or-legality");
       nyr_ir_func_free(&candidate);
+    }
+    if (!applied && !lu_geometric_unroll_disabled()) {
+      if (!defs_attempted) {
+        defs = nyr_build_defs(f);
+        defs_attempted = true;
+      }
+      if (defs)
+        applied = lu_try_geometric_unroll_one(f, &cfg, defs);
     }
     free(defs);
     nyr_scev_free(&info);
