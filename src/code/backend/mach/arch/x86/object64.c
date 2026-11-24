@@ -6582,6 +6582,15 @@ static bool mach_sib_scaled_index_only_feeds_add(const nyr_x64_mach_enc_t *e,
   return found;
 }
 
+static bool mach_sib_elided_lea_preg_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_SIB_ELIDED_LEA_PREG");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 /*
  * Query decomposition of an address vreg into base/index/scale physical
  * registers. A single-use LEA feeding an adjacent load/store is
@@ -16029,6 +16038,18 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          * holds for a float store as much as for a load: mach_sib_query
          * decides both from the same residency of base and index.
          */
+        const nyr_mach_operand_t *lea_base = NULL, *lea_index = NULL;
+        unsigned lea_scale = 0;
+        bool adj_sib =
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            mach_sib_lea_mem(e, in->dst.as.reg, e->cur_inst + 1, &lea_base,
+                             &lea_index, &lea_scale, NULL);
+        bool next_is_non_sib_v128_store =
+            next && next->opcode == NYR_MACH_STORE &&
+            mach_is_v128(mach, &next->src0) &&
+            !(e->vec_fast_path &&
+              (mach_v128_type(mach, &next->src0) == NYR_MACH_TYPE_V256_F64 ||
+               mach_v128_type(mach, &next->src0) == NYR_MACH_TYPE_V256_I64));
         bool float_use_folds =
             e->fp_fast_path && !e->force_stack_reads && next &&
             (next->opcode == NYR_MACH_LOAD ||
@@ -16036,37 +16057,91 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               mach_is_float(mach, &next->src0))) &&
             in->dst.kind == NYR_MACH_OPERAND_VREG &&
             in->src0.kind == NYR_MACH_OPERAND_VREG &&
-            in->src1.kind == NYR_MACH_OPERAND_VREG &&
-            mach_sib_lea_mem(e, in->dst.as.reg, e->cur_inst + 1, NULL, NULL,
-                             NULL, NULL);
+            in->src1.kind == NYR_MACH_OPERAND_VREG && adj_sib;
         if (float_use_folds) {
-          /*
-           * Residency is asked where the load will read it: an input whose
-           * last use is this LEA has already left its register there.
-           */
-          size_t lea_inst = e->cur_inst++;
-          int base_at_load = mach_vreg_preg(e, in->src0.as.reg);
-          int index_at_load = mach_vreg_preg(e, in->src1.as.reg);
-          e->cur_inst = lea_inst;
-          /*
-           * R12 is a valid SIB index (REX.X); only RSP cannot be one. This
-           * matches the test mach_sib_query applies at the access.
-           */
-          float_use_folds =
-              base_at_load >= 0 && index_at_load >= 0 && index_at_load != 4;
+          if (!mach_sib_elided_lea_preg_disabled() && adj_sib) {
+            int base_at_load = mach_vreg_preg(e, in->src0.as.reg);
+            int index_at_load = mach_vreg_preg(e, in->src1.as.reg);
+            float_use_folds =
+                base_at_load >= 0 && index_at_load >= 0 && index_at_load != 4;
+          } else {
+            /*
+             * Residency is asked where the load will read it: an input whose
+             * last use is this LEA has already left its register there.
+             */
+            size_t lea_inst = e->cur_inst++;
+            int base_at_load = mach_vreg_preg(e, in->src0.as.reg);
+            int index_at_load = mach_vreg_preg(e, in->src1.as.reg);
+            e->cur_inst = lea_inst;
+            /*
+             * R12 is a valid SIB index (REX.X); only RSP cannot be one. This
+             * matches the test mach_sib_query applies at the access.
+             */
+            float_use_folds =
+                base_at_load >= 0 && index_at_load >= 0 && index_at_load != 4;
+          }
         }
         if (in->dst.kind == NYR_MACH_OPERAND_VREG && !next_is_vector_load &&
             (float_use_folds || !mach_sib_lea_has_float_memory_use(
                                     e, in->dst.as.reg, e->cur_inst)) &&
-            ((mach_sib_lea_mem(e, in->dst.as.reg, e->cur_inst + 1, NULL, NULL,
-                               NULL, NULL)) ||
+            (adj_sib ||
              (in->src0.kind == NYR_MACH_OPERAND_VREG &&
               in->src1.kind == NYR_MACH_OPERAND_VREG &&
               in->src2.kind == NYR_MACH_OPERAND_IMM &&
               (in->src2.as.imm == 2 || in->src2.as.imm == 4 ||
                in->src2.as.imm == 8) &&
-              mach_sib_lea_all_uses_mem(e, in->dst.as.reg, e->cur_inst))))
+              mach_sib_lea_all_uses_mem(e, in->dst.as.reg, e->cur_inst)))) {
+          if (!mach_sib_elided_lea_preg_disabled() && !e->force_stack_reads &&
+              adj_sib && !next_is_non_sib_v128_store) {
+            bool next_is_v256 =
+                next &&
+                ((next->opcode == NYR_MACH_LOAD &&
+                  mach_is_v128(mach, &next->dst)) ||
+                 (next->opcode == NYR_MACH_STORE &&
+                  mach_is_v128(mach, &next->src0))) &&
+                e->vec_fast_path;
+            bool use_frame_fold =
+                !next_is_v256 && e->addr_fold && e->addr_fold_known &&
+                lea_base->as.reg < e->mach->vreg_len &&
+                e->addr_fold_known[lea_base->as.reg] &&
+                e->addr_fold[lea_base->as.reg].kind == NYR_MACH_OPERAND_FRAME;
+            int bp = mach_vreg_preg(e, lea_base->as.reg);
+            int ip = mach_vreg_preg(e, lea_index->as.reg);
+            if (use_frame_fold) {
+              if (ip >= 0 && ip != 4) {
+                e->pending_frame_vreg = in->dst.as.reg;
+                e->pending_frame_index = (unsigned)ip;
+                e->pending_frame_scale = lea_scale;
+                e->pending_frame_disp =
+                    mach_slot_off(e, &e->addr_fold[lea_base->as.reg]);
+                e->pending_frame_valid = true;
+              }
+            } else if (bp >= 0 && ip >= 0 && ip != 4) {
+              e->pending_sib_vreg = in->dst.as.reg;
+              e->pending_sib_base = (unsigned)bp;
+              e->pending_sib_index = (unsigned)ip;
+              e->pending_sib_scale = lea_scale;
+              e->pending_sib_valid = true;
+            } else if (ip >= 0 && ip != 4) {
+              if (!mach_load_op_rax(e, lea_base))
+                return false;
+              e->pending_sib_vreg = in->dst.as.reg;
+              e->pending_sib_base = 0;
+              e->pending_sib_index = (unsigned)ip;
+              e->pending_sib_scale = lea_scale;
+              e->pending_sib_valid = true;
+            } else if (bp >= 0 && bp != 0) {
+              if (!mach_load_op_rax(e, lea_index))
+                return false;
+              e->pending_sib_vreg = in->dst.as.reg;
+              e->pending_sib_base = (unsigned)bp;
+              e->pending_sib_index = 0;
+              e->pending_sib_scale = lea_scale;
+              e->pending_sib_valid = true;
+            }
+          }
           break;
+        }
         if (in->src0.kind == NYR_MACH_OPERAND_VREG &&
             in->src1.kind == NYR_MACH_OPERAND_VREG &&
             in->src2.kind == NYR_MACH_OPERAND_IMM &&
