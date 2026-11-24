@@ -8648,6 +8648,8 @@ typedef struct {
   int llvm_timer_fallback;
   int ny_fixture_timer;
   int llvm_fixture_timer;
+  int ny_wrapper_timer;
+  int llvm_wrapper_timer;
   int c_fixture_timer;
   int ny_rc;
   int c_rc;
@@ -9204,6 +9206,7 @@ typedef struct {
   int timeout_count;
   int timer_fallback_count;
   int fixture_timer_count;
+  int wrapper_timer_count;
   int checksum_seen;
   int checksum_consistent;
   char checksum[128];
@@ -9379,16 +9382,23 @@ static bench_stats_t bench_measure_self_timed(char *const argv[],
           s.checksum_consistent = 0;
         }
       }
-      bool fixture_timer = out && (strstr(out, "bench_elapsed_ns=") != NULL ||
-                                   strstr(out, "elapsed_ns=") != NULL ||
-                                   strstr(out, "elapsed_ms=") != NULL);
+      bool fixture_timer =
+          out && (bench_elapsed_marker(out, "bench_elapsed_ns=") != NULL ||
+                  bench_elapsed_marker(out, "elapsed_ns=") != NULL ||
+                  bench_elapsed_marker(out, "elapsed_ms=") != NULL);
+      bool wrapper_timer =
+          out && !fixture_timer &&
+          bench_elapsed_marker(out, "bench_process_elapsed_ns=") != NULL;
       double self_timed_ms = bench_parse_elapsed(out);
       double jit_run_ms = bench_parse_phase_ms(out, "JIT Run:");
-      double v = prefer_jit_timer && !fixture_timer && jit_run_ms > 0.0
+      double v = prefer_jit_timer && !fixture_timer && !wrapper_timer &&
+                         jit_run_ms > 0.0
                      ? jit_run_ms
                      : self_timed_ms;
       if (fixture_timer)
         s.fixture_timer_count++;
+      else if (wrapper_timer)
+        s.wrapper_timer_count++;
       if (test_env_truthy("NYTRIX_BENCH_TRACE_TIMING")) {
         const char *input = argv && argv[0] ? argv[0] : "<unknown>";
         for (int ai = 1; argv && argv[ai]; ++ai)
@@ -9400,16 +9410,20 @@ static bench_stats_t bench_measure_self_timed(char *const argv[],
                 input, (int)s.count + 1, rc, self_timed_ms, jit_run_ms,
                 fixture_timer
                     ? "fixture-marker"
-                    : (prefer_jit_timer && jit_run_ms > 0.0
-                           ? "ny--time"
-                           : (self_timed_ms > 0.0 ? "self-timed" : "none")));
+                    : (wrapper_timer
+                           ? (prefer_jit_timer ? "generated-ny-wrapper"
+                                               : "generated-main-wrapper")
+                           : (prefer_jit_timer && jit_run_ms > 0.0
+                                  ? "ny--time"
+                                  : (self_timed_ms > 0.0 ? "self-timed"
+                                                         : "none"))));
       }
       if (v <= 0.0 && jit_run_ms > 0.0) {
         v = jit_run_ms;
         s.timer_fallback_count++;
       }
-      if (prefer_jit_timer && !fixture_timer && jit_run_ms <= 0.0 &&
-          self_timed_ms > 0.0)
+      if (prefer_jit_timer && !fixture_timer && !wrapper_timer &&
+          jit_run_ms <= 0.0 && self_timed_ms > 0.0)
         s.timer_fallback_count++;
       if (v > 0.0 && s.count < 64)
         s.values[s.count++] = v;
@@ -9519,12 +9533,22 @@ static char *bench_c_block(const char *shape_path) {
   return shape_source_block(shape_path, "c");
 }
 
+static bool bench_ny_wrap_disabled(void);
+static char *bench_wrap_ny_source(const char *ny_source);
+
 /*
  * Extract the `source ny` block and materialize it via the shared helper.
  */
 static char *bench_materialize_ny(const char *shape_path) {
 #ifndef _WIN32
   char *source = shape_source_block(shape_path, "ny");
+  if (source && !bench_ny_wrap_disabled()) {
+    char *wrapped = bench_wrap_ny_source(source);
+    if (wrapped) {
+      free(source);
+      source = wrapped;
+    }
+  }
   if (source && !strstr(source, "use \"./") && !strstr(source, "use './") &&
       !strstr(source, "use \"../") && !strstr(source, "use '../") &&
       !strstr(source, "module ")) {
@@ -9994,6 +10018,102 @@ static const char *bench_c_body_end(const char *p) {
     ++p;
   }
   return NULL;
+}
+
+static bool bench_ny_wrap_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_BENCH_NY_WRAP");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+static char *bench_wrap_ny_source(const char *ny_source) {
+  if (!ny_source)
+    return NULL;
+  if (strstr(ny_source, "bench_elapsed_ns=") != NULL ||
+      strstr(ny_source, "elapsed_ns=") != NULL ||
+      strstr(ny_source, "elapsed_ms=") != NULL ||
+      strstr(ny_source, "bench_process_elapsed_ns=") != NULL ||
+      strstr(ny_source, "fn main(") != NULL ||
+      strstr(ny_source, "module ") != NULL)
+    return NULL;
+  const char *p = ny_source;
+  while (*p) {
+    const char *line = p;
+    while (*p == ' ' || *p == '\t' || *p == '\r')
+      ++p;
+    if (*p == '\n') {
+      ++p;
+      continue;
+    }
+    if (*p == ';') {
+      while (*p && *p != '\n')
+        ++p;
+      if (*p == '\n')
+        ++p;
+      continue;
+    }
+    if ((strncmp(p, "use", 3) == 0 && (p[3] == ' ' || p[3] == '\t')) ||
+        (strncmp(p, "import", 6) == 0 && (p[6] == ' ' || p[6] == '\t'))) {
+      int depth = 0;
+      while (*p) {
+        if (*p == ';') {
+          while (*p && *p != '\n')
+            ++p;
+          if (*p == '\n')
+            ++p;
+          if (depth <= 0)
+            break;
+          continue;
+        }
+        if (*p == '(')
+          ++depth;
+        else if (*p == ')' && depth > 0)
+          --depth;
+        if (*p == '\n') {
+          ++p;
+          if (depth <= 0)
+            break;
+          continue;
+        }
+        ++p;
+      }
+      continue;
+    }
+    p = line;
+    break;
+  }
+  static const char start_stmt[] =
+      "def int __ny_bench_t0 = __monotonic_ns_raw()\n";
+  static const char end_stmt[] =
+      "def int __ny_bench_t1 = __monotonic_ns_raw()\n"
+      "def int __ny_bench_dt = __ny_bench_t1 - __ny_bench_t0\n"
+      "if __ny_bench_dt <= 0 { print(\"bench_process_elapsed_ns=\", 1) } else { print(\"bench_process_elapsed_ns=\", __ny_bench_dt) }\n";
+  size_t prefix_len = (size_t)(p - ny_source);
+  size_t body_len = strlen(p);
+  bool need_nl = body_len > 0 && p[body_len - 1] != '\n';
+  size_t total = prefix_len + (sizeof(start_stmt) - 1) + body_len +
+                 (need_nl ? 1u : 0u) + sizeof(end_stmt);
+  char *wrapped = (char *)malloc(total);
+  if (!wrapped)
+    return NULL;
+  size_t off = 0;
+  if (prefix_len) {
+    memcpy(wrapped + off, ny_source, prefix_len);
+    off += prefix_len;
+  }
+  memcpy(wrapped + off, start_stmt, sizeof(start_stmt) - 1);
+  off += sizeof(start_stmt) - 1;
+  if (body_len) {
+    memcpy(wrapped + off, p, body_len);
+    off += body_len;
+  }
+  if (need_nl)
+    wrapped[off++] = '\n';
+  memcpy(wrapped + off, end_stmt, sizeof(end_stmt));
+  return wrapped;
 }
 
 static char *bench_wrap_c_source(const char *c_source) {
@@ -12945,6 +13065,7 @@ static void bench_record_result(
   row.ny_runs = (int)result->ny.count;
   row.ny_timer_fallback = result->ny.timer_fallback_count > 0;
   row.ny_fixture_timer = result->ny.fixture_timer_count > 0;
+  row.ny_wrapper_timer = result->ny.wrapper_timer_count > 0;
   row.ny_rc = result->ny.last_rc;
   row.ny_failures = result->ny.failure_count;
   row.ny_min = result->ny.min;
@@ -12961,6 +13082,7 @@ static void bench_record_result(
   row.llvm_runs = (int)result->llvm.count;
   row.llvm_timer_fallback = result->llvm.timer_fallback_count > 0;
   row.llvm_fixture_timer = result->llvm.fixture_timer_count > 0;
+  row.llvm_wrapper_timer = result->llvm.wrapper_timer_count > 0;
   row.llvm_rc = result->llvm.last_rc;
   row.llvm_failures = result->llvm.failure_count;
   row.llvm_min = result->llvm.min;
@@ -14712,17 +14834,22 @@ static void bench_write_csv(FILE *f, const BenchTable *t,
         r->bounds_checks_budget, r->indirect_calls_budget,
         r->unknown_effects_budget, r->alias_unresolved_budget, r->spills_budget,
         r->reloads_budget, r->budget_failed,
-        r->ny_runs <= 0 ? "unavailable"
-                        : (r->ny_fixture_timer ? "fixture-kernel"
-                                               : (r->ny_timer_fallback
-                                                      ? "fixture_timer_fallback"
-                                                      : "ny--time")),
+        r->ny_runs <= 0
+            ? "unavailable"
+            : (r->ny_fixture_timer
+                   ? "fixture-kernel"
+                   : (r->ny_wrapper_timer
+                          ? "generated-ny-wrapper"
+                          : (r->ny_timer_fallback ? "fixture_timer_fallback"
+                                                  : "ny--time"))),
         r->llvm_runs <= 0
             ? "unavailable"
             : (r->llvm_fixture_timer
                    ? "fixture-kernel"
-                   : (r->llvm_timer_fallback ? "fixture_timer_fallback"
-                                             : "ny--time")),
+                   : (r->llvm_wrapper_timer
+                          ? "generated-ny-wrapper"
+                          : (r->llvm_timer_fallback ? "fixture_timer_fallback"
+                                                    : "ny--time"))),
         r->c_runs <= 0 ? "unavailable"
                        : (r->c_fixture_timer ? "fixture-kernel"
                                              : "generated-main-wrapper"));
@@ -15033,17 +15160,22 @@ static void bench_write_json(FILE *f, const BenchTable *t,
         r->indirect_calls_budget, r->unknown_effects_budget,
         r->alias_unresolved_budget, r->spills_budget, r->reloads_budget,
         r->budget_failed ? "true" : "false",
-        r->ny_runs <= 0 ? "unavailable"
-                        : (r->ny_fixture_timer ? "fixture-kernel"
-                                               : (r->ny_timer_fallback
-                                                      ? "fixture_timer_fallback"
-                                                      : "ny--time")),
+        r->ny_runs <= 0
+            ? "unavailable"
+            : (r->ny_fixture_timer
+                   ? "fixture-kernel"
+                   : (r->ny_wrapper_timer
+                          ? "generated-ny-wrapper"
+                          : (r->ny_timer_fallback ? "fixture_timer_fallback"
+                                                  : "ny--time"))),
         r->llvm_runs <= 0
             ? "unavailable"
             : (r->llvm_fixture_timer
                    ? "fixture-kernel"
-                   : (r->llvm_timer_fallback ? "fixture_timer_fallback"
-                                             : "ny--time")),
+                   : (r->llvm_wrapper_timer
+                          ? "generated-ny-wrapper"
+                          : (r->llvm_timer_fallback ? "fixture_timer_fallback"
+                                                    : "ny--time"))),
         r->c_runs <= 0 ? "unavailable"
                        : (r->c_fixture_timer ? "fixture-kernel"
                                              : "generated-main-wrapper"),
