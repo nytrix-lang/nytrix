@@ -356,6 +356,8 @@ bool nyr_mach_regalloc_build_x64_class(const nyr_mach_func_t *mach,
                                        nyr_mach_reg_class_t reg_class,
                                        size_t color_count,
                                        nyr_mach_regalloc_t *out);
+size_t nyr_mach_regalloc_repair_carried(const nyr_mach_func_t *mach,
+                                        nyr_mach_regalloc_t *a);
 size_t nyr_mach_regalloc_recolor_locals(
     const nyr_mach_func_t *mach, nyr_mach_regalloc_t *alloc,
     nyr_mach_reg_class_t reg_class, const unsigned char *candidate,

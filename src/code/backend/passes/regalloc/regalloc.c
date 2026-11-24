@@ -4645,6 +4645,72 @@ bool nyr_mach_regalloc_build_class(const nyr_mach_func_t *mach,
                                             false, out);
 }
 
+/*
+ * A carried segment promises that its register already holds the value at
+ * block entry. The allocator can emit one whose predecessor ends in a
+ * stack-resident segment (spilled under register pressure), so the register
+ * holds some other value there. Turn such a segment into an ordinary reload
+ * from the home the predecessor wrote; later segments carried from it stay
+ * valid. Returns the number of segments repaired.
+ */
+size_t nyr_mach_regalloc_repair_carried(const nyr_mach_func_t *mach,
+                                        nyr_mach_regalloc_t *a) {
+  if (!mach || !a || !a->segment_len || a->block_count != mach->block_len ||
+      !a->live_in || !a->live_out)
+    return 0;
+  size_t *pred_offsets = NULL;
+  uint32_t *preds = NULL;
+  if (!verify_build_predecessors(mach, &pred_offsets, &preds))
+    return 0;
+  size_t repaired = 0;
+  bool *lazy = calloc(a->segment_len, sizeof(*lazy));
+  if (!lazy) {
+    free(pred_offsets);
+    free(preds);
+    return 0;
+  }
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t i = 0; i < a->segment_len; ++i) {
+      nyr_mach_live_segment_t *s = &a->segments[i];
+      if (!s->carried || s->color < 0 || s->block >= mach->block_len ||
+          !nyr_mach_regalloc_live_in(a, s->block, s->vreg))
+        continue;
+      bool stack_pred = false;
+      for (size_t edge = pred_offsets[s->block];
+           edge < pred_offsets[s->block + 1]; ++edge) {
+        size_t pred = preds[edge];
+        if (!nyr_mach_regalloc_live_out(a, pred, s->vreg))
+          continue;
+        const nyr_mach_block_t *source = &mach->blocks[pred];
+        if (!source->inst_count)
+          continue;
+        const nyr_mach_live_segment_t *from = nyr_mach_regalloc_segment_at(
+            a, s->vreg, (size_t)source->first_inst + source->inst_count - 1);
+        /*
+         * A repaired segment loads its home only at its first use, so a
+         * segment carried from it would see an unloaded register.
+         */
+        if (from && (from->color < 0 || lazy[from - a->segments]))
+          stack_pred = true;
+      }
+      if (!stack_pred)
+        continue;
+      s->carried = false;
+      s->acyclic_carried = false;
+      s->reload = true;
+      lazy[i] = true;
+      ++repaired;
+      changed = true;
+    }
+  }
+  free(lazy);
+  free(pred_offsets);
+  free(preds);
+  return repaired;
+}
+
 bool nyr_mach_regalloc_build_x64_class(const nyr_mach_func_t *mach,
                                        nyr_mach_reg_class_t reg_class,
                                        size_t color_count,

@@ -3050,18 +3050,25 @@ run directory under `/tmp`.
   GCC-compared at `-O0` and `-O2`): the earlier "plain `double arr[3];` fails"
   limitation is gone. Complex global initializers take a real constant only
   (`= 2.0`), not `a + b*I`. Still unsupported: `long double _Complex`.
-- Differential fuzzing (2026-11-24). `src/code/test/lang/fuzz/fuzz-expr.py`
-  generates seeded, undefined-behaviour-free integer programs in three-address
-  form and compares GCC with NYC at `-O0`/`-O2`; `fuzz-reduce.py` shrinks a
-  failing seed by deleting lines. The first 300 seeds found two defects.
-  (1) A store to a file-scope `short` or `signed char` wrote eight bytes and
-  overwrote the neighbouring globals; file-scope `float` scalars were also
-  rejected, and an `int` assigned to a `float`/`double` global failed to
-  compile. Fixed; `global-narrow-stores` is the regression. (2) Open: in the
-  direct-object encoder (`-c`, `-O0`) the result of a multiply that the
-  encoder forwards in `%rax` is never written to its register, and a later use
-  reads another value's register (`seed 245`, `f1`: `-S` through GNU as is
-  correct, `-c` returns 20334 instead of 15757574049326185246). It reproduces
-  on a clean HEAD build, so it belongs to the stack-encoder work above. About
-  8% of fuzz seeds still hit it or a related -O2 divergence.
+- Differential fuzzing (2026-11-24). `ny-fuzz` (an installed C tool,
+  `src/cmd/tools/fuzz`) compiles seeded programs with a reference compiler and
+  with NYC at `-O0`/`-O2` and compares program output. Its built-in generator
+  emits undefined-behaviour-free integer programs in three-address form;
+  `yarpgen` and `csmith` are used when installed (csmith also needs its runtime
+  headers, `CSMITH_INCLUDE`). Programs NYC rejects count as "unsupported", not
+  as failures, unless `--strict`; `ny-fuzz reduce` shrinks a failing case by
+  deleting lines and simplifying temporaries; the `ny-fuzz-smoke` ctest runs
+  forty seeds of every available generator. The first 300 built-in seeds found
+  two defects. (1) A store to a file-scope `short` or `signed char` wrote eight
+  bytes and overwrote the neighbouring globals; file-scope `float` scalars were
+  also rejected, and an `int` assigned to a `float`/`double` global failed to
+  compile. Fixed; `global-narrow-stores` is the regression. (2) In the
+  direct-object encoder (`-c`, `-O0`) the register allocator could mark a
+  segment as carried from a predecessor whose segment had been demoted to its
+  stack home, so a later block read a register that held another value (seed
+  245: `-S` through GNU as was correct, `-c` returned 20334 instead of
+  15757574049326185246). `nyr_mach_regalloc_repair_carried` now turns such
+  segments, and the segments carried from them, into reloads;
+  `regalloc-carry-spill` is the regression. After the fix 1500 built-in seeds
+  and the yarpgen seeds that NYC accepts agree with GCC.
 </details>

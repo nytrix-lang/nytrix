@@ -615,7 +615,7 @@ def cmake_build_has_work(build_root: Path, kind: str, targets: list[str]) -> boo
         return True
     exe = ".exe" if host_os() == "windows" else ""
     for target in targets:
-        if target in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+        if target in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp", "ny-fuzz"):
             if not (bdir / f"{target}{exe}").exists():
                 return True
     return False
@@ -3112,7 +3112,7 @@ def windows_stop_locked_build_targets(bdir: Path, targets: list[str]) -> None:
         return
     exes: list[Path] = []
     for target in targets:
-        if target in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+        if target in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp", "ny-fuzz"):
             path = bdir / f"{target}.exe"
             if path.exists():
                 exes.append(path.resolve())
@@ -8102,7 +8102,7 @@ def _stage_static_tools(src_dir: Path, out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     bin_dir = out_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    names = ["ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
+    names = ["ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp", "ny-fuzz"]
     copied = 0
     for name in names:
         src = src_dir / name
@@ -8161,7 +8161,7 @@ def _bundle_static_outputs(build_root: Path, src_dir: Path) -> None:
     for d in (static_dir, build_root / "release"):
         if not d.exists() or not d.is_dir():
             continue
-        for exe_name in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+        for exe_name in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp", "ny-fuzz"):
             exe = d / exe_name
             if exe.exists():
                 all_copied.extend(_bundle_dir_for_binary(exe))
@@ -8323,7 +8323,7 @@ def run_make_static(build_root: Path, kind: str, jobs: int, args: list[str]) -> 
                 continue
             if not item.is_dir():
                 continue
-            for exe_name in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"):
+            for exe_name in ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp", "ny-fuzz"):
                 exe_path = item / exe_name
                 if exe_path.exists():
                     total_copied.extend(_bundle_dir_for_binary(exe_path))

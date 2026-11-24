@@ -2997,6 +2997,24 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     "${NYTRIX_ROOT}/src/code/lang/c/parser/parse.c"
   )
   target_link_libraries(nyc PRIVATE nyr m)
+
+  # Differential fuzzer and reducer (reference compiler versus NYC); it
+  # drives yarpgen and csmith when they are installed.
+  add_executable(ny-fuzz "${NYTRIX_ROOT}/src/cmd/tools/fuzz/main.c")
+  target_compile_options(ny-fuzz PRIVATE -Wall -Wextra -Werror)
+  target_link_libraries(ny-fuzz PRIVATE pthread)
+  install(TARGETS ny-fuzz RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  if(BUILD_TESTING)
+    add_test(
+      NAME ny-fuzz-smoke
+      COMMAND "$<TARGET_FILE:ny-fuzz>"
+        run --nyc "$<TARGET_FILE:nyc>" --ref "${CMAKE_C_COMPILER}"
+        --out "${CMAKE_BINARY_DIR}/ny-fuzz-smoke" --seeds 0:40 --jobs 3
+        --gen all
+    )
+    add_dependencies(ny-fuzz nyc)
+    set_tests_properties(ny-fuzz-smoke PROPERTIES TIMEOUT 300)
+  endif()
   if(BUILD_TESTING)
     find_program(NYR_LLD_LINK_EXECUTABLE NAMES lld-link)
     find_program(NYR_LD64_LLD_EXECUTABLE NAMES ld64.lld)

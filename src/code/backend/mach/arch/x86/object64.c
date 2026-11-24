@@ -14263,6 +14263,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
        */
       if (!e->loop_gpr)
         mach_recolor_local_spills(e, e->mach);
+      /*
+       * The passes above may demote a segment to its stack home after a
+       * later segment was marked carried from it; repair those chains.
+       */
+      (void)nyr_mach_regalloc_repair_carried(e->mach, &e->regalloc);
     }
     e->mach = saved_mach;
     free(alloc_inst_copy);
