@@ -843,9 +843,164 @@ static bool nir_peep_reassoc_const(nyr_func_t *f, size_t *i, int x, int64_t imm,
   return true;
 }
 
+static bool peep_mul_cmp_select_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_MUL_CMP_SELECT");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+static const nyr_inst_t *nir_unwrap_copy_def(const nyr_func_t *f,
+                                             const int *defs, int v) {
+  for (unsigned depth = 0; depth < 8; ++depth) {
+    if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0)
+      return NULL;
+    const nyr_inst_t *d = &f->data[defs[v]];
+    if (d->op != NYIR_COPY)
+      return d;
+    v = d->a;
+  }
+  return NULL;
+}
+
+static int nir_extract_raw_cmp_bool(const nyr_func_t *f, const int *defs,
+                                    int v) {
+  const nyr_inst_t *d = nir_unwrap_copy_def(f, defs, v);
+  if (!d)
+    return -1;
+  if (d->op == NYIR_CMP_I64 && d->scalar_class == NYIR_SCALAR_I64_RAW)
+    return d->dst;
+  if (d->op == NYIR_AND_I64) {
+    for (int side = 0; side < 2; ++side) {
+      int lhs = side ? d->a : d->b;
+      int rhs = side ? d->b : d->a;
+      const nyr_inst_t *kc = nir_unwrap_copy_def(f, defs, lhs);
+      if (!kc || kc->op != NYIR_CONST_I64 || kc->imm != 1)
+        continue;
+      const nyr_inst_t *cmp = nir_unwrap_copy_def(f, defs, rhs);
+      if (cmp && cmp->op == NYIR_CMP_I64 &&
+          cmp->scalar_class == NYIR_SCALAR_I64_RAW)
+        return cmp->dst;
+    }
+  }
+  return -1;
+}
+
+typedef struct {
+  size_t pc;
+  int cmp_v;
+  int val;
+} peep_mul_cmp_match_t;
+
+/*
+ * Canonicalize `mul(cmp, x)` and `mul(cmp & 1, x)` to `select(cmp, x, 0)` so
+ * vectorization recognizes conditional masking without scalarizing `and.i64`.
+ */
+static bool nir_fold_mul_cmp_select(nyr_func_t *f) {
+  bool any_mul = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op == NYIR_MUL_I64) {
+      any_mul = true;
+      break;
+    }
+  }
+  if (!any_mul)
+    return true;
+
+  nyr_func_t cand = {0};
+  if (!nyr_ir_func_clone(f, &cand))
+    return false;
+  int *defs = nyr_build_defs(&cand);
+  peep_mul_cmp_match_t *matches =
+      (peep_mul_cmp_match_t *)malloc(cand.len * sizeof(*matches));
+  if (!defs || !matches) {
+    free(defs);
+    free(matches);
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+
+  size_t mcount = 0;
+  for (size_t i = 0; i < cand.len; ++i) {
+    const nyr_inst_t *in = &cand.data[i];
+    if (in->op != NYIR_MUL_I64 || in->dst < 0 || in->a < 0 || in->b < 0 ||
+        in->scalar_class != NYIR_SCALAR_I64_RAW)
+      continue;
+    int cmp_v = nir_extract_raw_cmp_bool(&cand, defs, in->a);
+    int val = in->b;
+    if (cmp_v < 0) {
+      cmp_v = nir_extract_raw_cmp_bool(&cand, defs, in->b);
+      val = in->a;
+    }
+    if (cmp_v >= 0)
+      matches[mcount++] = (peep_mul_cmp_match_t){i, cmp_v, val};
+  }
+  free(defs);
+
+  if (mcount == 0) {
+    free(matches);
+    nyr_ir_func_free(&cand);
+    return true;
+  }
+
+  if (!nir_ensure_inst_space(&cand, mcount)) {
+    free(matches);
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+
+  for (size_t m = mcount; m > 0; --m) {
+    const peep_mul_cmp_match_t mt = matches[m - 1];
+    nyr_inst_t orig = cand.data[mt.pc];
+    int zero = cand.next_value++;
+    memmove(&cand.data[mt.pc + 1], &cand.data[mt.pc],
+            (cand.len - mt.pc) * sizeof(*cand.data));
+    ++cand.len;
+    nyr_inst_t zero_in = {.op = NYIR_CONST_I64,
+                          .dst = zero,
+                          .a = -1,
+                          .b = -1,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .imm = 0,
+                          .scalar_class = NYIR_SCALAR_I64_RAW,
+                          .debug = orig.debug};
+    zero_in.effects = nyr_inst_effects(&zero_in);
+    nyr_inst_t sel = {.op = NYIR_SELECT_I64,
+                      .dst = orig.dst,
+                      .a = mt.cmp_v,
+                      .b = mt.val,
+                      .c = zero,
+                      .d = -1,
+                      .e = -1,
+                      .f = -1,
+                      .scalar_class = NYIR_SCALAR_I64_RAW,
+                      .debug = orig.debug};
+    nyr_clear_derived_facts(&sel);
+    sel.effects = nyr_inst_effects(&sel);
+    cand.data[mt.pc] = zero_in;
+    cand.data[mt.pc + 1] = sel;
+  }
+  free(matches);
+
+  char err[256] = {0};
+  if (!nyr_ir_verify(&cand, err, sizeof(err))) {
+    nyr_ir_func_free(&cand);
+    return true;
+  }
+  nyr_func_replace(f, &cand);
+  return true;
+}
+
 bool nyr_peephole(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
+  if (!peep_mul_cmp_select_disabled() && !nir_fold_mul_cmp_select(f))
+    return false;
   bool *known = (bool *)calloc((size_t)f->next_value, sizeof(bool));
   int64_t *value = (int64_t *)calloc((size_t)f->next_value, sizeof(int64_t));
   unsigned char *kind = (unsigned char *)calloc((size_t)f->next_value, 1);
