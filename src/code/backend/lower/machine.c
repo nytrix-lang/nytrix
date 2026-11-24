@@ -124,13 +124,30 @@ static bool mach_rotate_scalar_loops(nyr_mach_func_t *m) {
                in->src1.kind == NYR_MACH_OPERAND_VREG ||
                in->src1.kind == NYR_MACH_OPERAND_IMM);
     }
+    /*
+     * The exit block runs once, on whichever path leaves the loop, so it may
+     * also hold the address and store of a promoted global's write-back
+     * (NYTRIX_NO_ROTATE_STORE_EXIT=1 keeps exits copy-only).
+     */
+    static int copy_only_exit = -1;
+    if (copy_only_exit < 0) {
+      const char *env = getenv("NYTRIX_NO_ROTATE_STORE_EXIT");
+      copy_only_exit = env && *env && strcmp(env, "0") != 0;
+    }
     for (size_t n = 0; n + 1 < exit_count; ++n) {
       const nyr_mach_inst_t *in = &exit_insts[n];
-      safe &= in->opcode == NYR_MACH_COPY && !in->effects && !in->args &&
-              !in->arg_sizes && in->dst.kind == NYR_MACH_OPERAND_VREG &&
-              in->dst.reg_class == NYR_MACH_REGCLASS_GPR &&
-              (in->src0.kind == NYR_MACH_OPERAND_VREG ||
-               in->src0.kind == NYR_MACH_OPERAND_IMM);
+      bool copy = in->opcode == NYR_MACH_COPY && !in->effects &&
+                  in->dst.kind == NYR_MACH_OPERAND_VREG &&
+                  in->dst.reg_class == NYR_MACH_REGCLASS_GPR &&
+                  (in->src0.kind == NYR_MACH_OPERAND_VREG ||
+                   in->src0.kind == NYR_MACH_OPERAND_IMM);
+      bool writeback =
+          !copy_only_exit &&
+          ((in->opcode == NYR_MACH_LEA && !in->effects &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG) ||
+           (in->opcode == NYR_MACH_STORE &&
+            !(in->effects & ~(unsigned)NYR_MACH_EFFECT_WRITE_MEMORY)));
+      safe &= (copy || writeback) && !in->args && !in->arg_sizes;
     }
     for (size_t pc = body->first_inst; pc < latch; ++pc) {
       nyr_mach_opcode_t op = m->insts[pc].opcode;
