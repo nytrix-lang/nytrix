@@ -9852,10 +9852,35 @@ static bool lower_inplace_compound_literal_at(c_parser_t *p,
                                               const c_agg_type_t *agg,
                                               int address, size_t lbrace) {
   p->pos = lbrace;
-  if ((agg->size && !lower_zero_fill(p, address, agg->size)) ||
-      !init_aggregate(p, NULL, agg, NULL, 0, 0, address))
+  /* The target is the real object, not a padded temporary: zero exactly its
+   * bytes (lower_zero_fill rounds up to whole words and would overrun a
+   * 4-byte spinlock into its neighbour). */
+  size_t whole = agg->size & ~(size_t)7;
+  size_t tail = agg->size - whole;
+  if (whole && !lower_zero_fill(p, address, whole))
     return false;
-  return true;
+  for (size_t done = whole; tail; ) {
+    size_t width = tail >= 4 ? 4 : tail >= 2 ? 2 : 1;
+    int zero = emit_i64_constant(p, 0);
+    int target = done ? lower_add_const(p, address, done) : address;
+    if (zero < 0 || target < 0 ||
+        !emit(p,
+              (nyr_inst_t){.op = NYIR_STORE_I64,
+                           .dst = -1,
+                           .a = target,
+                           .c = zero,
+                           .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                      NYIR_EFFECT_MAY_TRAP,
+                           .flags = width == 4   ? NYIR_INST_F_MEM_I32
+                                    : width == 2 ? NYIR_INST_F_MEM_U16
+                                                 : NYIR_INST_F_MEM_BYTE,
+                           .scalar_class = NYIR_SCALAR_I64_RAW},
+              NULL))
+      return false;
+    done += width;
+    tail -= width;
+  }
+  return init_aggregate(p, NULL, agg, NULL, 0, 0, address);
 }
 
 static bool try_inplace_compound_literal_stmt(

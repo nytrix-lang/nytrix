@@ -4353,6 +4353,36 @@ endif()
 # A zero-initialised __int128 whose address is taken needs its own 16-byte
 # area (it used to overlap the saved frame), and its truth value covers both
 # words, not the area pointer.
+# Assigning a compound literal in place must zero exactly the target's bytes:
+# a 4-byte lock followed by a live neighbour was overrun by a rounded-up fill.
+file(WRITE "${BINARY_DIR}/inplace-literal-exact.c" [=[
+typedef struct { int v; } lock_t;
+struct two { lock_t a; unsigned char tag[3]; };
+struct holder { lock_t lk; int neighbour; };
+static struct holder h;
+static lock_t *where(struct holder *x) { return &x->lk; }
+__attribute__((noinline)) void init(struct holder *x) { *where(x) = (lock_t){0}; }
+__attribute__((noinline)) void init3(unsigned char (*t)[8]) { struct { unsigned char b[3]; } *q = (void *)t; *q = (typeof(*q)){{1,2,3}}; }
+int main(void) {
+  unsigned char buf[8] = {9,9,9,9,9,9,9,9};
+  h.lk.v = 5; h.neighbour = 77;
+  init(&h); init3(&buf);
+  return h.neighbour == 77 && h.lk.v == 0 && buf[2] == 3 && buf[3] == 9 ? 0 : 1;
+}
+]=])
+foreach(level IN ITEMS -O0 -O2)
+  nyc_execute_ok(
+    [=[inplace-literal-exact compilation failed\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${level} -S "${BINARY_DIR}/inplace-literal-exact.c"
+            -o "${BINARY_DIR}/inplace-literal-exact.s")
+  nyc_execute_ok(
+    [=[inplace-literal-exact link failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" "${BINARY_DIR}/inplace-literal-exact.s"
+            -o "${BINARY_DIR}/inplace-literal-exact")
+  nyc_execute_ok(
+    [=[inplace-literal-exact overran its target at ${level}\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/inplace-literal-exact")
+endforeach()
 file(WRITE "${BINARY_DIR}/int128-address-truth.c" [=[
 typedef unsigned long u64;
 __attribute__((noinline)) int probe(int set_high) {
