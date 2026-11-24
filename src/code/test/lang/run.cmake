@@ -4328,6 +4328,42 @@ if(NOT asm_noflags_text MATCHES "\\.section \"\\.discard\\.nyc_test\",\"\",@prog
   message(FATAL_ERROR
     "a file-scope asm section without flags was written with flags:\n${asm_noflags_text}")
 endif()
+# The kernel's RDMSR wrapper (`unsigned long` outputs plus an exception-table
+# entry) must reach the output as a real rdmsr, not vanish, and an inline asm
+# NYC cannot lower must fail the compile instead of being dropped.
+file(WRITE "${BINARY_DIR}/rdmsr-wide.c" [=[
+typedef unsigned long u64; typedef unsigned int u32;
+static inline __attribute__((__always_inline__)) u64 rd(u32 msr) {
+  unsigned long low, high;
+  asm volatile("1: rdmsr\n2:\n .pushsection __ex_table, \"aM\", @progbits, 12\n .balign 4\n .long (1b) - .\n .long (2b) - .\n .long 9 \n .popsection\n" : "=a"(low), "=d"(high) : "c"(msr));
+  return (low) | (high) << 32;
+}
+u64 f(void) { return rd(27); }
+]=])
+nyc_execute_output(
+  [=[nyc -S failed for the wide rdmsr fixture\n${stdout}${stderr}]=]
+  "${BINARY_DIR}/rdmsr-wide.s"
+  COMMAND "${CMAKE_COMMAND}" -E env NYC_KERNEL_COMPAT=1 "${NYC}" -O2 -S
+          "${BINARY_DIR}/rdmsr-wide.c" -o "${BINARY_DIR}/rdmsr-wide.s")
+file(READ "${BINARY_DIR}/rdmsr-wide.s" rdmsr_wide_text)
+if(NOT rdmsr_wide_text MATCHES "rdmsr" OR
+   NOT rdmsr_wide_text MATCHES "movq[ \t]+%r10, \\(%rax\\)")
+  message(FATAL_ERROR "the wide rdmsr was dropped or stored with the wrong width:\n${rdmsr_wide_text}")
+endif()
+file(WRITE "${BINARY_DIR}/asm-unsupported-dropped.c" [=[
+unsigned long g(unsigned long r, unsigned long y) {
+  unsigned long q;
+  __asm__("bswapq %0 ; sarq $3, %0" : "=r"(q) : "0"(r));
+  return q + y;
+}
+]=])
+execute_process(
+  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/asm-unsupported-dropped.c"
+          -o "${BINARY_DIR}/asm-unsupported-dropped.s"
+  RESULT_VARIABLE asm_drop_status OUTPUT_QUIET ERROR_QUIET)
+if(asm_drop_status EQUAL 0)
+  message(FATAL_ERROR "an unsupported inline asm was silently dropped")
+endif()
 file(READ "${SOURCE_DIR}/c/complex-pointer-index.expected" complex_index_expected)
 foreach(complex_opt -O0 -O2)
   nyc_execute_ok(

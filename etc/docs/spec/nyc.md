@@ -293,15 +293,15 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 ### Required acceptance
 
 - [ ] Make the unmodified-upstream gate clean. `nyc-kernel-boot-latest` clones
-  the newest release tag (`v7.3`, no source patches), builds all 3002 C units
+  the newest release tag (`v7.3`, no source patches), builds all 3003 C units
   with NYC (no `CC` step without NYC, zero build errors) and boots its
-  `bzImage` to `/init` under QEMU TCG (`qemu64`): met. Two things remain. The
-  pristine tag identifies NYC as GCC 12, so Kbuild enables `X86_KERNEL_IBT`;
-  its objtool pass now reports one "unreachable instruction"
-  (`___bpf_prog_run+0x1146d`, the `endbr64` of a computed-goto label; the host
-  GCC reports none). And the kernel hangs before `/init` under KVM with the
-  host CPU model (it idles in `default_idle` after `kprobes` with the clock
-  stopped), so only software emulation is verified.
+  `bzImage` to `/init`, both inits, under QEMU TCG (`qemu64`) and under KVM
+  with the host CPU, one CPU: met. Two things remain. The pristine tag
+  identifies NYC as GCC 12, so Kbuild enables `X86_KERNEL_IBT`; its objtool
+  pass reports one "unreachable instruction" (`___bpf_prog_run+0x1146d`, the
+  `endbr64` of a computed-goto label; the host GCC reports none). And with
+  four CPUs under KVM the kernel oopses with a NULL dereference at 0.44 s
+  during CPU bring-up, so only one-CPU boots are verified.
 - [ ] Establish assembly/direct-object/physical-machine parity over the native
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission without
@@ -3119,4 +3119,16 @@ run directory under `/tmp`.
   `asm-section-noflags` check in `run.cmake` fails on the old output. The
   untouched `v7.3` still builds and boots (`nyc-kernel-boot-latest`, 1042 s at
   48 jobs).
+- KVM boot (2026-11-24). The kernel that hung under KVM was built without a
+  single `rdmsr`: the kernel's `__rdmsr` inline asm declares `unsigned long`
+  outputs, NYC's recognizer accepted only 32-bit locals, gave up without an
+  error, and the leftover statement carried no effects so the optimizer
+  deleted it, leaving every MSR read as zero. `__x2apic_enable` then wrote
+  `0x400` to `MSR_IA32_APICBASE`, the CPU rejected it and the timer never
+  started. The recognizer now takes 64-bit locals (stored as whole
+  zero-extended registers), writes through the addresses it computed (the old
+  slot-based stores landed 8 bytes off), and any asm NYC cannot lower now
+  keeps its effects and fails the compile. Both inits now boot under KVM in
+  under two seconds, and the smoke gate boots them under KVM whenever
+  `/dev/kvm` is writable.
 </details>

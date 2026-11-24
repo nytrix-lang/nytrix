@@ -6339,6 +6339,7 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       int low_slot = -1;
       int high_slot = -1;
       int consumed = -1;
+      unsigned wide_mask = 0;
       bool mce =
           in->symbol && strncmp(in->symbol, "rdmsr_mce;nyc_slots=", 20) == 0;
       if (in->dst != -1 || in->a < 0 || in->b != -1 || in->c != -1 ||
@@ -6347,27 +6348,36 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                  mce ? "rdmsr_mce;nyc_slots=%d,%d%n"
                      : "rdmsr;nyc_slots=%d,%d%n",
                  &low_slot, &high_slot, &consumed) != 2 ||
-          consumed < 0 || in->symbol[consumed] != '\0' || low_slot < 0 ||
+          consumed < 0 ||
+          (in->symbol[consumed] != '\0' &&
+           sscanf(in->symbol + consumed, ";wide=%u", &wide_mask) != 1) ||
+          low_slot < 0 ||
           high_slot < 0 || low_slot == high_slot ||
           low_slot >= c->max_local_slot || high_slot >= c->max_local_slot) {
         nyr_set_error(c->err, c->err_len,
                       "nyir x86-64: invalid rdmsr inline assembly");
         return false;
       }
-      char low_address[64];
-      char high_address[64];
-      ny_x64_nir_slot_str(c, low_slot, low_address, sizeof(low_address));
-      ny_x64_nir_slot_str(c, high_slot, high_address, sizeof(high_address));
+      /*
+       * Store through the output addresses the lowering computed (the same
+       * ones the C code reads back), not through slot spellings: the two
+       * can disagree for locals whose address is taken.
+       */
       c->rax_cached_slot = -1;
-      if (!low_address[0] || low_address[0] == '%' || !high_address[0] ||
-          high_address[0] == '%' || !ny_x64_nir_load_value(c, in->a) ||
+      if (!ny_x64_nir_load_value(c, in->a) ||
           !nyr_printf(c->w,
                       "\tmovl\t%%eax, %%ecx\n1:\trdmsr\n2:\n"
                       "\t.pushsection __ex_table,\"aM\",@progbits,12\n"
                       "\t.balign 4\n\t.long 1b - .\n\t.long 2b - .\n"
                       "\t.long %d\n\t.popsection\n"
-                      "\tmovl\t%%eax, %s\n\tmovl\t%%edx, %s\n",
-                      mce ? 13 : 9, low_address, high_address))
+                      "\tmovl\t%%eax, %%r10d\n\tmovl\t%%edx, %%r11d\n",
+                      mce ? 13 : 9) ||
+          !ny_x64_nir_load_value(c, in->d) ||
+          !nyr_put(c->w, (wide_mask & 1u) ? "\tmovq\t%r10, (%rax)\n"
+                                           : "\tmovl\t%r10d, (%rax)\n") ||
+          !ny_x64_nir_load_value(c, in->e) ||
+          !nyr_put(c->w, (wide_mask & 2u) ? "\tmovq\t%r11, (%rax)\n"
+                                           : "\tmovl\t%r11d, (%rax)\n"))
         return false;
       c->rax_cached_slot = -1;
       return true;

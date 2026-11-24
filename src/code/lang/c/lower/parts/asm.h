@@ -680,10 +680,20 @@ static bool defer_unsupported_asm(c_parser_t *p, size_t open,
     fail(p, "out of memory preserving unsupported inline-assembly details");
     return false;
   }
-  return emit(
-      p,
-      (nyr_inst_t){.op = NYIR_INLINE_ASM, .dst = -1, .a = -1, .symbol = owned},
-      NULL);
+  /*
+   * Declare effects so the optimizer cannot discard the statement: an
+   * unsupported asm that reaches emission must fail the compile, never
+   * vanish and leave its outputs unset.
+   */
+  return emit(p,
+              (nyr_inst_t){.op = NYIR_INLINE_ASM,
+                           .dst = -1,
+                           .a = -1,
+                           .symbol = owned,
+                           .effects = NYIR_EFFECT_CONTROL | NYIR_EFFECT_VOLATILE |
+                                      NYIR_EFFECT_READ_MEMORY |
+                                      NYIR_EFFECT_WRITE_MEMORY},
+              NULL);
 }
 
 #define NYTRIX_C_PARSE_INLINE_ASM_HELPERS
@@ -5815,9 +5825,14 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     if (msr.value < 0 || !c_type_is_integer(msr.type) || !expect(p, ")") ||
         !expect(p, ")") || !expect(p, ";") || !low_local || !high_local ||
         low_local == high_local ||
-        (low_local->type != C_U32 && low_local->type != C_I32) ||
-        (high_local->type != C_U32 && high_local->type != C_I32) ||
+        (low_local->type != C_U32 && low_local->type != C_I32 &&
+         low_local->type != C_U64 && low_local->type != C_I64) ||
+        (high_local->type != C_U32 && high_local->type != C_I32 &&
+         high_local->type != C_U64 && high_local->type != C_I64) ||
+        low_local->array_rank || high_local->array_rank ||
         low_local->is_const || high_local->is_const) {
+      if (!p->err || !p->err_len || !p->err[0])
+        fail(p, "rdmsr inline assembly needs plain 32- or 64-bit local outputs");
       free(assembly);
       return false;
     }
@@ -5832,10 +5847,18 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                                                   .imm = high_local->slot});
     if (low_address < 0 || high_address < 0)
       return false;
-    char slots[64];
-    int slots_len = snprintf(slots, sizeof(slots), "%s;nyc_slots=%zu,%zu",
+    /*
+     * RDMSR writes EAX and EDX, which zero-extend into RAX and RDX, so a
+     * 64-bit output local holds the 32-bit result. Tell the emitter which
+     * outputs are 64-bit so it stores whole zero-extended registers.
+     */
+    const unsigned wide_mask =
+        (low_local->type == C_U64 || low_local->type == C_I64 ? 1u : 0u) |
+        (high_local->type == C_U64 || high_local->type == C_I64 ? 2u : 0u);
+    char slots[80];
+    int slots_len = snprintf(slots, sizeof(slots), "%s;nyc_slots=%zu,%zu;wide=%u",
                              rdmsr_mce_template ? "rdmsr_mce" : "rdmsr",
-                             low_local->slot, high_local->slot);
+                             low_local->slot, high_local->slot, wide_mask);
     if (slots_len < 0 || (size_t)slots_len >= sizeof(slots)) {
       fail(p, "out of memory lowering rdmsr inline assembly");
       return false;

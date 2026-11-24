@@ -117,6 +117,17 @@ timeout "${BOOT_TIMEOUT:-300}" qemu-system-x86_64 -m 512 -smp 1 -display none -s
   -kernel "$OUT/build/arch/x86/boot/bzImage" -initrd "$OUT/initramfs.gz" \
   -append "console=ttyS0 loglevel=7 panic=-1 rdinit=/init vga=normal nokaslr" -accel "${ACCEL:-tcg}" -cpu "${CPU:-qemu64}" >/dev/null 2>&1 || true
 grep -q NYC_KERNEL_INIT_REACHED "$OUT/serial.log" && echo "PASS: kernel reached /init" || { echo "FAIL: /init marker missing"; tail -n 20 "$OUT/serial.log"; exit 1; }
+# Hardware acceleration exercises paravirtual paths (kvm-clock, x2APIC) that
+# software emulation never reaches, so boot both inits under KVM when usable.
+if [ -w /dev/kvm ] && [ "${NYC_KERNEL_KVM:-1}" != 0 ]; then
+  for variant in initramfs_glibc.gz initramfs.gz; do
+    timeout "${BOOT_TIMEOUT:-300}" qemu-system-x86_64 -m 512 -smp 1 -display none -serial file:"$OUT/serial_kvm.log" -no-reboot -nic none \
+      -kernel "$OUT/build/arch/x86/boot/bzImage" -initrd "$OUT/$variant" \
+      -append "console=ttyS0 loglevel=7 panic=-1 rdinit=/init vga=normal nokaslr" -accel kvm -cpu host >/dev/null 2>&1 || true
+    grep -q NYC_KERNEL_INIT_REACHED "$OUT/serial_kvm.log" || { echo "FAIL: KVM boot with $variant: /init marker missing"; tail -n 20 "$OUT/serial_kvm.log"; exit 1; }
+  done
+  echo "PASS: both inits under KVM"
+fi
 ]==])
 file(WRITE "${WORK_DIR}/helpers/kernel-boot-smoke.sh" "${helper_kernel_boot_smoke_sh}")
 
