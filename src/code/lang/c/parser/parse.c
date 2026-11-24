@@ -8667,6 +8667,45 @@ static bool parse_global_char_array_row(c_parser_t *p, unsigned char *bytes,
   return true;
 }
 
+/*
+ * Parse one constant array element and store `count` copies of it. Integer
+ * elements use the integer constant evaluator; floating elements store the
+ * float or double bit pattern; complex elements take a real constant and a
+ * zero imaginary lane.
+ */
+static bool parse_global_array_element(c_parser_t *p, c_type_t type,
+                                       unsigned char *destination,
+                                       size_t destination_stride,
+                                       size_t count) {
+  size_t element_size = c_type_size(p->abi, type);
+  unsigned char element[32] = {0};
+  if (type == C_F32 || type == C_F64 || type == C_C64 || type == C_C128) {
+    double value = 0;
+    if (!parse_global_float_add(p, &p->pos, &value)) {
+      fail(p, "file-scope floating arrays require constant elements");
+      return false;
+    }
+    if (type == C_F32 || type == C_C64) {
+      float narrowed = (float)value;
+      memcpy(element, &narrowed, sizeof(narrowed));
+    } else {
+      memcpy(element, &value, sizeof(value));
+    }
+  } else {
+    int64_t value = 0;
+    if (!parse_global_const_expr(p, &p->pos, &value)) {
+      fail(p, "file-scope integer arrays require constant elements");
+      return false;
+    }
+    uint64_t bits = (uint64_t)value;
+    for (size_t byte = 0; byte < element_size && byte < 8; ++byte)
+      element[byte] = (unsigned char)(bits >> (byte * 8));
+  }
+  for (size_t item = 0; item < count; ++item)
+    memcpy(destination + item * destination_stride, element, element_size);
+  return true;
+}
+
 static bool parse_global_integer_array_initializer(
     c_parser_t *p, c_type_t type, unsigned char *bytes, const size_t *extents,
     unsigned rank, unsigned dimension, size_t base, size_t stride) {
@@ -8674,7 +8713,6 @@ static bool parse_global_integer_array_initializer(
     return false;
   size_t index = 0;
   bool first = true;
-  size_t element_size = c_type_size(p->abi, type);
   while (!tok_is(p, p->pos, "}")) {
     if (!first && !expect(p, ","))
       return false;
@@ -8748,15 +8786,9 @@ static bool parse_global_integer_array_initializer(
     size_t child_stride = stride / extents[dimension];
     size_t offset = base + index * child_stride;
     if (chained_designator) {
-      int64_t value = 0;
-      if (!parse_global_const_expr(p, &p->pos, &value)) {
-        fail(p, "file-scope integer arrays require constant elements");
+      if (!parse_global_array_element(p, type, bytes + offset + chained_offset,
+                                      0, 1))
         return false;
-      }
-      uint64_t bits = (uint64_t)value;
-      size_t at = offset + chained_offset;
-      for (size_t byte = 0; byte < element_size; ++byte)
-        bytes[at + byte] = (unsigned char)(bits >> (byte * 8));
     } else if (dimension + 1 < rank) {
       if (dimension + 2 == rank && (type == C_CHAR || type == C_U8) &&
           current(p)->kind == NY_CTOK_STRING) {
@@ -8776,16 +8808,10 @@ static bool parse_global_integer_array_initializer(
           return false;
       }
     } else {
-      int64_t value = 0;
-      if (!parse_global_const_expr(p, &p->pos, &value)) {
-        fail(p, "file-scope integer arrays require constant elements");
+      if (!parse_global_array_element(p, type,
+                                      bytes + base + index * child_stride,
+                                      child_stride, last_index - index + 1))
         return false;
-      }
-      uint64_t bits = (uint64_t)value;
-      for (size_t item = index; item <= last_index; ++item)
-        for (size_t byte = 0; byte < element_size; ++byte)
-          bytes[base + item * child_stride + byte] =
-              (unsigned char)(bits >> (byte * 8));
     }
     index = last_index + 1;
   }
@@ -8877,7 +8903,9 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
   if ((element_type != C_U8 && element_type != C_CHAR &&
        element_type != C_U16 && element_type != C_I16 &&
        element_type != C_I32 && element_type != C_U32 &&
-       element_type != C_I64 && element_type != C_U64) &&
+       element_type != C_I64 && element_type != C_U64 &&
+       element_type != C_F32 && element_type != C_F64 &&
+       element_type != C_C64 && element_type != C_C128) &&
       !typedef_array_element)
     return true;
   bool type_array = probe.last_type_is_array &&
@@ -15847,14 +15875,19 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       relocs = initializer.relocs;
       reloc_count = initializer.reloc_count;
     } else {
-      if (type == C_F64) {
+      if (type == C_F64 || type == C_C64 || type == C_C128) {
         double value;
         if (!parse_global_float_add(p, &p->pos, &value)) {
           free(bytes);
-          fail(p, "invalid file-scope double initializer");
+          fail(p, "invalid file-scope floating initializer");
           return false;
         }
-        memcpy(bytes, &value, sizeof(value));
+        if (type == C_C64) {
+          float narrowed = (float)value; /* real lane; imaginary stays zero */
+          memcpy(bytes, &narrowed, sizeof(narrowed));
+        } else {
+          memcpy(bytes, &value, sizeof(value));
+        }
       } else {
         c_global_t address_data = {.relocs = relocs,
                                    .reloc_count = reloc_count,

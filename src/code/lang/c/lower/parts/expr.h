@@ -5417,8 +5417,9 @@ static c_value_t parse_primary(c_parser_t *p) {
       c_global_t *global = find_global(p, tok);
       if (global && !global->function_symbol) {
         p->last_type_long_long = global->is_long_long;
-        if (c_type_is_complex(global->type)) {
-          fail(p, "complex values are not supported yet");
+        if (c_type_is_complex(global->type) && !global->is_array &&
+            global->type == C_C_LDOUBLE) {
+          fail(p, "long double complex values are not supported yet");
           return (c_value_t){-1, C_BAD, NULL};
         }
         if (global->has_asm_register) {
@@ -5463,6 +5464,11 @@ static c_value_t parse_primary(c_parser_t *p) {
         if (address < 0)
           return (c_value_t){-1, C_BAD, NULL};
         p->last_value_const = global->is_const;
+        if (!global->is_array &&
+            (global->type == C_C64 || global->type == C_C128))
+          return (c_value_t){address, C_AGG,
+                             global->type == C_C64 ? &lower_complex_value_f32
+                                                   : &lower_complex_value_f64};
         if (global->type == C_AGG_PTR && tok_is(p, p->pos, "->")) {
           int pointer =
               emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_I64,
@@ -5582,7 +5588,9 @@ static c_value_t parse_primary(c_parser_t *p) {
               global->is_pointer_array ? C_OPAQUE_PTR
               : global->type == C_U8 || global->type == C_CHAR ||
                       global->type == C_I16 || global->type == C_U16 ||
-                      global->type == C_I32 || global->type == C_U32
+                      global->type == C_I32 || global->type == C_U32 ||
+                      global->type == C_F32 || global->type == C_C64 ||
+                      global->type == C_C128
                   ? c_array_pointer_type(global->type)
                   : global->type;
           size_t base_element_size = c_type_size(p->abi, global->type);
@@ -5784,6 +5792,22 @@ static c_value_t parse_primary(c_parser_t *p) {
                                global->is_volatile))
               return (c_value_t){-1, C_BAD, NULL};
             return (c_value_t){value, element_type, NULL};
+          }
+          if (global->type == C_C64 || global->type == C_C128)
+            return (c_value_t){element_address, C_AGG,
+                               global->type == C_C64 ? &lower_complex_value_f32
+                                                     : &lower_complex_value_f64};
+          if (global->type == C_F32 || global->type == C_F64) {
+            int value =
+                global->type == C_F32
+                    ? lower_load_f32_field(p, element_address,
+                                           global->is_volatile)
+                    : lower_load_field(p, element_address, true,
+                                       global->is_volatile);
+            if (value < 0 || !record_lvalue(p, value, element_address,
+                                            global->type, global->is_volatile))
+              return (c_value_t){-1, C_BAD, NULL};
+            return (c_value_t){value, global->type, NULL};
           }
           if (global->type == C_I64 || global->type == C_U64) {
             int value = emit_value(

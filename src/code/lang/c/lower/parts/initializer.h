@@ -3901,6 +3901,51 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
     fail(p, "file-scope C object is not writable by this frontend");
     return false;
   }
+  if (global->type == C_C64 || global->type == C_C128) {
+    /* A file-scope complex object: its symbol address is the value. */
+    const char *prefix = global->is_external || global->is_weak
+                             ? "__nyc_extern_"
+                             : "__nyc_data_";
+    size_t prefix_len = strlen(prefix);
+    char *symbol = malloc(prefix_len + global->name.len + 1);
+    if (!symbol) {
+      fail(p, "out of memory lowering a file-scope complex assignment");
+      return false;
+    }
+    memcpy(symbol, prefix, prefix_len);
+    memcpy(symbol + prefix_len, global->name.start, global->name.len);
+    symbol[prefix_len + global->name.len] = '\0';
+    int complex_address = emit_value(
+        p, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL, .dst = -1, .symbol = symbol});
+    free(symbol);
+    if (complex_address < 0)
+      return false;
+    c_agg_type_t *complex_agg = c_complex_aggregate(global->type);
+    ++p->pos;
+    int compound =
+        lower_complex_compound_assignment(
+            p, (c_value_t){complex_address, C_AGG, complex_agg}, semicolon);
+    if (compound)
+      return compound > 0;
+    if (!expect(p, "="))
+      return false;
+    c_value_t value = parse_expr(p, 1);
+    if (value.value < 0)
+      return false;
+    c_value_t converted =
+        lower_complex_convert(p, value, global->type == C_C64);
+    if (converted.value >= 0)
+      value = converted;
+    if (value.type != C_AGG || !value.agg ||
+        value.agg->size != complex_agg->size) {
+      fail(p, "complex global assignment requires a complex or real value");
+      return false;
+    }
+    if (semicolon && !expect(p, ";"))
+      return false;
+    return lower_copy_struct(p, complex_address, value.value,
+                             complex_agg->size);
+  }
   ny_ctok_t assignment = p->tokens[p->pos + 1];
   bool simple = ny_ctok_eq(assignment, "=");
   bool pointer_compound =

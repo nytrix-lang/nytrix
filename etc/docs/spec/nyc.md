@@ -3044,6 +3044,9 @@ run directory under `/tmp`.
   (`complex-pointer-index`, compared with GCC at `-O0` and `-O2`). Local arrays of
   complex values (brace initializers, `a[i]` read and write, `a[i] op= x`,
   `p[i] op= x`) follow in `complex-arrays`, also GCC-compared at `-O0` and
-  `-O2`. Still unsupported: file-scope complex variables and arrays (the
-  declaration is not recognised as data) and `long double _Complex` promotion.
+  `-O2`. File-scope `float`/`double`
+  arrays and complex variables and arrays now work too (`global-float-arrays`,
+  GCC-compared at `-O0` and `-O2`): the earlier "plain `double arr[3];` fails"
+  limitation is gone. Complex global initializers take a real constant only
+  (`= 2.0`), not `a + b*I`. Still unsupported: `long double _Complex`.
 </details>
