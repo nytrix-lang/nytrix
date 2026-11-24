@@ -2398,15 +2398,28 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
        * expression results use their own static aggregate descriptors.
        */
       c_param_t complex_param;
-      if (param && c_type_is_complex(param->type)) {
+      bool defined_complex_param =
+          param && param->type == C_AGG && param->agg &&
+          param->agg->scope_id == SIZE_MAX && param->agg->field_count == 2 &&
+          !param->agg->is_int128 &&
+          (param->agg->fields[0].kind == C_AGG_FIELD_F32 ||
+           param->agg->fields[0].kind == C_AGG_FIELD_F64);
+      if (param && (c_type_is_complex(param->type) || defined_complex_param)) {
         complex_param = *param;
         complex_param.type = C_AGG;
-        complex_param.agg = c_complex_aggregate(param->type);
+        if (!defined_complex_param)
+          complex_param.agg = c_complex_aggregate(param->type);
         param = &complex_param;
         if (value.value >= 0 &&
-            (c_type_is_float(value.type) || c_type_is_integer(value.type)))
-          value = lower_scalar_to_complex(p, value,
-                                          complex_param.agg->size == 8);
+            (c_type_is_float(value.type) || c_type_is_integer(value.type) ||
+             (value.type == C_AGG && value.agg &&
+              value.agg->scope_id == SIZE_MAX &&
+              value.agg->size != complex_param.agg->size))) {
+          c_value_t converted = lower_complex_convert(
+              p, value, complex_param.agg->size == 8);
+          if (converted.value >= 0)
+            value = converted;
+        }
         if (value.value >= 0 && value.type == C_AGG && value.agg &&
             value.agg != complex_param.agg &&
             value.agg->size == complex_param.agg->size)
@@ -4823,63 +4836,11 @@ static c_value_t parse_primary(c_parser_t *p) {
           operand.value >= 0) {
         /* (T _Complex)expr: convert or widen into the target's lane type. */
         bool to_single = cast_type == C_C64;
-        if (operand.type != C_AGG) {
-          if (c_type_is_float(operand.type) || c_type_is_integer(operand.type))
-            return lower_scalar_to_complex(p, operand, to_single);
-        } else if (operand.agg && operand.agg->scope_id == SIZE_MAX &&
-                   operand.agg->field_count == 2) {
-          bool from_single = operand.agg->size == 8;
-          if (from_single == to_single)
-            return (c_value_t){operand.value, C_AGG,
-                               to_single ? &lower_complex_value_f32
-                                         : &lower_complex_value_f64};
-          size_t lane = from_single ? 4 : 8;
-          int real_source =
-              from_single ? lower_load_f32_field(p, operand.value, false)
-                          : lower_load_field(p, operand.value, true, false);
-          int imag_address = lower_add_const(p, operand.value, lane);
-          int imag_source =
-              imag_address < 0 ? -1
-              : from_single    ? lower_load_f32_field(p, imag_address, false)
-                               : lower_load_field(p, imag_address, true, false);
-          nyr_op_t convert = from_single ? NYIR_F32_TO_F64 : NYIR_F64_TO_F32;
-          nyr_scalar_class_t class_to =
-              to_single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64;
-          int real_value =
-              real_source < 0
-                  ? -1
-                  : emit_value(p, (nyr_inst_t){.op = convert,
-                                               .dst = -1,
-                                               .a = real_source,
-                                               .scalar_class = class_to});
-          int imag_value =
-              imag_source < 0
-                  ? -1
-                  : emit_value(p, (nyr_inst_t){.op = convert,
-                                               .dst = -1,
-                                               .a = imag_source,
-                                               .scalar_class = class_to});
-          size_t offset = 0;
-          if (real_value < 0 || imag_value < 0 ||
-              !agg_area_alloc(p, to_single ? 8 : 16, &offset))
-            return (c_value_t){-1, C_BAD, NULL};
-          int base = p->agg_base;
-          int imag_target = lower_add_const(p, base, to_single ? 4 : 8);
-          bool stored =
-              imag_target >= 0 &&
-              (to_single
-                   ? lower_store_f32_field(p, base, real_value, false) &&
-                         lower_store_f32_field(p, imag_target, imag_value,
-                                               false)
-                   : lower_store_field(p, base, real_value, true, false) &&
-                         lower_store_field(p, imag_target, imag_value, true,
-                                           false));
-          if (!stored)
-            return (c_value_t){-1, C_BAD, NULL};
-          return (c_value_t){base, C_AGG,
-                             to_single ? &lower_complex_value_f32
-                                       : &lower_complex_value_f64};
-        }
+        c_value_t converted = lower_complex_convert(p, operand, to_single);
+        if (converted.value >= 0)
+          return converted;
+        if (p->err && p->err_len && p->err[0])
+          return (c_value_t){-1, C_BAD, NULL};
       }
       char message[128];
       snprintf(message, sizeof(message),
@@ -9292,6 +9253,338 @@ static bool lower_store_scalar_lvalue(c_parser_t *p, const c_lvalue_t *lvalue,
       NULL);
 }
 
+/*
+ * Convert a real or complex value to a complex of the requested precision
+ * (single when `to_single`): real values get a zero imaginary lane, complex
+ * values of the other width convert both lanes. Returns value -1 (no error
+ * set) when the operand is not a convertible scalar or complex.
+ */
+static c_value_t lower_complex_convert(c_parser_t *p, c_value_t operand,
+                                       bool to_single) {
+  if (operand.value < 0)
+    return (c_value_t){-1, C_BAD, NULL};
+  if (operand.type != C_AGG) {
+    if (c_type_is_float(operand.type) || c_type_is_integer(operand.type))
+      return lower_scalar_to_complex(p, operand, to_single);
+    return (c_value_t){-1, C_BAD, NULL};
+  }
+  if (!operand.agg || operand.agg->scope_id != SIZE_MAX ||
+      operand.agg->field_count != 2)
+    return (c_value_t){-1, C_BAD, NULL};
+  bool from_single = operand.agg->size == 8;
+  if (from_single == to_single)
+    return (c_value_t){operand.value, C_AGG,
+                       to_single ? &lower_complex_value_f32
+                                 : &lower_complex_value_f64};
+  size_t lane = from_single ? 4 : 8;
+  int real_source = from_single ? lower_load_f32_field(p, operand.value, false)
+                                : lower_load_field(p, operand.value, true, false);
+  int imag_address = lower_add_const(p, operand.value, lane);
+  int imag_source =
+      imag_address < 0 ? -1
+      : from_single    ? lower_load_f32_field(p, imag_address, false)
+                       : lower_load_field(p, imag_address, true, false);
+  nyr_op_t convert = from_single ? NYIR_F32_TO_F64 : NYIR_F64_TO_F32;
+  nyr_scalar_class_t class_to = to_single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64;
+  int real_value = real_source < 0
+                       ? -1
+                       : emit_value(p, (nyr_inst_t){.op = convert,
+                                                    .dst = -1,
+                                                    .a = real_source,
+                                                    .scalar_class = class_to});
+  int imag_value = imag_source < 0
+                       ? -1
+                       : emit_value(p, (nyr_inst_t){.op = convert,
+                                                    .dst = -1,
+                                                    .a = imag_source,
+                                                    .scalar_class = class_to});
+  size_t offset = 0;
+  if (real_value < 0 || imag_value < 0 ||
+      !agg_area_alloc(p, to_single ? 8 : 16, &offset))
+    return (c_value_t){-1, C_BAD, NULL};
+  int base = p->agg_base;
+  int imag_target = lower_add_const(p, base, to_single ? 4 : 8);
+  bool stored =
+      imag_target >= 0 &&
+      (to_single ? lower_store_f32_field(p, base, real_value, false) &&
+                       lower_store_f32_field(p, imag_target, imag_value, false)
+                 : lower_store_field(p, base, real_value, true, false) &&
+                       lower_store_field(p, imag_target, imag_value, true,
+                                         false));
+  if (!stored)
+    return (c_value_t){-1, C_BAD, NULL};
+  return (c_value_t){base, C_AGG,
+                     to_single ? &lower_complex_value_f32
+                               : &lower_complex_value_f64};
+}
+
+/*
+ * Complex arithmetic and comparison: `left op right` where either operand is
+ * complex. Real operands are promoted; the result is a complex value, or an
+ * integer for `==` and `!=`. Shared by binary expressions and `a op= b`.
+ */
+static c_value_t lower_complex_binary(c_parser_t *p, ny_ctok_t op,
+                                      c_value_t left, c_value_t right) {
+  bool left_complex =
+      left.type == C_AGG && left.agg && left.agg->scope_id == SIZE_MAX;
+  bool right_complex =
+      right.type == C_AGG && right.agg && right.agg->scope_id == SIZE_MAX;
+    bool add = ny_ctok_eq(op, "+");
+    bool subtract = ny_ctok_eq(op, "-");
+    bool multiply = ny_ctok_eq(op, "*");
+    bool divide = ny_ctok_eq(op, "/");
+    bool equality = ny_ctok_eq(op, "==") || ny_ctok_eq(op, "!=");
+    if (!add && !subtract && !multiply && !divide && !equality) {
+      fail(p, "unsupported complex binary operator");
+      return (c_value_t){-1, C_BAD, NULL};
+    }
+    bool widen = (left_complex && left.agg->size == 16) ||
+                 (right_complex && right.agg->size == 16) ||
+                 (!left_complex && left.type == C_F64) ||
+                 (!right_complex && right.type == C_F64);
+    if (!left_complex) {
+      left = lower_scalar_to_complex(p, left, !widen);
+      if (left.value < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      left_complex = true;
+    }
+    if (!right_complex) {
+      right = lower_scalar_to_complex(p, right, !widen);
+      if (right.value < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      right_complex = true;
+    }
+    if (left.agg->size != right.agg->size) {
+      /*
+       * Usual arithmetic conversions: promote the narrower complex operand
+       * to the wider precision so a mixed `float _Complex`/`double _Complex`
+       * expression keeps the wider result type.
+       */
+      bool left_narrow = left.agg->size < right.agg->size;
+      c_value_t narrow = left_narrow ? left : right;
+      bool source_single = narrow.agg->size == 8;
+      bool target_single = !source_single;
+      size_t narrow_lane = source_single ? 4 : 8;
+      int real_source = source_single
+                            ? lower_load_f32_field(p, narrow.value, false)
+                            : lower_load_field(p, narrow.value, true, false);
+      int imag_source_addr = lower_add_const(p, narrow.value, narrow_lane);
+      int imag_source =
+          imag_source_addr < 0 ? -1
+          : source_single
+              ? lower_load_f32_field(p, imag_source_addr, false)
+              : lower_load_field(p, imag_source_addr, true, false);
+      int real_value =
+          real_source < 0
+              ? -1
+              : emit_value(p,
+                           (nyr_inst_t){.op = source_single ? NYIR_F32_TO_F64
+                                                            : NYIR_F64_TO_F32,
+                                        .dst = -1,
+                                        .a = real_source,
+                                        .scalar_class =
+                                            target_single ? NYIR_SCALAR_F32
+                                                          : NYIR_SCALAR_F64});
+      int imag_value =
+          imag_source < 0
+              ? -1
+              : emit_value(p,
+                           (nyr_inst_t){.op = source_single ? NYIR_F32_TO_F64
+                                                            : NYIR_F64_TO_F32,
+                                        .dst = -1,
+                                        .a = imag_source,
+                                        .scalar_class =
+                                            target_single ? NYIR_SCALAR_F32
+                                                          : NYIR_SCALAR_F64});
+      size_t promote_offset = 0;
+      if (real_value < 0 || imag_value < 0 ||
+          !agg_area_alloc(p, target_single ? 8 : 16, &promote_offset))
+        return (c_value_t){-1, C_BAD, NULL};
+      int promote_base = p->agg_base;
+      int imag_target =
+          lower_add_const(p, promote_base, target_single ? 4 : 8);
+      bool promoted =
+          imag_target >= 0 &&
+          (target_single
+               ? lower_store_f32_field(p, promote_base, real_value, false) &&
+                     lower_store_f32_field(p, imag_target, imag_value, false)
+               : lower_store_field(p, promote_base, real_value, true,
+                                   false) &&
+                     lower_store_field(p, imag_target, imag_value, true,
+                                       false));
+      if (!promoted)
+        return (c_value_t){-1, C_BAD, NULL};
+      c_value_t promoted_value = {promote_base, C_AGG,
+                                  target_single ? &lower_complex_value_f32
+                                                : &lower_complex_value_f64};
+      if (left_narrow)
+        left = promoted_value;
+      else
+        right = promoted_value;
+    }
+    if (left.agg->size == 32) {
+      fail(p, "long double _Complex arithmetic is not supported yet");
+      return (c_value_t){-1, C_BAD, NULL};
+    }
+    if (equality) {
+      bool single_eq = left.agg->size == 8;
+      size_t eq_lane = single_eq ? 4 : 8;
+      int left_real = single_eq
+                          ? lower_load_f32_field(p, left.value, false)
+                          : lower_load_field(p, left.value, true, false);
+      int right_real = single_eq
+                           ? lower_load_f32_field(p, right.value, false)
+                           : lower_load_field(p, right.value, true, false);
+      int left_imag_addr = lower_add_const(p, left.value, eq_lane);
+      int right_imag_addr = lower_add_const(p, right.value, eq_lane);
+      int left_imag = left_imag_addr < 0 ? -1
+                      : single_eq
+                          ? lower_load_f32_field(p, left_imag_addr, false)
+                          : lower_load_field(p, left_imag_addr, true, false);
+      int right_imag =
+          right_imag_addr < 0 ? -1
+          : single_eq ? lower_load_f32_field(p, right_imag_addr, false)
+                      : lower_load_field(p, right_imag_addr, true, false);
+      if (left_real < 0 || left_imag < 0 || right_real < 0 || right_imag < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      bool equal_op = ny_ctok_eq(op, "==");
+      nyr_op_t float_cmp = single_eq ? NYIR_CMP_F32 : NYIR_CMP_F64;
+      int real_cmp = emit_value(
+          p, (nyr_inst_t){.op = float_cmp,
+                          .dst = -1,
+                          .a = left_real,
+                          .b = right_real,
+                          .cmp = equal_op ? NYIR_CMP_EQ : NYIR_CMP_NE,
+                          .scalar_class = NYIR_SCALAR_I64_RAW});
+      int imag_cmp = emit_value(
+          p, (nyr_inst_t){.op = float_cmp,
+                          .dst = -1,
+                          .a = left_imag,
+                          .b = right_imag,
+                          .cmp = equal_op ? NYIR_CMP_EQ : NYIR_CMP_NE,
+                          .scalar_class = NYIR_SCALAR_I64_RAW});
+      int combined =
+          real_cmp < 0 || imag_cmp < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){.op = equal_op ? NYIR_AND_I64
+                                                          : NYIR_OR_I64,
+                                           .dst = -1,
+                                           .a = real_cmp,
+                                           .b = imag_cmp});
+      return (c_value_t){combined, C_I64, NULL};
+    }
+    if ((multiply || divide) && left.agg->size == 32) {
+      fail(p, "long double _Complex multiplication and division are not "
+              "supported yet");
+      return (c_value_t){-1, C_BAD, NULL};
+    }
+    if (multiply || divide) {
+      bool single_call = left.agg->size == 8;
+      size_t lane_offset = single_call ? 4 : 8;
+      int left_real = single_call
+                          ? lower_load_f32_field(p, left.value, false)
+                          : lower_load_field(p, left.value, true, false);
+      int left_imag =
+          single_call
+              ? lower_load_f32_field(
+                    p, lower_add_const(p, left.value, lane_offset), false)
+              : lower_load_field(p,
+                                 lower_add_const(p, left.value, lane_offset),
+                                 true, false);
+      int right_real = single_call
+                           ? lower_load_f32_field(p, right.value, false)
+                           : lower_load_field(p, right.value, true, false);
+      int right_imag =
+          single_call
+              ? lower_load_f32_field(
+                    p, lower_add_const(p, right.value, lane_offset), false)
+              : lower_load_field(p,
+                                 lower_add_const(p, right.value, lane_offset),
+                                 true, false);
+      if (left_real < 0 || left_imag < 0 || right_real < 0 || right_imag < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      nyr_inst_t call = {
+          .op = NYIR_CALL,
+          .dst = -1,
+          .a = left_real,
+          .b = left_imag,
+          .c = right_real,
+          .d = right_imag,
+          .e = -1,
+          .f = -1,
+          .imm = 4,
+          .flags = NYIR_INST_F_EXTERN,
+          .effects = NYIR_EFFECT_CALL,
+          .symbol = single_call ? (multiply ? "__mulsc3" : "__divsc3")
+                                : (multiply ? "__muldc3" : "__divdc3"),
+          .scalar_class = single_call ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64,
+          .ret_aggregate_size = single_call ? 8 : 16};
+      call.ret_aggregate_classes[0] = NYIR_ARG_CLASS_SSE;
+      call.ret_aggregate_classes[1] = single_call ? 0 : NYIR_ARG_CLASS_SSE;
+      for (int argument = 0; argument < 4; ++argument)
+        nyr_call_arg_class_set(call.arg_scalar_classes, argument,
+                               single_call ? NYIR_SCALAR_F32
+                                           : NYIR_SCALAR_F64);
+      int call_result = emit_value(p, call);
+      if (call_result < 0) {
+        fail(p, "complex arithmetic helper call failed");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      uint32_t packed = 0;
+      if (!nyc_classify_aggregate(left.agg, p->abi, 0, &packed)) {
+        fail(p, "complex aggregate is not classifiable by the C ABI");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      left = lower_aggregate_call_result(p, call_result, left.agg, packed);
+      if (left.value < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      /* Keep climbing: `a * b + c` continues with the next operator. */
+      return left;
+    }
+    size_t offset = 0;
+    if (!agg_area_alloc(p, left.agg->size, &offset)) {
+      fail(p, "complex arithmetic storage allocation failed");
+      return (c_value_t){-1, C_BAD, NULL};
+    }
+    int result = p->agg_base;
+    bool single_precision = left.agg->size == 8;
+    size_t half = left.agg->size / 2;
+    for (size_t part = 0; part < 2; ++part) {
+      int left_address = lower_add_const(p, left.value, part * half);
+      int right_address = lower_add_const(p, right.value, part * half);
+      int result_address = lower_add_const(p, result, part * half);
+      int left_part = single_precision
+                          ? lower_load_f32_field(p, left_address, false)
+                          : lower_load_field(p, left_address, true, false);
+      int right_part = single_precision
+                           ? lower_load_f32_field(p, right_address, false)
+                           : lower_load_field(p, right_address, true, false);
+      if (left_address < 0 || right_address < 0 || result_address < 0 ||
+          left_part < 0 || right_part < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      int part_value = emit_value(
+          p, (nyr_inst_t){
+                 .op = single_precision ? (add ? NYIR_ADD_F32 : NYIR_SUB_F32)
+                                        : (add ? NYIR_ADD_F64 : NYIR_SUB_F64),
+                 .dst = -1,
+                 .a = left_part,
+                 .b = right_part,
+                 .scalar_class =
+                     single_precision ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
+      if (part_value < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      bool stored =
+          single_precision
+              ? lower_store_f32_field(p, result_address, part_value, false)
+              : lower_store_field(p, result_address, part_value, true, false);
+      if (!stored)
+        return (c_value_t){-1, C_BAD, NULL};
+    }
+    left = (c_value_t){result, C_AGG, left.agg};
+    return left;
+  return left;
+}
+
 static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
   c_value_t left = parse_unary(p);
   if (left.value < 0 && !(min_precedence == 0 && tok_is(p, p->pos, ",") &&
@@ -10041,258 +10334,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
     bool right_complex =
         right.type == C_AGG && right.agg && right.agg->scope_id == SIZE_MAX;
     if (left_complex || right_complex) {
-      bool add = ny_ctok_eq(op, "+");
-      bool subtract = ny_ctok_eq(op, "-");
-      bool multiply = ny_ctok_eq(op, "*");
-      bool divide = ny_ctok_eq(op, "/");
-      bool equality = ny_ctok_eq(op, "==") || ny_ctok_eq(op, "!=");
-      if (!add && !subtract && !multiply && !divide && !equality) {
-        fail(p, "unsupported complex binary operator");
+      left = lower_complex_binary(p, op, left, right);
+      if (left.value < 0)
         return (c_value_t){-1, C_BAD, NULL};
-      }
-      bool widen = (left_complex && left.agg->size == 16) ||
-                   (right_complex && right.agg->size == 16) ||
-                   (!left_complex && left.type == C_F64) ||
-                   (!right_complex && right.type == C_F64);
-      if (!left_complex) {
-        left = lower_scalar_to_complex(p, left, !widen);
-        if (left.value < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        left_complex = true;
-      }
-      if (!right_complex) {
-        right = lower_scalar_to_complex(p, right, !widen);
-        if (right.value < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        right_complex = true;
-      }
-      if (left.agg->size != right.agg->size) {
-        /*
-         * Usual arithmetic conversions: promote the narrower complex operand
-         * to the wider precision so a mixed `float _Complex`/`double _Complex`
-         * expression keeps the wider result type.
-         */
-        bool left_narrow = left.agg->size < right.agg->size;
-        c_value_t narrow = left_narrow ? left : right;
-        bool source_single = narrow.agg->size == 8;
-        bool target_single = !source_single;
-        size_t narrow_lane = source_single ? 4 : 8;
-        int real_source = source_single
-                              ? lower_load_f32_field(p, narrow.value, false)
-                              : lower_load_field(p, narrow.value, true, false);
-        int imag_source_addr = lower_add_const(p, narrow.value, narrow_lane);
-        int imag_source =
-            imag_source_addr < 0 ? -1
-            : source_single
-                ? lower_load_f32_field(p, imag_source_addr, false)
-                : lower_load_field(p, imag_source_addr, true, false);
-        int real_value =
-            real_source < 0
-                ? -1
-                : emit_value(p,
-                             (nyr_inst_t){.op = source_single ? NYIR_F32_TO_F64
-                                                              : NYIR_F64_TO_F32,
-                                          .dst = -1,
-                                          .a = real_source,
-                                          .scalar_class =
-                                              target_single ? NYIR_SCALAR_F32
-                                                            : NYIR_SCALAR_F64});
-        int imag_value =
-            imag_source < 0
-                ? -1
-                : emit_value(p,
-                             (nyr_inst_t){.op = source_single ? NYIR_F32_TO_F64
-                                                              : NYIR_F64_TO_F32,
-                                          .dst = -1,
-                                          .a = imag_source,
-                                          .scalar_class =
-                                              target_single ? NYIR_SCALAR_F32
-                                                            : NYIR_SCALAR_F64});
-        size_t promote_offset = 0;
-        if (real_value < 0 || imag_value < 0 ||
-            !agg_area_alloc(p, target_single ? 8 : 16, &promote_offset))
-          return (c_value_t){-1, C_BAD, NULL};
-        int promote_base = p->agg_base;
-        int imag_target =
-            lower_add_const(p, promote_base, target_single ? 4 : 8);
-        bool promoted =
-            imag_target >= 0 &&
-            (target_single
-                 ? lower_store_f32_field(p, promote_base, real_value, false) &&
-                       lower_store_f32_field(p, imag_target, imag_value, false)
-                 : lower_store_field(p, promote_base, real_value, true,
-                                     false) &&
-                       lower_store_field(p, imag_target, imag_value, true,
-                                         false));
-        if (!promoted)
-          return (c_value_t){-1, C_BAD, NULL};
-        c_value_t promoted_value = {promote_base, C_AGG,
-                                    target_single ? &lower_complex_value_f32
-                                                  : &lower_complex_value_f64};
-        if (left_narrow)
-          left = promoted_value;
-        else
-          right = promoted_value;
-      }
-      if (left.agg->size == 32) {
-        fail(p, "long double _Complex arithmetic is not supported yet");
-        return (c_value_t){-1, C_BAD, NULL};
-      }
-      if (equality) {
-        bool single_eq = left.agg->size == 8;
-        size_t eq_lane = single_eq ? 4 : 8;
-        int left_real = single_eq
-                            ? lower_load_f32_field(p, left.value, false)
-                            : lower_load_field(p, left.value, true, false);
-        int right_real = single_eq
-                             ? lower_load_f32_field(p, right.value, false)
-                             : lower_load_field(p, right.value, true, false);
-        int left_imag_addr = lower_add_const(p, left.value, eq_lane);
-        int right_imag_addr = lower_add_const(p, right.value, eq_lane);
-        int left_imag = left_imag_addr < 0 ? -1
-                        : single_eq
-                            ? lower_load_f32_field(p, left_imag_addr, false)
-                            : lower_load_field(p, left_imag_addr, true, false);
-        int right_imag =
-            right_imag_addr < 0 ? -1
-            : single_eq ? lower_load_f32_field(p, right_imag_addr, false)
-                        : lower_load_field(p, right_imag_addr, true, false);
-        if (left_real < 0 || left_imag < 0 || right_real < 0 || right_imag < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        bool equal_op = ny_ctok_eq(op, "==");
-        nyr_op_t float_cmp = single_eq ? NYIR_CMP_F32 : NYIR_CMP_F64;
-        int real_cmp = emit_value(
-            p, (nyr_inst_t){.op = float_cmp,
-                            .dst = -1,
-                            .a = left_real,
-                            .b = right_real,
-                            .cmp = equal_op ? NYIR_CMP_EQ : NYIR_CMP_NE,
-                            .scalar_class = NYIR_SCALAR_I64_RAW});
-        int imag_cmp = emit_value(
-            p, (nyr_inst_t){.op = float_cmp,
-                            .dst = -1,
-                            .a = left_imag,
-                            .b = right_imag,
-                            .cmp = equal_op ? NYIR_CMP_EQ : NYIR_CMP_NE,
-                            .scalar_class = NYIR_SCALAR_I64_RAW});
-        int combined =
-            real_cmp < 0 || imag_cmp < 0
-                ? -1
-                : emit_value(p, (nyr_inst_t){.op = equal_op ? NYIR_AND_I64
-                                                            : NYIR_OR_I64,
-                                             .dst = -1,
-                                             .a = real_cmp,
-                                             .b = imag_cmp});
-        return (c_value_t){combined, C_I64, NULL};
-      }
-      if ((multiply || divide) && left.agg->size == 32) {
-        fail(p, "long double _Complex multiplication and division are not "
-                "supported yet");
-        return (c_value_t){-1, C_BAD, NULL};
-      }
-      if (multiply || divide) {
-        bool single_call = left.agg->size == 8;
-        size_t lane_offset = single_call ? 4 : 8;
-        int left_real = single_call
-                            ? lower_load_f32_field(p, left.value, false)
-                            : lower_load_field(p, left.value, true, false);
-        int left_imag =
-            single_call
-                ? lower_load_f32_field(
-                      p, lower_add_const(p, left.value, lane_offset), false)
-                : lower_load_field(p,
-                                   lower_add_const(p, left.value, lane_offset),
-                                   true, false);
-        int right_real = single_call
-                             ? lower_load_f32_field(p, right.value, false)
-                             : lower_load_field(p, right.value, true, false);
-        int right_imag =
-            single_call
-                ? lower_load_f32_field(
-                      p, lower_add_const(p, right.value, lane_offset), false)
-                : lower_load_field(p,
-                                   lower_add_const(p, right.value, lane_offset),
-                                   true, false);
-        if (left_real < 0 || left_imag < 0 || right_real < 0 || right_imag < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        nyr_inst_t call = {
-            .op = NYIR_CALL,
-            .dst = -1,
-            .a = left_real,
-            .b = left_imag,
-            .c = right_real,
-            .d = right_imag,
-            .e = -1,
-            .f = -1,
-            .imm = 4,
-            .flags = NYIR_INST_F_EXTERN,
-            .effects = NYIR_EFFECT_CALL,
-            .symbol = single_call ? (multiply ? "__mulsc3" : "__divsc3")
-                                  : (multiply ? "__muldc3" : "__divdc3"),
-            .scalar_class = single_call ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64,
-            .ret_aggregate_size = single_call ? 8 : 16};
-        call.ret_aggregate_classes[0] = NYIR_ARG_CLASS_SSE;
-        call.ret_aggregate_classes[1] = single_call ? 0 : NYIR_ARG_CLASS_SSE;
-        for (int argument = 0; argument < 4; ++argument)
-          nyr_call_arg_class_set(call.arg_scalar_classes, argument,
-                                 single_call ? NYIR_SCALAR_F32
-                                             : NYIR_SCALAR_F64);
-        int call_result = emit_value(p, call);
-        if (call_result < 0) {
-          fail(p, "complex arithmetic helper call failed");
-          return (c_value_t){-1, C_BAD, NULL};
-        }
-        uint32_t packed = 0;
-        if (!nyc_classify_aggregate(left.agg, p->abi, 0, &packed)) {
-          fail(p, "complex aggregate is not classifiable by the C ABI");
-          return (c_value_t){-1, C_BAD, NULL};
-        }
-        left = lower_aggregate_call_result(p, call_result, left.agg, packed);
-        if (left.value < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        /* Keep climbing: `a * b + c` continues with the next operator. */
-        continue;
-      }
-      size_t offset = 0;
-      if (!agg_area_alloc(p, left.agg->size, &offset)) {
-        fail(p, "complex arithmetic storage allocation failed");
-        return (c_value_t){-1, C_BAD, NULL};
-      }
-      int result = p->agg_base;
-      bool single_precision = left.agg->size == 8;
-      size_t half = left.agg->size / 2;
-      for (size_t part = 0; part < 2; ++part) {
-        int left_address = lower_add_const(p, left.value, part * half);
-        int right_address = lower_add_const(p, right.value, part * half);
-        int result_address = lower_add_const(p, result, part * half);
-        int left_part = single_precision
-                            ? lower_load_f32_field(p, left_address, false)
-                            : lower_load_field(p, left_address, true, false);
-        int right_part = single_precision
-                             ? lower_load_f32_field(p, right_address, false)
-                             : lower_load_field(p, right_address, true, false);
-        if (left_address < 0 || right_address < 0 || result_address < 0 ||
-            left_part < 0 || right_part < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        int part_value = emit_value(
-            p, (nyr_inst_t){
-                   .op = single_precision ? (add ? NYIR_ADD_F32 : NYIR_SUB_F32)
-                                          : (add ? NYIR_ADD_F64 : NYIR_SUB_F64),
-                   .dst = -1,
-                   .a = left_part,
-                   .b = right_part,
-                   .scalar_class =
-                       single_precision ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
-        if (part_value < 0)
-          return (c_value_t){-1, C_BAD, NULL};
-        bool stored =
-            single_precision
-                ? lower_store_f32_field(p, result_address, part_value, false)
-                : lower_store_field(p, result_address, part_value, true, false);
-        if (!stored)
-          return (c_value_t){-1, C_BAD, NULL};
-      }
-      left = (c_value_t){result, C_AGG, left.agg};
       continue;
     }
     bool cmp = ny_ctok_eq(op, "==") || ny_ctok_eq(op, "!=") ||

@@ -2147,6 +2147,38 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
                                 bool read_only, bool wrapped,
                                 unsigned segment_flags);
 
+/*
+ * `z op= value` on a complex object: 0 when the current token is not one of
+ * the four complex compound operators, 1 when handled, -1 on error.
+ */
+static int lower_complex_compound_assignment(c_parser_t *p, c_value_t target,
+                                             bool semicolon) {
+  if (!target.agg || target.agg->scope_id != SIZE_MAX ||
+      target.agg->field_count != 2 || target.agg->is_int128)
+    return 0;
+  ny_ctok_t assignment = *current(p);
+  if (!ny_ctok_eq(assignment, "+=") && !ny_ctok_eq(assignment, "-=") &&
+      !ny_ctok_eq(assignment, "*=") && !ny_ctok_eq(assignment, "/="))
+    return 0;
+  ++p->pos;
+  c_value_t operand = parse_expr(p, 1);
+  if (operand.value < 0)
+    return -1;
+  ny_ctok_t operation = assignment;
+  operation.len = 1;
+  c_value_t result = lower_complex_binary(
+      p, operation, (c_value_t){target.value, C_AGG, target.agg}, operand);
+  if (result.value < 0 || result.type != C_AGG || !result.agg ||
+      result.agg->size != target.agg->size) {
+    if (!p->err[0])
+      fail(p, "complex compound assignment needs a result of the same width");
+    return -1;
+  }
+  if (!lower_copy_struct(p, target.value, result.value, target.agg->size))
+    return -1;
+  return semicolon && !expect(p, ";") ? -1 : 1;
+}
+
 static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
   size_t statement_start = p->pos;
   ny_ctok_t name;
@@ -3051,6 +3083,12 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
           return false;
         return true;
       }
+      {
+        int complex_assignment =
+            lower_complex_compound_assignment(p, target, semicolon);
+        if (complex_assignment)
+          return complex_assignment > 0;
+      }
       if (!is_assignment_operator(p, p->pos) || !ny_ctok_eq(*current(p), "=")) {
         fail(p, "only simple assignment is supported for struct targets");
         return false;
@@ -3177,6 +3215,12 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
       if (shifted.value < 0 || (semicolon && !expect(p, ";")))
         return false;
       return lower_copy_struct(p, base, shifted.value, target_agg->size);
+    }
+    {
+      int complex_assignment = lower_complex_compound_assignment(
+          p, (c_value_t){base, C_AGG, target_agg}, semicolon);
+      if (complex_assignment)
+        return complex_assignment > 0;
     }
     if (!is_assignment_operator(p, p->pos) || !ny_ctok_eq(*current(p), "=")) {
       fail(p, "only simple assignment is supported for struct targets");

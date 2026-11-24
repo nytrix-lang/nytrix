@@ -3035,6 +3035,10 @@ run directory under `/tmp`.
   next operator was a syntax error); `(double _Complex)float_complex_value`
   casts; and complex descriptors of the same width that were compared by
   pointer. `complex-forms` prints each result and must match GCC's output at
-  `-O0` and `-O2`. Still unsupported: compound assignment on complex values
-  (`a -= b`), arrays of complex values, and `long double _Complex` promotion.
+  `-O0` and `-O2`. Compound assignment on complex values
+  (`a += b`, `-=`, `*=`, `/=`) and implicit float-to-double complex conversion
+  in call arguments were added afterwards (`complex-compound`, also compared
+  with GCC at `-O0` and `-O2`); the complex arithmetic moved into
+  `lower_complex_binary` so both paths share it. Still unsupported: arrays of
+  complex values and `long double _Complex` promotion.
 </details>
