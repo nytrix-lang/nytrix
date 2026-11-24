@@ -11768,12 +11768,29 @@ static unsigned mach_convert_loop_fpr_clobbers(const nyr_mach_func_t *m,
   return ~0u;
 }
 
+static bool mach_loop_fpr_keep_wide_vec_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_LOOP_FPR_KEEP_WIDE_VEC");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  return disabled != 0;
+}
+
 static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
   const nyr_mach_func_t *m = e->mach;
   size_t nv = m->vreg_len, nb = m->block_len;
   if (!e->fp_fast_path || !nv || nv > 512 ||
       nb > MACH_SET_BLOCKS || !nb || getenv("NYTRIX_FORCE_STACK_FPR"))
     return;
+  bool keep_wide_vec =
+      !mach_loop_fpr_keep_wide_vec_disabled() && e->vec_fast_path &&
+      e->vec_color_n == MVEC_COLOR_N && e->target &&
+      e->target->abi == NY_NATIVE_ABI_SYSV &&
+      (e->target->caps & NY_NATIVE_CAP_MACH_AVX2) &&
+      !getenv("NYTRIX_NO_SHARED_XMM4_7");
+  for (size_t i = 0; keep_wide_vec && i < e->fp_regalloc.segment_len; ++i)
+    keep_wide_vec = e->fp_regalloc.segments[i].color < MVEC_WIDE_PREG_BASE;
   int *regs = malloc(nv * sizeof(*regs));
   size_t *score = calloc(nv, sizeof(*score));
   bool *eligible = malloc(nv * sizeof(*eligible));
@@ -11945,6 +11962,59 @@ static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
       out[b] = state;
     }
   } while (changed);
+  size_t seg_len = e->fp_regalloc.segment_len;
+  nyr_mach_live_segment_t *segs = e->fp_regalloc.segments;
+  size_t move_limit = e->fp_color_limit;
+  if (keep_wide_vec && seg_len) {
+    int *trial_color = malloc(seg_len * sizeof(*trial_color));
+    if (!trial_color)
+      goto done;
+    for (size_t i = 0; i < seg_len; ++i) {
+      int c = regs[segs[i].vreg];
+      trial_color[i] = c >= 0 ? c : segs[i].color;
+    }
+    bool all_low = true;
+    for (size_t i = 0; i < seg_len && all_low; ++i) {
+      const nyr_mach_live_segment_t *s = &segs[i];
+      int c = regs[s->vreg];
+      if (c < 0 && !(s->color >= 0 && (unsigned)s->color < count))
+        continue;
+      if (c >= 0) {
+        if ((unsigned)c >= MVEC_WIDE_PREG_BASE)
+          all_low = false;
+        continue;
+      }
+      if (!s->carried && !s->acyclic_carried) {
+        int moved = -1;
+        for (unsigned cand = count; cand < MVEC_WIDE_PREG_BASE && moved < 0;
+             ++cand) {
+          bool free_color = true;
+          for (size_t j = 0; j < seg_len && free_color; ++j) {
+            const nyr_mach_live_segment_t *o = &segs[j];
+            if (j != i && trial_color[j] == (int)cand && o->start <= s->end &&
+                s->start <= o->end)
+              free_color = false;
+          }
+          for (size_t pc = s->start;
+               free_color && pc <= s->end && pc < m->inst_len; ++pc)
+            if (nyr_mach_inst_fixed_clobbers(m, &m->insts[pc],
+                                             NYR_MACH_REGCLASS_FPR) &
+                (UINT64_C(1) << cand))
+              free_color = false;
+          if (free_color)
+            moved = (int)cand;
+        }
+        if (moved < 0)
+          all_low = false;
+        else
+          trial_color[i] = moved;
+      }
+    }
+    free(trial_color);
+    if (!all_low)
+      goto done;
+    move_limit = MVEC_WIDE_PREG_BASE;
+  }
   e->loop_fpr = regs;
   e->loop_fpr_entry = entry;
   regs = NULL;
@@ -11955,8 +12025,6 @@ static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
    * clobber-free across their whole interval and unused by any overlapping
    * segment; otherwise they spill as before.
    */
-  size_t seg_len = e->fp_regalloc.segment_len;
-  nyr_mach_live_segment_t *segs = e->fp_regalloc.segments;
   for (size_t i = 0; i < seg_len; ++i) {
     nyr_mach_live_segment_t *s = &segs[i];
     int c = e->loop_fpr[s->vreg];
@@ -11964,8 +12032,7 @@ static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
       continue;
     int moved = -1;
     if (c < 0 && !s->carried && !s->acyclic_carried) {
-      for (unsigned cand = count; cand < e->fp_color_limit && moved < 0;
-           ++cand) {
+      for (unsigned cand = count; cand < move_limit && moved < 0; ++cand) {
         bool free_color = true;
         for (size_t j = 0; j < seg_len && free_color; ++j) {
           const nyr_mach_live_segment_t *o = &segs[j];
