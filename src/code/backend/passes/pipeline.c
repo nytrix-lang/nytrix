@@ -1965,6 +1965,34 @@ static size_t nyr_count_vec_ops(const nyr_func_t *f) {
   return n;
 }
 
+static bool nyr_post_inline_global_promote_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_POST_INLINE_GLOBAL_PROMOTE");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+/* Re-run global slot promotion after inlining exposes inner-loop globals. */
+static void nyr_run_post_inline_global_promote(nyr_func_t *f,
+                                               nyr_opt_stats_t *stats,
+                                               FILE *dump, bool *ok) {
+  if (!*ok || nyr_pass_stopped || nyr_post_inline_global_promote_disabled())
+    return;
+  uint64_t fp_lgp = nyr_debug_fingerprint(f);
+  nyr_run_pass(f, nyr_loop_global_promote, stats, dump, ok);
+  if (*ok && !nyr_pass_stopped && nyr_debug_fingerprint(f) != fp_lgp) {
+    if (nyr_has_local_mem(f) &&
+        (!nyr_has_control_flow(f) || nyr_cf_mem2reg_enabled))
+      nyr_run_pass(f, nyr_mem2reg, stats, dump, ok);
+    if (*ok && !nyr_pass_stopped) {
+      static bool (*const lgp_clean[])(nyr_func_t *) = {nyr_copy_prop, nyr_dce};
+      nyr_run_seq(f, lgp_clean, 2, stats, dump, ok);
+    }
+  }
+}
+
 static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
                                   int opt_level, unsigned options, FILE *dump) {
   /*
@@ -2108,6 +2136,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * CFG/SCEV rebuilds and bails with no change.
      */
     if (ok && !nyr_pass_stopped && nyr_has_loop(f)) {
+      nyr_run_post_inline_global_promote(f, stats, dump, &ok);
       static bool (*const loop_opts[])(nyr_func_t *) = {nyr_loop_rotate,
                                                         nyr_scev_lite,
                                                         nyr_irce,
@@ -2271,6 +2300,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       static bool (*const pre_loop_thread[])(nyr_func_t *) = {
           nyr_jump_thread, nyr_sccp, nyr_cfg_simplify, nyr_dce};
       nyr_run_seq(f, pre_loop_thread, 4, stats, dump, &ok);
+      nyr_run_post_inline_global_promote(f, stats, dump, &ok);
       static bool (*const loop_analysis[])(nyr_func_t *) = {
           nyr_loop_rotate,
           nyr_scev_lite,

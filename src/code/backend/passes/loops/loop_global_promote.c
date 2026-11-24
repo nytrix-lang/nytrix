@@ -266,6 +266,15 @@ static nyr_inst_t lgp_clone_addr(const nyr_inst_t *tmpl, nyr_op_t op, int dst) {
  * additions. Such memory is a distinct object from every symbol cell, so an
  * access through it can neither read nor clobber a promoted slot.
  */
+static bool lgp_post_inline_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_POST_INLINE_GLOBAL_PROMOTE");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 static bool lgp_private_heap_addr(const nyr_func_t *f, const int *defs,
                                   int value, unsigned depth) {
   if (depth > 8 || value < 0 || value >= f->next_value || defs[value] < 0)
@@ -273,6 +282,8 @@ static bool lgp_private_heap_addr(const nyr_func_t *f, const int *defs,
   const nyr_inst_t *def = &f->data[defs[value]];
   if (def->op == NYIR_COPY)
     return lgp_private_heap_addr(f, defs, def->a, depth + 1);
+  if (def->op == NYIR_ALLOCA && !lgp_post_inline_disabled())
+    return true;
   if (def->op == NYIR_PHI) {
     if (def->phi_incoming_len == 0)
       return false;
