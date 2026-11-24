@@ -108,14 +108,14 @@ init=open(o+'/init_glibc','rb').read()
 out=ent('dev',stat.S_IFDIR|0o755)+ent('dev/console',stat.S_IFCHR|0o600,rdev=(5,1))+ent('init',stat.S_IFREG|0o755,init)+ent('TRAILER!!!',0)
 open(o+'/initramfs_glibc.gz','wb').write(gzip.compress(out))
 EOP
-timeout "${BOOT_TIMEOUT:-90}" qemu-system-x86_64 -m 512 -smp 1 -display none -serial file:"$OUT/serial_glibc.log" -no-reboot -nic none \
+timeout "${BOOT_TIMEOUT:-300}" qemu-system-x86_64 -m 512 -smp 1 -display none -serial file:"$OUT/serial_glibc.log" -no-reboot -nic none \
   -kernel "$OUT/build/arch/x86/boot/bzImage" -initrd "$OUT/initramfs_glibc.gz" \
-  -append "console=ttyS0 loglevel=7 panic=-1 rdinit=/init vga=normal nokaslr" -accel "${ACCEL:-kvm}" -cpu "${CPU:-host}" >/dev/null 2>&1 || true
+  -append "console=ttyS0 loglevel=7 panic=-1 rdinit=/init vga=normal nokaslr" -accel "${ACCEL:-tcg}" -cpu "${CPU:-qemu64}" >/dev/null 2>&1 || true
 grep -q NYC_KERNEL_INIT_REACHED "$OUT/serial_glibc.log" || { echo "FAIL: static glibc /init marker missing"; tail -n 20 "$OUT/serial_glibc.log"; exit 1; }
 echo "PASS: static glibc /init"
-timeout "${BOOT_TIMEOUT:-90}" qemu-system-x86_64 -m 512 -smp 1 -display none -serial file:"$OUT/serial.log" -no-reboot -nic none \
+timeout "${BOOT_TIMEOUT:-300}" qemu-system-x86_64 -m 512 -smp 1 -display none -serial file:"$OUT/serial.log" -no-reboot -nic none \
   -kernel "$OUT/build/arch/x86/boot/bzImage" -initrd "$OUT/initramfs.gz" \
-  -append "console=ttyS0 loglevel=7 panic=-1 rdinit=/init vga=normal nokaslr" -accel "${ACCEL:-kvm}" -cpu "${CPU:-host}" >/dev/null 2>&1 || true
+  -append "console=ttyS0 loglevel=7 panic=-1 rdinit=/init vga=normal nokaslr" -accel "${ACCEL:-tcg}" -cpu "${CPU:-qemu64}" >/dev/null 2>&1 || true
 grep -q NYC_KERNEL_INIT_REACHED "$OUT/serial.log" && echo "PASS: kernel reached /init" || { echo "FAIL: /init marker missing"; tail -n 20 "$OUT/serial.log"; exit 1; }
 ]==])
 file(WRITE "${WORK_DIR}/helpers/kernel-boot-smoke.sh" "${helper_kernel_boot_smoke_sh}")

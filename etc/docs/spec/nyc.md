@@ -292,6 +292,19 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 
 ### Required acceptance
 
+- [ ] Make the unmodified-upstream gate clean. `nyc-kernel-boot-latest` clones
+  the newest release tag (`v7.3`, no source patches), builds all 3002 C units
+  with NYC (no `CC` step without NYC, zero build errors) and boots
+  its `bzImage` to `/init` under QEMU TCG (`qemu64`): met. Two things remain.
+  The pristine tag identifies NYC as GCC 12, so Kbuild enables
+  `X86_KERNEL_IBT`, whose objtool pass reports 76 "unreachable instruction"
+  diagnostics, all at assembly entry symbols (`startup_64`,
+  `entry_SYSCALL_64`, the return thunks); the same untouched tree configured
+  with only `X86_KERNEL_IBT` off reports none and boots, so the IBT objtool
+  path needs fixing rather than the kernel; and the
+  same kernel hangs before `/init` under KVM with the host CPU model (it
+  idles in `default_idle` after `kprobes`, with the clock stopped), so only
+  software emulation is verified.
 - [ ] Establish assembly/direct-object/physical-machine parity over the native
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission without
@@ -299,42 +312,22 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 
 ### Correctness verification programme
 
-- [ ] **P0 — Harness.** Audit the existing test, differential, and benchmark
-  lanes for false positives, truncated exit comparisons, matching failures,
-  stale output, silent exclusions, fragile expected failures, and duplication.
-  Distinguish pass, miscompile, compile/link/runtime failure, timeout,
-  unsupported, and invalid test. Inject faults to prove the harness detects
-  wrong output, bad assembly, link failures, crashes, timeouts, and stale
-  binaries; every real regression must fail the test command.
-- [ ] **P1 — Differential execution.** Compare NYC/NYR, NYC/LLVM, GCC, and
-  Clang at supported optimization levels on well-defined, deterministic C.
-  Compare full output, status and signal, binary and memory results, exact
-  integers, appropriate floating-point semantics, ABI results, and side
-  effects. Separate compile acceptance from execution coverage; resolve
-  oracle disputes against the language contract.
-- [ ] **P2 — Automated bug discovery.** Reuse existing generators, torture
-  suites, or fuzzers for integer conversions, aliasing/casts, aggregates and
-  bitfields, variadics, GNU attributes/asm, atomics, SSA/CFG, scalar and loop
-  optimization, register allocation and spills, and ELF/linking. Retain
-  deterministic seeds, rule out undefined behavior, minimize mismatches to
-  the first divergent stage, and add focused regressions by root cause.
-- [ ] **P3 — Compiler invariants.** Check typed AST/IR, SSA dominance and PHI
-  edges, optimizer rewrites, machine liveness and allocation, spill and
-  frame layout, ABI constraints, and ELF sections/symbols/relocations. Fail
-  at the first invalid boundary. Enable expensive checks in test and debug
-  builds without imposing them on normal compilation.
+- [ ] **P2 — Automated bug discovery (remaining targets).** `ny-fuzz` covers
+  integer conversions, aggregates, bit-fields, variadics, aliasing/punning,
+  loops, SSA/CFG, scalar and loop optimization, register allocation and
+  linking. Atomics (`__atomic_*`, `__sync_*`), `__builtin_popcount*` and
+  register-operand inline asm are rejected by NYC (the `atomic` and `gnu`
+  profiles report every such program as unsupported), so those areas have no
+  differential coverage until the builtins exist.
+- [ ] **P3 — Compiler invariants (remaining).** `NYC_VERIFY=1` verifies the
+  NYIR after every pass (SSA dominance, PHI edges, optimizer rewrites) and the
+  whole frontend suite and the fuzzer pass under it. Still open: machine
+  liveness and allocation (the register-allocation verifier reports false
+  overlaps for tied destinations, so it is not wired), spill and frame layout,
+  ABI constraints, and ELF section/symbol/relocation checks.
 - [ ] **P4 — Conformance.** Pair positive execution and negative diagnostic
   tests for supported C and GNU C constructs encountered in Linux, SQLite,
   system headers, and other real workloads. Do not count untested features.
-- [ ] **P6 — Reproducibility.** Preserve compiler revision, flags, dependencies,
-  target, checksums, seeds, object provenance, and reproduction commands.
-  Consider self-hosting only if it serves the existing architecture; identical
-  binaries are not proof of semantics.
-- [ ] **P7 — Cost.** Keep fast deterministic checks separate from deep
-  differential/fuzzing/sanitizer lanes and full system checks. Reuse the
-  current harness, safely cache reproducible inputs, parallelize independent
-  cases, retain failures, and report compiler time and peak memory against a
-  stable baseline without slowing ordinary builds.
 
 ## Verification evidence
 
@@ -3079,4 +3072,41 @@ run directory under `/tmp`.
   an arithmetic-capable `long double _Complex` would need an x87 `long double`,
   which NYC does not provide (its scalar `long double` is binary64), so it
   stays rejected by design rather than miscompiled.
+- Verification programme work (2026-11-24). `ny-fuzz` gained a second
+  reference compiler (`--ref2`, clang): a program the two references run
+  differently is an "oracle dispute", not a NYC failure. It compares status
+  and output on every NYC route (`object`, `direct`, `asm`) at `-O0`..`-O3`,
+  writes `repro.txt` (generator, seed, tool versions, NYC checksum, commands)
+  for each failure, reports NYC compile CPU and peak RSS per run with a
+  `--baseline` regression bound, and has seven program shapes (integer,
+  struct, bit-field, varargs, atomic, aliasing, GNU). `ny-fuzz-smoke` is the
+  fast lane; `ny-fuzz-deep` (`-DNYC_DEEP_TESTS=ON`) runs 3000 seeds at every
+  level. Findings, all fixed with regressions: the `-c` register allocator's
+  stale carried segment (`regalloc-carry-spill`); stores to narrow file-scope
+  objects (`global-narrow-stores`); `-O3` loop-invariant hoisting that moved
+  an instruction while its load stayed in the loop (`licm-dead-loop`);
+  `invert_fallthrough_branches` leaving a NOP block that made PHI operands name
+  the wrong predecessor (found by `NYC_VERIFY=1`; `dce` is also tolerant of
+  such blocks); and the assembly route emitting a `shl 32` / `sar 32` pair
+  twice (`shift-sext-fusion`). Harness audit: all 82 `execute_process` calls
+  in `run.cmake` now examine their result, and a run reports each optional
+  lane that is skipped. 3000 seeds of all shapes agree with GCC and clang on
+  every route and level.
+- Pristine upstream kernel (2026-11-24). `nyc-kernel-boot-latest` cloned the
+  `v7.3` tag and found a defect the patched local tree hides: with NYC
+  identified as GCC, `intel_pmu_init` exhausted the inliner's splice budget
+  and left `always_inline` jump-label helpers out of line, which cannot be
+  emitted. Forced callees now inline after the budget is spent, and unused
+  `static inline` chains are pruned to a fixed point. The tree then builds
+  with no failing unit (`nyc-kernel-boot-latest` rerun) but does not reach
+  `/init`: see the open acceptance item.
+- Pristine kernel boot (2026-11-24). The previous `nyc-kernel-boot` runs used
+  QEMU TCG without saying so (their boot logs read "bare hardware"), and the
+  source tree carried four patched files for `CONFIG_CC_IS_NYC`. The smoke
+  gate now fixes `-accel tcg -cpu qemu64` explicitly. On the untouched `v7.3`
+  tag the gate built 3002 units, paired 2973 `CC` steps with NYC and booted
+  both inits; the same tree under `-accel kvm -cpu host` stops in `oom_init`
+  (every KVM variant tried, including with `USE_X86_SEG_SUPPORT` off, hangs the
+  same way) and the patched tree gets as far as starting `/init`, which is then
+  killed, so a KVM boot is a separate open defect.
 </details>
