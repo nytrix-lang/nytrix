@@ -248,11 +248,55 @@ static addr_form_t slp_addr(const nyr_func_t *f, const int *defs, int value,
   return (addr_form_t){.ok = true, .root = value, .offset = 0};
 }
 
+static bool slp_reduce_quad_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_SLP_REDUCE_QUAD_I64");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  return disabled != 0;
+}
+
+static int slp_unwrap_copy(const nyr_func_t *f, const int *defs, int v) {
+  for (int depth = 0; depth < 8 && v >= 0 && v < f->next_value; ++depth) {
+    int di = defs[v];
+    if (di < 0 || (size_t)di >= f->len || f->data[(size_t)di].op != NYIR_COPY ||
+        f->data[(size_t)di].a < 0)
+      break;
+    v = f->data[(size_t)di].a;
+  }
+  return v;
+}
+
+static bool slp_same_root(const nyr_func_t *f, const int *defs, int r0,
+                          int r1) {
+  r0 = slp_unwrap_copy(f, defs, r0);
+  r1 = slp_unwrap_copy(f, defs, r1);
+  if (r0 == r1)
+    return true;
+  if (slp_reduce_quad_disabled())
+    return false;
+  if (r0 < 0 || r1 < 0 || r0 >= f->next_value || r1 >= f->next_value)
+    return false;
+  int d0 = defs[r0], d1 = defs[r1];
+  if (d0 < 0 || d1 < 0 || (size_t)d0 >= f->len || (size_t)d1 >= f->len)
+    return false;
+  const nyr_inst_t *i0 = &f->data[(size_t)d0];
+  const nyr_inst_t *i1 = &f->data[(size_t)d1];
+  if (i0->op != NYIR_ADD_I64 || i1->op != NYIR_ADD_I64)
+    return false;
+  int a0 = slp_unwrap_copy(f, defs, i0->a);
+  int b0 = slp_unwrap_copy(f, defs, i0->b);
+  int a1 = slp_unwrap_copy(f, defs, i1->a);
+  int b1 = slp_unwrap_copy(f, defs, i1->b);
+  return (a0 == a1 && b0 == b1) || (a0 == b1 && b0 == a1);
+}
+
 static bool slp_contiguous(const nyr_func_t *f, const int *defs, int a0, int a1,
                            size_t block_start) {
   addr_form_t x = slp_addr(f, defs, a0, block_start, 0);
   addr_form_t y = slp_addr(f, defs, a1, block_start, 0);
-  return x.ok && y.ok && x.root == y.root &&
+  return x.ok && y.ok && slp_same_root(f, defs, x.root, y.root) &&
          (ny_i128)y.offset - (ny_i128)x.offset == 8;
 }
 
@@ -261,7 +305,7 @@ static bool slp_contiguous4(const nyr_func_t *f, const int *defs,
   addr_form_t a[4];
   for (size_t lane = 0; lane < 4; ++lane) {
     a[lane] = slp_addr(f, defs, addr[lane], block_start, 0);
-    if (!a[lane].ok || a[lane].root != a[0].root)
+    if (!a[lane].ok || !slp_same_root(f, defs, a[lane].root, a[0].root))
       return false;
   }
   for (size_t lane = 1; lane < 4; ++lane)
@@ -508,6 +552,14 @@ static bool slp_quad_load_group_safe(const nyr_func_t *f, const size_t at[4]) {
       }
     if (lane_load || f->data[i].op == NYIR_NOP)
       continue;
+    if (!slp_reduce_quad_disabled()) {
+      const nyr_inst_t *in = &f->data[i];
+      unsigned eff = in->effects | nyr_inst_effects(in);
+      if (eff == NYIR_EFFECT_NONE && in->op != NYIR_BR &&
+          in->op != NYIR_BR_IF && in->op != NYIR_RET &&
+          in->op != NYIR_LABEL)
+        continue;
+    }
     /*
      * Do not move/widen a potentially trapping load across unrelated work.
      */
@@ -1088,6 +1140,207 @@ static size_t slp_next_store_in_block(const nyr_func_t *f, const int *defs,
 }
 
 /*
+ * Detect straight-line 4-lane horizontal i64 add reduction trees rooted in one
+ * basic block so interleaved load+add reductions vectorize to AVX2
+ * VEC8_LOAD_I64 + VEC8_ADD_I64 + VEC8_REDUCE_ADD_I64.
+ */
+static bool slp_has_add_quad_cand(const nyr_func_t *f) {
+  unsigned loads = 0, adds = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_op_t op = f->data[i].op;
+    if (op == NYIR_LABEL || op == NYIR_BR || op == NYIR_BR_IF ||
+        op == NYIR_RET) {
+      loads = 0;
+      adds = 0;
+    } else if (op == NYIR_LOAD_I64) {
+      ++loads;
+      if (loads >= 4 && adds >= 3)
+        return true;
+    } else if (op == NYIR_ADD_I64) {
+      ++adds;
+      if (loads >= 4 && adds >= 3)
+        return true;
+    }
+  }
+  return false;
+}
+
+static bool slp_pack_add_quad_i64(nyr_func_t *f, const int *defs,
+                                  const nyr_use_def_t *uses, const int val[4],
+                                  const size_t expected[4], size_t block_start,
+                                  unsigned depth, int *out_vec,
+                                  size_t *out_pos) {
+  if (!f || !defs || !uses || !out_vec || !out_pos || depth > 4)
+    return false;
+  size_t at[4];
+  nyr_op_t op = NYIR_NOP;
+  size_t hi = 0;
+  for (size_t lane = 0; lane < 4; ++lane) {
+    if (val[lane] < 0 || val[lane] >= f->next_value)
+      return false;
+    for (size_t prev = 0; prev < lane; ++prev)
+      if (val[prev] == val[lane])
+        return false;
+    int di = defs[val[lane]];
+    if (di < 0 || (size_t)di < block_start || (size_t)di >= f->len)
+      return false;
+    at[lane] = (size_t)di;
+    if (!slp_value_only_used_at(uses, val[lane], expected[lane]))
+      return false;
+    const nyr_inst_t *in = &f->data[at[lane]];
+    if (in->scalar_class == NYIR_SCALAR_F64)
+      return false;
+    if (lane == 0)
+      op = in->op;
+    else if (in->op != op)
+      return false;
+    if (at[lane] > hi)
+      hi = at[lane];
+  }
+  if (op == NYIR_LOAD_I64) {
+    unsigned narrow =
+        NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32;
+    for (size_t lane = 0; lane < 4; ++lane) {
+      const nyr_inst_t *ld = &f->data[at[lane]];
+      if ((ld->flags & narrow) || (ld->effects & NYIR_EFFECT_VOLATILE))
+        return false;
+    }
+    if (!slp_pack_quad_load_i64(f, defs, uses, val, expected, block_start,
+                                out_vec))
+      return false;
+    *out_pos = hi;
+    return true;
+  }
+  if (op != NYIR_ADD_I64)
+    return false;
+  int lhs[4], rhs[4];
+  for (size_t lane = 0; lane < 4; ++lane) {
+    const nyr_inst_t *in = &f->data[at[lane]];
+    if (in->a < 0 || in->b < 0 || in->a == in->b)
+      return false;
+    lhs[lane] = in->a;
+    rhs[lane] = in->b;
+  }
+  nyr_op_t want_lhs = NYIR_NOP;
+  if (lhs[0] < f->next_value && defs[lhs[0]] >= (int)block_start &&
+      (size_t)defs[lhs[0]] < f->len)
+    want_lhs = f->data[(size_t)defs[lhs[0]]].op;
+  for (size_t lane = 1; lane < 4; ++lane) {
+    nyr_op_t lop = (lhs[lane] < f->next_value &&
+                    defs[lhs[lane]] >= (int)block_start &&
+                    (size_t)defs[lhs[lane]] < f->len)
+                       ? f->data[(size_t)defs[lhs[lane]]].op
+                       : NYIR_NOP;
+    if (want_lhs != NYIR_NOP && lop != want_lhs) {
+      nyr_op_t rop = (rhs[lane] < f->next_value &&
+                      defs[rhs[lane]] >= (int)block_start &&
+                      (size_t)defs[rhs[lane]] < f->len)
+                         ? f->data[(size_t)defs[rhs[lane]]].op
+                         : NYIR_NOP;
+      if (rop == want_lhs) {
+        int tmp = lhs[lane];
+        lhs[lane] = rhs[lane];
+        rhs[lane] = tmp;
+      }
+    }
+  }
+  int vlhs = -1, vrhs = -1;
+  size_t lhs_pos = 0, rhs_pos = 0;
+  if (!slp_pack_add_quad_i64(f, defs, uses, lhs, at, block_start, depth + 1,
+                             &vlhs, &lhs_pos))
+    return false;
+  if (!slp_pack_add_quad_i64(f, defs, uses, rhs, at, block_start, depth + 1,
+                             &vrhs, &rhs_pos))
+    return false;
+  if (lhs_pos >= hi || rhs_pos >= hi)
+    return false;
+  nyr_debug_loc_t debug = f->data[hi].debug;
+  for (size_t lane = 0; lane < 4; ++lane)
+    if (at[lane] != hi)
+      slp_discard(f, at[lane]);
+  slp_assign(f, hi,
+             (nyr_inst_t){.op = NYIR_VEC8_ADD_I64,
+                          .dst = val[0],
+                          .a = vlhs,
+                          .b = vrhs,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .debug = debug,
+                          .effects = NYIR_EFFECT_NONE});
+  *out_vec = val[0];
+  *out_pos = hi;
+  return true;
+}
+
+static bool slp_try_reduce_quad_i64(nyr_func_t *f, size_t root_pc,
+                                    size_t block_start, const int *defs,
+                                    const nyr_use_def_t *uses,
+                                    bool swap_pairs) {
+  if (!f || !defs || !uses || root_pc < block_start || root_pc >= f->len)
+    return false;
+  nyr_inst_t root = f->data[root_pc];
+  if (root.op != NYIR_ADD_I64 || root.dst < 0 ||
+      root.scalar_class == NYIR_SCALAR_F64 || root.a < 0 || root.b < 0 ||
+      root.a == root.b || root.a >= f->next_value || root.b >= f->next_value)
+    return false;
+  int p0_v = swap_pairs ? root.b : root.a;
+  int p1_v = swap_pairs ? root.a : root.b;
+  if (defs[p0_v] < (int)block_start || defs[p1_v] < (int)block_start)
+    return false;
+  size_t p0_pc = (size_t)defs[p0_v];
+  size_t p1_pc = (size_t)defs[p1_v];
+  if (p0_pc >= root_pc || p1_pc >= root_pc || p0_pc == p1_pc)
+    return false;
+  if (!slp_value_only_used_at(uses, p0_v, root_pc) ||
+      !slp_value_only_used_at(uses, p1_v, root_pc))
+    return false;
+  nyr_inst_t p0 = f->data[p0_pc];
+  nyr_inst_t p1 = f->data[p1_pc];
+  if (p0.op != NYIR_ADD_I64 || p1.op != NYIR_ADD_I64 ||
+      p0.scalar_class == NYIR_SCALAR_F64 || p1.scalar_class == NYIR_SCALAR_F64 ||
+      p0.a < 0 || p0.b < 0 || p1.a < 0 || p1.b < 0)
+    return false;
+  int lanes[4] = {p0.a, p0.b, p1.a, p1.b};
+  size_t expected[4] = {p0_pc, p0_pc, p1_pc, p1_pc};
+  int vec = -1;
+  size_t vec_pos = 0;
+  if (!slp_pack_add_quad_i64(f, defs, uses, lanes, expected, block_start, 0,
+                             &vec, &vec_pos))
+    return false;
+  if (vec_pos >= root_pc)
+    return false;
+  int zero_v = f->next_value++;
+  slp_assign(f, p0_pc,
+             (nyr_inst_t){.op = NYIR_CONST_I64,
+                          .dst = zero_v,
+                          .a = -1,
+                          .b = -1,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .imm = 0,
+                          .debug = root.debug,
+                          .effects = NYIR_EFFECT_NONE});
+  slp_discard(f, p1_pc);
+  slp_assign(f, root_pc,
+             (nyr_inst_t){.op = NYIR_VEC8_REDUCE_ADD_I64,
+                          .dst = root.dst,
+                          .a = zero_v,
+                          .b = vec,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .scalar_class = root.scalar_class,
+                          .debug = root.debug,
+                          .effects = NYIR_EFFECT_NONE});
+  return true;
+}
+
+/*
  * Every transform below starts with two stores in one basic block.
  */
 static bool slp_has_store_pair(const nyr_func_t *f) {
@@ -1107,7 +1360,9 @@ static bool slp_has_store_pair(const nyr_func_t *f) {
 }
 
 bool nyr_slp_vectorize(nyr_func_t *f) {
-  if (!f || f->len < 4 || f->next_value <= 0 || !slp_has_store_pair(f))
+  if (!f || f->len < 4 || f->next_value <= 0 ||
+      (!slp_has_store_pair(f) &&
+       (slp_reduce_quad_disabled() || !slp_has_add_quad_cand(f))))
     return true;
 
   nyr_func_t work = {0};
@@ -1261,6 +1516,50 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
               "decision=reject kind=pair block=%zu reason=tree-or-use-legality",
               b);
           slp_journal_rollback(&journal, &work);
+        }
+      }
+      if (!transformed && !slp_reduce_quad_disabled()) {
+        for (size_t i = end; i-- > start && !transformed;) {
+          if (work.data[i].op != NYIR_ADD_I64)
+            continue;
+          for (int swap = 0; swap < 2 && !transformed; ++swap) {
+            slp_journal_begin(&journal, &work);
+            bool red_ok = slp_try_reduce_quad_i64(&work, i, start, defs, &uses,
+                                                  swap != 0);
+            if (journal.failed) {
+              slp_journal = NULL;
+              free(journal.items);
+              nyr_use_def_free(&uses);
+              free(defs);
+              nyr_cfg_free(&cfg);
+              nyr_ir_func_free(&work);
+              return false;
+            }
+            if (red_ok) {
+              char err[256] = {0};
+              if (nyr_ir_verify(&work, err, sizeof(err))) {
+                ny_dbg_heuristic_event("SLP",
+                                       "decision=accept kind=reduce_quad block=%zu "
+                                       "lanes=4 reason=pack-legal-and-verifies",
+                                       b);
+                if (!slp_accept(&journal, &work)) {
+                  free(journal.items);
+                  nyr_use_def_free(&uses);
+                  free(defs);
+                  nyr_cfg_free(&cfg);
+                  return false;
+                }
+                transformed = true;
+                changed = true;
+                break;
+              }
+              ny_dbg_heuristic_event("SLP",
+                                     "decision=reject kind=reduce_quad block=%zu "
+                                     "reason=verification detail=%s",
+                                     b, err[0] ? err : "unknown");
+            }
+            slp_journal_rollback(&journal, &work);
+          }
         }
       }
     }
