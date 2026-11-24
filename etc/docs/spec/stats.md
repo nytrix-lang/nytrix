@@ -28,13 +28,13 @@ section is not stored here: `./make bench` writes it to
 
 ## Benchmark dashboard
 
-Generated from 24 full `./make bench` reports; the latest is `build/bench-reports/bench-20261124-035035-3694771.json` (11-24 03:50). Ratios are runtime relative to Host C on the same host: below `1×` is faster than C. Only checksum-correct, valid comparisons count. Wall times on this host are noisy (C references moved up to 2× between runs), so read trends, not single points.
+Generated from 24 full `./make bench` reports; the latest is `build/bench-reports/bench-20261124-041412-3970734.json` (11-24 04:14). Ratios are runtime relative to Host C on the same host: below `1×` is faster than C. Only checksum-correct, valid comparisons count. Wall times on this host are noisy (C references moved up to 2× between runs), so read trends, not single points.
 
 | Backend | Geomean vs C | Benchmarks ≤2× | Above | Compared |
 |---|---|---|---|---|
-| NYR | 1.36× | 84 | 25 | 109 |
-| LLVM | 1.06× | 98 | 11 | 109 |
-| NYC | 1.32× | 99 | 10 | 109 |
+| NYR | 1.19× | 92 | 17 | 109 |
+| LLVM | 0.96× | 98 | 11 | 109 |
+| NYC | 1.19× | 103 | 6 | 109 |
 
 <svg width="880" height="300" viewBox="0 0 880 300" role="img" aria-label="Geometric-mean runtime relative to C across benchmark runs">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Geomean runtime vs C, per full run (lower is better)</text>
@@ -44,116 +44,116 @@ Generated from 24 full `./make bench` reports; the latest is `build/bench-report
 <line x1="64" y1="105.3" x2="856" y2="105.3" stroke="var(--border)" stroke-width="1"/><text x="56" y="109.3" text-anchor="end" font-size="11" fill="var(--muted)">1.6×</text>
 <line x1="64" y1="72.7" x2="856" y2="72.7" stroke="var(--border)" stroke-width="1"/><text x="56" y="76.7" text-anchor="end" font-size="11" fill="var(--muted)">1.8×</text>
 <line x1="64" y1="40.0" x2="856" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="56" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)">2.0×</text>
-<polyline fill="none" stroke="var(--c1)" stroke-width="2.2" stroke-linejoin="round" points="64.0,160.3 98.4,159.8 132.9,167.6 167.3,169.2 201.7,169.7 236.2,164.1 270.6,167.2 305.0,173.7 339.5,157.6 373.9,168.0 408.3,133.2 442.8,140.6 477.2,164.5 511.7,161.8 546.1,160.5 580.5,134.9 615.0,143.2 649.4,162.8 683.8,173.9 718.3,153.1 752.7,168.8 787.1,158.3 821.6,167.4 856.0,145.2"/>
-<circle cx="64.0" cy="160.3" r="3" fill="var(--c1)"/>
-<circle cx="98.4" cy="159.8" r="3" fill="var(--c1)"/>
-<circle cx="132.9" cy="167.6" r="3" fill="var(--c1)"/>
-<circle cx="167.3" cy="169.2" r="3" fill="var(--c1)"/>
-<circle cx="201.7" cy="169.7" r="3" fill="var(--c1)"/>
-<circle cx="236.2" cy="164.1" r="3" fill="var(--c1)"/>
-<circle cx="270.6" cy="167.2" r="3" fill="var(--c1)"/>
-<circle cx="305.0" cy="173.7" r="3" fill="var(--c1)"/>
-<circle cx="339.5" cy="157.6" r="3" fill="var(--c1)"/>
-<circle cx="373.9" cy="168.0" r="3" fill="var(--c1)"/>
-<circle cx="408.3" cy="133.2" r="3" fill="var(--c1)"/>
-<circle cx="442.8" cy="140.6" r="3" fill="var(--c1)"/>
-<circle cx="477.2" cy="164.5" r="3" fill="var(--c1)"/>
-<circle cx="511.7" cy="161.8" r="3" fill="var(--c1)"/>
-<circle cx="546.1" cy="160.5" r="3" fill="var(--c1)"/>
-<circle cx="580.5" cy="134.9" r="3" fill="var(--c1)"/>
-<circle cx="615.0" cy="143.2" r="3" fill="var(--c1)"/>
-<circle cx="649.4" cy="162.8" r="3" fill="var(--c1)"/>
-<circle cx="683.8" cy="173.9" r="3" fill="var(--c1)"/>
-<circle cx="718.3" cy="153.1" r="3" fill="var(--c1)"/>
-<circle cx="752.7" cy="168.8" r="3" fill="var(--c1)"/>
-<circle cx="787.1" cy="158.3" r="3" fill="var(--c1)"/>
-<circle cx="821.6" cy="167.4" r="3" fill="var(--c1)"/>
-<circle cx="856.0" cy="145.2" r="3" fill="var(--c1)"/>
+<polyline fill="none" stroke="var(--c1)" stroke-width="2.2" stroke-linejoin="round" points="64.0,159.8 98.4,167.6 132.9,169.2 167.3,169.7 201.7,164.1 236.2,167.2 270.6,173.7 305.0,157.6 339.5,168.0 373.9,133.2 408.3,140.6 442.8,164.5 477.2,161.8 511.7,160.5 546.1,134.9 580.5,143.2 615.0,162.8 649.4,173.9 683.8,153.1 718.3,168.8 752.7,158.3 787.1,167.4 821.6,145.2 856.0,172.9"/>
+<circle cx="64.0" cy="159.8" r="3" fill="var(--c1)"/>
+<circle cx="98.4" cy="167.6" r="3" fill="var(--c1)"/>
+<circle cx="132.9" cy="169.2" r="3" fill="var(--c1)"/>
+<circle cx="167.3" cy="169.7" r="3" fill="var(--c1)"/>
+<circle cx="201.7" cy="164.1" r="3" fill="var(--c1)"/>
+<circle cx="236.2" cy="167.2" r="3" fill="var(--c1)"/>
+<circle cx="270.6" cy="173.7" r="3" fill="var(--c1)"/>
+<circle cx="305.0" cy="157.6" r="3" fill="var(--c1)"/>
+<circle cx="339.5" cy="168.0" r="3" fill="var(--c1)"/>
+<circle cx="373.9" cy="133.2" r="3" fill="var(--c1)"/>
+<circle cx="408.3" cy="140.6" r="3" fill="var(--c1)"/>
+<circle cx="442.8" cy="164.5" r="3" fill="var(--c1)"/>
+<circle cx="477.2" cy="161.8" r="3" fill="var(--c1)"/>
+<circle cx="511.7" cy="160.5" r="3" fill="var(--c1)"/>
+<circle cx="546.1" cy="134.9" r="3" fill="var(--c1)"/>
+<circle cx="580.5" cy="143.2" r="3" fill="var(--c1)"/>
+<circle cx="615.0" cy="162.8" r="3" fill="var(--c1)"/>
+<circle cx="649.4" cy="173.9" r="3" fill="var(--c1)"/>
+<circle cx="683.8" cy="153.1" r="3" fill="var(--c1)"/>
+<circle cx="718.3" cy="168.8" r="3" fill="var(--c1)"/>
+<circle cx="752.7" cy="158.3" r="3" fill="var(--c1)"/>
+<circle cx="787.1" cy="167.4" r="3" fill="var(--c1)"/>
+<circle cx="821.6" cy="145.2" r="3" fill="var(--c1)"/>
+<circle cx="856.0" cy="172.9" r="3" fill="var(--c1)"/>
 <rect x="80" y="278" width="12" height="12" rx="2" fill="var(--c1)"/><text x="98" y="288" font-size="12" fill="currentColor">NYR</text>
-<polyline fill="none" stroke="var(--c2)" stroke-width="2.2" stroke-linejoin="round" points="64.0,187.8 98.4,200.7 132.9,202.7 167.3,206.9 201.7,204.5 236.2,200.0 270.6,191.1 305.0,201.5 339.5,209.0 373.9,207.9 408.3,199.5 442.8,216.0 477.2,206.6 511.7,206.1 546.1,208.2 580.5,193.8 615.0,196.9 649.4,199.1 683.8,203.5 718.3,201.5 752.7,198.8 787.1,199.1 821.6,202.3 856.0,193.1"/>
-<circle cx="64.0" cy="187.8" r="3" fill="var(--c2)"/>
-<circle cx="98.4" cy="200.7" r="3" fill="var(--c2)"/>
-<circle cx="132.9" cy="202.7" r="3" fill="var(--c2)"/>
-<circle cx="167.3" cy="206.9" r="3" fill="var(--c2)"/>
-<circle cx="201.7" cy="204.5" r="3" fill="var(--c2)"/>
-<circle cx="236.2" cy="200.0" r="3" fill="var(--c2)"/>
-<circle cx="270.6" cy="191.1" r="3" fill="var(--c2)"/>
-<circle cx="305.0" cy="201.5" r="3" fill="var(--c2)"/>
-<circle cx="339.5" cy="209.0" r="3" fill="var(--c2)"/>
-<circle cx="373.9" cy="207.9" r="3" fill="var(--c2)"/>
-<circle cx="408.3" cy="199.5" r="3" fill="var(--c2)"/>
-<circle cx="442.8" cy="216.0" r="3" fill="var(--c2)"/>
-<circle cx="477.2" cy="206.6" r="3" fill="var(--c2)"/>
-<circle cx="511.7" cy="206.1" r="3" fill="var(--c2)"/>
-<circle cx="546.1" cy="208.2" r="3" fill="var(--c2)"/>
-<circle cx="580.5" cy="193.8" r="3" fill="var(--c2)"/>
-<circle cx="615.0" cy="196.9" r="3" fill="var(--c2)"/>
-<circle cx="649.4" cy="199.1" r="3" fill="var(--c2)"/>
-<circle cx="683.8" cy="203.5" r="3" fill="var(--c2)"/>
-<circle cx="718.3" cy="201.5" r="3" fill="var(--c2)"/>
-<circle cx="752.7" cy="198.8" r="3" fill="var(--c2)"/>
-<circle cx="787.1" cy="199.1" r="3" fill="var(--c2)"/>
-<circle cx="821.6" cy="202.3" r="3" fill="var(--c2)"/>
-<circle cx="856.0" cy="193.1" r="3" fill="var(--c2)"/>
+<polyline fill="none" stroke="var(--c2)" stroke-width="2.2" stroke-linejoin="round" points="64.0,200.7 98.4,202.7 132.9,206.9 167.3,204.5 201.7,200.0 236.2,191.1 270.6,201.5 305.0,209.0 339.5,207.9 373.9,199.5 408.3,216.0 442.8,206.6 477.2,206.1 511.7,208.2 546.1,193.8 580.5,196.9 615.0,199.1 649.4,203.5 683.8,201.5 718.3,198.8 752.7,199.1 787.1,202.3 821.6,193.1 856.0,210.0"/>
+<circle cx="64.0" cy="200.7" r="3" fill="var(--c2)"/>
+<circle cx="98.4" cy="202.7" r="3" fill="var(--c2)"/>
+<circle cx="132.9" cy="206.9" r="3" fill="var(--c2)"/>
+<circle cx="167.3" cy="204.5" r="3" fill="var(--c2)"/>
+<circle cx="201.7" cy="200.0" r="3" fill="var(--c2)"/>
+<circle cx="236.2" cy="191.1" r="3" fill="var(--c2)"/>
+<circle cx="270.6" cy="201.5" r="3" fill="var(--c2)"/>
+<circle cx="305.0" cy="209.0" r="3" fill="var(--c2)"/>
+<circle cx="339.5" cy="207.9" r="3" fill="var(--c2)"/>
+<circle cx="373.9" cy="199.5" r="3" fill="var(--c2)"/>
+<circle cx="408.3" cy="216.0" r="3" fill="var(--c2)"/>
+<circle cx="442.8" cy="206.6" r="3" fill="var(--c2)"/>
+<circle cx="477.2" cy="206.1" r="3" fill="var(--c2)"/>
+<circle cx="511.7" cy="208.2" r="3" fill="var(--c2)"/>
+<circle cx="546.1" cy="193.8" r="3" fill="var(--c2)"/>
+<circle cx="580.5" cy="196.9" r="3" fill="var(--c2)"/>
+<circle cx="615.0" cy="199.1" r="3" fill="var(--c2)"/>
+<circle cx="649.4" cy="203.5" r="3" fill="var(--c2)"/>
+<circle cx="683.8" cy="201.5" r="3" fill="var(--c2)"/>
+<circle cx="718.3" cy="198.8" r="3" fill="var(--c2)"/>
+<circle cx="752.7" cy="199.1" r="3" fill="var(--c2)"/>
+<circle cx="787.1" cy="202.3" r="3" fill="var(--c2)"/>
+<circle cx="821.6" cy="193.1" r="3" fill="var(--c2)"/>
+<circle cx="856.0" cy="210.0" r="3" fill="var(--c2)"/>
 <rect x="190" y="278" width="12" height="12" rx="2" fill="var(--c2)"/><text x="208" y="288" font-size="12" fill="currentColor">LLVM</text>
-<polyline fill="none" stroke="var(--c3)" stroke-width="2.2" stroke-linejoin="round" points="64.0,122.6 98.4,129.0 132.9,138.9 167.3,139.0 201.7,141.9 236.2,144.1 270.6,133.8 305.0,140.0 339.5,147.2 373.9,155.3 408.3,153.2 442.8,153.6 477.2,155.2 511.7,152.4 546.1,161.6 580.5,154.0 615.0,138.1 649.4,156.1 683.8,152.9 718.3,145.2 752.7,158.0 787.1,156.2 821.6,162.2 856.0,151.6"/>
-<circle cx="64.0" cy="122.6" r="3" fill="var(--c3)"/>
-<circle cx="98.4" cy="129.0" r="3" fill="var(--c3)"/>
-<circle cx="132.9" cy="138.9" r="3" fill="var(--c3)"/>
-<circle cx="167.3" cy="139.0" r="3" fill="var(--c3)"/>
-<circle cx="201.7" cy="141.9" r="3" fill="var(--c3)"/>
-<circle cx="236.2" cy="144.1" r="3" fill="var(--c3)"/>
-<circle cx="270.6" cy="133.8" r="3" fill="var(--c3)"/>
-<circle cx="305.0" cy="140.0" r="3" fill="var(--c3)"/>
-<circle cx="339.5" cy="147.2" r="3" fill="var(--c3)"/>
-<circle cx="373.9" cy="155.3" r="3" fill="var(--c3)"/>
-<circle cx="408.3" cy="153.2" r="3" fill="var(--c3)"/>
-<circle cx="442.8" cy="153.6" r="3" fill="var(--c3)"/>
-<circle cx="477.2" cy="155.2" r="3" fill="var(--c3)"/>
-<circle cx="511.7" cy="152.4" r="3" fill="var(--c3)"/>
-<circle cx="546.1" cy="161.6" r="3" fill="var(--c3)"/>
-<circle cx="580.5" cy="154.0" r="3" fill="var(--c3)"/>
-<circle cx="615.0" cy="138.1" r="3" fill="var(--c3)"/>
-<circle cx="649.4" cy="156.1" r="3" fill="var(--c3)"/>
-<circle cx="683.8" cy="152.9" r="3" fill="var(--c3)"/>
-<circle cx="718.3" cy="145.2" r="3" fill="var(--c3)"/>
-<circle cx="752.7" cy="158.0" r="3" fill="var(--c3)"/>
-<circle cx="787.1" cy="156.2" r="3" fill="var(--c3)"/>
-<circle cx="821.6" cy="162.2" r="3" fill="var(--c3)"/>
-<circle cx="856.0" cy="151.6" r="3" fill="var(--c3)"/>
+<polyline fill="none" stroke="var(--c3)" stroke-width="2.2" stroke-linejoin="round" points="64.0,129.0 98.4,138.9 132.9,139.0 167.3,141.9 201.7,144.1 236.2,133.8 270.6,140.0 305.0,147.2 339.5,155.3 373.9,153.2 408.3,153.6 442.8,155.2 477.2,152.4 511.7,161.6 546.1,154.0 580.5,138.1 615.0,156.1 649.4,152.9 683.8,145.2 718.3,158.0 752.7,156.2 787.1,162.2 821.6,151.6 856.0,171.8"/>
+<circle cx="64.0" cy="129.0" r="3" fill="var(--c3)"/>
+<circle cx="98.4" cy="138.9" r="3" fill="var(--c3)"/>
+<circle cx="132.9" cy="139.0" r="3" fill="var(--c3)"/>
+<circle cx="167.3" cy="141.9" r="3" fill="var(--c3)"/>
+<circle cx="201.7" cy="144.1" r="3" fill="var(--c3)"/>
+<circle cx="236.2" cy="133.8" r="3" fill="var(--c3)"/>
+<circle cx="270.6" cy="140.0" r="3" fill="var(--c3)"/>
+<circle cx="305.0" cy="147.2" r="3" fill="var(--c3)"/>
+<circle cx="339.5" cy="155.3" r="3" fill="var(--c3)"/>
+<circle cx="373.9" cy="153.2" r="3" fill="var(--c3)"/>
+<circle cx="408.3" cy="153.6" r="3" fill="var(--c3)"/>
+<circle cx="442.8" cy="155.2" r="3" fill="var(--c3)"/>
+<circle cx="477.2" cy="152.4" r="3" fill="var(--c3)"/>
+<circle cx="511.7" cy="161.6" r="3" fill="var(--c3)"/>
+<circle cx="546.1" cy="154.0" r="3" fill="var(--c3)"/>
+<circle cx="580.5" cy="138.1" r="3" fill="var(--c3)"/>
+<circle cx="615.0" cy="156.1" r="3" fill="var(--c3)"/>
+<circle cx="649.4" cy="152.9" r="3" fill="var(--c3)"/>
+<circle cx="683.8" cy="145.2" r="3" fill="var(--c3)"/>
+<circle cx="718.3" cy="158.0" r="3" fill="var(--c3)"/>
+<circle cx="752.7" cy="156.2" r="3" fill="var(--c3)"/>
+<circle cx="787.1" cy="162.2" r="3" fill="var(--c3)"/>
+<circle cx="821.6" cy="151.6" r="3" fill="var(--c3)"/>
+<circle cx="856.0" cy="171.8" r="3" fill="var(--c3)"/>
 <rect x="300" y="278" width="12" height="12" rx="2" fill="var(--c3)"/><text x="318" y="288" font-size="12" fill="currentColor">NYC</text>
-<text x="64.0" y="252" text-anchor="start" font-size="10" fill="var(--muted)">11-21 02:05</text>
-<text x="167.3" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 05:33</text>
-<text x="270.6" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 08:06</text>
-<text x="373.9" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 16:19</text>
-<text x="477.2" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 17:44</text>
-<text x="580.5" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-22 17:53</text>
-<text x="683.8" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-23 23:27</text>
-<text x="787.1" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-24 03:19</text>
-<text x="856.0" y="252" text-anchor="end" font-size="10" fill="var(--muted)">11-24 03:50</text>
+<text x="64.0" y="252" text-anchor="start" font-size="10" fill="var(--muted)">11-21 05:21</text>
+<text x="167.3" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 05:36</text>
+<text x="270.6" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 08:44</text>
+<text x="373.9" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-21 16:52</text>
+<text x="477.2" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-22 14:33</text>
+<text x="580.5" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-22 17:55</text>
+<text x="683.8" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-23 23:37</text>
+<text x="787.1" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-24 03:27</text>
+<text x="856.0" y="252" text-anchor="end" font-size="10" fill="var(--muted)">11-24 04:14</text>
 </svg>
 
 <svg width="880" height="300" viewBox="0 0 880 300" role="img" aria-label="Benchmarks per runtime-ratio band and backend">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Benchmarks per runtime band vs C, latest run</text>
-<rect x="92.2" y="157.6" width="31.0" height="78.4" rx="3" fill="var(--c1)"/><text x="107.7" y="153.6" text-anchor="middle" font-size="10" fill="currentColor">22</text>
-<rect x="126.2" y="79.2" width="31.0" height="156.8" rx="3" fill="var(--c2)"/><text x="141.7" y="75.2" text-anchor="middle" font-size="10" fill="currentColor">44</text>
-<rect x="160.2" y="171.9" width="31.0" height="64.1" rx="3" fill="var(--c3)"/><text x="175.7" y="167.9" text-anchor="middle" font-size="10" fill="currentColor">18</text>
+<rect x="92.2" y="139.7" width="31.0" height="96.3" rx="3" fill="var(--c1)"/><text x="107.7" y="135.7" text-anchor="middle" font-size="10" fill="currentColor">29</text>
+<rect x="126.2" y="63.3" width="31.0" height="172.7" rx="3" fill="var(--c2)"/><text x="141.7" y="59.3" text-anchor="middle" font-size="10" fill="currentColor">52</text>
+<rect x="160.2" y="152.9" width="31.0" height="83.1" rx="3" fill="var(--c3)"/><text x="175.7" y="148.9" text-anchor="middle" font-size="10" fill="currentColor">25</text>
 <text x="143.2" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">≤1×</text>
-<rect x="250.6" y="79.2" width="31.0" height="156.8" rx="3" fill="var(--c1)"/><text x="266.1" y="75.2" text-anchor="middle" font-size="10" fill="currentColor">44</text>
-<rect x="284.6" y="64.9" width="31.0" height="171.1" rx="3" fill="var(--c2)"/><text x="300.1" y="60.9" text-anchor="middle" font-size="10" fill="currentColor">48</text>
-<rect x="318.6" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c3)"/><text x="334.1" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">55</text>
+<rect x="250.6" y="63.3" width="31.0" height="172.7" rx="3" fill="var(--c1)"/><text x="266.1" y="59.3" text-anchor="middle" font-size="10" fill="currentColor">52</text>
+<rect x="284.6" y="99.8" width="31.0" height="136.2" rx="3" fill="var(--c2)"/><text x="300.1" y="95.8" text-anchor="middle" font-size="10" fill="currentColor">41</text>
+<rect x="318.6" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c3)"/><text x="334.1" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">59</text>
 <text x="301.6" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1–1.5×</text>
-<rect x="409.0" y="171.9" width="31.0" height="64.1" rx="3" fill="var(--c1)"/><text x="424.5" y="167.9" text-anchor="middle" font-size="10" fill="currentColor">18</text>
-<rect x="443.0" y="214.6" width="31.0" height="21.4" rx="3" fill="var(--c2)"/><text x="458.5" y="210.6" text-anchor="middle" font-size="10" fill="currentColor">6</text>
-<rect x="477.0" y="143.3" width="31.0" height="92.7" rx="3" fill="var(--c3)"/><text x="492.5" y="139.3" text-anchor="middle" font-size="10" fill="currentColor">26</text>
+<rect x="409.0" y="199.5" width="31.0" height="36.5" rx="3" fill="var(--c1)"/><text x="424.5" y="195.5" text-anchor="middle" font-size="10" fill="currentColor">11</text>
+<rect x="443.0" y="219.4" width="31.0" height="16.6" rx="3" fill="var(--c2)"/><text x="458.5" y="215.4" text-anchor="middle" font-size="10" fill="currentColor">5</text>
+<rect x="477.0" y="172.9" width="31.0" height="63.1" rx="3" fill="var(--c3)"/><text x="492.5" y="168.9" text-anchor="middle" font-size="10" fill="currentColor">19</text>
 <text x="460.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1.5–2×</text>
-<rect x="567.4" y="164.7" width="31.0" height="71.3" rx="3" fill="var(--c1)"/><text x="582.9" y="160.7" text-anchor="middle" font-size="10" fill="currentColor">20</text>
-<rect x="601.4" y="207.5" width="31.0" height="28.5" rx="3" fill="var(--c2)"/><text x="616.9" y="203.5" text-anchor="middle" font-size="10" fill="currentColor">8</text>
-<rect x="635.4" y="203.9" width="31.0" height="32.1" rx="3" fill="var(--c3)"/><text x="650.9" y="199.9" text-anchor="middle" font-size="10" fill="currentColor">9</text>
+<rect x="567.4" y="189.5" width="31.0" height="46.5" rx="3" fill="var(--c1)"/><text x="582.9" y="185.5" text-anchor="middle" font-size="10" fill="currentColor">14</text>
+<rect x="601.4" y="206.1" width="31.0" height="29.9" rx="3" fill="var(--c2)"/><text x="616.9" y="202.1" text-anchor="middle" font-size="10" fill="currentColor">9</text>
+<rect x="635.4" y="216.1" width="31.0" height="19.9" rx="3" fill="var(--c3)"/><text x="650.9" y="212.1" text-anchor="middle" font-size="10" fill="currentColor">6</text>
 <text x="618.4" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">2–4×</text>
-<rect x="725.8" y="218.2" width="31.0" height="17.8" rx="3" fill="var(--c1)"/><text x="741.3" y="214.2" text-anchor="middle" font-size="10" fill="currentColor">5</text>
-<rect x="759.8" y="225.3" width="31.0" height="10.7" rx="3" fill="var(--c2)"/><text x="775.3" y="221.3" text-anchor="middle" font-size="10" fill="currentColor">3</text>
-<rect x="793.8" y="232.4" width="31.0" height="3.6" rx="3" fill="var(--c3)"/><text x="809.3" y="228.4" text-anchor="middle" font-size="10" fill="currentColor">1</text>
+<rect x="725.8" y="226.0" width="31.0" height="10.0" rx="3" fill="var(--c1)"/><text x="741.3" y="222.0" text-anchor="middle" font-size="10" fill="currentColor">3</text>
+<rect x="759.8" y="229.4" width="31.0" height="6.6" rx="3" fill="var(--c2)"/><text x="775.3" y="225.4" text-anchor="middle" font-size="10" fill="currentColor">2</text>
+<rect x="793.8" y="236.0" width="31.0" height="0.0" rx="3" fill="var(--c3)"/><text x="809.3" y="232.0" text-anchor="middle" font-size="10" fill="currentColor">0</text>
 <text x="776.8" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">&gt;4×</text>
 <rect x="80" y="278" width="12" height="12" rx="2" fill="var(--c1)"/><text x="98" y="288" font-size="12" fill="currentColor">NYR (109)</text>
 <rect x="230" y="278" width="12" height="12" rx="2" fill="var(--c2)"/><text x="248" y="288" font-size="12" fill="currentColor">LLVM (109)</text>
@@ -170,135 +170,131 @@ Generated from 24 full `./make bench` reports; the latest is `build/bench-report
 <line x1="720.9" y1="34" x2="720.9" y2="1572" stroke="var(--border)" stroke-width="1"/><text x="720.9" y="1588" text-anchor="middle" font-size="10" fill="var(--muted)">8×</text>
 <line x1="816.0" y1="34" x2="816.0" y2="1572" stroke="var(--border)" stroke-width="1"/><text x="816.0" y="1588" text-anchor="middle" font-size="10" fill="var(--muted)">16×</text>
 <text x="144" y="49" text-anchor="end" font-size="10" fill="currentColor">dce</text><rect x="150.0" y="40" width="285.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="49" font-size="9" fill="var(--muted)"><0.01</text>
-<text x="144" y="63" text-anchor="end" font-size="10" fill="currentColor">pbkdf2</text><rect x="171.4" y="54" width="264.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="63" font-size="9" fill="var(--muted)">0.15</text>
-<text x="144" y="77" text-anchor="end" font-size="10" fill="currentColor">recursive-fibonacci</text><rect x="337.8" y="68" width="97.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="77" font-size="9" fill="var(--muted)">0.49</text>
-<text x="144" y="91" text-anchor="end" font-size="10" fill="currentColor">stream</text><rect x="356.6" y="82" width="78.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="91" font-size="9" fill="var(--muted)">0.56</text>
-<text x="144" y="105" text-anchor="end" font-size="10" fill="currentColor">append-scaling</text><rect x="363.6" y="96" width="71.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="105" font-size="9" fill="var(--muted)">0.59</text>
-<text x="144" y="119" text-anchor="end" font-size="10" fill="currentColor">fft</text><rect x="366.8" y="110" width="68.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="119" font-size="9" fill="var(--muted)">0.61</text>
-<text x="144" y="133" text-anchor="end" font-size="10" fill="currentColor">list-dynamic</text><rect x="367.7" y="124" width="67.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="133" font-size="9" fill="var(--muted)">0.61</text>
-<text x="144" y="147" text-anchor="end" font-size="10" fill="currentColor">binary</text><rect x="385.1" y="138" width="50.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="147" font-size="9" fill="var(--muted)">0.69</text>
-<text x="144" y="161" text-anchor="end" font-size="10" fill="currentColor">thread-ring</text><rect x="391.1" y="152" width="44.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="161" font-size="9" fill="var(--muted)">0.72</text>
-<text x="144" y="175" text-anchor="end" font-size="10" fill="currentColor">transpose</text><rect x="393.8" y="166" width="41.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="175" font-size="9" fill="var(--muted)">0.74</text>
-<text x="144" y="189" text-anchor="end" font-size="10" fill="currentColor">heapsort-int</text><rect x="395.3" y="180" width="40.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="189" font-size="9" fill="var(--muted)">0.75</text>
-<text x="144" y="203" text-anchor="end" font-size="10" fill="currentColor">knight</text><rect x="396.6" y="194" width="38.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="203" font-size="9" fill="var(--muted)">0.75</text>
-<text x="144" y="217" text-anchor="end" font-size="10" fill="currentColor">records</text><rect x="400.3" y="208" width="35.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="217" font-size="9" fill="var(--muted)">0.77</text>
-<text x="144" y="231" text-anchor="end" font-size="10" fill="currentColor">fibonacci</text><rect x="401.3" y="222" width="34.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="231" font-size="9" fill="var(--muted)">0.78</text>
-<text x="144" y="245" text-anchor="end" font-size="10" fill="currentColor">dict</text><rect x="406.4" y="236" width="29.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="245" font-size="9" fill="var(--muted)">0.81</text>
-<text x="144" y="259" text-anchor="end" font-size="10" fill="currentColor">pbkdf2 #2</text><rect x="412.1" y="250" width="23.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="259" font-size="9" fill="var(--muted)">0.84</text>
-<text x="144" y="273" text-anchor="end" font-size="10" fill="currentColor">expression-tree</text><rect x="418.4" y="264" width="17.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="273" font-size="9" fill="var(--muted)">0.88</text>
-<text x="144" y="287" text-anchor="end" font-size="10" fill="currentColor">time-profile</text><rect x="429.6" y="278" width="5.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="287" font-size="9" fill="var(--muted)">0.96</text>
-<text x="144" y="301" text-anchor="end" font-size="10" fill="currentColor">vector</text><rect x="430.1" y="292" width="5.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="301" font-size="9" fill="var(--muted)">0.96</text>
-<text x="144" y="315" text-anchor="end" font-size="10" fill="currentColor">sha256 #2</text><rect x="430.5" y="306" width="5.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="315" font-size="9" fill="var(--muted)">0.96</text>
-<text x="144" y="329" text-anchor="end" font-size="10" fill="currentColor">calls</text><rect x="431.1" y="320" width="4.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="329" font-size="9" fill="var(--muted)">0.97</text>
-<text x="144" y="343" text-anchor="end" font-size="10" fill="currentColor">heapsort</text><rect x="432.4" y="334" width="3.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="343" font-size="9" fill="var(--muted)">0.98</text>
-<text x="144" y="357" text-anchor="end" font-size="10" fill="currentColor">float</text><rect x="435.4" y="348" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="440.6" y="357" font-size="9" fill="var(--muted)">1.01</text>
-<text x="144" y="371" text-anchor="end" font-size="10" fill="currentColor">imagick</text><rect x="435.4" y="362" width="1.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="441.1" y="371" font-size="9" fill="var(--muted)">1.01</text>
-<text x="144" y="385" text-anchor="end" font-size="10" fill="currentColor">licm-math</text><rect x="435.4" y="376" width="1.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="441.4" y="385" font-size="9" fill="var(--muted)">1.01</text>
-<text x="144" y="399" text-anchor="end" font-size="10" fill="currentColor">tce-recursion</text><rect x="435.4" y="390" width="2.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="441.5" y="399" font-size="9" fill="var(--muted)">1.02</text>
-<text x="144" y="413" text-anchor="end" font-size="10" fill="currentColor">nussinov</text><rect x="435.4" y="404" width="4.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="443.4" y="413" font-size="9" fill="var(--muted)">1.03</text>
-<text x="144" y="427" text-anchor="end" font-size="10" fill="currentColor">straight</text><rect x="435.4" y="418" width="4.5" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="443.9" y="427" font-size="9" fill="var(--muted)">1.03</text>
-<text x="144" y="441" text-anchor="end" font-size="10" fill="currentColor">binary-trees</text><rect x="435.4" y="432" width="5.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="445.1" y="441" font-size="9" fill="var(--muted)">1.04</text>
-<text x="144" y="455" text-anchor="end" font-size="10" fill="currentColor">splay</text><rect x="435.4" y="446" width="6.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="446.1" y="455" font-size="9" fill="var(--muted)">1.05</text>
-<text x="144" y="469" text-anchor="end" font-size="10" fill="currentColor">richards</text><rect x="435.4" y="460" width="8.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="447.5" y="469" font-size="9" fill="var(--muted)">1.06</text>
-<text x="144" y="483" text-anchor="end" font-size="10" fill="currentColor">crc32</text><rect x="435.4" y="474" width="8.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="447.7" y="483" font-size="9" fill="var(--muted)">1.06</text>
-<text x="144" y="497" text-anchor="end" font-size="10" fill="currentColor">fannkuch</text><rect x="435.4" y="488" width="9.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="449.3" y="497" font-size="9" fill="var(--muted)">1.07</text>
-<text x="144" y="511" text-anchor="end" font-size="10" fill="currentColor">mandelbrot</text><rect x="435.4" y="502" width="10.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="449.6" y="511" font-size="9" fill="var(--muted)">1.08</text>
-<text x="144" y="525" text-anchor="end" font-size="10" fill="currentColor">loop-unswitch</text><rect x="435.4" y="516" width="10.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="450.3" y="525" font-size="9" fill="var(--muted)">1.08</text>
-<text x="144" y="539" text-anchor="end" font-size="10" fill="currentColor">sor</text><rect x="435.4" y="530" width="11.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="450.8" y="539" font-size="9" fill="var(--muted)">1.09</text>
-<text x="144" y="553" text-anchor="end" font-size="10" fill="currentColor">bce-matrix</text><rect x="435.4" y="544" width="13.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="452.7" y="553" font-size="9" fill="var(--muted)">1.10</text>
-<text x="144" y="567" text-anchor="end" font-size="10" fill="currentColor">loop</text><rect x="435.4" y="558" width="14.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="453.5" y="567" font-size="9" fill="var(--muted)">1.11</text>
-<text x="144" y="581" text-anchor="end" font-size="10" fill="currentColor">escape-loop</text><rect x="435.4" y="572" width="15.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="455.4" y="581" font-size="9" fill="var(--muted)">1.12</text>
-<text x="144" y="595" text-anchor="end" font-size="10" fill="currentColor">float-cmp-oracle</text><rect x="435.4" y="586" width="17.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="456.7" y="595" font-size="9" fill="var(--muted)">1.13</text>
-<text x="144" y="609" text-anchor="end" font-size="10" fill="currentColor">mcf</text><rect x="435.4" y="600" width="20.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="459.5" y="609" font-size="9" fill="var(--muted)">1.16</text>
-<text x="144" y="623" text-anchor="end" font-size="10" fill="currentColor">qrsyndrome</text><rect x="435.4" y="614" width="20.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="460.2" y="623" font-size="9" fill="var(--muted)">1.16</text>
-<text x="144" y="637" text-anchor="end" font-size="10" fill="currentColor">gcbench</text><rect x="435.4" y="628" width="23.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="463.2" y="637" font-size="9" fill="var(--muted)">1.19</text>
-<text x="144" y="651" text-anchor="end" font-size="10" fill="currentColor">leela</text><rect x="435.4" y="642" width="23.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="463.2" y="651" font-size="9" fill="var(--muted)">1.19</text>
-<text x="144" y="665" text-anchor="end" font-size="10" fill="currentColor">word-frequency-scan</text><rect x="435.4" y="656" width="24.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="463.5" y="665" font-size="9" fill="var(--muted)">1.19</text>
-<text x="144" y="679" text-anchor="end" font-size="10" fill="currentColor">json-parser</text><rect x="435.4" y="670" width="26.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="465.8" y="679" font-size="9" fill="var(--muted)">1.21</text>
-<text x="144" y="693" text-anchor="end" font-size="10" fill="currentColor">hash</text><rect x="435.4" y="684" width="29.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="468.5" y="693" font-size="9" fill="var(--muted)">1.24</text>
-<text x="144" y="707" text-anchor="end" font-size="10" fill="currentColor">viterbi</text><rect x="435.4" y="698" width="29.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="469.1" y="707" font-size="9" fill="var(--muted)">1.24</text>
-<text x="144" y="721" text-anchor="end" font-size="10" fill="currentColor">nqueens</text><rect x="435.4" y="712" width="30.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="470.3" y="721" font-size="9" fill="var(--muted)">1.25</text>
-<text x="144" y="735" text-anchor="end" font-size="10" fill="currentColor">repeat</text><rect x="435.4" y="726" width="31.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="471.2" y="735" font-size="9" fill="var(--muted)">1.26</text>
-<text x="144" y="749" text-anchor="end" font-size="10" fill="currentColor">word-frequency</text><rect x="435.4" y="740" width="32.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="472.1" y="749" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="763" text-anchor="end" font-size="10" fill="currentColor">knucleotide</text><rect x="435.4" y="754" width="32.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="472.3" y="763" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="777" text-anchor="end" font-size="10" fill="currentColor">mixed-static-island</text><rect x="435.4" y="768" width="32.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="472.3" y="777" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="791" text-anchor="end" font-size="10" fill="currentColor">currying</text><rect x="435.4" y="782" width="33.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="472.7" y="791" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="805" text-anchor="end" font-size="10" fill="currentColor">statemate</text><rect x="435.4" y="796" width="34.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="473.9" y="805" font-size="9" fill="var(--muted)">1.29</text>
-<text x="144" y="819" text-anchor="end" font-size="10" fill="currentColor">deltablue</text><rect x="435.4" y="810" width="34.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="474.3" y="819" font-size="9" fill="var(--muted)">1.29</text>
-<text x="144" y="833" text-anchor="end" font-size="10" fill="currentColor">stringsearch</text><rect x="435.4" y="824" width="35.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="475.1" y="833" font-size="9" fill="var(--muted)">1.30</text>
-<text x="144" y="847" text-anchor="end" font-size="10" fill="currentColor">euler9</text><rect x="435.4" y="838" width="36.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="476.2" y="847" font-size="9" fill="var(--muted)">1.31</text>
-<text x="144" y="861" text-anchor="end" font-size="10" fill="currentColor">omnetpp</text><rect x="435.4" y="852" width="36.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="476.3" y="861" font-size="9" fill="var(--muted)">1.31</text>
-<text x="144" y="875" text-anchor="end" font-size="10" fill="currentColor">fasta</text><rect x="435.4" y="866" width="38.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="478.2" y="875" font-size="9" fill="var(--muted)">1.33</text>
-<text x="144" y="889" text-anchor="end" font-size="10" fill="currentColor">list-any-append</text><rect x="435.4" y="880" width="40.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="480.0" y="889" font-size="9" fill="var(--muted)">1.34</text>
-<text x="144" y="903" text-anchor="end" font-size="10" fill="currentColor">sha256</text><rect x="435.4" y="894" width="42.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="481.9" y="903" font-size="9" fill="var(--muted)">1.36</text>
-<text x="144" y="917" text-anchor="end" font-size="10" fill="currentColor">havlak</text><rect x="435.4" y="908" width="43.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="482.7" y="917" font-size="9" fill="var(--muted)">1.37</text>
-<text x="144" y="931" text-anchor="end" font-size="10" fill="currentColor">towers</text><rect x="435.4" y="922" width="46.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="485.8" y="931" font-size="9" fill="var(--muted)">1.40</text>
-<text x="144" y="945" text-anchor="end" font-size="10" fill="currentColor">collatz</text><rect x="435.4" y="936" width="49.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="488.4" y="945" font-size="9" fill="var(--muted)">1.43</text>
-<text x="144" y="959" text-anchor="end" font-size="10" fill="currentColor">matrix-raw</text><rect x="435.4" y="950" width="51.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="490.6" y="959" font-size="9" fill="var(--muted)">1.45</text>
-<text x="144" y="973" text-anchor="end" font-size="10" fill="currentColor">n-body</text><rect x="435.4" y="964" width="58.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="497.9" y="973" font-size="9" fill="var(--muted)">1.53</text>
-<text x="144" y="987" text-anchor="end" font-size="10" fill="currentColor">dijkstra</text><rect x="435.4" y="978" width="59.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="499.3" y="987" font-size="9" fill="var(--muted)">1.55</text>
-<text x="144" y="1001" text-anchor="end" font-size="10" fill="currentColor">povray</text><rect x="435.4" y="992" width="61.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="500.5" y="1001" font-size="9" fill="var(--muted)">1.56</text>
-<text x="144" y="1015" text-anchor="end" font-size="10" fill="currentColor">permute</text><rect x="435.4" y="1006" width="62.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="502.1" y="1015" font-size="9" fill="var(--muted)">1.58</text>
-<text x="144" y="1029" text-anchor="end" font-size="10" fill="currentColor">matmul-int</text><rect x="435.4" y="1020" width="64.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="503.7" y="1029" font-size="9" fill="var(--muted)">1.60</text>
-<text x="144" y="1043" text-anchor="end" font-size="10" fill="currentColor">knucleotide #2</text><rect x="435.4" y="1034" width="68.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="508.1" y="1043" font-size="9" fill="var(--muted)">1.65</text>
-<text x="144" y="1057" text-anchor="end" font-size="10" fill="currentColor">queen</text><rect x="435.4" y="1048" width="69.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="508.5" y="1057" font-size="9" fill="var(--muted)">1.65</text>
-<text x="144" y="1071" text-anchor="end" font-size="10" fill="currentColor">spectral</text><rect x="435.4" y="1062" width="69.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="509.4" y="1071" font-size="9" fill="var(--muted)">1.66</text>
-<text x="144" y="1085" text-anchor="end" font-size="10" fill="currentColor">doitgen</text><rect x="435.4" y="1076" width="74.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="513.6" y="1085" font-size="9" fill="var(--muted)">1.72</text>
-<text x="144" y="1099" text-anchor="end" font-size="10" fill="currentColor">fhourstones</text><rect x="435.4" y="1090" width="81.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="520.4" y="1099" font-size="9" fill="var(--muted)">1.80</text>
-<text x="144" y="1113" text-anchor="end" font-size="10" fill="currentColor">dgemm</text><rect x="435.4" y="1104" width="82.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="521.4" y="1113" font-size="9" fill="var(--muted)">1.82</text>
-<text x="144" y="1127" text-anchor="end" font-size="10" fill="currentColor">mont64</text><rect x="435.4" y="1118" width="82.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="522.1" y="1127" font-size="9" fill="var(--muted)">1.83</text>
-<text x="144" y="1141" text-anchor="end" font-size="10" fill="currentColor">pidigits</text><rect x="435.4" y="1132" width="83.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="522.6" y="1141" font-size="9" fill="var(--muted)">1.83</text>
-<text x="144" y="1155" text-anchor="end" font-size="10" fill="currentColor">jacobi-2d</text><rect x="435.4" y="1146" width="83.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="522.9" y="1155" font-size="9" fill="var(--muted)">1.84</text>
-<text x="144" y="1169" text-anchor="end" font-size="10" fill="currentColor">sieve</text><rect x="435.4" y="1160" width="85.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="524.7" y="1169" font-size="9" fill="var(--muted)">1.86</text>
-<text x="144" y="1183" text-anchor="end" font-size="10" fill="currentColor">ackermann</text><rect x="435.4" y="1174" width="89.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="529.2" y="1183" font-size="9" fill="var(--muted)">1.92</text>
-<text x="144" y="1197" text-anchor="end" font-size="10" fill="currentColor">intops</text><rect x="435.4" y="1188" width="91.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="530.7" y="1197" font-size="9" fill="var(--muted)">1.94</text>
-<text x="144" y="1211" text-anchor="end" font-size="10" fill="currentColor">call-chain</text><rect x="435.4" y="1202" width="93.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="533.1" y="1211" font-size="9" fill="var(--muted)">1.98</text>
-<text x="144" y="1225" text-anchor="end" font-size="10" fill="currentColor">licm</text><rect x="435.4" y="1216" width="96.4" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="535.8" y="1225" font-size="9" fill="var(--muted)">2.02</text>
-<text x="144" y="1239" text-anchor="end" font-size="10" fill="currentColor">dict-set</text><rect x="435.4" y="1230" width="96.7" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="536.1" y="1239" font-size="9" fill="var(--muted)">2.02</text>
-<text x="144" y="1253" text-anchor="end" font-size="10" fill="currentColor">xz</text><rect x="435.4" y="1244" width="98.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="538.0" y="1253" font-size="9" fill="var(--muted)">2.05</text>
-<text x="144" y="1267" text-anchor="end" font-size="10" fill="currentColor">sssp</text><rect x="435.4" y="1258" width="98.7" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="538.1" y="1267" font-size="9" fill="var(--muted)">2.05</text>
-<text x="144" y="1281" text-anchor="end" font-size="10" fill="currentColor">cd</text><rect x="435.4" y="1272" width="98.8" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="538.2" y="1281" font-size="9" fill="var(--muted)">2.05</text>
-<text x="144" y="1295" text-anchor="end" font-size="10" fill="currentColor">list</text><rect x="435.4" y="1286" width="102.4" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="541.8" y="1295" font-size="9" fill="var(--muted)">2.11</text>
-<text x="144" y="1309" text-anchor="end" font-size="10" fill="currentColor">inline</text><rect x="435.4" y="1300" width="103.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="543.1" y="1309" font-size="9" fill="var(--muted)">2.13</text>
-<text x="144" y="1323" text-anchor="end" font-size="10" fill="currentColor">linpack</text><rect x="435.4" y="1314" width="105.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="545.3" y="1323" font-size="9" fill="var(--muted)">2.16</text>
-<text x="144" y="1337" text-anchor="end" font-size="10" fill="currentColor">susan</text><rect x="435.4" y="1328" width="114.0" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="553.4" y="1337" font-size="9" fill="var(--muted)">2.29</text>
-<text x="144" y="1351" text-anchor="end" font-size="10" fill="currentColor">matmult-int</text><rect x="435.4" y="1342" width="116.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="556.3" y="1351" font-size="9" fill="var(--muted)">2.34</text>
-<text x="144" y="1365" text-anchor="end" font-size="10" fill="currentColor">string</text><rect x="435.4" y="1356" width="132.4" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="571.9" y="1365" font-size="9" fill="var(--muted)">2.62</text>
-<text x="144" y="1379" text-anchor="end" font-size="10" fill="currentColor">revcomp</text><rect x="435.4" y="1370" width="141.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="581.3" y="1379" font-size="9" fill="var(--muted)">2.81</text>
-<text x="144" y="1393" text-anchor="end" font-size="10" fill="currentColor">mandel</text><rect x="435.4" y="1384" width="167.0" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="606.4" y="1393" font-size="9" fill="var(--muted)">3.38</text>
-<text x="144" y="1407" text-anchor="end" font-size="10" fill="currentColor">cmov-sort</text><rect x="435.4" y="1398" width="167.0" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="606.5" y="1407" font-size="9" fill="var(--muted)">3.38</text>
-<text x="144" y="1421" text-anchor="end" font-size="10" fill="currentColor">radix-tree</text><rect x="435.4" y="1412" width="170.1" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="609.5" y="1421" font-size="9" fill="var(--muted)">3.45</text>
-<text x="144" y="1435" text-anchor="end" font-size="10" fill="currentColor">prime</text><rect x="435.4" y="1426" width="172.9" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="612.3" y="1435" font-size="9" fill="var(--muted)">3.52</text>
-<text x="144" y="1449" text-anchor="end" font-size="10" fill="currentColor">dict-oracle</text><rect x="435.4" y="1440" width="173.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="613.1" y="1449" font-size="9" fill="var(--muted)">3.54</text>
-<text x="144" y="1463" text-anchor="end" font-size="10" fill="currentColor">iter</text><rect x="435.4" y="1454" width="175.5" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="614.9" y="1463" font-size="9" fill="var(--muted)">3.59</text>
-<text x="144" y="1477" text-anchor="end" font-size="10" fill="currentColor">page-rank</text><rect x="435.4" y="1468" width="178.3" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="617.7" y="1477" font-size="9" fill="var(--muted)">3.67</text>
-<text x="144" y="1491" text-anchor="end" font-size="10" fill="currentColor">matrix</text><rect x="435.4" y="1482" width="179.1" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="618.5" y="1491" font-size="9" fill="var(--muted)">3.69</text>
-<text x="144" y="1505" text-anchor="end" font-size="10" fill="currentColor">graph-bfs</text><rect x="435.4" y="1496" width="197.4" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="636.8" y="1505" font-size="9" fill="var(--muted)">4.21</text>
-<text x="144" y="1519" text-anchor="end" font-size="10" fill="currentColor">lbm</text><rect x="435.4" y="1510" width="209.5" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="649.0" y="1519" font-size="9" fill="var(--muted)">4.60</text>
-<text x="144" y="1533" text-anchor="end" font-size="10" fill="currentColor">native-oracle</text><rect x="435.4" y="1524" width="237.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="677.3" y="1533" font-size="9" fill="var(--muted)">5.66</text>
-<text x="144" y="1547" text-anchor="end" font-size="10" fill="currentColor">bigint-oracle</text><rect x="435.4" y="1538" width="267.1" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="706.5" y="1547" font-size="9" fill="var(--muted)">7.00</text>
-<text x="144" y="1561" text-anchor="end" font-size="10" fill="currentColor">bitcount</text><rect x="435.4" y="1552" width="299.9" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="739.4" y="1561" font-size="9" fill="var(--muted)">8.89</text>
+<text x="144" y="63" text-anchor="end" font-size="10" fill="currentColor">radix-tree</text><rect x="150.0" y="54" width="285.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="63" font-size="9" fill="var(--muted)">0.09</text>
+<text x="144" y="77" text-anchor="end" font-size="10" fill="currentColor">pbkdf2</text><rect x="169.4" y="68" width="266.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="77" font-size="9" fill="var(--muted)">0.14</text>
+<text x="144" y="91" text-anchor="end" font-size="10" fill="currentColor">repeat</text><rect x="281.7" y="82" width="153.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="91" font-size="9" fill="var(--muted)">0.33</text>
+<text x="144" y="105" text-anchor="end" font-size="10" fill="currentColor">iter</text><rect x="327.1" y="96" width="108.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="105" font-size="9" fill="var(--muted)">0.45</text>
+<text x="144" y="119" text-anchor="end" font-size="10" fill="currentColor">transpose</text><rect x="339.2" y="110" width="96.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="119" font-size="9" fill="var(--muted)">0.50</text>
+<text x="144" y="133" text-anchor="end" font-size="10" fill="currentColor">imagick</text><rect x="343.6" y="124" width="91.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="133" font-size="9" fill="var(--muted)">0.51</text>
+<text x="144" y="147" text-anchor="end" font-size="10" fill="currentColor">pbkdf2 #2</text><rect x="364.5" y="138" width="70.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="147" font-size="9" fill="var(--muted)">0.60</text>
+<text x="144" y="161" text-anchor="end" font-size="10" fill="currentColor">recursive-fibonacci</text><rect x="374.3" y="152" width="61.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="161" font-size="9" fill="var(--muted)">0.64</text>
+<text x="144" y="175" text-anchor="end" font-size="10" fill="currentColor">thread-ring</text><rect x="385.4" y="166" width="50.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="175" font-size="9" fill="var(--muted)">0.69</text>
+<text x="144" y="189" text-anchor="end" font-size="10" fill="currentColor">string</text><rect x="385.8" y="180" width="49.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="189" font-size="9" fill="var(--muted)">0.70</text>
+<text x="144" y="203" text-anchor="end" font-size="10" fill="currentColor">richards</text><rect x="389.7" y="194" width="45.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="203" font-size="9" fill="var(--muted)">0.72</text>
+<text x="144" y="217" text-anchor="end" font-size="10" fill="currentColor">binary</text><rect x="403.2" y="208" width="32.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="217" font-size="9" fill="var(--muted)">0.79</text>
+<text x="144" y="231" text-anchor="end" font-size="10" fill="currentColor">list-any-append</text><rect x="405.2" y="222" width="30.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="231" font-size="9" fill="var(--muted)">0.80</text>
+<text x="144" y="245" text-anchor="end" font-size="10" fill="currentColor">time-profile</text><rect x="405.5" y="236" width="29.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="245" font-size="9" fill="var(--muted)">0.80</text>
+<text x="144" y="259" text-anchor="end" font-size="10" fill="currentColor">list</text><rect x="409.7" y="250" width="25.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="259" font-size="9" fill="var(--muted)">0.83</text>
+<text x="144" y="273" text-anchor="end" font-size="10" fill="currentColor">heapsort</text><rect x="416.5" y="264" width="18.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="273" font-size="9" fill="var(--muted)">0.87</text>
+<text x="144" y="287" text-anchor="end" font-size="10" fill="currentColor">records</text><rect x="420.8" y="278" width="14.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="287" font-size="9" fill="var(--muted)">0.90</text>
+<text x="144" y="301" text-anchor="end" font-size="10" fill="currentColor">mcf</text><rect x="421.0" y="292" width="14.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="301" font-size="9" fill="var(--muted)">0.90</text>
+<text x="144" y="315" text-anchor="end" font-size="10" fill="currentColor">fft</text><rect x="422.1" y="306" width="13.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="315" font-size="9" fill="var(--muted)">0.91</text>
+<text x="144" y="329" text-anchor="end" font-size="10" fill="currentColor">knucleotide #2</text><rect x="424.1" y="320" width="11.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="329" font-size="9" fill="var(--muted)">0.92</text>
+<text x="144" y="343" text-anchor="end" font-size="10" fill="currentColor">matrix-raw</text><rect x="424.7" y="334" width="10.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="343" font-size="9" fill="var(--muted)">0.92</text>
+<text x="144" y="357" text-anchor="end" font-size="10" fill="currentColor">straight</text><rect x="425.0" y="348" width="10.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="357" font-size="9" fill="var(--muted)">0.93</text>
+<text x="144" y="371" text-anchor="end" font-size="10" fill="currentColor">calls</text><rect x="425.5" y="362" width="9.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="371" font-size="9" fill="var(--muted)">0.93</text>
+<text x="144" y="385" text-anchor="end" font-size="10" fill="currentColor">stream</text><rect x="429.9" y="376" width="5.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="385" font-size="9" fill="var(--muted)">0.96</text>
+<text x="144" y="399" text-anchor="end" font-size="10" fill="currentColor">dict</text><rect x="430.7" y="390" width="4.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="399" font-size="9" fill="var(--muted)">0.97</text>
+<text x="144" y="413" text-anchor="end" font-size="10" fill="currentColor">crc32</text><rect x="434.7" y="404" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="413" font-size="9" fill="var(--muted)">0.99</text>
+<text x="144" y="427" text-anchor="end" font-size="10" fill="currentColor">list-dynamic</text><rect x="435.2" y="418" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="427" font-size="9" fill="var(--muted)">1.00</text>
+<text x="144" y="441" text-anchor="end" font-size="10" fill="currentColor">licm-math</text><rect x="435.3" y="432" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="441" font-size="9" fill="var(--muted)">1.00</text>
+<text x="144" y="455" text-anchor="end" font-size="10" fill="currentColor">fibonacci</text><rect x="435.4" y="446" width="1.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="441.0" y="455" font-size="9" fill="var(--muted)">1.01</text>
+<text x="144" y="469" text-anchor="end" font-size="10" fill="currentColor">float</text><rect x="435.4" y="460" width="4.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="443.7" y="469" font-size="9" fill="var(--muted)">1.03</text>
+<text x="144" y="483" text-anchor="end" font-size="10" fill="currentColor">loop-unswitch</text><rect x="435.4" y="474" width="6.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="446.0" y="483" font-size="9" fill="var(--muted)">1.05</text>
+<text x="144" y="497" text-anchor="end" font-size="10" fill="currentColor">sha256 #2</text><rect x="435.4" y="488" width="7.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="446.5" y="497" font-size="9" fill="var(--muted)">1.05</text>
+<text x="144" y="511" text-anchor="end" font-size="10" fill="currentColor">mandelbrot</text><rect x="435.4" y="502" width="9.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="449.3" y="511" font-size="9" fill="var(--muted)">1.07</text>
+<text x="144" y="525" text-anchor="end" font-size="10" fill="currentColor">splay</text><rect x="435.4" y="516" width="10.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="450.1" y="525" font-size="9" fill="var(--muted)">1.08</text>
+<text x="144" y="539" text-anchor="end" font-size="10" fill="currentColor">fannkuch</text><rect x="435.4" y="530" width="12.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="452.4" y="539" font-size="9" fill="var(--muted)">1.10</text>
+<text x="144" y="553" text-anchor="end" font-size="10" fill="currentColor">loop</text><rect x="435.4" y="544" width="14.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="454.3" y="553" font-size="9" fill="var(--muted)">1.11</text>
+<text x="144" y="567" text-anchor="end" font-size="10" fill="currentColor">word-frequency-scan</text><rect x="435.4" y="558" width="16.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="455.8" y="567" font-size="9" fill="var(--muted)">1.13</text>
+<text x="144" y="581" text-anchor="end" font-size="10" fill="currentColor">viterbi</text><rect x="435.4" y="572" width="17.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="456.8" y="581" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="595" text-anchor="end" font-size="10" fill="currentColor">permute</text><rect x="435.4" y="586" width="17.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="457.2" y="595" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="609" text-anchor="end" font-size="10" fill="currentColor">tce-recursion</text><rect x="435.4" y="600" width="18.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="457.5" y="609" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="623" text-anchor="end" font-size="10" fill="currentColor">hash</text><rect x="435.4" y="614" width="18.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="457.7" y="623" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="637" text-anchor="end" font-size="10" fill="currentColor">dict-set</text><rect x="435.4" y="628" width="18.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="457.8" y="637" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="651" text-anchor="end" font-size="10" fill="currentColor">bce-matrix</text><rect x="435.4" y="642" width="18.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="457.8" y="651" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="665" text-anchor="end" font-size="10" fill="currentColor">prime</text><rect x="435.4" y="656" width="18.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="458.0" y="665" font-size="9" fill="var(--muted)">1.14</text>
+<text x="144" y="679" text-anchor="end" font-size="10" fill="currentColor">sor</text><rect x="435.4" y="670" width="19.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="458.6" y="679" font-size="9" fill="var(--muted)">1.15</text>
+<text x="144" y="693" text-anchor="end" font-size="10" fill="currentColor">float-cmp-oracle</text><rect x="435.4" y="684" width="21.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="460.7" y="693" font-size="9" fill="var(--muted)">1.17</text>
+<text x="144" y="707" text-anchor="end" font-size="10" fill="currentColor">collatz</text><rect x="435.4" y="698" width="21.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="460.8" y="707" font-size="9" fill="var(--muted)">1.17</text>
+<text x="144" y="721" text-anchor="end" font-size="10" fill="currentColor">omnetpp</text><rect x="435.4" y="712" width="21.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="461.0" y="721" font-size="9" fill="var(--muted)">1.17</text>
+<text x="144" y="735" text-anchor="end" font-size="10" fill="currentColor">linpack</text><rect x="435.4" y="726" width="21.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="461.0" y="735" font-size="9" fill="var(--muted)">1.17</text>
+<text x="144" y="749" text-anchor="end" font-size="10" fill="currentColor">leela</text><rect x="435.4" y="740" width="24.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="463.4" y="749" font-size="9" fill="var(--muted)">1.19</text>
+<text x="144" y="763" text-anchor="end" font-size="10" fill="currentColor">json-parser</text><rect x="435.4" y="754" width="24.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="464.0" y="763" font-size="9" fill="var(--muted)">1.20</text>
+<text x="144" y="777" text-anchor="end" font-size="10" fill="currentColor">escape-loop</text><rect x="435.4" y="768" width="24.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="464.3" y="777" font-size="9" fill="var(--muted)">1.20</text>
+<text x="144" y="791" text-anchor="end" font-size="10" fill="currentColor">deltablue</text><rect x="435.4" y="782" width="25.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="464.4" y="791" font-size="9" fill="var(--muted)">1.20</text>
+<text x="144" y="805" text-anchor="end" font-size="10" fill="currentColor">heapsort-int</text><rect x="435.4" y="796" width="25.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="464.7" y="805" font-size="9" fill="var(--muted)">1.20</text>
+<text x="144" y="819" text-anchor="end" font-size="10" fill="currentColor">expression-tree</text><rect x="435.4" y="810" width="26.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="465.5" y="819" font-size="9" fill="var(--muted)">1.21</text>
+<text x="144" y="833" text-anchor="end" font-size="10" fill="currentColor">nussinov</text><rect x="435.4" y="824" width="26.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="465.8" y="833" font-size="9" fill="var(--muted)">1.21</text>
+<text x="144" y="847" text-anchor="end" font-size="10" fill="currentColor">fasta</text><rect x="435.4" y="838" width="26.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="466.2" y="847" font-size="9" fill="var(--muted)">1.22</text>
+<text x="144" y="861" text-anchor="end" font-size="10" fill="currentColor">sssp</text><rect x="435.4" y="852" width="27.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="466.7" y="861" font-size="9" fill="var(--muted)">1.22</text>
+<text x="144" y="875" text-anchor="end" font-size="10" fill="currentColor">knucleotide</text><rect x="435.4" y="866" width="27.5" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="466.9" y="875" font-size="9" fill="var(--muted)">1.22</text>
+<text x="144" y="889" text-anchor="end" font-size="10" fill="currentColor">graph-bfs</text><rect x="435.4" y="880" width="27.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="467.1" y="889" font-size="9" fill="var(--muted)">1.22</text>
+<text x="144" y="903" text-anchor="end" font-size="10" fill="currentColor">currying</text><rect x="435.4" y="894" width="30.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="469.6" y="903" font-size="9" fill="var(--muted)">1.25</text>
+<text x="144" y="917" text-anchor="end" font-size="10" fill="currentColor">jacobi-2d</text><rect x="435.4" y="908" width="30.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="470.0" y="917" font-size="9" fill="var(--muted)">1.25</text>
+<text x="144" y="931" text-anchor="end" font-size="10" fill="currentColor">mixed-static-island</text><rect x="435.4" y="922" width="30.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="470.2" y="931" font-size="9" fill="var(--muted)">1.25</text>
+<text x="144" y="945" text-anchor="end" font-size="10" fill="currentColor">nqueens</text><rect x="435.4" y="936" width="31.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="471.0" y="945" font-size="9" fill="var(--muted)">1.26</text>
+<text x="144" y="959" text-anchor="end" font-size="10" fill="currentColor">qrsyndrome</text><rect x="435.4" y="950" width="32.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="471.8" y="959" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="973" text-anchor="end" font-size="10" fill="currentColor">mont64</text><rect x="435.4" y="964" width="33.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="473.3" y="973" font-size="9" fill="var(--muted)">1.28</text>
+<text x="144" y="987" text-anchor="end" font-size="10" fill="currentColor">spectral</text><rect x="435.4" y="978" width="40.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="479.8" y="987" font-size="9" fill="var(--muted)">1.34</text>
+<text x="144" y="1001" text-anchor="end" font-size="10" fill="currentColor">doitgen</text><rect x="435.4" y="992" width="40.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="479.9" y="1001" font-size="9" fill="var(--muted)">1.34</text>
+<text x="144" y="1015" text-anchor="end" font-size="10" fill="currentColor">towers</text><rect x="435.4" y="1006" width="41.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="480.8" y="1015" font-size="9" fill="var(--muted)">1.35</text>
+<text x="144" y="1029" text-anchor="end" font-size="10" fill="currentColor">statemate</text><rect x="435.4" y="1020" width="41.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="481.0" y="1029" font-size="9" fill="var(--muted)">1.35</text>
+<text x="144" y="1043" text-anchor="end" font-size="10" fill="currentColor">sha256</text><rect x="435.4" y="1034" width="41.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="481.0" y="1043" font-size="9" fill="var(--muted)">1.35</text>
+<text x="144" y="1057" text-anchor="end" font-size="10" fill="currentColor">bitcount</text><rect x="435.4" y="1048" width="45.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="485.1" y="1057" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="1071" text-anchor="end" font-size="10" fill="currentColor">append-scaling</text><rect x="435.4" y="1062" width="46.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="485.8" y="1071" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="1085" text-anchor="end" font-size="10" fill="currentColor">dijkstra</text><rect x="435.4" y="1076" width="47.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="486.8" y="1085" font-size="9" fill="var(--muted)">1.41</text>
+<text x="144" y="1099" text-anchor="end" font-size="10" fill="currentColor">havlak</text><rect x="435.4" y="1090" width="48.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="487.4" y="1099" font-size="9" fill="var(--muted)">1.42</text>
+<text x="144" y="1113" text-anchor="end" font-size="10" fill="currentColor">word-frequency</text><rect x="435.4" y="1104" width="51.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="490.4" y="1113" font-size="9" fill="var(--muted)">1.45</text>
+<text x="144" y="1127" text-anchor="end" font-size="10" fill="currentColor">pidigits</text><rect x="435.4" y="1118" width="51.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="490.8" y="1127" font-size="9" fill="var(--muted)">1.45</text>
+<text x="144" y="1141" text-anchor="end" font-size="10" fill="currentColor">knight</text><rect x="435.4" y="1132" width="51.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="491.3" y="1141" font-size="9" fill="var(--muted)">1.46</text>
+<text x="144" y="1155" text-anchor="end" font-size="10" fill="currentColor">binary-trees</text><rect x="435.4" y="1146" width="53.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="492.6" y="1155" font-size="9" fill="var(--muted)">1.47</text>
+<text x="144" y="1169" text-anchor="end" font-size="10" fill="currentColor">povray</text><rect x="435.4" y="1160" width="54.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="494.0" y="1169" font-size="9" fill="var(--muted)">1.49</text>
+<text x="144" y="1183" text-anchor="end" font-size="10" fill="currentColor">matmul-int</text><rect x="435.4" y="1174" width="55.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="495.3" y="1183" font-size="9" fill="var(--muted)">1.50</text>
+<text x="144" y="1197" text-anchor="end" font-size="10" fill="currentColor">n-body</text><rect x="435.4" y="1188" width="56.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="495.7" y="1197" font-size="9" fill="var(--muted)">1.51</text>
+<text x="144" y="1211" text-anchor="end" font-size="10" fill="currentColor">matmult-int</text><rect x="435.4" y="1202" width="57.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="496.5" y="1211" font-size="9" fill="var(--muted)">1.52</text>
+<text x="144" y="1225" text-anchor="end" font-size="10" fill="currentColor">susan</text><rect x="435.4" y="1216" width="60.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="499.7" y="1225" font-size="9" fill="var(--muted)">1.55</text>
+<text x="144" y="1239" text-anchor="end" font-size="10" fill="currentColor">stringsearch</text><rect x="435.4" y="1230" width="64.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="504.1" y="1239" font-size="9" fill="var(--muted)">1.60</text>
+<text x="144" y="1253" text-anchor="end" font-size="10" fill="currentColor">fhourstones</text><rect x="435.4" y="1244" width="65.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="505.2" y="1253" font-size="9" fill="var(--muted)">1.61</text>
+<text x="144" y="1267" text-anchor="end" font-size="10" fill="currentColor">euler9</text><rect x="435.4" y="1258" width="68.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="508.3" y="1267" font-size="9" fill="var(--muted)">1.65</text>
+<text x="144" y="1281" text-anchor="end" font-size="10" fill="currentColor">queen</text><rect x="435.4" y="1272" width="72.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="512.2" y="1281" font-size="9" fill="var(--muted)">1.70</text>
+<text x="144" y="1295" text-anchor="end" font-size="10" fill="currentColor">xz</text><rect x="435.4" y="1286" width="73.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="513.2" y="1295" font-size="9" fill="var(--muted)">1.71</text>
+<text x="144" y="1309" text-anchor="end" font-size="10" fill="currentColor">call-chain</text><rect x="435.4" y="1300" width="90.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="530.0" y="1309" font-size="9" fill="var(--muted)">1.93</text>
+<text x="144" y="1323" text-anchor="end" font-size="10" fill="currentColor">ackermann</text><rect x="435.4" y="1314" width="94.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="533.9" y="1323" font-size="9" fill="var(--muted)">1.99</text>
+<text x="144" y="1337" text-anchor="end" font-size="10" fill="currentColor">dgemm</text><rect x="435.4" y="1328" width="97.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="537.2" y="1337" font-size="9" fill="var(--muted)">2.04</text>
+<text x="144" y="1351" text-anchor="end" font-size="10" fill="currentColor">inline</text><rect x="435.4" y="1342" width="99.3" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="538.7" y="1351" font-size="9" fill="var(--muted)">2.06</text>
+<text x="144" y="1365" text-anchor="end" font-size="10" fill="currentColor">cd</text><rect x="435.4" y="1356" width="101.7" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="541.2" y="1365" font-size="9" fill="var(--muted)">2.10</text>
+<text x="144" y="1379" text-anchor="end" font-size="10" fill="currentColor">gcbench</text><rect x="435.4" y="1370" width="108.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="547.6" y="1379" font-size="9" fill="var(--muted)">2.20</text>
+<text x="144" y="1393" text-anchor="end" font-size="10" fill="currentColor">cmov-sort</text><rect x="435.4" y="1384" width="109.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="549.4" y="1393" font-size="9" fill="var(--muted)">2.23</text>
+<text x="144" y="1407" text-anchor="end" font-size="10" fill="currentColor">vector</text><rect x="435.4" y="1398" width="116.3" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="555.7" y="1407" font-size="9" fill="var(--muted)">2.33</text>
+<text x="144" y="1421" text-anchor="end" font-size="10" fill="currentColor">revcomp</text><rect x="435.4" y="1412" width="120.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="560.1" y="1421" font-size="9" fill="var(--muted)">2.41</text>
+<text x="144" y="1435" text-anchor="end" font-size="10" fill="currentColor">licm</text><rect x="435.4" y="1426" width="121.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="561.1" y="1435" font-size="9" fill="var(--muted)">2.43</text>
+<text x="144" y="1449" text-anchor="end" font-size="10" fill="currentColor">sieve</text><rect x="435.4" y="1440" width="131.8" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="571.2" y="1449" font-size="9" fill="var(--muted)">2.61</text>
+<text x="144" y="1463" text-anchor="end" font-size="10" fill="currentColor">dict-oracle</text><rect x="435.4" y="1454" width="156.5" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="596.0" y="1463" font-size="9" fill="var(--muted)">3.13</text>
+<text x="144" y="1477" text-anchor="end" font-size="10" fill="currentColor">intops</text><rect x="435.4" y="1468" width="175.2" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="614.6" y="1477" font-size="9" fill="var(--muted)">3.58</text>
+<text x="144" y="1491" text-anchor="end" font-size="10" fill="currentColor">matrix</text><rect x="435.4" y="1482" width="175.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="615.4" y="1491" font-size="9" fill="var(--muted)">3.60</text>
+<text x="144" y="1505" text-anchor="end" font-size="10" fill="currentColor">lbm</text><rect x="435.4" y="1496" width="182.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="621.7" y="1505" font-size="9" fill="var(--muted)">3.77</text>
+<text x="144" y="1519" text-anchor="end" font-size="10" fill="currentColor">native-oracle</text><rect x="435.4" y="1510" width="182.4" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="621.8" y="1519" font-size="9" fill="var(--muted)">3.78</text>
+<text x="144" y="1533" text-anchor="end" font-size="10" fill="currentColor">page-rank</text><rect x="435.4" y="1524" width="200.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="640.2" y="1533" font-size="9" fill="var(--muted)">4.32</text>
+<text x="144" y="1547" text-anchor="end" font-size="10" fill="currentColor">mandel</text><rect x="435.4" y="1538" width="208.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="648.3" y="1547" font-size="9" fill="var(--muted)">4.58</text>
+<text x="144" y="1561" text-anchor="end" font-size="10" fill="currentColor">bigint-oracle</text><rect x="435.4" y="1552" width="279.9" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="719.3" y="1561" font-size="9" fill="var(--muted)">7.69</text>
 </svg>
 
 ### Largest gaps above 2× (C reference ≥ 1 ms)
 
 | Benchmark | Backend | Runtime / C | C time |
 |---|---|---|---|
-| bitcount | NYR | 8.89× | 4.3 ms |
-| bigint-oracle | NYR | 7.00× | 3.7 ms |
-| graph-bfs | NYC | 6.75× | 22.7 ms |
-| bitcount | LLVM | 4.63× | 4.3 ms |
-| lbm | NYR | 4.60× | 1.1 ms |
-| graph-bfs | NYR | 4.21× | 22.7 ms |
-| graph-bfs | LLVM | 3.69× | 22.7 ms |
-| bigint-oracle | LLVM | 3.66× | 3.7 ms |
-| prime | NYR | 3.52× | 1.3 ms |
-| radix-tree | NYR | 3.45× | 1.7 ms |
-| lbm | LLVM | 3.01× | 1.1 ms |
-| sieve | NYC | 2.79× | 4.0 ms |
-| susan | NYR | 2.29× | 1.5 ms |
-| sieve | LLVM | 2.24× | 4.0 ms |
-| susan | NYC | 2.19× | 1.5 ms |
+| bigint-oracle | NYR | 7.69× | 3.7 ms |
+| lbm | NYR | 3.77× | 1.4 ms |
+| bigint-oracle | LLVM | 3.57× | 3.7 ms |
+| prime | LLVM | 3.34× | 1.3 ms |
+| sieve | NYR | 2.61× | 5.8 ms |
+| fhourstones | NYC | 2.49× | 1.1 ms |
+| lbm | LLVM | 2.32× | 1.4 ms |
+| jacobi-2d | LLVM | 2.23× | 1.1 ms |
+| gcbench | NYR | 2.20× | 43.4 ms |
+| sieve | NYC | 2.11× | 5.8 ms |
+| cd | NYR | 2.10× | 1.1 ms |
 
 Bars for workloads whose C reference is under 1 ms are drawn lighter: their ratios are dominated by timer resolution.
 
@@ -4916,7 +4912,14 @@ unchanged (two more programs matched GCC). Its `./make bench` started at load
 7 but ended at load 25 under concurrent builds and failed the string
 NYR/LLVM gate on `append-scaling` again (2.02×); nine-run timing on the same
 host gave NYR 1.89 ms (0.24× of LLVM) against 1.77 ms at HEAD, and records
-NYR 41.1 ms against 40.4 ms, so the gate tripped on load, not on code.
+NYR 41.1 ms against 40.4 ms, so the gate tripped on load, not on code. A full gated
+`ny-test --bench` with the frozen candidate binaries (`./make bench` could not
+build `build/release` while a concurrent `emitter.c` edit was broken)
+passed every class but concurrency, which missed by 0.01 (NYR/LLVM 1.45×,
+limit 1.44×; load fell from 15 to 9 during the run). Nine-run timing of that
+class matched HEAD: calls 95 µs both, call-chain 503 vs 506 µs, thread-ring
+3.42 vs 3.35 ms, richards 1.19 vs 1.18 ms (NYR/LLVM 1.02× for the class); the
+swing was LLVM's thread-ring time (3.36 vs 3.75 ms).
 `./make bench` (report `bench-20261123-233709-1786163`) passed every
 per-class gate with all checksums correct. Rows that moved against history
 in that single run (NYR append-scaling, bitcount, the JSON scan, sieve, stream,

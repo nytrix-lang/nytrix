@@ -4604,7 +4604,7 @@ skip_compilation:
         if (fast_isel_env && *fast_isel_env) {
           jopt.EnableFastISel = ny_env_is_truthy(fast_isel_env) ? 1 : 0;
         } else if (!ny_jit_module_is_apple_arm64(jmod)) {
-          jopt.EnableFastISel = 1;
+          jopt.EnableFastISel = (jopt.OptLevel < 2) ? 1 : 0;
         }
       }
       ny_jit_register_module_symbols(jmod, &cg);

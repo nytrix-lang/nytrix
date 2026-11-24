@@ -3082,4 +3082,11 @@ run directory under `/tmp`.
   `ny-stdlib-debug-path` fails because the debug IR for `use core.str` plus
   `"...".len` no longer contains a `DIFile` for `str.ny`; `nytrix-addr-probe-device`
   fails on the host's vvar page layout. Neither involves the C frontend.
+- Kernel gate as ctest (2026-11-24). The kernel acceptance tests now live in
+  `src/code/test/lang/kernel/CMakeLists.txt`. `nyc-kernel-boot` builds a tree
+  named with `-DNYC_LINUX_SRC`; `-DNYC_KERNEL_CLONE=ON` adds
+  `nyc-kernel-boot-latest`, which resolves the newest non-rc upstream tag
+  (v7.3 today), clones it shallow into the build tree, cleans it, builds it
+  with NYC and boots it (`ctest -L kernel`, about fifteen minutes plus the
+  download).
 </details>

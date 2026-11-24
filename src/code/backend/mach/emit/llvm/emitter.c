@@ -500,14 +500,63 @@ typedef struct {
 
 static bool ny_llvm_is_typed_buffer_alloc(const nyr_inst_t *in) {
   return in && in->op == NYIR_CALL && (in->flags & NYIR_INST_F_EXTERN) &&
-         !(in->flags & NYIR_INST_F_INDIRECT) &&
-         in->scalar_class == NYIR_SCALAR_TYPED_BUFFER && in->symbol &&
-         strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0;
+         !(in->flags & NYIR_INST_F_INDIRECT) && in->symbol &&
+         ((in->scalar_class == NYIR_SCALAR_TYPED_BUFFER &&
+           strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0) ||
+          strcmp(in->symbol, "rt_malloc_i64") == 0 ||
+          strcmp(in->symbol, "rt_malloc_uninit_i64") == 0 ||
+          strcmp(in->symbol, "rt_malloc_raw_i64") == 0 ||
+          strcmp(in->symbol, "rt_calloc_raw_i64") == 0);
+}
+
+static bool ny_llvm_tb_phi_gep_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *env = getenv("NYTRIX_NO_LLVM_TB_PHI_GEP");
+    enabled = !(env && *env && strcmp(env, "0") != 0);
+  }
+  return enabled != 0;
 }
 
 static const nyr_inst_t *ny_llvm_address_def(const nyr_func_t *f,
                                              const int *defs, int v) {
   return v >= 0 && v < f->next_value && defs[v] >= 0 ? &f->data[defs[v]] : NULL;
+}
+
+/*
+ * Trace typed-buffer/raw-alloc provenance through COPY and closed PHI cycles
+ * (e.g. buffer swaps across outer loop latches) so LLVM receives getelementptr
+ * instead of inttoptr(add i64 ...).
+ */
+static bool ny_llvm_is_typed_buffer_value(const nyr_func_t *f, const int *defs,
+                                          int v, int seen[32], size_t *count) {
+  const nyr_inst_t *in = ny_llvm_address_def(f, defs, v);
+  if (!in)
+    return false;
+  if (ny_llvm_is_typed_buffer_alloc(in))
+    return true;
+  if (!ny_llvm_tb_phi_gep_enabled())
+    return false;
+  for (size_t i = 0; i < *count; ++i)
+    if (seen[i] == v)
+      return true;
+  if (*count == 32)
+    return false;
+  seen[(*count)++] = v;
+  switch (in->op) {
+  case NYIR_COPY:
+    return ny_llvm_is_typed_buffer_value(f, defs, in->a, seen, count);
+  case NYIR_PHI:
+    if (in->phi_incoming_len == 0)
+      return false;
+    for (size_t i = 0; i < in->phi_incoming_len; ++i)
+      if (!ny_llvm_is_typed_buffer_value(f, defs, in->phi_incoming[i].value,
+                                         seen, count))
+        return false;
+    return true;
+  default:
+    return false;
+  }
 }
 
 /*
@@ -549,37 +598,68 @@ static bool ny_llvm_integer_offset(const nyr_func_t *f, const int *defs, int v,
   }
 }
 
-static LLVMValueRef ny_llvm_memory_pointer(ny_llvm_context_t *cg,
-                                           const nyr_func_t *f,
-                                           const nyr_inst_t *access,
-                                           LLVMValueRef *vals,
-                                           const int *defs) {
-  LLVMTypeRef ptr = LLVMPointerType(cg->type_i8, 0);
+static LLVMValueRef ny_llvm_memory_pointer_typed(ny_llvm_context_t *cg,
+                                                 const nyr_func_t *f,
+                                                 const nyr_inst_t *access,
+                                                 LLVMValueRef *vals,
+                                                 const int *defs,
+                                                 LLVMTypeRef elem_type) {
+  LLVMTypeRef ptr = LLVMPointerType(elem_type, 0);
+  LLVMTypeRef byte_ptr = LLVMPointerType(cg->type_i8, 0);
   LLVMValueRef displacement =
       access->imm ? LLVMConstInt(cg->type_i64, (uint64_t)access->imm, false)
                   : NULL;
   if (defs) {
-    const nyr_inst_t *addr = ny_llvm_address_def(f, defs, access->a);
+    int addr_v = access->a;
+    const nyr_inst_t *addr = ny_llvm_address_def(f, defs, addr_v);
+    for (int hop = 0; hop < 8 && addr && addr->op == NYIR_COPY; ++hop) {
+      addr_v = addr->a;
+      addr = ny_llvm_address_def(f, defs, addr_v);
+    }
     if (addr && addr->op == NYIR_ADD_I64) {
-      const nyr_inst_t *base = ny_llvm_address_def(f, defs, addr->a);
+      int base_v = addr->a;
       int index = addr->b;
-      if (!ny_llvm_is_typed_buffer_alloc(base)) {
-        base = ny_llvm_address_def(f, defs, addr->b);
+      int bseen[32];
+      size_t bcount = 0;
+      bool base_ok =
+          ny_llvm_is_typed_buffer_value(f, defs, base_v, bseen, &bcount);
+      if (!base_ok) {
+        base_v = addr->b;
         index = addr->a;
+        bcount = 0;
+        base_ok =
+            ny_llvm_is_typed_buffer_value(f, defs, base_v, bseen, &bcount);
       }
       int seen[32];
       size_t count = 0;
-      if (ny_llvm_is_typed_buffer_alloc(base) &&
+      if (base_ok && base_v >= 0 && base_v < f->next_value &&
           ny_llvm_integer_offset(f, defs, index, seen, &count)) {
         LLVMValueRef offset = ny_as_i64(cg, vals[index]);
         if (displacement)
           offset = LLVMBuildAdd(cg->builder, offset, displacement, "");
         LLVMValueRef p = LLVMBuildIntToPtr(
-            cg->builder, ny_as_i64(cg, vals[base->dst]), ptr, "");
+            cg->builder, ny_as_i64(cg, vals[base_v]), byte_ptr, "");
         /*
          * Do not imply inbounds or change the integer wrapping contract.
          */
-        return LLVMBuildGEP2(cg->builder, cg->type_i8, p, &offset, 1, "");
+        LLVMValueRef gep =
+            LLVMBuildGEP2(cg->builder, cg->type_i8, p, &offset, 1, "");
+        return elem_type == cg->type_i8
+                   ? gep
+                   : LLVMBuildBitCast(cg->builder, gep, ptr, "");
+      }
+    } else if (ny_llvm_tb_phi_gep_enabled() && addr_v >= 0 &&
+               addr_v < f->next_value) {
+      int bseen[32];
+      size_t bcount = 0;
+      if (ny_llvm_is_typed_buffer_value(f, defs, addr_v, bseen, &bcount)) {
+        LLVMValueRef p = LLVMBuildIntToPtr(
+            cg->builder, ny_as_i64(cg, vals[addr_v]), byte_ptr, "");
+        if (displacement)
+          p = LLVMBuildGEP2(cg->builder, cg->type_i8, p, &displacement, 1, "");
+        return elem_type == cg->type_i8
+                   ? p
+                   : LLVMBuildBitCast(cg->builder, p, ptr, "");
       }
     }
   }
@@ -588,6 +668,14 @@ static LLVMValueRef ny_llvm_memory_pointer(ny_llvm_context_t *cg,
   if (displacement)
     address = LLVMBuildAdd(cg->builder, address, displacement, "");
   return LLVMBuildIntToPtr(cg->builder, address, ptr, "");
+}
+
+static LLVMValueRef ny_llvm_memory_pointer(ny_llvm_context_t *cg,
+                                           const nyr_func_t *f,
+                                           const nyr_inst_t *access,
+                                           LLVMValueRef *vals,
+                                           const int *defs) {
+  return ny_llvm_memory_pointer_typed(cg, f, access, vals, defs, cg->type_i8);
 }
 
 static void ny_llvm_record_edge(ny_llvm_nyir_edge_t **edges, size_t *len,
@@ -1734,11 +1822,16 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       unsigned lanes = LLVMGetVectorSize(vector_type);
       if (in->op == NYIR_VEC4_LOAD_F64 || in->op == NYIR_VEC8_LOAD_F32 ||
           in->op == NYIR_VEC4_LOAD_I64 || in->op == NYIR_VEC8_LOAD_I64) {
-        LLVMValueRef address =
-            (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
         LLVMValueRef ptr =
-            LLVMBuildIntToPtr(cg->builder, ny_as_i64(cg, address),
-                              LLVMPointerType(vector_type, 0), "");
+            ny_llvm_tb_phi_gep_enabled()
+                ? ny_llvm_memory_pointer_typed(cg, f, in, vals, address_defs,
+                                               vector_type)
+                : LLVMBuildIntToPtr(
+                      cg->builder,
+                      ny_as_i64(cg, (in->a >= 0 && (size_t)in->a < val_count)
+                                        ? vals[in->a]
+                                        : NULL),
+                      LLVMPointerType(vector_type, 0), "");
         if (in->dst >= 0 && (size_t)in->dst < val_count) {
           LLVMValueRef load = LLVMBuildLoad2(cg->builder, vector_type, ptr, "");
           /*
@@ -1754,14 +1847,19 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       }
       if (in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32 ||
           in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64) {
-        LLVMValueRef address =
-            (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
         int vector_value = in->b >= 0 ? in->b : in->c;
         LLVMValueRef vector =
             ny_llvm_vector_slot(cg, vals, val_count, vector_value, vector_type);
         LLVMValueRef ptr =
-            LLVMBuildIntToPtr(cg->builder, ny_as_i64(cg, address),
-                              LLVMPointerType(vector_type, 0), "");
+            ny_llvm_tb_phi_gep_enabled()
+                ? ny_llvm_memory_pointer_typed(cg, f, in, vals, address_defs,
+                                               vector_type)
+                : LLVMBuildIntToPtr(
+                      cg->builder,
+                      ny_as_i64(cg, (in->a >= 0 && (size_t)in->a < val_count)
+                                        ? vals[in->a]
+                                        : NULL),
+                      LLVMPointerType(vector_type, 0), "");
         LLVMValueRef store = LLVMBuildStore(cg->builder, vector, ptr);
         LLVMSetAlignment(store, 1);
         break;

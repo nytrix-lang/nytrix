@@ -914,15 +914,16 @@ static void mach_recolor_local_spills(nyr_x64_mach_enc_t *e,
  * is live.
  */
 typedef struct {
-  size_t *starts;
-  size_t *ends;
+  uint32_t *starts;
+  uint32_t *ends;
   size_t block_len;
 } mach_loop_gpr_ranges_t;
 
 static bool mach_loop_gpr_ranges_build(const nyr_x64_mach_enc_t *e,
                                        mach_loop_gpr_ranges_t *ranges) {
   const nyr_mach_func_t *m = e ? e->mach : NULL;
-  if (!m || !ranges || !m->block_len || m->vreg_len > SIZE_MAX / m->block_len ||
+  if (!m || !ranges || !m->block_len || m->inst_len >= UINT32_MAX ||
+      m->vreg_len > SIZE_MAX / m->block_len ||
       m->vreg_len * m->block_len > SIZE_MAX / sizeof(*ranges->starts))
     return false;
   size_t len = m->vreg_len * m->block_len;
@@ -938,8 +939,8 @@ static bool mach_loop_gpr_ranges_build(const nyr_x64_mach_enc_t *e,
     const nyr_mach_block_t *block = &m->blocks[b];
     if (!block->inst_count)
       continue;
-    size_t first = block->first_inst;
-    size_t last = first + block->inst_count - 1;
+    uint32_t first = block->first_inst;
+    uint32_t last = first + block->inst_count - 1;
     if (ra->live_in && b < ra->block_count && ra->bit_words) {
       const size_t *in_row = ra->live_in + b * ra->bit_words;
       for (size_t w = 0; w < ra->bit_words; ++w) {
@@ -970,7 +971,7 @@ static bool mach_loop_gpr_ranges_build(const nyr_x64_mach_enc_t *e,
      * Visit operands once instead of rescanning the block for every vreg.
      * Live-in/out still extend the first/last touch to the block edges.
      */
-    for (size_t pc = first; pc <= last; ++pc) {
+    for (uint32_t pc = first; pc <= last; ++pc) {
       const nyr_mach_inst_t *in = &m->insts[pc];
       const nyr_mach_operand_t *ops[] = {&in->dst, &in->src0, &in->src1,
                                          &in->src2};
@@ -979,7 +980,7 @@ static bool mach_loop_gpr_ranges_build(const nyr_x64_mach_enc_t *e,
         if (op->kind != NYR_MACH_OPERAND_VREG || op->as.reg >= m->vreg_len)
           continue;
         size_t at = (size_t)op->as.reg * m->block_len + b;
-        if (ranges->starts[at] == SIZE_MAX)
+        if (ranges->starts[at] == UINT32_MAX)
           ranges->starts[at] = pc;
         if (pc > ranges->ends[at])
           ranges->ends[at] = pc;
@@ -1062,7 +1063,7 @@ static size_t mach_loop_gpr_color_blocker(const mach_loop_gpr_ranges_t *ranges,
   else
     for (size_t b = 0; b < ranges->block_len; ++b)
       has_interval |=
-          ranges->starts[(size_t)vreg * ranges->block_len + b] != SIZE_MAX;
+          ranges->starts[(size_t)vreg * ranges->block_len + b] != UINT32_MAX;
   if (!has_interval)
     return MACH_LOOP_GPR_NO_INTERVAL;
   for (size_t other = color_heads[color]; other != SIZE_MAX;
@@ -1084,7 +1085,8 @@ static size_t mach_loop_gpr_color_blocker(const mach_loop_gpr_ranges_t *ranges,
       for (size_t b = 0; b < ranges->block_len; ++b) {
         size_t a = (size_t)vreg * ranges->block_len + b;
         size_t c = other * ranges->block_len + b;
-        if (ranges->starts[a] != SIZE_MAX && ranges->starts[c] != SIZE_MAX &&
+        if (ranges->starts[a] != UINT32_MAX &&
+            ranges->starts[c] != UINT32_MAX &&
             ranges->starts[a] <= ranges->ends[c] &&
             ranges->starts[c] <= ranges->ends[a])
           return other;
@@ -1111,7 +1113,7 @@ static bool mach_loop_gpr_call_safe(const nyr_mach_func_t *m,
     return false;
   for (size_t b = 0; b < m->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] == SIZE_MAX)
+    if (ranges->starts[at] == UINT32_MAX)
       continue;
     for (size_t pc = ranges->starts[at]; pc <= ranges->ends[at]; ++pc) {
       nyr_mach_opcode_t op = m->insts[pc].opcode;
@@ -1140,7 +1142,7 @@ static bool mach_loop_gpr_r8_safe(const nyr_mach_func_t *m,
     return false;
   for (size_t b = 0; b < m->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] == SIZE_MAX)
+    if (ranges->starts[at] == UINT32_MAX)
       continue;
     for (size_t pc = ranges->starts[at]; pc <= ranges->ends[at]; ++pc) {
       const nyr_mach_inst_t *in = &m->insts[pc];
@@ -1218,7 +1220,7 @@ static bool mach_loop_gpr_fixed_safe(const nyr_mach_func_t *m,
     return false;
   for (size_t b = 0; b < m->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] == SIZE_MAX)
+    if (ranges->starts[at] == UINT32_MAX)
       continue;
     for (size_t pc = ranges->starts[at]; pc <= ranges->ends[at]; ++pc) {
       const nyr_mach_inst_t *in = &m->insts[pc];
@@ -1391,7 +1393,7 @@ static bool mach_loop_gpr_vector_safe(const nyr_mach_func_t *m,
     return false;
   for (size_t b = 0; b < m->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] == SIZE_MAX)
+    if (ranges->starts[at] == UINT32_MAX)
       continue;
     for (size_t pc = ranges->starts[at]; pc <= ranges->ends[at]; ++pc) {
       const nyr_mach_inst_t *in = &m->insts[pc];
@@ -1422,7 +1424,7 @@ static bool mach_loop_gpr_store_safe(const nyr_mach_func_t *m,
     return true;
   for (size_t b = 0; b < ranges->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] == SIZE_MAX)
+    if (ranges->starts[at] == UINT32_MAX)
       continue;
     for (size_t pc = ranges->starts[at]; pc <= ranges->ends[at]; ++pc) {
       const nyr_mach_inst_t *in = &m->insts[pc];
@@ -1500,7 +1502,7 @@ static bool mach_loop_gpr_vector_safe_indexed(
     return mach_loop_gpr_vector_safe(m, ranges, vreg);
   for (size_t b = 0; b < ranges->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] != SIZE_MAX &&
+    if (ranges->starts[at] != UINT32_MAX &&
         mach_loop_hazard_has(index, MACH_LOOP_HAZARD_VECTOR, ranges->starts[at],
                              ranges->ends[at]))
       return false;
@@ -1517,7 +1519,7 @@ static bool mach_loop_gpr_store_safe_indexed(
     return true;
   for (size_t b = 0; b < ranges->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] != SIZE_MAX &&
+    if (ranges->starts[at] != UINT32_MAX &&
         mach_loop_hazard_has(index, MACH_LOOP_HAZARD_INDIRECT_STORE,
                              ranges->starts[at], ranges->ends[at]))
       return false;
@@ -1534,7 +1536,7 @@ static bool mach_loop_gpr_call_safe_indexed(
                                    allow_ordinary_calls);
   for (size_t b = 0; b < ranges->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
-    if (ranges->starts[at] == SIZE_MAX)
+    if (ranges->starts[at] == UINT32_MAX)
       continue;
     size_t start = ranges->starts[at], end = ranges->ends[at];
     if (mach_loop_hazard_has(index, MACH_LOOP_HAZARD_OPAQUE, start, end) ||
@@ -1599,8 +1601,8 @@ static bool mach_recolor_interval_safe(
     for (size_t rb = 0; rb < ranges.block_len; ++rb) {
       size_t source_at = (size_t)src * ranges.block_len + rb;
       size_t other_at = other * ranges.block_len + rb;
-      if (ranges.starts[source_at] != SIZE_MAX &&
-          ranges.starts[other_at] != SIZE_MAX &&
+      if (ranges.starts[source_at] != UINT32_MAX &&
+          ranges.starts[other_at] != UINT32_MAX &&
           ranges.starts[source_at] <= ranges.ends[other_at] &&
           ranges.starts[other_at] <= ranges.ends[source_at]) {
         safe = false;
@@ -1878,8 +1880,19 @@ static bool mach_loop_root_boost(const nyr_mach_func_t *m, size_t def_pc) {
     arith = env && *env && strcmp(env, "0") != 0;
   }
   if (!arith &&
-      (op == NYR_MACH_ADD || op == NYR_MACH_SUB || op == NYR_MACH_LEA))
+      (op == NYR_MACH_ADD || op == NYR_MACH_SUB || op == NYR_MACH_LEA)) {
+    if (op == NYR_MACH_LEA &&
+        m->insts[def_pc].src0.kind == NYR_MACH_OPERAND_FRAME) {
+      static int no_frame_lea = -1;
+      if (no_frame_lea < 0) {
+        const char *env = getenv("NYTRIX_NO_LOOP_ROOT_FRAME_LEA");
+        no_frame_lea = env && *env && strcmp(env, "0") != 0;
+      }
+      if (!no_frame_lea)
+        return true;
+    }
     return false;
+  }
   return true;
 }
 
@@ -2011,7 +2024,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
   if (present)
     for (size_t v = 0; v < m->vreg_len; ++v)
       for (size_t b = 0; b < ranges.block_len; ++b)
-        if (ranges.starts[v * ranges.block_len + b] != SIZE_MAX)
+        if (ranges.starts[v * ranges.block_len + b] != UINT32_MAX)
           present[v] |= mach_set_bit(b);
   for (size_t v = 0; v < m->vreg_len; ++v)
     vector_safe[v] =
@@ -2023,6 +2036,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
   for (size_t v = 0; v < m->vreg_len; ++v) {
     colors[v] = -1;
     def_pc[v] = SIZE_MAX;
+    def_depth[v] = UINT_MAX;
     hint_peer[v] = UINT32_MAX;
   }
   /*
@@ -2236,7 +2250,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
         score[v] *= loop_cmp_use[v] ? 3u : 2u;
       unsigned max_live_depth = 0;
       for (size_t b = 0; b < ranges.block_len; ++b)
-        if (ranges.starts[(size_t)v * ranges.block_len + b] != SIZE_MAX &&
+        if (ranges.starts[(size_t)v * ranges.block_len + b] != UINT32_MAX &&
             depth[b] > max_live_depth)
           max_live_depth = depth[b];
       if (max_live_depth > max_use_depth[v]) {
@@ -2264,9 +2278,18 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
    * they mirror another vreg; doubling them cost `viterbi` 7.4% by
    * outranking its DP recurrences.
    */
+  static int no_def_depth_fix = -1;
+  if (no_def_depth_fix < 0) {
+    const char *env = getenv("NYTRIX_NO_DEF_DEPTH_FIX");
+    no_def_depth_fix = env && *env && strcmp(env, "0") != 0;
+  }
   for (uint32_t v = 0; v < m->vreg_len; ++v)
     loop_root[v] = has_loop_activity[v] && address_feed[v] && defs[v] <= 1 &&
-                   def_depth[v] < max_use_depth[v];
+                   (no_def_depth_fix
+                        ? (def_depth[v] == UINT_MAX ? 0 : def_depth[v]) <
+                              max_use_depth[v]
+                        : (def_depth[v] != UINT_MAX &&
+                           def_depth[v] < max_use_depth[v]));
   size_t gp_limit = mach_gpr_color_count(m, e->target);
   mach_loop_cand_t *cands = malloc(m->vreg_len * sizeof(*cands));
   size_t cand_len = 0;
@@ -2381,7 +2404,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
         if (block_local_defs && block_color_mask && gp_limit > 9) {
           uint32_t cbit = 1u << (unsigned)color;
           for (size_t b = 0; b < ranges.block_len; ++b) {
-            if (ranges.starts[(size_t)v * ranges.block_len + b] == SIZE_MAX)
+            if (ranges.starts[(size_t)v * ranges.block_len + b] == UINT32_MAX)
               continue;
             if (block_local_defs[b] >= 16 && !(block_color_mask[b] & cbit) &&
                 __builtin_popcount(block_color_mask[b]) >= 9) {
@@ -2418,7 +2441,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
     ++selected;
     if (block_color_mask)
       for (size_t b = 0; b < ranges.block_len; ++b)
-        if (ranges.starts[(size_t)v * ranges.block_len + b] != SIZE_MAX)
+        if (ranges.starts[(size_t)v * ranges.block_len + b] != UINT32_MAX)
           block_color_mask[b] |= 1u << (unsigned)chosen;
     if (ny_dbg_is_enabled(NY_DBG_DEEP)) {
       ny_dbg_enter_context(name);
@@ -2608,7 +2631,7 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
         size_t *row = coverage + (size_t)c * (m->inst_len + 1);
         for (size_t rb = 0; rb < ranges.block_len; ++rb) {
           size_t at = v * ranges.block_len + rb;
-          if (ranges.starts[at] == SIZE_MAX || ranges.ends[at] >= m->inst_len)
+          if (ranges.starts[at] == UINT32_MAX || ranges.ends[at] >= m->inst_len)
             continue;
           row[ranges.starts[at]] += 1;
           row[ranges.ends[at] + 1] -= 1; /* wraps; restored by prefix sum */

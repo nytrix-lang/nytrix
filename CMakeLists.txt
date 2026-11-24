@@ -3047,21 +3047,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         -P "${NYR_C_TEST_DIR}/harness-fault-injection.cmake"
     )
     set_tests_properties(nyr-c-harness-fault-injection PROPERTIES TIMEOUT 60)
-    # Kernel acceptance: build Linux with NYC and boot it in QEMU. It takes
-    # about fifteen minutes, so it is registered only when a Linux source tree
-    # is named with -DNYC_LINUX_SRC=/path/to/linux-7.3.
-    set(NYC_LINUX_SRC "" CACHE PATH
-        "Linux source tree for the NYC kernel boot test (empty disables it)")
-    if(NYC_LINUX_SRC AND EXISTS "${NYC_LINUX_SRC}/Makefile")
-      add_test(
-        NAME nyc-kernel-boot
-        COMMAND bash "${NYR_C_TEST_DIR}/kernel/kernel-boot-smoke.sh"
-          "${NYC_LINUX_SRC}" "${CMAKE_BINARY_DIR}/nyc-kernel-boot"
-          "$<TARGET_FILE:nyc>"
-      )
-      set_tests_properties(nyc-kernel-boot PROPERTIES TIMEOUT 3600
-        RUN_SERIAL TRUE LABELS "kernel")
-    endif()
+    # Kernel acceptance tests (nyc-kernel-boot, nyc-kernel-boot-latest).
+    add_subdirectory("${NYR_C_TEST_DIR}/kernel"
+                     "${CMAKE_BINARY_DIR}/nyc-kernel-tests")
     nytrix_add_nshape_test(
       nyr-benchmark-knucleotide
       etc/labs/tests/bench/algorithms/knucleotide.nshape
