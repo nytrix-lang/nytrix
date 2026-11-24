@@ -983,6 +983,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_ilp_reassociate, "ilp_reassociate"},
     {nyr_loop_sub_iv, "loop_sub_iv"},
     {nyr_iv_merge, "iv_merge"},
+    {nyr_abs_range_fold, "abs_range_fold"},
     {nyr_loop_store_promote, "loop_store_promote"},
     {nyr_and_branch_split, "and_branch_split"},
     {nyr_addr_base_reassoc, "addr_base_reassoc"},
@@ -2183,6 +2184,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
                                                       nyr_dce};
       nyr_run_seq(f, c_canon, 3, stats, dump, &ok);
     }
+    if (ok && !nyr_pass_stopped && nyr_has_loop(f))
+      nyr_run_pass(f, nyr_abs_range_fold, stats, dump, &ok);
     if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
         !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f,
@@ -2356,6 +2359,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_run_seq(f, pre_vec_canon_nocse, 8, stats, dump, &ok);
         }
       }
+      if (ok && !nyr_pass_stopped)
+        nyr_run_pass(f, nyr_abs_range_fold, stats, dump, &ok);
       if (ok && getenv("NYTRIX_DUMP_PREVEC_NYIR"))
         nyr_dump(stderr, f, "prevec");
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&

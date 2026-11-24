@@ -911,6 +911,8 @@ bool nyr_ilp_reassociate(nyr_func_t *f);
 bool nyr_loop_sub_iv(nyr_func_t *f);
 /* Merge header IVs that step by the same constant into one plus offsets. */
 bool nyr_iv_merge(nyr_func_t *f);
+/* C only: |x| < C -> (x + C-1) <u (2C-1), as one biased signed compare. */
+bool nyr_abs_range_fold(nyr_func_t *f);
 /* Share (B + x) across addresses (B + C_k) + x; C_k becomes a displacement. */
 bool nyr_addr_base_reassoc(nyr_func_t *f);
 /* Versioned register promotion of a loop-invariant cell (runtime overlap check). */
