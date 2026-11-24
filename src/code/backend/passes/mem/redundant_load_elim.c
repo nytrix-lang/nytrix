@@ -324,7 +324,8 @@ static nyr_inst_t rle_make_inst(nyr_op_t op, int dst, int a, int b, int c,
 static bool rle_is_direct_memcpy(const nyr_inst_t *in) {
   return in && in->op == NYIR_CALL && in->symbol &&
          strcmp(in->symbol, "memcpy") == 0 && in->imm == 3 &&
-         !(in->flags & (NYIR_INST_F_INDIRECT | NYIR_INST_F_SRET)) &&
+         !(in->flags & (NYIR_INST_F_INDIRECT | NYIR_INST_F_SRET |
+                        NYIR_INST_F_SYMBOL_NONPREEMPTIBLE)) &&
          !(in->effects & NYIR_EFFECT_VOLATILE);
 }
 

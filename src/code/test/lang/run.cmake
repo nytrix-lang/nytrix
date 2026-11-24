@@ -4350,6 +4350,33 @@ if(NOT rdmsr_wide_text MATCHES "rdmsr" OR
    NOT rdmsr_wide_text MATCHES "movq[ \t]+%r10, \\(%rax\\)")
   message(FATAL_ERROR "the wide rdmsr was dropped or stored with the wrong width:\n${rdmsr_wide_text}")
 endif()
+# A zero-initialised __int128 whose address is taken needs its own 16-byte
+# area (it used to overlap the saved frame), and its truth value covers both
+# words, not the area pointer.
+file(WRITE "${BINARY_DIR}/int128-address-truth.c" [=[
+typedef unsigned long u64;
+__attribute__((noinline)) int probe(int set_high) {
+  __uint128_t zero = 0, wide = 0;
+  u64 *words = (u64 *)&wide;
+  if (set_high)
+    words[1] = 64;
+  return (!zero ? 1 : 0) | (wide ? 2 : 0) | (!wide ? 4 : 0);
+}
+int main(void) { return probe(0) == 5 && probe(1) == 3 ? 0 : 1; }
+]=])
+foreach(level IN ITEMS -O0 -O2)
+  nyc_execute_ok(
+    [=[int128-address-truth compilation failed\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${level} -S "${BINARY_DIR}/int128-address-truth.c"
+            -o "${BINARY_DIR}/int128-address-truth.s")
+  nyc_execute_ok(
+    [=[int128-address-truth link failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" "${BINARY_DIR}/int128-address-truth.s"
+            -o "${BINARY_DIR}/int128-address-truth")
+  nyc_execute_ok(
+    [=[int128-address-truth returned an incorrect result at ${level}\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/int128-address-truth")
+endforeach()
 file(WRITE "${BINARY_DIR}/asm-unsupported-dropped.c" [=[
 unsigned long g(unsigned long r, unsigned long y) {
   unsigned long q;

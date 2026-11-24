@@ -2377,6 +2377,11 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
   if (!p->no_builtin && !fn->defined && !fn->has_asm_alias &&
       (ny_ctok_eq(name, "malloc") || ny_ctok_eq(name, "free")))
     call.flags |= NYIR_INST_F_LIBC_ALLOC;
+  /* A memcpy the program defines is an ordinary call whose side effects
+   * must survive: mark it resolved locally so the NYIR small-copy expansion
+   * leaves it alone. */
+  if (ny_ctok_eq(name, "memcpy") && fn->defined)
+    call.flags |= NYIR_INST_F_SYMBOL_NONPREEMPTIBLE;
   if (!call.symbol) {
     fail(p, "out of memory creating call symbol");
     return (c_value_t){-1, C_BAD, NULL};
@@ -8840,6 +8845,9 @@ static c_value_t parse_unary(c_parser_t *p) {
       return (c_value_t){base, C_AGG, value.agg};
     }
     if (ny_ctok_eq(op, "!")) {
+      value = lower_int128_collapse(p, value);
+      if (value.value < 0)
+        return (c_value_t){-1, C_BAD, NULL};
       bool is_float = c_type_is_float(value.type);
       c_type_t float_type = is_float ? value.type : C_F64;
       int zero = emit_value(

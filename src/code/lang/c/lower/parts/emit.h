@@ -56,7 +56,29 @@ static int emit_i64_constant(c_parser_t *p, int64_t value) {
                                     .scalar_class = NYIR_SCALAR_I64_RAW});
 }
 
+static int lower_int128_word(c_parser_t *p, int base, size_t offset);
+
+/* A 128-bit integer value is a pointer to its two words; its truth is
+ * whether either word is nonzero, not whether the pointer is. */
+static c_value_t lower_int128_collapse(c_parser_t *p, c_value_t value) {
+  if (value.type != C_AGG || !value.agg || !value.agg->is_int128 ||
+      value.value < 0)
+    return value;
+  int low = lower_int128_word(p, value.value, 0);
+  int high = lower_int128_word(p, value.value, 8);
+  int either = low < 0 || high < 0
+                   ? -1
+                   : emit_value(p, (nyr_inst_t){.op = NYIR_OR_I64,
+                                                .dst = -1,
+                                                .a = low,
+                                                .b = high,
+                                                .scalar_class =
+                                                    NYIR_SCALAR_I64_RAW});
+  return (c_value_t){either, C_I64, NULL};
+}
+
 static int lower_truth_value(c_parser_t *p, c_value_t condition) {
+  condition = lower_int128_collapse(p, condition);
   if (!c_type_is_float(condition.type))
     return condition.value;
   int zero = emit_value(
@@ -75,6 +97,9 @@ static int lower_truth_value(c_parser_t *p, c_value_t condition) {
 }
 
 static int lower_boolean_value(c_parser_t *p, c_value_t value) {
+  value = lower_int128_collapse(p, value);
+  if (value.value < 0)
+    return -1;
   if (c_type_is_float(value.type))
     return lower_truth_value(p, value);
   int zero = emit_i64_constant(p, 0);

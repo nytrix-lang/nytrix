@@ -3109,15 +3109,15 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local = find_local(p, name);
           bool stored = false;
           if (local && int128_scalar_zero) {
-            int address = emit_value(
-                p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                .dst = -1,
-                                .imm = (int64_t)local->slot,
-                                .scalar_class = NYIR_SCALAR_I64_RAW});
+            /* The local holds a pointer to a 16-byte area; zeroing the
+             * pointer's own 8-byte slot would overrun into the frame. */
+            size_t area_offset = 0;
+            int address = lower_int128_allocate(p, decl_agg, &area_offset);
             int zero = emit_i64_constant(p, 0);
             stored = address >= 0 && zero >= 0 &&
                      lower_int128_store(p, address, 0, zero) >= 0 &&
-                     lower_int128_store(p, address, 8, zero) >= 0;
+                     lower_int128_store(p, address, 8, zero) >= 0 &&
+                     lower_local_store(p, local, address);
           } else if (local) {
             stored = lower_local_store(p, local, initial_value);
           }
