@@ -3442,6 +3442,47 @@ static bool segment_color_survives_clobbers(const nyr_mach_func_t *mach,
   return true;
 }
 
+static bool regalloc_inv_vec_swap_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_INV_VEC_PREHEADER_SWAP");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  return disabled != 0;
+}
+
+static bool has_carried_succ_for_vreg(const nyr_mach_regalloc_t *a,
+                                      const size_vec_t *succ,
+                                      const size_vec_t *by_block, size_t block,
+                                      uint32_t vreg) {
+  if (!a || !succ || !by_block || block >= a->block_count)
+    return false;
+  for (size_t si = 0; si < succ[block].len; ++si) {
+    size_t q = succ[block].data[si];
+    if (q >= a->block_count)
+      continue;
+    for (size_t k = 0; k < by_block[q].len; ++k) {
+      const nyr_mach_live_segment_t *s = &a->segments[by_block[q].data[k]];
+      if (s->vreg == vreg && s->carried)
+        return true;
+    }
+  }
+  return false;
+}
+
+static bool block_vreg_is_unique(const nyr_mach_regalloc_t *a,
+                                 const size_vec_t *by_block, size_t block,
+                                 const nyr_mach_live_segment_t *seg) {
+  if (!a || !by_block || !seg || block >= a->block_count)
+    return false;
+  for (size_t k = 0; k < by_block[block].len; ++k) {
+    const nyr_mach_live_segment_t *s = &a->segments[by_block[block].data[k]];
+    if (s != seg && s->vreg == seg->vreg)
+      return false;
+  }
+  return true;
+}
+
 static void coalesce_segments(const nyr_mach_func_t *mach,
                               nyr_mach_regalloc_t *a, const size_vec_t *succ,
                               const size_vec_t *pred,
@@ -3558,9 +3599,55 @@ static void coalesce_segments(const nyr_mach_func_t *mach,
     }
     if (class_legal && (!conflicts || evictable) &&
         coalesce_preg_reaches_edge(mach, x, preserve_gpr_calls)) {
-      if (conflicts)
+      if (conflicts) {
+        if (!regalloc_inv_vec_swap_disabled() && mach->vreg_classes &&
+            x->vreg < mach->vreg_len &&
+            mach->vreg_classes[x->vreg] == NYR_MACH_REGCLASS_VECTOR &&
+            by_block && y->block < a->block_count) {
+          const size_t *indices = by_block[y->block].data;
+          size_t count = by_block[y->block].len;
+          for (size_t k = 0; k < count; ++k) {
+            nyr_mach_live_segment_t *other = &a->segments[indices[k]];
+            if (other == y || other->vreg == excluded_vreg ||
+                other->color != x->color || other->end < y->start ||
+                y->end < other->start)
+              continue;
+            if (other->carried || other->acyclic_carried ||
+                has_carried_succ_for_vreg(a, succ, by_block, y->block,
+                                          other->vreg) ||
+                !block_vreg_is_unique(a, by_block, y->block, other))
+              continue;
+            int moved = -1;
+            for (int pass = -1; pass < (int)a->color_count && moved < 0;
+                 ++pass) {
+              int alt = pass < 0 ? y->color : pass;
+              if (pass >= 0 && (alt == x->color || alt == y->color))
+                continue;
+              if (!segment_accepts_color(mach, other, a->color_count, alt) ||
+                  !segment_color_survives_clobbers(
+                      mach, other, NYR_MACH_REGCLASS_VECTOR, alt,
+                      preserve_gpr_calls))
+                continue;
+              bool busy = false;
+              for (size_t j = 0; j < count; ++j) {
+                const nyr_mach_live_segment_t *s = &a->segments[indices[j]];
+                if (s == y || s == other || s->color != alt)
+                  continue;
+                if (!(s->end < other->start || other->end < s->start)) {
+                  busy = true;
+                  break;
+                }
+              }
+              if (!busy)
+                moved = alt;
+            }
+            if (moved >= 0)
+              other->color = moved;
+          }
+        }
         block_evict_color_conflicts_excl(a, y, x->color, by_block,
                                          &excluded_vreg, 1);
+      }
       y->color = x->color;
       x->spill = false;
       x->spill_reason = NYR_MACH_SPILL_NONE;
@@ -3879,6 +3966,56 @@ static bool preheader_align_vector_color(
   return true;
 }
 
+static bool body_align_vector_color(
+    const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a, const uint8_t *body,
+    size_t nb, uint32_t v, int want, const size_vec_t *by_block,
+    const uint8_t *locked_vreg, size_t nv, const size_vec_t *succ,
+    bool preserve_gpr_calls) {
+  if (!mach || !a || !body || !by_block || want < 0 ||
+      (size_t)want >= a->color_count)
+    return false;
+  for (size_t b = 0; b < nb; ++b) {
+    if (!body[b])
+      continue;
+    bool unique = false;
+    nyr_mach_live_segment_t *seg =
+        segment_in_block_vreg(a, v, b, by_block, &unique);
+    if (!seg || !unique || seg->color < 0 || seg->color == want ||
+        seg->carried ||
+        !segment_accepts_color(mach, seg, a->color_count, want) ||
+        !segment_color_survives_clobbers(mach, seg, NYR_MACH_REGCLASS_VECTOR,
+                                         want, preserve_gpr_calls))
+      return false;
+    for (size_t k = 0; k < by_block[b].len; ++k) {
+      const nyr_mach_live_segment_t *s = &a->segments[by_block[b].data[k]];
+      if (s == seg || s->color != want)
+        continue;
+      if (s->carried || s->acyclic_carried ||
+          (locked_vreg && s->vreg < nv && locked_vreg[s->vreg]) ||
+          has_carried_succ_for_vreg(a, succ, by_block, b, s->vreg) ||
+          !block_vreg_is_unique(a, by_block, b, s) ||
+          !segment_accepts_color(mach, s, a->color_count, seg->color) ||
+          !segment_color_survives_clobbers(mach, s, NYR_MACH_REGCLASS_VECTOR,
+                                           seg->color, preserve_gpr_calls))
+        return false;
+    }
+  }
+  for (size_t b = 0; b < nb; ++b) {
+    if (!body[b])
+      continue;
+    nyr_mach_live_segment_t *seg =
+        segment_in_block_vreg(a, v, b, by_block, NULL);
+    int old = seg->color;
+    for (size_t k = 0; k < by_block[b].len; ++k) {
+      nyr_mach_live_segment_t *s = &a->segments[by_block[b].data[k]];
+      if (s != seg && s->color == want)
+        s->color = old;
+    }
+    seg->color = want;
+  }
+  return true;
+}
+
 static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
                                          nyr_mach_regalloc_t *a,
                                          const size_vec_t *succ,
@@ -3891,10 +4028,12 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
   uint8_t *body = calloc(nb, 1);
   uint8_t *defined = calloc(nv, 1);
   uint8_t *used = calloc(nv, 1);
+  uint8_t *carried_vreg = calloc(nv, 1);
   uint32_t *def_count = calloc(nv, sizeof(*def_count));
   size_t *def_block = malloc(nv * sizeof(*def_block));
   size_t *work = malloc(nb * sizeof(*work));
-  if (!body || !defined || !used || !def_count || !def_block || !work)
+  if (!body || !defined || !used || !carried_vreg || !def_count || !def_block ||
+      !work)
     goto done;
   for (uint32_t v = 0; v < nv; ++v)
     def_block[v] = SIZE_MAX;
@@ -3939,6 +4078,7 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
     bool natural = true, has_call = false;
     memset(defined, 0, nv);
     memset(used, 0, nv);
+    memset(carried_vreg, 0, nv);
     for (size_t b = 0; b < nb && natural; ++b) {
       if (!body[b])
         continue;
@@ -3992,6 +4132,44 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
       }
       if (!ok || color < 0)
         continue;
+      if (!regalloc_inv_vec_swap_disabled()) {
+        int want = -1;
+        bool can_align_body = true;
+        bool has_outside = false;
+        for (size_t pi = 0; pi < pred[h].len && can_align_body; ++pi) {
+          size_t p = pred[h].data[pi];
+          if (body[p])
+            continue;
+          has_outside = true;
+          const nyr_mach_block_t *pb = &mach->blocks[p];
+          if (!pb->inst_count) {
+            can_align_body = false;
+            break;
+          }
+          size_t last = pb->first_inst + pb->inst_count - 1;
+          const nyr_mach_live_segment_t *ps = NULL;
+          for (size_t k = 0; k < by_block[p].len; ++k) {
+            const nyr_mach_live_segment_t *cand =
+                &a->segments[by_block[p].data[k]];
+            if (cand->vreg == v && cand->end == last)
+              ps = cand;
+          }
+          if (!ps || ps->color < 0 ||
+              !(ps->carried || !ps->reload || def_block[v] == p)) {
+            can_align_body = false;
+            break;
+          }
+          if (want < 0)
+            want = ps->color;
+          else if (want != ps->color)
+            can_align_body = false;
+        }
+        if (has_outside && can_align_body && want >= 0 && want != color &&
+            body_align_vector_color(mach, a, body, nb, v, want, by_block,
+                                    carried_vreg, nv, succ, preserve_gpr_calls))
+          color = want;
+      }
+      const uint8_t *lock = !regalloc_inv_vec_swap_disabled() ? carried_vreg : used;
       bool entry = false;
       for (size_t pi = 0; pi < pred[h].len && ok; ++pi) {
         size_t p = pred[h].data[pi];
@@ -4018,7 +4196,7 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
         else if (ps->color != color) {
           if (ps->carried ||
               !preheader_align_vector_color(mach, a, p, ps, color, by_block,
-                                            used, nv, preserve_gpr_calls))
+                                            lock, nv, preserve_gpr_calls))
             ok = false;
         }
       }
@@ -4056,12 +4234,14 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
         if (!has_unpub_exit)
           seg->spill = false;
       }
+      carried_vreg[v] = 1;
     }
   }
 done:
   free(body);
   free(defined);
   free(used);
+  free(carried_vreg);
   free(def_count);
   free(def_block);
   free(work);
