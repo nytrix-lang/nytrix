@@ -6591,6 +6591,15 @@ static bool mach_sib_elided_lea_preg_disabled(void) {
   return disabled != 0;
 }
 
+static bool mach_sext32_direct_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_SEXT32_DIRECT");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 /*
  * Query decomposition of an address vreg into base/index/scale physical
  * registers. A single-use LEA feeding an adjacent load/store is
@@ -16989,6 +16998,13 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 if (!mach_u8(e, 0xc4) || !mach_u8(e, b1) || !mach_u8(e, b2) ||
                     !mach_u8(e, 0xf0) || !mach_u8(e, modrm) ||
                     !mach_u8(e, (unsigned char)count))
+                  return false;
+              } else if (in->sext32 && sp >= 0 &&
+                         !mach_sext32_direct_disabled()) {
+                if (!mach_rex(e, true, dp >= 8, false, sp >= 8) ||
+                    !mach_u8(e, 0x63) ||
+                    !mach_u8(e, (unsigned char)(0xc0 | ((dp & 7) << 3) |
+                                                (sp & 7))))
                   return false;
               } else {
                 if (!mach_load_src_preg(e, &in->src0, (unsigned)dp))
