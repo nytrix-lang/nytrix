@@ -5877,6 +5877,13 @@ static c_value_t parse_primary(c_parser_t *p) {
             return (c_value_t){-1, C_BAD, NULL};
           return member;
         }
+        if (global->type == C_F32 && !global->object_seg) {
+          int single = lower_load_f32_field(p, address, global->is_volatile);
+          if (single < 0 ||
+              !record_lvalue(p, single, address, C_F32, global->is_volatile))
+            return (c_value_t){-1, C_BAD, NULL};
+          return (c_value_t){single, C_F32, NULL};
+        }
         uint8_t memory_flags =
             global->type == C_I32 || global->type == C_U32
                 ? NYIR_INST_F_MEM_I32

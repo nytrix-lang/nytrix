@@ -15720,7 +15720,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
   *matched = true;
   if (type != C_I32 && type != C_U32 && type != C_U8 && type != C_CHAR &&
       type != C_I16 && type != C_U16 && type != C_I64 && type != C_U64 &&
-      type != C_F64 && type != C_AGG && type != C_BAD &&
+      type != C_F32 && type != C_F64 && type != C_AGG && type != C_BAD &&
       !c_type_is_complex(type) && !c_type_is_pointer(type)) {
     fail(p, "unsupported file-scope C object type");
     return false;
@@ -15900,14 +15900,14 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       relocs = initializer.relocs;
       reloc_count = initializer.reloc_count;
     } else {
-      if (type == C_F64 || type == C_C64 || type == C_C128) {
+      if (type == C_F32 || type == C_F64 || type == C_C64 || type == C_C128) {
         double value;
         if (!parse_global_float_add(p, &p->pos, &value)) {
           free(bytes);
           fail(p, "invalid file-scope floating initializer");
           return false;
         }
-        if (type == C_C64) {
+        if (type == C_C64 || type == C_F32) {
           float narrowed = (float)value; /* real lane; imaginary stays zero */
           memcpy(bytes, &narrowed, sizeof(narrowed));
         } else {

@@ -4033,8 +4033,35 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
       return false;
     return lower_copy_struct(p, address, value.value, global->agg->size);
   }
+  if ((global->type == C_F32 || global->type == C_F64) && value.value >= 0 &&
+      c_type_is_integer(value.type)) {
+    value.value = emit_value(
+        p, (nyr_inst_t){.op = global->type == C_F32 ? NYIR_I64_TO_F32
+                                                    : NYIR_I64_TO_F64,
+                        .dst = -1,
+                        .a = value.value,
+                        .scalar_class = global->type == C_F32
+                                            ? NYIR_SCALAR_F32
+                                            : NYIR_SCALAR_F64});
+    value.type = global->type;
+  }
+  if (global->type == C_F64 && value.value >= 0 && value.type == C_F32) {
+    value.value = emit_value(p, (nyr_inst_t){.op = NYIR_F32_TO_F64,
+                                             .dst = -1,
+                                             .a = value.value,
+                                             .scalar_class = NYIR_SCALAR_F64});
+    value.type = C_F64;
+  }
+  if (global->type == C_F32 && value.value >= 0 && value.type == C_F64) {
+    value.value = emit_value(p, (nyr_inst_t){.op = NYIR_F64_TO_F32,
+                                             .dst = -1,
+                                             .a = value.value,
+                                             .scalar_class = NYIR_SCALAR_F32});
+    value.type = C_F32;
+  }
   bool valid =
       global->type == C_F64             ? value.type == C_F64
+      : global->type == C_F32 ? (value.type == C_F32 || value.type == C_F64)
       : c_type_is_integer(global->type) ? c_type_is_integer(value.type)
       : c_type_is_pointer(global->type)
           ? c_type_is_pointer(value.type) || c_type_is_integer(value.type)
@@ -4150,6 +4177,13 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
     c_lvalue_t target = {.address = address,
                          .is_volatile = global->is_volatile,
                          .segment_flags = c_seg_flags(global->object_seg)};
+    return lower_store_scalar_lvalue(p, &target, global->type, value.value);
+  }
+  if (global->type == C_I16 || global->type == C_U16 ||
+      global->type == C_CHAR || global->type == C_F32) {
+    /* Narrow objects must not be written with a full-width store. */
+    c_lvalue_t target = {.address = address,
+                         .is_volatile = global->is_volatile};
     return lower_store_scalar_lvalue(p, &target, global->type, value.value);
   }
   uint8_t flags = global->type == C_I32 || global->type == C_U32 ||
