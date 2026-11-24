@@ -6329,6 +6329,28 @@ static c_value_t parse_primary(c_parser_t *p) {
         return address < 0 ? (c_value_t){-1, C_BAD, NULL}
                            : (c_value_t){address, C_AGG_ARRAY_PTR, local->agg};
       }
+      if (local->type == C_C64_PTR || local->type == C_C128_PTR) {
+        /* p[i] on a complex pointer is the complex object at p + i. */
+        c_value_t index = parse_expr(p, 1);
+        if (index.value < 0 || !c_type_is_integer(index.type) ||
+            !expect(p, "]")) {
+          fail(p, "complex pointer index must be an integer");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        bool single = local->type == C_C64_PTR;
+        int stride = emit_i64_constant(p, single ? 8 : 16);
+        int scaled = stride < 0 ? -1
+                                : emit_i64_binary(p, NYIR_MUL_I64, index.value,
+                                                  stride);
+        int address = scaled < 0 ? -1
+                                 : emit_i64_binary(p, NYIR_ADD_I64, value,
+                                                   scaled);
+        if (address < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        return (c_value_t){address, C_AGG,
+                           single ? &lower_complex_value_f32
+                                  : &lower_complex_value_f64};
+      }
       if (local->type != C_CHAR_PTR && local->type != C_I8_PTR &&
           local->type != C_I32_PTR && local->type != C_U32_PTR &&
           local->type != C_I16_PTR && local->type != C_U16_PTR &&

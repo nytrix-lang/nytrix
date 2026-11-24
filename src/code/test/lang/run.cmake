@@ -4256,6 +4256,27 @@ foreach(complex_opt -O0 -O2)
   endif()
 endforeach()
 endforeach()
+file(READ "${SOURCE_DIR}/c/complex-pointer-index.expected" complex_index_expected)
+foreach(complex_opt -O0 -O2)
+  nyc_execute_ok(
+    [=[nyc failed to compile the complex-pointer-index fixture (${status})\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${complex_opt} --all "${NY_C_CORPUS_complex-pointer-index.c}"
+              "${BINARY_DIR}/complex-pointer-index.o"
+  )
+  nyc_execute_ok(
+    [=[linking the complex-pointer-index fixture failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -o "${BINARY_DIR}/complex-pointer-index-host"
+              "${NY_C_CORPUS_complex-pointer-index-main.c}"
+              "${BINARY_DIR}/complex-pointer-index.o" -lm
+  )
+  nyc_execute_ok(
+    [=[the complex-pointer-index fixture crashed\n${stdout}${stderr}]=]
+    COMMAND "${BINARY_DIR}/complex-pointer-index-host"
+  )
+  if(NOT stdout STREQUAL complex_index_expected)
+    message(FATAL_ERROR "complex pointer subscripts differ from GCC (${complex_opt})\nexpected:\n${complex_index_expected}\ngot:\n${stdout}")
+  endif()
+endforeach()
 nyc_execute_ok(
   [=[nyc failed to compile the global byte array alignment fixture (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -S "${NY_C_CORPUS_global-byte-array-alignment.c}"

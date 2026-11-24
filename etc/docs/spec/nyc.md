@@ -3039,6 +3039,9 @@ run directory under `/tmp`.
   (`a += b`, `-=`, `*=`, `/=`) and implicit float-to-double complex conversion
   in call arguments were added afterwards (`complex-compound`, also compared
   with GCC at `-O0` and `-O2`); the complex arithmetic moved into
-  `lower_complex_binary` so both paths share it. Still unsupported: arrays of
-  complex values and `long double _Complex` promotion.
+  `lower_complex_binary` so both paths share it. Subscripts on complex pointers
+  (`p[i]` read and write, `p[i] * q[i]` in loops) work through a host driver
+  (`complex-pointer-index`, compared with GCC at `-O0` and `-O2`). Still
+  unsupported: local and global arrays of complex values, `p[i] += x`, and
+  `long double _Complex` promotion.
 </details>
