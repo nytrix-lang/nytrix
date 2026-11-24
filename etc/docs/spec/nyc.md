@@ -3016,8 +3016,9 @@ run directory under `/tmp`.
   kernel uses: `*(__seg_gs int *)offset`, subscripts, stores, increments) were
   correct. Aggregate-pointer parameters and locals and globals, fields and
   typedefs are now rejected with "qualify only scalar pointers and casts";
-  arrays of segment pointers are still not caught. The
-  `segment-unsupported-forms` fixture checks each rejection and the cast form.
+  arrays of segment pointers (file-scope, local and parameter) are now rejected
+  the same way. The `segment-unsupported-forms` fixture checks each rejection
+  and the cast form.
   The kernel builds without warnings and boots with the rejections in place.
 - Direct-object assembly annotations (2026-11-24). Section-bearing inline asm
   (`.pushsection .discard.*`, bug tables) used to be rejected in ordinary `-c`

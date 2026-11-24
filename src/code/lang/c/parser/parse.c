@@ -9264,6 +9264,31 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
   return expect(p, ";");
 }
 
+/*
+ * A file-scope declaration of an array whose elements are segment-qualified
+ * pointers (`int __seg_gs *table[4];`) would index without the segment
+ * prefix, so it is rejected instead of silently reading the wrong segment.
+ */
+static bool file_scope_segment_pointer_array(c_parser_t *p) {
+  c_parser_t probe = *p;
+  char probe_error[1] = {0};
+  probe.err = probe_error;
+  probe.err_len = sizeof(probe_error);
+  probe.type_lookahead = true;
+  c_type_t type;
+  if (!parse_type(&probe, &type, false) || !c_type_is_pointer(type) ||
+      probe.last_type_seg == C_SEG_NONE)
+    return false;
+  for (size_t at = probe.pos; at < p->token_count; ++at) {
+    if (tok_is(p, at, ";") || tok_is(p, at, "=") || tok_is(p, at, "(") ||
+        tok_is(p, at, "{"))
+      return false;
+    if (tok_is(p, at, "["))
+      return true;
+  }
+  return false;
+}
+
 static bool try_collect_uninitialized_pointer_arrays(c_parser_t *p,
                                                      bool *matched) {
   *matched = false;
@@ -16459,7 +16484,9 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             p->last_type_volatile && c_type_is_arithmetic_pointer(type);
         unsigned char pointee_seg =
             c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
-        if (pointee_seg != C_SEG_NONE && (type == C_AGG_PTR || type == C_AGG)) {
+        if (pointee_seg != C_SEG_NONE &&
+            (type == C_AGG_PTR || type == C_AGG ||
+             p->last_type_pointer_count > 1 || tok_is(p, p->pos + 1, "["))) {
           fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
           goto error;
         }
@@ -16844,6 +16871,10 @@ static bool collect_functions(c_parser_t *p) {
      * Give the string-literal array parser priority over the general pointer
      * array parser, which accepts symbol addresses and nulls.
      */
+    if (file_scope_segment_pointer_array(p)) {
+      fail(p, "__seg_gs/__seg_fs qualify only scalar pointers and casts; aggregate pointers, fields, typedefs and arrays of segment pointers are not supported");
+      return false;
+    }
     if (!try_collect_string_pointer_array(p, &matched_global, false))
       return false;
     if (matched_global)

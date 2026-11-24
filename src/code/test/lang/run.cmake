@@ -4217,7 +4217,7 @@ execute_process(
 if(reject_status EQUAL 0)
   message(FATAL_ERROR "nyc -c silently accepted -fpatchable-function-entry")
 endif()
-foreach(seg_form IN ITEMS SEG_AGGREGATE_PARAM SEG_FIELD SEG_TYPEDEF)
+foreach(seg_form IN ITEMS SEG_AGGREGATE_PARAM SEG_FIELD SEG_TYPEDEF SEG_GLOBAL_ARRAY SEG_LOCAL_ARRAY SEG_PARAM_ARRAY)
   execute_process(
     COMMAND "${NYC}" -O2 -S "-D${seg_form}" "${NY_C_CORPUS_segment-unsupported-forms.c}"
             -o "${BINARY_DIR}/segment-unsupported-${seg_form}.s"
