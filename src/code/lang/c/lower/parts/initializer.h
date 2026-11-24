@@ -3094,6 +3094,21 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
         return false;
       }
       ++p->pos;
+      if (!target_const) {
+        const c_lvalue_t *lv = find_lvalue(p, target.value);
+        bool target_vol =
+            (lv && lv->is_volatile) ||
+            (local && (local->is_volatile || local->pointee_volatile));
+        unsigned seg = (lv ? lv->segment_flags : 0) |
+                       (local ? (unsigned)local->pointee_seg : 0);
+        bool handled = false;
+        if (!try_inplace_compound_literal_stmt(
+                p, target.agg, target.value, target_vol, seg, local, semicolon,
+                &handled))
+          return false;
+        if (handled)
+          return true;
+      }
       c_value_t value = parse_expr(p, 1);
       if (target.agg && target.agg->is_int128 &&
           c_type_is_integer(value.type)) {
@@ -3227,6 +3242,22 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
       return false;
     }
     ++p->pos;
+    {
+      const c_lvalue_t *lv = find_lvalue(p, base);
+      bool target_vol =
+          (lv && lv->is_volatile) ||
+          (local && (local->is_volatile || local->pointee_volatile)) ||
+          (global && global->is_volatile);
+      unsigned seg = (lv ? lv->segment_flags : 0) |
+                     (local ? (unsigned)local->pointee_seg : 0) |
+                     (global ? global->object_seg : 0);
+      bool handled = false;
+      if (!try_inplace_compound_literal_stmt(p, target_agg, base, target_vol,
+                                             seg, local, semicolon, &handled))
+        return false;
+      if (handled)
+        return true;
+    }
     c_value_t value = parse_expr(p, 1);
     if (local && local->array_count && local->pointer_depth &&
         value.value >= 0 && value.type == C_AGG_PTR &&
@@ -3515,6 +3546,19 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
     }
     if (!expect(p, "="))
       return false;
+    {
+      const c_lvalue_t *lv = find_lvalue(p, address.value);
+      bool target_vol =
+          (lv && lv->is_volatile) || c_value_pointee_volatile(address);
+      unsigned seg = segment_flags | (lv ? lv->segment_flags : 0);
+      bool handled = false;
+      if (!try_inplace_compound_literal_stmt(p, address.agg, address.value,
+                                             target_vol, seg, NULL, true,
+                                             &handled))
+        return false;
+      if (handled)
+        return true;
+    }
     c_value_t value = parse_expr(p, 1);
     if (value.value < 0)
       return false;
@@ -3533,6 +3577,19 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
     }
     if (!expect(p, "="))
       return false;
+    if (!wrapped) {
+      const c_lvalue_t *lv = find_lvalue(p, address.value);
+      bool target_vol =
+          (lv && lv->is_volatile) || c_value_pointee_volatile(address);
+      unsigned seg = segment_flags | (lv ? lv->segment_flags : 0);
+      bool handled = false;
+      if (!try_inplace_compound_literal_stmt(p, address.agg, address.value,
+                                             target_vol, seg, NULL, true,
+                                             &handled))
+        return false;
+      if (handled)
+        return true;
+    }
     c_value_t value = parse_expr(p, 1);
     if (value.value < 0)
       return false;
@@ -4021,6 +4078,16 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
       return false;
   }
   p->pos += 2;
+  if (aggregate_assignment && global && !global->is_volatile) {
+    bool handled = false;
+    if (!try_inplace_compound_literal_stmt(p, global->agg, address,
+                                           global->is_volatile,
+                                           global->object_seg, NULL, semicolon,
+                                           &handled))
+      return false;
+    if (handled)
+      return true;
+  }
   c_value_t value = parse_expr(p, 1);
   if (aggregate_assignment) {
     if (value.value < 0)
