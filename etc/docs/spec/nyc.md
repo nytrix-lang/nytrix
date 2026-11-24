@@ -3019,4 +3019,11 @@ run directory under `/tmp`.
   arrays of segment pointers are still not caught. The
   `segment-unsupported-forms` fixture checks each rejection and the cast form.
   The kernel builds without warnings and boots with the rejections in place.
+- Direct-object assembly annotations (2026-11-24). Section-bearing inline asm
+  (`.pushsection .discard.*`, bug tables) used to be rejected in ordinary `-c`
+  builds and accepted only with `-mcmodel=kernel`. Every `-c` build now lets
+  GNU as complete such a unit, with the per-unit "emitted through GNU as" note
+  and the annotation sections preserved; nothing is dropped silently. The
+  resumable-asm regression checks the note and that `.discard.test` is in the
+  object.
 </details>

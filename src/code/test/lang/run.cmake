@@ -3572,14 +3572,24 @@ foreach(route IN ITEMS S c)
   )
 endforeach()
 
-# Section-bearing raw assembly remains unsupported by the direct encoder:
-# reject it rather than silently dropping its annotation data.
-execute_process(
+# Section-bearing raw assembly has no direct encoding; GNU as completes it with
+# a loud per-unit note, and the annotation section must survive in the object.
+nyc_execute_ok(
+  [=[section-annotated asm no longer compiles in object mode (${status})\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -c "${NY_C_CORPUS_resumable-asm.c}"
           -o "${BINARY_DIR}/resumable-asm-annotated.o"
-  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(status EQUAL 0)
-  message(FATAL_ERROR "direct object silently accepted unsupported section-bearing asm")
+)
+if(NOT stderr MATCHES "emitted through GNU as")
+  message(FATAL_ERROR "the GNU as completion was not announced\n${stderr}")
+endif()
+if(OBJDUMP)
+  nyc_execute_ok(
+    [=[objdump -h failed on the annotated object (${status})\n${stdout}${stderr}]=]
+    COMMAND "${OBJDUMP}" -h "${BINARY_DIR}/resumable-asm-annotated.o"
+  )
+  if(NOT stdout MATCHES "\\.discard\\.test")
+    message(FATAL_ERROR "the annotation section was dropped from the object\n${stdout}")
+  endif()
 endif()
 
 set(weak_function_source "${NY_C_CORPUS_weak-function.c}")

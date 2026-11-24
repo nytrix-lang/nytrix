@@ -3669,25 +3669,13 @@ static int compile_source(int argc, char **argv, int source_arg,
            strstr(err, "segment-relative store requires assembly output") !=
                NULL);
       /*
-       * Section-bearing asm changes sections the direct encoder cannot
-       * represent, so ordinary direct-object builds still reject it. Kernel
-       * builds need those annotations, and section-free instruction forms are
-       * safe to complete for every target. The encoder can report a generic
-       * `inline.asm` failure, so inspect the IR rather than only the error.
+       * Section-bearing asm (annotations such as __bug_table or .discard.*)
+       * changes sections the direct encoder cannot represent. GNU as
+       * completes it, keeping the metadata, with the per-unit note below, as
+       * for kernel builds; it is never dropped silently.
        */
-      bool section_bearing = false;
-      for (size_t f = 0; asm_form && !driver->kernel_model && f < unit.count &&
-                         !section_bearing;
-           ++f)
-        for (size_t k = 0; k < unit.funcs[f].len && !section_bearing; ++k) {
-          const nyr_inst_t *ins = &unit.funcs[f].data[k];
-          section_bearing = ins->op == NYIR_INLINE_ASM && ins->symbol &&
-                            (strstr(ins->symbol, "pushsection") != NULL ||
-                             strstr(ins->symbol, ".section") != NULL ||
-                             strstr(ins->symbol, "__bug_table") != NULL);
-        }
       if (raw_file_asm ||
-          (!ok && asm_form && (driver->kernel_model || !section_bearing))) {
+          (!ok && asm_form)) {
         /*
          * The object writer encodes a fixed set of inline-asm forms. Kernel
          * asm macros (alternatives, bug tables, atomics) are open-ended, so
