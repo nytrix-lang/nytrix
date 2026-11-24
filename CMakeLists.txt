@@ -3048,8 +3048,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     )
     set_tests_properties(nyr-c-harness-fault-injection PROPERTIES TIMEOUT 60)
     # Kernel acceptance tests (nyc-kernel-boot, nyc-kernel-boot-latest).
-    add_subdirectory("${NYR_C_TEST_DIR}/kernel"
-                     "${CMAKE_BINARY_DIR}/nyc-kernel-tests")
+    include("${NYR_C_TEST_DIR}/kernel.cmake")
     nytrix_add_nshape_test(
       nyr-benchmark-knucleotide
       etc/labs/tests/bench/algorithms/knucleotide.nshape

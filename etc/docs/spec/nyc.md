@@ -2798,15 +2798,15 @@ run directory under `/tmp`.
     freed it into the page allocator after copy-on-write. Integer arguments
     and values stored to `_Bool` struct members are now converted
     (`bool-argument-normalization`). (Superseded by the next entry.)
-  `src/code/test/lang/kernel/kernel-boot-smoke.sh` builds the kernel with NYC,
+  `src/code/test/lang/kernel.cmake` (with its embedded `kernel-boot-smoke.sh`) builds the kernel with NYC,
   boots it with a freestanding initramfs `/init`, and fails unless
   `NYC_KERNEL_INIT_REACHED` appears; both a freestanding and a static glibc
-  `/init` pass. It takes about fifteen minutes and is not part of `ctest`.
+  `/init` pass. It takes about fifteen minutes and is registered as the `kernel`-labelled `nyc-kernel-boot` ctest.
 
 - Smoke gate run end to end (2026-11-23). `kernel-boot-smoke.sh` built Linux 7.3
   `x86_64_defconfig` from a fresh output tree with the final compiler and
   booted both a freestanding and a static glibc `/init` to
-  `NYC_KERNEL_INIT_REACHED`; both passed. `src/code/test/lang/kernel/kernel-provenance.py` pairs every
+  `NYC_KERNEL_INIT_REACHED`; both passed. the embedded `kernel-provenance.py` pairs every
   `# CC` step of a `V=1` Kbuild log with NYC's own `compiled` line (or, for an
   interleaved line, a `.comment` free of `GCC:`). On the earlier `V=1` log it
   matched 2,973 steps with none left unpaired; the smoke script's log is not
@@ -2842,7 +2842,7 @@ run directory under `/tmp`.
   A static `always_inline` function with no remaining reference is no longer
   emitted (it put references to `__init` data into `.text`). The final
   `V=1` build with `bzImage` and all 12 configured modules from a fresh output
-  tree (all 2,973 `CC` steps NYC, `src/code/test/lang/kernel/kernel-provenance.py` rc 0, both `/init`
+  tree (all 2,973 `CC` steps NYC, the embedded `kernel-provenance.py` rc 0, both `/init`
   boots passing) still reports 181 "unreachable instruction", 45 "missing
   __noreturn", 4 "call with UACCESS enabled", 9 "redundant UACCESS", 11 "leaves
   .noinstr.text" and 17 modpost section-mismatch warnings. The remaining
@@ -3083,7 +3083,7 @@ run directory under `/tmp`.
   `"...".len` no longer contains a `DIFile` for `str.ny`; `nytrix-addr-probe-device`
   fails on the host's vvar page layout. Neither involves the C frontend.
 - Kernel gate as ctest (2026-11-24). The kernel acceptance tests now live in
-  `src/code/test/lang/kernel/CMakeLists.txt`. `nyc-kernel-boot` builds a tree
+  `src/code/test/lang/kernel.cmake`. `nyc-kernel-boot` builds a tree
   named with `-DNYC_LINUX_SRC`; `-DNYC_KERNEL_CLONE=ON` adds
   `nyc-kernel-boot-latest`, which resolves the newest non-rc upstream tag
   (v7.3 today), clones it shallow into the build tree, cleans it, builds it
