@@ -1325,10 +1325,33 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
         if (!dedicated) {
           size_t before = move_count;
           size_t w = 0;
+          /*
+           * Values whose defining move was rejected stay in the loop; any
+           * move computing from one of them cannot leave the loop either.
+           */
+          size_t nvals = f->next_value > 0 ? (size_t)f->next_value : 0;
+          bool *stays = nvals ? calloc(nvals, sizeof(*stays)) : NULL;
           for (size_t k = 0; k < move_count; ++k) {
-            if (!(nyr_effective_effects(&moves[k].inst) & NYIR_EFFECT_MAY_TRAP))
+            const nyr_inst_t *mi = &moves[k].inst;
+            bool keep = !(nyr_effective_effects(mi) & NYIR_EFFECT_MAY_TRAP);
+            if (keep && stays) {
+              const int operands[] = {mi->a, mi->b, mi->c, mi->d, mi->e, mi->f};
+              for (size_t o = 0; o < 6 && keep; ++o)
+                if (operands[o] >= 0 && (size_t)operands[o] < nvals &&
+                    stays[operands[o]])
+                  keep = false;
+              for (size_t o = 0; mi->extra_args && o < mi->extra_args_len && keep;
+                   ++o)
+                if (mi->extra_args[o] >= 0 && (size_t)mi->extra_args[o] < nvals &&
+                    stays[mi->extra_args[o]])
+                  keep = false;
+            }
+            if (keep)
               moves[w++] = moves[k];
+            else if (stays && mi->dst >= 0 && (size_t)mi->dst < nvals)
+              stays[mi->dst] = true;
           }
+          free(stays);
           move_count = w;
           if (before != move_count && nyr_licm_trace_enabled())
             ny_dbg_heuristic_event(

@@ -1420,6 +1420,7 @@ static uint8_t ny_x64_obj_i64_vector_lanes(nyr_op_t op) {
   case NYIR_VEC8_SHL_I64:
   case NYIR_VEC8_CMP_I64:
   case NYIR_VEC8_SELECT_I64:
+  case NYIR_VEC8_DIV_CONST_I64:
     return 4;
   case NYIR_VEC4_LOAD_F64:
   case NYIR_VEC4_STORE_F64:
@@ -3909,6 +3910,22 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
      */
     return ny_x64_obj_i64_vec_binop(
         c, in, 4u, (const unsigned char[]){0x49, 0x0f, 0xaf, 0xc2}, 4);
+  case NYIR_VEC8_DIV_CONST_I64: {
+    int64_t dv = in->imm;
+    if (dv == 0 || dv == 1 || dv == -1 || dv == INT64_MIN)
+      return false;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      if (!ny_x64_obj_load_rax(c, da) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0xba}, 2) ||
+          !ny_x64_obj_i64(c, dv) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x99, 0x49, 0xf7, 0xfa}, 5) ||
+          !ny_x64_obj_store_rax(c, dd))
+        return false;
+    }
+    return true;
+  }
   case NYIR_VEC4_REDUCE_ADD_I64:
     return ny_x64_obj_i64_vec_reduce_add(c, in, 2u);
   case NYIR_VEC8_REDUCE_ADD_I64:
@@ -5098,6 +5115,7 @@ static bool ny_x64_obj_classify_values(nyr_x64_obj_ctx_t *c,
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
       need_a = 4;
       break;
     case NYIR_VEC8_SELECT_I64:

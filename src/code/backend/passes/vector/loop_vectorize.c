@@ -568,6 +568,24 @@ static bool value_defined_in_loop(const nyr_func_t *f, const int *defs,
   return block < cfg->block_count && in_loop[block];
 }
 
+static bool lv_const_div_enabled(void) {
+  static int on = -1;
+  if (on < 0) {
+    const char *env = getenv("NYTRIX_NO_VEC_CONST_DIV");
+    on = !(env && *env && strcmp(env, "0") != 0);
+  }
+  return on != 0;
+}
+
+static bool lv_two_level_iv_enabled(void) {
+  static int on = -1;
+  if (on < 0) {
+    const char *env = getenv("NYTRIX_NO_VEC_TWO_LEVEL_IV");
+    on = !(env && *env && strcmp(env, "0") != 0);
+  }
+  return on != 0;
+}
+
 static affine_t affine_value(const nyr_func_t *f, const int *defs,
                              const nyr_cfg_t *cfg, const bool *in_loop,
                              int value, int iv, unsigned depth) {
@@ -582,8 +600,12 @@ static affine_t affine_value(const nyr_func_t *f, const int *defs,
   const nyr_inst_t *in = &f->data[(size_t)di];
   if (in->op == NYIR_CONST_I64)
     return (affine_t){.ok = true, .root = -1, .offset = in->imm, .stride = 0};
+  if (in->op == NYIR_COPY)
+    return affine_value(f, defs, cfg, in_loop, in->a, iv, depth + 1);
   if (in->op == NYIR_ALLOCA || in->op == NYIR_ADDR_SYMBOL ||
       in->op == NYIR_ADDR_LOCAL)
+    return (affine_t){.ok = true, .root = value, .offset = 0, .stride = 0};
+  if (!value_defined_in_loop(f, defs, cfg, in_loop, value))
     return (affine_t){.ok = true, .root = value, .offset = 0, .stride = 0};
   if (in->op == NYIR_PHI && in->phi_incoming_len == 2) {
     int pre = -1;
@@ -605,24 +627,26 @@ static affine_t affine_value(const nyr_func_t *f, const int *defs,
         int64_t init_value = 0;
         int64_t step_value = 0;
         int step_operand = -1;
-        if (update->a == value)
+        if (nyr_vectorize_resolve_value(f, defs, update->a) == value)
           step_operand = update->b;
-        else if (update->b == value)
+        else if (nyr_vectorize_resolve_value(f, defs, update->b) == value)
           step_operand = update->a;
-        if (step_operand >= 0 && nyr_const_i64(f, defs, pre, &init_value) &&
-            nyr_const_i64(f, defs, step_operand, &step_value))
-          return (affine_t){.ok = true,
-                            .root = -1,
-                            .offset = init_value,
-                            .stride = step_value};
+        if (step_operand >= 0 && nyr_const_i64(f, defs, step_operand, &step_value)) {
+          if (nyr_const_i64(f, defs, pre, &init_value))
+            return (affine_t){.ok = true,
+                              .root = -1,
+                              .offset = init_value,
+                              .stride = step_value};
+          if (lv_two_level_iv_enabled())
+            return (affine_t){
+                .ok = true,
+                .root = nyr_vectorize_resolve_value(f, defs, pre),
+                .offset = 0,
+                .stride = step_value};
+        }
       }
     }
   }
-  if (!value_defined_in_loop(f, defs, cfg, in_loop, value))
-    return (affine_t){.ok = true, .root = value, .offset = 0, .stride = 0};
-
-  if (in->op == NYIR_COPY)
-    return affine_value(f, defs, cfg, in_loop, in->a, iv, depth + 1);
   if (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) {
     affine_t a = affine_value(f, defs, cfg, in_loop, in->a, iv, depth + 1);
     affine_t b = affine_value(f, defs, cfg, in_loop, in->b, iv, depth + 1);
@@ -1469,8 +1493,9 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
 /*
  * A two-edge PHI of a constant start and `phi + positive constant`.
  */
-static bool linear_phi(const nyr_func_t *f, const int *defs, int value,
-                       int64_t *start, int64_t *step, int64_t *latch_label) {
+static bool linear_phi_any_start(const nyr_func_t *f, const int *defs,
+                                 int value, int *init_value, int64_t *step,
+                                 int64_t *latch_label) {
   if (value < 0 || value >= f->next_value || defs[value] < 0)
     return false;
   const nyr_inst_t *phi = &f->data[(size_t)defs[value]];
@@ -1487,13 +1512,20 @@ static bool linear_phi(const nyr_func_t *f, const int *defs, int value,
     int other = nyr_vectorize_resolve_value(f, defs, add->a) == value   ? add->b
                 : nyr_vectorize_resolve_value(f, defs, add->b) == value ? add->a
                                                                         : -1;
-    if (other >= 0 && nyr_const_i64(f, defs, other, step) && *step > 0 &&
-        nyr_const_i64(f, defs, phi->phi_incoming[1 - k].value, start)) {
+    if (other >= 0 && nyr_const_i64(f, defs, other, step) && *step > 0) {
+      *init_value = phi->phi_incoming[1 - k].value;
       *latch_label = phi->phi_incoming[k].predecessor_label;
       return true;
     }
   }
   return false;
+}
+
+static bool linear_phi(const nyr_func_t *f, const int *defs, int value,
+                       int64_t *start, int64_t *step, int64_t *latch_label) {
+  int init_value = -1;
+  return linear_phi_any_start(f, defs, value, &init_value, step, latch_label) &&
+         nyr_const_i64(f, defs, init_value, start);
 }
 
 /*
@@ -1504,9 +1536,28 @@ static bool linear_phi(const nyr_func_t *f, const int *defs, int value,
 static bool derived_induction_range(const nyr_func_t *f, const int *defs,
                                     const nyr_cfg_t *cfg, size_t use_pc,
                                     int value, nyr_range_t *out) {
-  int64_t start = 0, step = 0, latch = -1;
-  if (!linear_phi(f, defs, value, &start, &step, &latch))
+  int init_value = -1;
+  int64_t step = 0, latch = -1;
+  if (!linear_phi_any_start(f, defs, value, &init_value, &step, &latch))
     return false;
+  nyr_range_t init_range = {0};
+  int64_t start = 0;
+  if (nyr_const_i64(f, defs, init_value, &start)) {
+    init_range = (nyr_range_t){
+        .has_min = true, .has_max = true, .min = start, .max = start};
+  } else if (lv_two_level_iv_enabled()) {
+    static _Thread_local unsigned derived_depth;
+    if (derived_depth >= 6)
+      return false;
+    ++derived_depth;
+    bool have_init = value_range_under_guards(
+        f, defs, cfg, (size_t)defs[value], init_value, -1, 0, 0, 0, &init_range);
+    --derived_depth;
+    if (!have_init || !init_range.has_min || !init_range.has_max)
+      return false;
+  } else {
+    return false;
+  }
   size_t header = cfg->inst_block[(size_t)defs[value]];
   for (size_t i = cfg->block_start[header]; i < cfg->block_end[header]; ++i) {
     const nyr_inst_t *other = &f->data[i];
@@ -1519,11 +1570,13 @@ static bool derived_induction_range(const nyr_func_t *f, const int *defs,
         !guarded_induction_range(f, defs, cfg, use_pc, other->dst, &guarded))
       continue;
     __int128 steps = ((__int128)guarded.max - guarded.min) / other_step;
-    __int128 max = (__int128)start + steps * step;
+    __int128 max = (__int128)init_range.max + steps * step;
     if (steps < 0 || max > INT64_MAX)
       return false;
-    *out = (nyr_range_t){
-        .has_min = true, .has_max = true, .min = start, .max = (int64_t)max};
+    *out = (nyr_range_t){.has_min = true,
+                         .has_max = true,
+                         .min = init_range.min,
+                         .max = (int64_t)max};
     return true;
   }
   return false;
@@ -3832,7 +3885,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
        * vf * stride in the scalar latch.
        */
       affine_t extra = affine_value(f, defs, &cfg, in_loop, phi->dst, iv, 0);
-      bool affine_extra = extra.ok && extra.root < 0 && extra.stride != 0;
+      bool affine_extra =
+          extra.ok && extra.stride != 0 && pre_in >= 0 && back_in >= 0 &&
+          defs[back_in] >= 0 &&
+          (extra.root < 0 ||
+           (lv_two_level_iv_enabled() &&
+            extra.root == nyr_vectorize_resolve_value(f, defs, pre_in)));
       if (affine_extra) {
         if (extra_phi_count >= VEC_MAX_EXTRA_PHIS) {
           extra_phi = true;
@@ -3847,7 +3905,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             .phi_idx = i,
             .update_idx = (size_t)defs[back_in],
             .step = extra.stride,
-            .update_has_phi_on_left = back_a == phi->dst,
+            .update_has_phi_on_left =
+                nyr_vectorize_resolve_value(f, defs, back_a) == phi->dst,
             .vec_arith = false,
             .const_init = has_cinit,
             .const_init_val = civ,
@@ -4282,6 +4341,26 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         continue;
       }
 
+      if (lv_const_div_enabled() && in->op == NYIR_DIV_I64 && in->dst >= 0 &&
+          vf == 4 && supports_vec8_i64_broadcast) {
+        bool va =
+            in->a >= 0 && (size_t)in->a < scalar_value_count && vec[in->a];
+        bool vb =
+            in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
+        bool ma =
+            in->a >= 0 && (size_t)in->a < scalar_value_count && vmask[in->a];
+        int64_t div_c = 0;
+        if (va && !vb && !ma && nyr_const_i64(f, defs, in->b, &div_c) &&
+            div_c != 0 && div_c != -1 && div_c != INT64_MIN) {
+          vec[in->dst] = true;
+          rewrite[i] = true;
+          is_i64 = true;
+          has_i64_mul = true;
+          vec_ops += 4;
+          continue;
+        }
+      }
+
       /*
        * f64 vector arithmetic
        */
@@ -4367,7 +4446,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       if ((in->op == NYIR_MOD_I64 || in->op == NYIR_DIV_I64) && in->b >= 0 &&
           in->b < f->next_value && defs[in->b] >= 0) {
         const nyr_inst_t *divisor = &f->data[(size_t)defs[in->b]];
-        trap_ruled_out = divisor->op == NYIR_CONST_I64 && divisor->imm != 0;
+        trap_ruled_out =
+            divisor->op == NYIR_CONST_I64 && divisor->imm != 0 && divisor->imm != -1;
       }
       unsigned blocking_effects =
           trap_ruled_out ? (effects & ~(unsigned)NYIR_EFFECT_MAY_TRAP)
@@ -5218,6 +5298,20 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             broadcast_map[in->c] >= 0)
           in->c = broadcast_map[in->c];
         in->op = NYIR_VEC8_SELECT_I64;
+        in->flags = 0;
+        in->effects = nyr_inst_effects(in);
+        nyr_clear_derived_facts(in);
+      } else if (in->op == NYIR_DIV_I64) {
+        int64_t div_c = 0;
+        (void)nyr_const_i64(f, defs, in->b, &div_c);
+        if (div_c == 1) {
+          in->op = NYIR_COPY;
+        } else {
+          in->op = NYIR_VEC8_DIV_CONST_I64;
+          in->imm = div_c;
+        }
+        in->b = -1;
+        in->c = in->d = in->e = in->f = -1;
         in->flags = 0;
         in->effects = nyr_inst_effects(in);
         nyr_clear_derived_facts(in);

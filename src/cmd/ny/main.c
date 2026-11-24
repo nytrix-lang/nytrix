@@ -1302,7 +1302,11 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt,
                          "-fno-trapping-math -funroll-loops");
     ny_env_append_unique("NYTRIX_HOST_LDFLAGS", "-march=native -mtune=native");
 #if !(defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)))
-    ny_env_config_set(env, "NYTRIX_JIT_FAST_ISEL", "1");
+    {
+      const char *peak_fast_isel = getenv("NYTRIX_PEAK_FAST_ISEL");
+      if (peak_fast_isel && *peak_fast_isel && strcmp(peak_fast_isel, "0") != 0)
+        ny_env_config_set(env, "NYTRIX_JIT_FAST_ISEL", "1");
+    }
 #endif
     ny_env_config_set(env, "NYTRIX_JIT_CODEGEN_OPT", "aggressive");
     ny_env_config_set(env, "NYTRIX_OPT_DCE", "1");

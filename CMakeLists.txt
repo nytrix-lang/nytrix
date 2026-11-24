@@ -3004,16 +3004,39 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
   target_compile_options(ny-fuzz PRIVATE -Wall -Wextra -Werror)
   target_link_libraries(ny-fuzz PRIVATE pthread)
   install(TARGETS ny-fuzz RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  find_program(NYC_FUZZ_REF2 NAMES clang)
+  option(NYC_DEEP_TESTS "Register the long differential fuzz lane" OFF)
   if(BUILD_TESTING)
+    # Fast lane: forty seeds of every generator, all routes, -O0 and -O2.
+    set(_nyc_fuzz_ref2 "")
+    if(NYC_FUZZ_REF2)
+      set(_nyc_fuzz_ref2 --ref2 "${NYC_FUZZ_REF2}")
+    endif()
     add_test(
       NAME ny-fuzz-smoke
       COMMAND "$<TARGET_FILE:ny-fuzz>"
         run --nyc "$<TARGET_FILE:nyc>" --ref "${CMAKE_C_COMPILER}"
+        ${_nyc_fuzz_ref2} --routes object,direct,asm
         --out "${CMAKE_BINARY_DIR}/ny-fuzz-smoke" --seeds 0:40 --jobs 3
         --gen all
     )
     add_dependencies(ny-fuzz nyc)
-    set_tests_properties(ny-fuzz-smoke PROPERTIES TIMEOUT 300)
+    set_tests_properties(ny-fuzz-smoke PROPERTIES TIMEOUT 600 LABELS "fuzz")
+    # Deep lane (off by default, label "deep"): thousands of seeds at every
+    # level, with the compile-cost baseline kept in the build tree.
+    if(NYC_DEEP_TESTS)
+      add_test(
+        NAME ny-fuzz-deep
+        COMMAND "$<TARGET_FILE:ny-fuzz>"
+          run --nyc "$<TARGET_FILE:nyc>" --ref "${CMAKE_C_COMPILER}"
+          ${_nyc_fuzz_ref2} --routes object,direct,asm
+          --opts -O0,-O1,-O2,-O3
+          --out "${CMAKE_BINARY_DIR}/ny-fuzz-deep" --seeds 0:3000 --jobs 4
+          --gen all --baseline "${CMAKE_BINARY_DIR}/ny-fuzz-baseline.txt"
+      )
+      set_tests_properties(ny-fuzz-deep PROPERTIES TIMEOUT 7200
+        LABELS "deep;fuzz")
+    endif()
   endif()
   if(BUILD_TESTING)
     find_program(NYR_LLD_LINK_EXECUTABLE NAMES lld-link)

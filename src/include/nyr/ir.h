@@ -192,6 +192,8 @@ typedef enum {
   NYIR_VEC8_CMP_I64,
   /* Four-lane i64 select: dst[k] = (a[k] < 0) ? b[k] : c[k] (vblendvpd), AVX2. */
   NYIR_VEC8_SELECT_I64,
+  /* Four-lane signed i64 division by non-zero constant in->imm (!= 0, 1, -1, INT64_MIN). */
+  NYIR_VEC8_DIV_CONST_I64,
   NYIR_OP_COUNT,
 } nyr_op_t;
 

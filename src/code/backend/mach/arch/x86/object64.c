@@ -10379,6 +10379,134 @@ static bool mach_ymm_pmuludq_operand(nyr_x64_mach_enc_t *e, unsigned acc,
   return mach_ymm_op3_mem(e, acc, acc, mach_slot_off(e, op), 0xf4);
 }
 
+static bool mach_vector_ymm_div_lane_rdx(nyr_x64_mach_enc_t *e, int64_t magic,
+                                         unsigned mshift, bool negate) {
+  if (!mach_mov_preg_preg(e, 0, 11) ||
+      !mach_rex(e, true, false, false, true) || !mach_u8(e, 0xf7) ||
+      !mach_u8(e, 0xea))
+    return false;
+  if (magic < 0 && !mach_alu_preg_preg(e, NYR_MACH_ADD, 2, 10))
+    return false;
+  if (mshift > 0 &&
+      (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0xc1) ||
+       !mach_u8(e, 0xfa) || !mach_u8(e, (unsigned char)mshift)))
+    return false;
+  if (!mach_mov_preg_preg(e, 0, 10) ||
+      !mach_rex(e, true, false, false, false) || !mach_u8(e, 0xc1) ||
+      !mach_u8(e, 0xf8) || !mach_u8(e, 63) ||
+      !mach_alu_preg_preg(e, NYR_MACH_SUB, 2, 0))
+    return false;
+  if (negate && (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0xf7) ||
+                 !mach_u8(e, 0xda)))
+    return false;
+  return true;
+}
+
+static bool mach_vector_ymm_div_const_i64(nyr_x64_mach_enc_t *e,
+                                          const nyr_mach_inst_t *in,
+                                          int dst_off) {
+  if (!e->target || !(e->target->caps & NY_NATIVE_CAP_MACH_AVX2))
+    return mach_err(e, "x64: vec8.div.const.i64 requires AVX2");
+  if (in->src1.kind != NYR_MACH_OPERAND_IMM)
+    return mach_err(e, "x64: vec8.div.const.i64 requires immediate divisor");
+  int64_t dval = in->src1.as.imm;
+  if (dval == 0 || dval == 1 || dval == -1 || dval == INT64_MIN)
+    return mach_err(e, "x64: vec8.div.const.i64 invalid divisor");
+  int assigned = in->dst.kind == NYR_MACH_OPERAND_VREG
+                     ? mach_vreg_vpreg(e, in->dst.as.reg)
+                     : -1;
+  unsigned d = assigned >= 0 ? (unsigned)assigned : 14u;
+  uint64_t ad = dval >= 0 ? (uint64_t)dval : (uint64_t)(-(dval + 1)) + 1u;
+  bool negate = dval < 0;
+  if ((ad & (ad - 1u)) == 0) {
+    unsigned k = (unsigned)__builtin_ctzll(ad);
+    unsigned a = 14u;
+    if (!mach_load_vector_operand(e, &in->src0, 14u, &a))
+      return false;
+    if (a == 15u)
+      return mach_err(e, "x64: unexpected scratch ymm15 input");
+    if (!mach_ymm_op_reg(e, 15, 15, 0xef) || !mach_u8(e, 0xc4) ||
+        !mach_u8(e, a >= 8 ? 0x42u : 0x62u) || !mach_u8(e, 0x05) ||
+        !mach_u8(e, 0x37) || !mach_u8(e, (unsigned char)(0xf8u | (a & 7u))) ||
+        !mach_ymm_qword_shift_imm(e, 15, 15, 2, 64u - k) ||
+        !mach_ymm_op3_reg(e, 15, a, 15, 0xd4) ||
+        !mach_ymm_op_reg(e, 14, 14, 0xef) || !mach_u8(e, 0xc4) ||
+        !mach_u8(e, 0x42) || !mach_u8(e, 0x0d) || !mach_u8(e, 0x37) ||
+        !mach_u8(e, 0xf7) ||
+        !mach_ymm_qword_shift_imm(e, 15, 15, 2, k) ||
+        !mach_ymm_qword_shift_imm(e, 14, 14, 6, 64u - k))
+      return false;
+    if (!negate) {
+      if (!mach_ymm_op3_reg(e, d, 15, 14, 0xeb))
+        return false;
+    } else if (!mach_ymm_op_reg(e, 14, 15, 0xeb) ||
+               !mach_ymm_op_reg(e, 15, 15, 0xef) ||
+               !mach_ymm_op3_reg(e, d, 15, 14, 0xfb)) {
+      return false;
+    }
+    if (assigned >= 0) {
+      if (e->vec_color_seeded)
+        e->vec_color_seeded[in->dst.as.reg] = true;
+      return true;
+    }
+    return mach_ymm_store_v256(e, dst_off, d);
+  }
+  int64_t magic = 0;
+  unsigned mshift = 0;
+  nyr_sdiv_magic_i64(ad, &magic, &mshift);
+  if (!mach_flush_pregs_to_home(e, (1u << 0) | (1u << 2) | (1u << 10) |
+                                       (1u << 11)))
+    return false;
+  unsigned a = 15u;
+  if (!mach_load_vector_operand(e, &in->src0, 15u, &a))
+    return false;
+  if (a != 15u && !mach_ymm_mov_reg(e, 15u, a))
+    return false;
+  /* movabs r11, magic */
+  if (!mach_rex(e, true, false, false, true) || !mach_u8(e, 0xbb) ||
+      !mach_i64(e, magic))
+    return false;
+  /* lane 0: vmovq r10, xmm15 -> div -> vmovq xmm14, rdx */
+  if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x41) || !mach_u8(e, 0xf9) ||
+      !mach_u8(e, 0x7e) || !mach_u8(e, 0xfa) ||
+      !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
+      !mach_u8(e, 0xc4) || !mach_u8(e, 0x61) || !mach_u8(e, 0xf9) ||
+      !mach_u8(e, 0x6e) || !mach_u8(e, 0xf2))
+    return false;
+  /* lane 1: vpextrq r10, xmm15, 1 -> div -> vpinsrq xmm14, xmm14, rdx, 1 */
+  if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x43) || !mach_u8(e, 0xf9) ||
+      !mach_u8(e, 0x16) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x01) ||
+      !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
+      !mach_u8(e, 0xc4) || !mach_u8(e, 0x63) || !mach_u8(e, 0x89) ||
+      !mach_u8(e, 0x22) || !mach_u8(e, 0xf2) || !mach_u8(e, 0x01))
+    return false;
+  /* extract upper 128b to xmm15 */
+  if (!mach_xmm_vextractf128(e, 15u, 15u, 1u))
+    return false;
+  /* lane 2: vmovq r10, xmm15 -> div -> vpinsrq xmm15, xmm15, rdx, 0 */
+  if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x41) || !mach_u8(e, 0xf9) ||
+      !mach_u8(e, 0x7e) || !mach_u8(e, 0xfa) ||
+      !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
+      !mach_u8(e, 0xc4) || !mach_u8(e, 0x63) || !mach_u8(e, 0x81) ||
+      !mach_u8(e, 0x22) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x00))
+    return false;
+  /* lane 3: vpextrq r10, xmm15, 1 -> div -> vpinsrq xmm15, xmm15, rdx, 1 */
+  if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x43) || !mach_u8(e, 0xf9) ||
+      !mach_u8(e, 0x16) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x01) ||
+      !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
+      !mach_u8(e, 0xc4) || !mach_u8(e, 0x63) || !mach_u8(e, 0x81) ||
+      !mach_u8(e, 0x22) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x01))
+    return false;
+  if (!mach_xmm_vinsertf128(e, d, 14u, 15u, 1u))
+    return false;
+  if (assigned >= 0) {
+    if (e->vec_color_seeded)
+      e->vec_color_seeded[in->dst.as.reg] = true;
+    return true;
+  }
+  return mach_ymm_store_v256(e, dst_off, d);
+}
+
 static bool mach_vector_ymm_mul_i64(nyr_x64_mach_enc_t *e,
                                     const nyr_mach_inst_t *in, int dst_off) {
   if (!e->target || !(e->target->caps & NY_NATIVE_CAP_MACH_AVX2))
@@ -16373,6 +16501,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           }
           if (in->opcode == NYR_MACH_MUL && vt == NYR_MACH_TYPE_V256_I64) {
             if (!mach_vector_ymm_mul_i64(e, in, dst))
+              return false;
+            break;
+          }
+          if (in->opcode == NYR_MACH_DIV && vt == NYR_MACH_TYPE_V256_I64) {
+            if (!mach_vector_ymm_div_const_i64(e, in, dst))
               return false;
             break;
           }

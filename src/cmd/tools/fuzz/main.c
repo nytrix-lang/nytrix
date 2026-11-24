@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -113,13 +114,36 @@ static void remove_tree(const char *path) {
 #define RUN_TIMEOUT 124
 #define RUN_SPAWN_FAILED 127
 
+static _Thread_local long g_child_cpu_ms;
+static _Thread_local long g_child_rss_kb;
+
+/* Totals over every NYC compile of a run. */
+static long g_nyc_cpu_ms;
+static long g_nyc_rss_kb;
+static long g_nyc_compiles;
+
+static void note_nyc_compile(void) {
+  __atomic_fetch_add(&g_nyc_cpu_ms, g_child_cpu_ms, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&g_nyc_compiles, 1, __ATOMIC_RELAXED);
+  long seen = __atomic_load_n(&g_nyc_rss_kb, __ATOMIC_RELAXED);
+  while (g_child_rss_kb > seen &&
+         !__atomic_compare_exchange_n(&g_nyc_rss_kb, &seen, g_child_rss_kb, false,
+                                      __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  }
+}
+
+/* Resource use of the most recent child in this thread (see run_cmd). */
+
 /*
  * Run argv with stdout and stderr captured into files. Returns the exit
  * status, 128 + signal for a signalled child, RUN_TIMEOUT when the child
- * outlived `timeout_s`, or RUN_SPAWN_FAILED.
+ * outlived `timeout_s`, or RUN_SPAWN_FAILED. CPU time and peak RSS of the
+ * child land in g_child_cpu_ms and g_child_rss_kb.
  */
 static int run_cmd(char *const argv[], const char *out_path,
                    const char *err_path, int timeout_s) {
+  g_child_cpu_ms = 0;
+  g_child_rss_kb = 0;
   posix_spawn_file_actions_t actions;
   posix_spawn_file_actions_init(&actions);
   posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0);
@@ -136,8 +160,13 @@ static int run_cmd(char *const argv[], const char *out_path,
   long waited_ms = 0;
   for (;;) {
     int status = 0;
-    pid_t done = waitpid(pid, &status, WNOHANG);
+    struct rusage usage;
+    memset(&usage, 0, sizeof(usage));
+    pid_t done = wait4(pid, &status, WNOHANG, &usage);
     if (done == pid) {
+      g_child_cpu_ms = usage.ru_utime.tv_sec * 1000 + usage.ru_utime.tv_usec / 1000 +
+                       usage.ru_stime.tv_sec * 1000 + usage.ru_stime.tv_usec / 1000;
+      g_child_rss_kb = usage.ru_maxrss;
       if (WIFEXITED(status))
         return WEXITSTATUS(status);
       if (WIFSIGNALED(status))
@@ -167,6 +196,11 @@ typedef struct {
   const char *ref;
   const char *outdir;
   const char *csmith_include;
+  const char *ref2;     /* second reference compiler used as a tie-breaker */
+  const char *baseline; /* file holding the compile-cost baseline */
+  bool save_baseline;
+  int routes;           /* bit 0 object, 1 direct encoder, 2 assembly */
+  int profile;          /* -1 all, 0 integer ... 6 gnu */
   long seed_lo;
   long seed_hi;
   int jobs;
@@ -291,7 +325,7 @@ static name_t expr(gen_t *g, int depth) {
   }
 }
 
-static void gen_builtin(uint64_t seed, bool small, sb_t *out) {
+static void gen_integer(uint64_t seed, bool small, sb_t *out) {
   gen_t g = {.rng = {.state = seed * UINT64_C(0x2545f4914f6cdd1d) + 1}};
   rng_t *r = &g.rng;
   sb_addf(out, "#include <stdint.h>\n#include <stdio.h>\n");
@@ -374,6 +408,293 @@ static void gen_builtin(uint64_t seed, bool small, sb_t *out) {
   sb_addf(out, "  printf(\"%%llu\\n\", (unsigned long long)sink);\n  return 0;\n}\n");
 }
 
+
+/* Binary operators over unsigned 64-bit operands; every one is defined. */
+static const char *const k_binops[] = {"+", "-", "*", "^", "|", "&"};
+
+static void gen_preamble(sb_t *out) {
+  sb_addf(out, "#include <stdarg.h>\n#include <stdint.h>\n#include <stdio.h>\n");
+  sb_addf(out, "static uint64_t sink = 1469598103934665603ull;\n");
+  sb_addf(out, "static void mix(uint64_t v) { sink = (sink ^ v) * "
+               "1099511628211ull; }\n");
+}
+
+static void gen_epilogue(sb_t *out) {
+  sb_addf(out, "  printf(\"%%llu\\n\", (unsigned long long)sink);\n  return 0;\n}\n");
+}
+
+/* Structures passed and returned by value, by pointer, and copied in arrays. */
+static void gen_struct(uint64_t seed, sb_t *out) {
+  rng_t r = {.state = seed * UINT64_C(0x9e3779b97f4a7c15) + 7};
+  int nf = 3 + (int)rng_below(&r, 4);
+  const char *ft[8];
+  gen_preamble(out);
+  sb_addf(out, "struct S {\n");
+  for (int i = 0; i < nf; ++i) {
+    ft[i] = k_types[rng_below(&r, TYPE_COUNT)];
+    sb_addf(out, "  %s f%d;\n", ft[i], i);
+  }
+  sb_addf(out, "};\n");
+  int nfun = 2 + (int)rng_below(&r, 3);
+  bool pointer_form[8] = {false};
+  for (int f = 0; f < nfun; ++f) {
+    bool by_pointer = rng_below(&r, 3) == 0;
+    pointer_form[f] = by_pointer;
+    if (by_pointer)
+      sb_addf(out, "static __attribute__((noinline)) void u%d(struct S *s, "
+                   "uint64_t k) {\n", f);
+    else
+      sb_addf(out, "static __attribute__((noinline)) struct S u%d(struct S s, "
+                   "uint64_t k) {\n", f);
+    const char *sel = by_pointer ? "s->" : "s.";
+    unsigned stmts = 2 + rng_below(&r, 4);
+    for (unsigned k = 0; k < stmts; ++k) {
+      int a = (int)rng_below(&r, (unsigned)nf), b = (int)rng_below(&r, (unsigned)nf);
+      const char *op = k_binops[rng_below(&r, 6)];
+      if (rng_below(&r, 4) == 0)
+        sb_addf(out, "  %sf%d = (%s)((uint64_t)%sf%d >> ((uint64_t)%sf%d & 31u));\n",
+                sel, a, ft[a], sel, a, sel, b);
+      else
+        sb_addf(out, "  %sf%d = (%s)((uint64_t)%sf%d %s ((uint64_t)%sf%d %s k));\n",
+                sel, a, ft[a], sel, a, op, sel, b, k_binops[rng_below(&r, 6)]);
+    }
+    if (!by_pointer)
+      sb_addf(out, "  return s;\n");
+    sb_addf(out, "}\n");
+  }
+  sb_addf(out, "static void mix_struct(struct S s) {\n");
+  for (int i = 0; i < nf; ++i)
+    sb_addf(out, "  mix((uint64_t)s.f%d);\n", i);
+  sb_addf(out, "}\nint main(void) {\n  struct S a[3];\n");
+  for (int e = 0; e < 3; ++e) {
+    sb_addf(out, "  a[%d] = (struct S){", e);
+    for (int i = 0; i < nf; ++i)
+      sb_addf(out, "%s(%s)%uu", i ? ", " : "", ft[i], rng_below(&r, 1u << 30));
+    sb_addf(out, "};\n");
+  }
+  unsigned calls = 4 + rng_below(&r, 6);
+  for (unsigned c = 0; c < calls; ++c) {
+    int f = (int)rng_below(&r, (unsigned)nfun);
+    int dst = (int)rng_below(&r, 3), src = (int)rng_below(&r, 3);
+    sb_addf(out, "  a[%d] = a[%d];\n", dst, src);
+    if (pointer_form[f])
+      sb_addf(out, "  u%d(&a[%d], %uu);\n", f, dst, rng_below(&r, 1u << 20));
+    else
+      sb_addf(out, "  a[%d] = u%d(a[%d], %uu);\n", dst, f, dst,
+              rng_below(&r, 1u << 20));
+  }
+  for (int e = 0; e < 3; ++e)
+    sb_addf(out, "  mix_struct(a[%d]);\n", e);
+  gen_epilogue(out);
+}
+
+/* Unsigned bit-fields: truncating stores, compound updates, copies. */
+static void gen_bits(uint64_t seed, sb_t *out) {
+  rng_t r = {.state = seed * UINT64_C(0xd1b54a32d192ed03) + 11};
+  int nf = 3 + (int)rng_below(&r, 5);
+  unsigned width[10];
+  gen_preamble(out);
+  sb_addf(out, "struct B {\n");
+  for (int i = 0; i < nf; ++i) {
+    width[i] = 1 + rng_below(&r, 31);
+    sb_addf(out, "  unsigned f%d : %u;\n", i, width[i]);
+  }
+  sb_addf(out, "  uint64_t tail;\n};\n");
+  int nfun = 2 + (int)rng_below(&r, 3);
+  for (int f = 0; f < nfun; ++f) {
+    sb_addf(out, "static __attribute__((noinline)) struct B u%d(struct B b, "
+                 "unsigned k) {\n", f);
+    unsigned stmts = 2 + rng_below(&r, 5);
+    for (unsigned k = 0; k < stmts; ++k) {
+      int a = (int)rng_below(&r, (unsigned)nf), c = (int)rng_below(&r, (unsigned)nf);
+      switch (rng_below(&r, 4)) {
+      case 0:
+        sb_addf(out, "  b.f%d = b.f%d %s k;\n", a, c, k_binops[rng_below(&r, 6)]);
+        break;
+      case 1:
+        sb_addf(out, "  b.f%d += b.f%d;\n", a, c);
+        break;
+      case 2:
+        sb_addf(out, "  b.f%d = (unsigned)((uint64_t)b.f%d << (k & 7u));\n", a, c);
+        break;
+      default:
+        sb_addf(out, "  b.tail += (uint64_t)b.f%d * (b.f%d + 1u);\n", a, c);
+      }
+    }
+    sb_addf(out, "  return b;\n}\n");
+  }
+  sb_addf(out, "static void mix_bits(struct B b) {\n");
+  for (int i = 0; i < nf; ++i)
+    sb_addf(out, "  mix((uint64_t)b.f%d);\n", i);
+  sb_addf(out, "  mix(b.tail);\n}\nint main(void) {\n  struct B b = {0};\n");
+  for (int i = 0; i < nf; ++i)
+    sb_addf(out, "  b.f%d = %uu;\n", i, rng_below(&r, 1u << 30));
+  unsigned calls = 3 + rng_below(&r, 6);
+  for (unsigned c = 0; c < calls; ++c)
+    sb_addf(out, "  b = u%u(b, %uu);\n  mix_bits(b);\n",
+            rng_below(&r, (unsigned)nfun), rng_below(&r, 1u << 20));
+  gen_epilogue(out);
+}
+
+/* Variadic functions reading mixed integer and double arguments. */
+static void gen_varargs(uint64_t seed, sb_t *out) {
+  rng_t r = {.state = seed * UINT64_C(0xa0761d6478bd642f) + 13};
+  gen_preamble(out);
+  sb_addf(out, "static __attribute__((noinline)) uint64_t vmix(const char *fmt, "
+               "...) {\n  va_list ap;\n  uint64_t acc = 7;\n  "
+               "va_start(ap, fmt);\n  for (; *fmt; ++fmt) {\n    switch (*fmt) "
+               "{\n    case 'i': acc = acc * 31 + (uint64_t)(uint32_t)va_arg(ap, "
+               "int); break;\n    case 'l': acc = acc * 31 + (uint64_t)va_arg(ap, "
+               "long long); break;\n    case 'u': acc = acc * 31 + "
+               "(uint64_t)va_arg(ap, unsigned); break;\n    case 'd': acc = acc * "
+               "31 + (uint64_t)(uint32_t)va_arg(ap, double); break;\n    }\n  }\n"
+               "  va_end(ap);\n  return acc;\n}\nint main(void) {\n");
+  unsigned calls = 4 + rng_below(&r, 6);
+  static const char kinds[] = "iludi";
+  for (unsigned c = 0; c < calls; ++c) {
+    char fmt[16];
+    unsigned n = 1 + rng_below(&r, 12);
+    for (unsigned i = 0; i < n; ++i)
+      fmt[i] = kinds[rng_below(&r, 5)];
+    fmt[n] = '\0';
+    sb_addf(out, "  mix(vmix(\"%s\"", fmt);
+    for (unsigned i = 0; i < n; ++i) {
+      unsigned v = rng_below(&r, 1u << 24);
+      switch (fmt[i]) {
+      case 'i': sb_addf(out, ", %d", (int)v - (1 << 20)); break;
+      case 'l': sb_addf(out, ", %lluLL", ((unsigned long long)v << 20) | v); break;
+      case 'u': sb_addf(out, ", %uu", v); break;
+      default: sb_addf(out, ", %u.0", v);
+      }
+    }
+    sb_addf(out, "));\n");
+  }
+  gen_epilogue(out);
+}
+
+
+/* Atomic builtins on plain objects, single threaded and so deterministic. */
+static void gen_atomic(uint64_t seed, sb_t *out) {
+  rng_t r = {.state = seed * UINT64_C(0xe7037ed1a0b428db) + 17};
+  gen_preamble(out);
+  static const char *const types[] = {"uint8_t", "uint16_t", "uint32_t", "uint64_t"};
+  int n = 3 + (int)rng_below(&r, 4);
+  for (int i = 0; i < n; ++i)
+    sb_addf(out, "static %s a%d = %uu;\n", types[rng_below(&r, 4)], i,
+            rng_below(&r, 1u << 20));
+  sb_addf(out, "static __attribute__((noinline)) void step(unsigned k) {\n");
+  unsigned stmts = 5 + rng_below(&r, 8);
+  for (unsigned i = 0; i < stmts; ++i) {
+    int v = (int)rng_below(&r, (unsigned)n), w = (int)rng_below(&r, (unsigned)n);
+    switch (rng_below(&r, 8)) {
+    case 0: sb_addf(out, "  mix(__atomic_fetch_add(&a%d, k, __ATOMIC_SEQ_CST));\n", v); break;
+    case 1: sb_addf(out, "  mix(__atomic_fetch_sub(&a%d, k + 3, __ATOMIC_SEQ_CST));\n", v); break;
+    case 2: sb_addf(out, "  mix(__atomic_fetch_xor(&a%d, k | 1, __ATOMIC_RELAXED));\n", v); break;
+    case 3: sb_addf(out, "  mix(__atomic_fetch_and(&a%d, ~(k & 7), __ATOMIC_ACQ_REL));\n", v); break;
+    case 4: sb_addf(out, "  mix(__atomic_exchange_n(&a%d, a%d + k, __ATOMIC_SEQ_CST));\n", v, w); break;
+    case 5:
+      sb_addf(out, "  { __typeof__(a%d) e = a%d; mix(__atomic_compare_exchange_n(&a%d, "
+                   "&e, e + k, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)); mix(e); }\n",
+              v, v, v);
+      break;
+    case 6: sb_addf(out, "  __atomic_store_n(&a%d, __atomic_load_n(&a%d, __ATOMIC_SEQ_CST) ^ k, "
+                         "__ATOMIC_SEQ_CST);\n", v, w); break;
+    default: sb_addf(out, "  mix(__atomic_fetch_or(&a%d, k << 1, __ATOMIC_SEQ_CST));\n", v);
+    }
+  }
+  sb_addf(out, "}\nint main(void) {\n");
+  unsigned calls = 3 + rng_below(&r, 5);
+  for (unsigned c = 0; c < calls; ++c)
+    sb_addf(out, "  step(%uu);\n", rng_below(&r, 1u << 16));
+  for (int i = 0; i < n; ++i)
+    sb_addf(out, "  mix((uint64_t)a%d);\n", i);
+  gen_epilogue(out);
+}
+
+/* Type punning through unions, character pointers and memcpy. */
+static void gen_alias(uint64_t seed, sb_t *out) {
+  rng_t r = {.state = seed * UINT64_C(0x8ebc6af09c88c6e3) + 19};
+  gen_preamble(out);
+  sb_addf(out, "#include <string.h>\n");
+  sb_addf(out, "union U { uint64_t q; uint32_t w[2]; uint16_t h[4]; uint8_t b[8]; };\n");
+  sb_addf(out, "static uint64_t buf[8];\n");
+  sb_addf(out, "static __attribute__((noinline)) void poke(unsigned k) {\n");
+  sb_addf(out, "  unsigned char *p = (unsigned char *)buf;\n  union U u;\n  uint32_t t;\n");
+  unsigned stmts = 5 + rng_below(&r, 8);
+  for (unsigned i = 0; i < stmts; ++i) {
+    unsigned a = rng_below(&r, 64), b = rng_below(&r, 8);
+    switch (rng_below(&r, 6)) {
+    case 0: sb_addf(out, "  p[%u] = (unsigned char)(p[%u] + k);\n", a, (a * 5 + 3) % 64 ? (a * 5 + 3) % 64 : 1); break;
+    case 1: sb_addf(out, "  u.q = buf[%u]; u.w[%u] ^= k; buf[%u] = u.q;\n", b, rng_below(&r, 2), (b + 1) % 8); break;
+    case 2: sb_addf(out, "  memcpy(&t, p + %u, sizeof t); t += k; memcpy(p + %u, &t, sizeof t);\n", a % 61, (a + 7) % 61 ? (a + 7) % 61 : 1); break;
+    case 3: sb_addf(out, "  u.q = buf[%u]; u.h[%u] = (uint16_t)(u.h[%u] * 3 + k); buf[%u] = u.q;\n", b, rng_below(&r, 4), rng_below(&r, 4), b); break;
+    case 4: sb_addf(out, "  buf[%u] = (buf[%u] << (k & 31)) | (buf[%u] >> 7);\n", b, (b + 3) % 8, (b + 5) % 8); break;
+    default: sb_addf(out, "  { unsigned char *q = p + %u; q[0] ^= (unsigned char)k; q[1] += q[0]; }\n", a % 62);
+    }
+  }
+  sb_addf(out, "}\nint main(void) {\n  for (int i = 0; i < 8; ++i) buf[i] = %uu * (i + 1);\n",
+          1 + rng_below(&r, 1u << 20));
+  unsigned calls = 3 + rng_below(&r, 5);
+  for (unsigned c = 0; c < calls; ++c)
+    sb_addf(out, "  poke(%uu);\n", rng_below(&r, 1u << 16));
+  sb_addf(out, "  for (int i = 0; i < 8; ++i) mix(buf[i]);\n");
+  gen_epilogue(out);
+}
+
+/* GNU attributes, builtins and register-constrained inline assembly. */
+static void gen_gnu(uint64_t seed, sb_t *out) {
+  rng_t r = {.state = seed * UINT64_C(0x589965cc75374cc3) + 23};
+  gen_preamble(out);
+  sb_addf(out, "struct __attribute__((packed)) P { uint8_t a; uint32_t b; uint16_t c; "
+               "uint64_t d; };\n");
+  sb_addf(out, "static struct P gp = {1, 2, 3, 4};\n");
+  sb_addf(out, "static uint64_t tab[4] __attribute__((aligned(32))) = {1, 2, 3, 4};\n");
+  sb_addf(out, "static __attribute__((noinline)) uint64_t f(uint64_t x, uint64_t y) {\n");
+  sb_addf(out, "  uint64_t r = x;\n");
+  unsigned stmts = 4 + rng_below(&r, 8);
+  for (unsigned i = 0; i < stmts; ++i) {
+    switch (rng_below(&r, 9)) {
+    case 0: sb_addf(out, "  r += (uint64_t)__builtin_popcountll(r ^ y);\n"); break;
+    case 1: sb_addf(out, "  r ^= (uint64_t)__builtin_clzll(r | 1) + y;\n"); break;
+    case 2: sb_addf(out, "  r = __builtin_bswap64(r) + (uint64_t)__builtin_ctzll(y | 1);\n"); break;
+    case 3: sb_addf(out, "  r += __builtin_bswap32((uint32_t)y);\n"); break;
+    case 4: sb_addf(out, "  __asm__(\"addq %%1, %%0\" : \"+r\"(r) : \"r\"(y));\n"); break;
+    case 5: sb_addf(out, "  __asm__ volatile(\"\" ::: \"memory\");\n  gp.b += (uint32_t)r; gp.c ^= (uint16_t)y; gp.d += gp.b;\n"); break;
+    case 6: sb_addf(out, "  tab[(r >> 3) & 3] += __builtin_expect(r & 1, 0) ? y : r;\n"); break;
+    case 7: { sb_addf(out, "  { uint64_t o; r += __builtin_add_overflow(r, y, &o) ? 5 : o; }\n"); break; }
+    default: sb_addf(out, "  r = (r << 5) | (r >> 59);\n");
+    }
+  }
+  sb_addf(out, "  return r + gp.a + gp.d;\n}\nint main(void) {\n");
+  unsigned calls = 3 + rng_below(&r, 5);
+  for (unsigned c = 0; c < calls; ++c)
+    sb_addf(out, "  mix(f(%lluull, %uu));\n",
+            ((unsigned long long)rng_below(&r, 1u << 30) << 20) | rng_below(&r, 1u << 20),
+            rng_below(&r, 1u << 24));
+  sb_addf(out, "  for (int i = 0; i < 4; ++i) mix(tab[i]);\n  mix(gp.b); mix(gp.c);\n");
+  gen_epilogue(out);
+}
+
+static void gen_builtin(uint64_t seed, bool small, int profile, sb_t *out) {
+  int pick = profile >= 0 ? profile : (int)(seed % 7);
+  if (pick == 1) {
+    gen_struct(seed, out);
+    return;
+  }
+  if (pick == 2)
+    gen_bits(seed, out);
+  else if (pick == 3)
+    gen_varargs(seed, out);
+  else if (pick == 4)
+    gen_atomic(seed, out);
+  else if (pick == 5)
+    gen_alias(seed, out);
+  else if (pick == 6)
+    gen_gnu(seed, out);
+  else
+    gen_integer(seed, small, out);
+}
+
 /* ------------------------------------------------------------------ */
 /* Case checking                                                       */
 /* ------------------------------------------------------------------ */
@@ -382,13 +703,14 @@ typedef enum {
   ST_OK,
   ST_INVALID,
   ST_UNSUPPORTED,
+  ST_DISPUTE,
   ST_MISCOMPILE,
   ST_LINKFAIL,
   ST_COUNT
 } status_t;
 
 static const char *const k_status_names[ST_COUNT] = {
-    "ok", "invalid", "unsupported", "MISCOMPILE", "link-fail"};
+    "ok", "invalid", "unsupported", "oracle-dispute", "MISCOMPILE", "link-fail"};
 
 typedef struct {
   status_t status;
@@ -462,68 +784,120 @@ static outcome_t check_case(const config_t *cfg, const case_t *c) {
     return outcome(ST_INVALID, "reference compile failed: %s", why);
   }
   char *run_ref[] = {ref_exe, NULL};
-  rc = run_cmd(run_ref, want_out, NULL, cfg->timeout_s);
-  if (rc != 0)
-    return outcome(ST_INVALID, "reference run exited %d", rc);
+  int want_rc = run_cmd(run_ref, want_out, NULL, cfg->timeout_s);
+  if (want_rc >= 128)
+    return outcome(ST_INVALID, "reference run died with status %d", want_rc);
   sb_t want = {0};
   read_file(want_out, &want);
+  if (cfg->ref2) {
+    /* A second compiler settles disputes about what the program means. */
+    char ref2_exe[PATH_MAX], ref2_out[PATH_MAX];
+    path_in(ref2_exe, sizeof(ref2_exe), c->dir, "ref2");
+    path_in(ref2_out, sizeof(ref2_out), c->dir, "ref2.out");
+    char *argv2[13];
+    memcpy(argv2, ref_argv, sizeof(argv2));
+    argv2[0] = (char *)cfg->ref2;
+    for (int i = 0; argv2[i]; ++i)
+      if (argv2[i] == ref_exe)
+        argv2[i] = ref2_exe;
+    if (run_cmd(argv2, NULL, err, cfg->timeout_s * 4) == 0) {
+      char *run2[] = {ref2_exe, NULL};
+      int rc2 = run_cmd(run2, ref2_out, NULL, cfg->timeout_s);
+      sb_t other = {0};
+      read_file(ref2_out, &other);
+      bool agree = rc2 == want_rc && other.len == want.len &&
+                   (!want.len || memcmp(other.data, want.data, want.len) == 0);
+      sb_free(&other);
+      if (!agree) {
+        sb_free(&want);
+        return outcome(ST_DISPUTE, "%s and %s disagree (status %d vs %d)",
+                       cfg->ref, cfg->ref2, want_rc, rc2);
+      }
+    }
+  }
   outcome_t result = outcome(ST_OK, "");
   for (int o = 0; o < cfg->opt_count && result.status == ST_OK; ++o) {
     const char *opt = cfg->opts[o];
-    char obj[PATH_MAX], exe[PATH_MAX], got_out[PATH_MAX], name[48];
-    snprintf(name, sizeof(name), "n%s.o", opt);
-    path_in(obj, sizeof(obj), c->dir, name);
-    snprintf(name, sizeof(name), "n%s", opt);
-    path_in(exe, sizeof(exe), c->dir, name);
-    snprintf(name, sizeof(name), "n%s.out", opt);
-    path_in(got_out, sizeof(got_out), c->dir, name);
-    char *nyc_argv[] = {(char *)cfg->nyc, "-c", (char *)opt, inc, (char *)c->nyc_unit,
-                        "-o", obj, NULL};
-    rc = run_cmd(nyc_argv, NULL, err, cfg->timeout_s * 4);
-    if (rc != 0) {
-      char why[160];
-      first_line(err, why, sizeof(why));
-      result = outcome(ST_UNSUPPORTED, "nyc %s rejected: %s", opt, why);
-      break;
-    }
-    char *link_argv[11];
-    int m = 0;
-    link_argv[m++] = (char *)cfg->ref;
-    link_argv[m++] = "-w";
-    link_argv[m++] = inc;
-    if (c->model)
-      link_argv[m++] = (char *)c->model;
-    if (c->driver)
-      link_argv[m++] = (char *)c->driver;
-    link_argv[m++] = obj;
-    link_argv[m++] = "-o";
-    link_argv[m++] = exe;
-    link_argv[m++] = "-lm";
-    link_argv[m] = NULL;
-    rc = run_cmd(link_argv, NULL, err, cfg->timeout_s * 4);
-    if (rc != 0) {
-      char why[160];
-      first_line(err, why, sizeof(why));
-      result = outcome(ST_LINKFAIL, "link %s: %s", opt, why);
-      break;
-    }
-    char *run_n[] = {exe, NULL};
-    rc = run_cmd(run_n, got_out, NULL, cfg->timeout_s);
-    sb_t got = {0};
-    read_file(got_out, &got);
-    bool same = rc == 0 && got.len == want.len &&
-                (!want.len || memcmp(got.data, want.data, want.len) == 0);
-    if (!same) {
-      char w[64] = "", gtxt[64] = "";
-      if (want.data)
-        snprintf(w, sizeof(w), "%.*s", (int)strcspn(want.data, "\n"), want.data);
-      if (got.data)
-        snprintf(gtxt, sizeof(gtxt), "%.*s", (int)strcspn(got.data, "\n"),
-                 got.data);
-      result = outcome(ST_MISCOMPILE, "%s: want [%s] got [%s] rc=%d", opt, w,
-                       gtxt, rc);
-    }
-    sb_free(&got);
+    for (int rt = 0; rt < 3 && result.status == ST_OK; ++rt) {
+      if (!(cfg->routes & (1 << rt)))
+        continue;
+      static const char *const route_names[] = {"object", "direct", "asm"};
+      char obj[PATH_MAX], exe[PATH_MAX], got_out[PATH_MAX], asm_path[PATH_MAX],
+          name[64], label[40];
+      snprintf(label, sizeof(label), "%s/%s", opt, route_names[rt]);
+      snprintf(name, sizeof(name), "n%s-%s.o", opt, route_names[rt]);
+      path_in(obj, sizeof(obj), c->dir, name);
+      snprintf(name, sizeof(name), "n%s-%s", opt, route_names[rt]);
+      path_in(exe, sizeof(exe), c->dir, name);
+      snprintf(name, sizeof(name), "n%s-%s.out", opt, route_names[rt]);
+      path_in(got_out, sizeof(got_out), c->dir, name);
+      snprintf(name, sizeof(name), "n%s-%s.s", opt, route_names[rt]);
+      path_in(asm_path, sizeof(asm_path), c->dir, name);
+      if (rt == 2) {
+        char *asm_argv[] = {(char *)cfg->nyc, "-S", (char *)opt, inc,
+                            (char *)c->nyc_unit, "-o", asm_path, NULL};
+        rc = run_cmd(asm_argv, NULL, err, cfg->timeout_s * 4);
+        note_nyc_compile();
+        if (rc == 0) {
+          char *as_argv[] = {(char *)cfg->ref, "-w", "-c", asm_path, "-o", obj, NULL};
+          rc = run_cmd(as_argv, NULL, err, cfg->timeout_s * 4);
+        }
+      } else if (rt == 1) {
+        char *direct_argv[] = {"env", "NYC_NO_MACH_OBJECT=1", (char *)cfg->nyc, "-c",
+                               (char *)opt, inc, (char *)c->nyc_unit, "-o", obj, NULL};
+        rc = run_cmd(direct_argv, NULL, err, cfg->timeout_s * 4);
+        note_nyc_compile();
+      } else {
+        char *nyc_argv[] = {(char *)cfg->nyc, "-c", (char *)opt, inc,
+                            (char *)c->nyc_unit, "-o", obj, NULL};
+        rc = run_cmd(nyc_argv, NULL, err, cfg->timeout_s * 4);
+        note_nyc_compile();
+      }
+      if (rc != 0) {
+        char why[160];
+        first_line(err, why, sizeof(why));
+        result = outcome(ST_UNSUPPORTED, "nyc %s rejected: %s", label, why);
+        break;
+      }
+      char *link_argv[11];
+      int m = 0;
+      link_argv[m++] = (char *)cfg->ref;
+      link_argv[m++] = "-w";
+      link_argv[m++] = inc;
+      if (c->model)
+        link_argv[m++] = (char *)c->model;
+      if (c->driver)
+        link_argv[m++] = (char *)c->driver;
+      link_argv[m++] = obj;
+      link_argv[m++] = "-o";
+      link_argv[m++] = exe;
+      link_argv[m++] = "-lm";
+      link_argv[m] = NULL;
+      rc = run_cmd(link_argv, NULL, err, cfg->timeout_s * 4);
+      if (rc != 0) {
+        char why[160];
+        first_line(err, why, sizeof(why));
+        result = outcome(ST_LINKFAIL, "link %s: %s", label, why);
+        break;
+      }
+      char *run_n[] = {exe, NULL};
+      rc = run_cmd(run_n, got_out, NULL, cfg->timeout_s);
+      sb_t got = {0};
+      read_file(got_out, &got);
+      bool same = rc == want_rc && got.len == want.len &&
+                  (!want.len || memcmp(got.data, want.data, want.len) == 0);
+      if (!same) {
+        char w[64] = "", gtxt[64] = "";
+        if (want.data)
+          snprintf(w, sizeof(w), "%.*s", (int)strcspn(want.data, "\n"), want.data);
+        if (got.data)
+          snprintf(gtxt, sizeof(gtxt), "%.*s", (int)strcspn(got.data, "\n"),
+                   got.data);
+        result = outcome(ST_MISCOMPILE, "%s: want [%s] got [%s] rc=%d", label, w,
+                         gtxt, rc);
+      }
+      sb_free(&got);
+      }
   }
   sb_free(&want);
   return result;
@@ -535,7 +909,7 @@ static outcome_t check_case(const config_t *cfg, const case_t *c) {
 
 static outcome_t run_builtin_seed(const config_t *cfg, long seed, const char *dir) {
   sb_t src = {0};
-  gen_builtin((uint64_t)seed, cfg->small, &src);
+  gen_builtin((uint64_t)seed, cfg->small, cfg->profile, &src);
   char path[PATH_MAX];
   path_in(path, sizeof(path), dir, "p.c");
   if (!write_file(path, src.data, src.len)) {
@@ -633,6 +1007,60 @@ static const char *gen_name(int gen) {
   return gen == GEN_BUILTIN ? "builtin" : gen == GEN_YARPGEN ? "yarpgen" : "csmith";
 }
 
+/* Everything needed to rebuild a failing case: versions, checksum, commands. */
+static void tool_first_line(char *const argv[], char *out, size_t cap) {
+  char tmp[PATH_MAX];
+  snprintf(tmp, sizeof(tmp), "/tmp/ny-fuzz-ver-%d-%lu", (int)getpid(),
+           (unsigned long)pthread_self());
+  out[0] = '\0';
+  if (run_cmd(argv, tmp, NULL, 20) == 0)
+    first_line(tmp, out, cap);
+  unlink(tmp);
+}
+
+static void write_repro(const config_t *cfg, const char *dir, int gen, long seed,
+                        const outcome_t *o) {
+  char path[PATH_MAX], ref_version[200], nyc_version[200], sum[200] = "";
+  path_in(path, sizeof(path), dir, "repro.txt");
+  char *ref_v[] = {(char *)cfg->ref, "--version", NULL};
+  char *nyc_v[] = {(char *)cfg->nyc, "--version", NULL};
+  tool_first_line(ref_v, ref_version, sizeof(ref_version));
+  tool_first_line(nyc_v, nyc_version, sizeof(nyc_version));
+  char tmp[PATH_MAX];
+  snprintf(tmp, sizeof(tmp), "/tmp/ny-fuzz-sum-%d-%lu", (int)getpid(),
+           (unsigned long)pthread_self());
+  char *sha_v[] = {"sha256sum", (char *)cfg->nyc, NULL};
+  if (run_cmd(sha_v, tmp, NULL, 20) == 0) {
+    first_line(tmp, sum, sizeof(sum));
+    char *space = strchr(sum, ' ');
+    if (space)
+      *space = '\0';
+  }
+  unlink(tmp);
+  sb_t b = {0};
+  sb_addf(&b, "generator: %s\nseed: %ld\nstatus: %s\ndetail: %s\n",
+          gen_name(gen), seed, k_status_names[o->status], o->detail);
+  sb_addf(&b, "reference: %s (%s)\nnyc: %s\nnyc sha256: %s\nlevels:", cfg->ref,
+          ref_version, nyc_version, sum);
+  for (int i = 0; i < cfg->opt_count; ++i)
+    sb_addf(&b, " %s", cfg->opts[i]);
+  sb_addf(&b, "\nreproduce:\n");
+  if (gen == GEN_BUILTIN)
+    sb_addf(&b, "  ny-fuzz gen --seed %ld --profile %d%s > p.c\n", seed,
+            cfg->profile, cfg->small ? " --small" : "");
+  else if (gen == GEN_YARPGEN)
+    sb_addf(&b, "  yarpgen --std=c --seed=%ld --out-dir=.\n", seed + 1);
+  else
+    sb_addf(&b, "  csmith --seed %ld --output p.c\n", seed);
+  sb_addf(&b, "  ny-fuzz run --nyc %s --ref %s --seeds %ld:%ld --gen %s --opts ",
+          cfg->nyc, cfg->ref, seed, seed + 1, gen_name(gen));
+  for (int i = 0; i < cfg->opt_count; ++i)
+    sb_addf(&b, "%s%s", i ? "," : "", cfg->opts[i]);
+  sb_addf(&b, "\n");
+  write_file(path, b.data, b.len);
+  sb_free(&b);
+}
+
 static void *worker(void *arg) {
   pool_t *pool = arg;
   const config_t *cfg = pool->cfg;
@@ -657,7 +1085,11 @@ static void *worker(void *arg) {
       printf("%s seed %ld: %s %s\n", gen_name(gen), seed,
              k_status_names[o.status], o.detail);
     pthread_mutex_unlock(&pool->lock);
-    bool keep = cfg->keep || o.status == ST_MISCOMPILE || o.status == ST_LINKFAIL;
+    bool keep = cfg->keep || o.status == ST_MISCOMPILE ||
+                o.status == ST_LINKFAIL || o.status == ST_DISPUTE;
+    if (o.status == ST_MISCOMPILE || o.status == ST_LINKFAIL ||
+        o.status == ST_DISPUTE)
+      write_repro(cfg, dir, gen, seed, &o);
     if (!keep)
       remove_tree(dir);
   }
@@ -697,12 +1129,42 @@ static int command_run(config_t *cfg) {
     pthread_join(threads[i], NULL);
   free(threads);
   printf("%ld cases: %ld ok, %ld invalid, %ld unsupported by NYC, %ld "
-         "miscompiled, %ld link failures\n",
+         "oracle disputes, %ld miscompiled, %ld link failures\n",
          pool.total, pool.counts[ST_OK], pool.counts[ST_INVALID],
-         pool.counts[ST_UNSUPPORTED], pool.counts[ST_MISCOMPILE],
-         pool.counts[ST_LINKFAIL]);
+         pool.counts[ST_UNSUPPORTED], pool.counts[ST_DISPUTE],
+         pool.counts[ST_MISCOMPILE], pool.counts[ST_LINKFAIL]);
+  long compiles = g_nyc_compiles ? g_nyc_compiles : 1;
+  long per_compile_ms = g_nyc_cpu_ms / compiles;
+  printf("nyc compile cost: %ld compiles, %ld ms CPU each, peak RSS %ld MB\n",
+         g_nyc_compiles, per_compile_ms, g_nyc_rss_kb / 1024);
   bool failed = pool.counts[ST_MISCOMPILE] || pool.counts[ST_LINKFAIL] ||
                 (cfg->strict && pool.counts[ST_UNSUPPORTED]);
+  if (cfg->baseline) {
+    long base_ms = 0, base_kb = 0;
+    FILE *f = fopen(cfg->baseline, "r");
+    if (f && fscanf(f, "%ld %ld", &base_ms, &base_kb) == 2 && !cfg->save_baseline) {
+      /* Generous bounds: this guards against regressions, not noise. */
+      if (base_ms > 0 && per_compile_ms > 2 * base_ms + 50) {
+        printf("compile-time regression: %ld ms against a %ld ms baseline\n",
+               per_compile_ms, base_ms);
+        failed = true;
+      }
+      if (base_kb > 0 && g_nyc_rss_kb > 2 * base_kb) {
+        printf("peak-memory regression: %ld MB against a %ld MB baseline\n",
+               g_nyc_rss_kb / 1024, base_kb / 1024);
+        failed = true;
+      }
+    }
+    if (f)
+      fclose(f);
+    if (cfg->save_baseline) {
+      FILE *out = fopen(cfg->baseline, "w");
+      if (out) {
+        fprintf(out, "%ld %ld\n", per_compile_ms, g_nyc_rss_kb);
+        fclose(out);
+      }
+    }
+  }
   return failed ? 1 : 0;
 }
 
@@ -758,6 +1220,8 @@ typedef struct {
   const config_t *cfg;
   const char *dir;
   const char *opt;
+  const char *reject; /* reduce a compile failure whose message has this text */
+  int route;          /* 0 object, 1 direct encoder, 2 assembly */
 } reducer_t;
 
 /* GCC must accept the program cleanly and NYC must still differ. */
@@ -782,8 +1246,35 @@ static bool still_bad(const reducer_t *rd, const char *text) {
     return false;
   char *nyc_argv[] = {(char *)rd->cfg->nyc, "-c", (char *)rd->opt, src, "-o", obj,
                       NULL};
-  if (run_cmd(nyc_argv, NULL, NULL, rd->cfg->timeout_s * 4) != 0)
+  if (rd->reject) {
+    char err_path[PATH_MAX];
+    path_in(err_path, sizeof(err_path), rd->dir, "r.err");
+    int status = run_cmd(nyc_argv, NULL, err_path, rd->cfg->timeout_s * 4);
+    sb_t text = {0};
+    read_file(err_path, &text);
+    bool match = status != 0 && text.data && strstr(text.data, rd->reject);
+    sb_free(&text);
+    return match;
+  }
+  if (rd->route == 2) {
+    char asm_path[PATH_MAX];
+    path_in(asm_path, sizeof(asm_path), rd->dir, "r.s");
+    char *asm_argv[] = {(char *)rd->cfg->nyc, "-S", (char *)rd->opt, src, "-o",
+                        asm_path, NULL};
+    if (run_cmd(asm_argv, NULL, NULL, rd->cfg->timeout_s * 4) != 0)
+      return false;
+    char *as_argv[] = {(char *)rd->cfg->ref, "-w", "-c", asm_path, "-o", obj,
+                       NULL};
+    if (run_cmd(as_argv, NULL, NULL, rd->cfg->timeout_s * 4) != 0)
+      return false;
+  } else if (rd->route == 1) {
+    char *direct_argv[] = {"env", "NYC_NO_MACH_OBJECT=1", (char *)rd->cfg->nyc,
+                           "-c", (char *)rd->opt, src, "-o", obj, NULL};
+    if (run_cmd(direct_argv, NULL, NULL, rd->cfg->timeout_s * 4) != 0)
+      return false;
+  } else if (run_cmd(nyc_argv, NULL, NULL, rd->cfg->timeout_s * 4) != 0) {
     return false;
+  }
   char *link_argv[] = {(char *)rd->cfg->ref, obj, "-o", exe_n, NULL};
   if (run_cmd(link_argv, NULL, NULL, rd->cfg->timeout_s * 4) != 0)
     return false;
@@ -814,7 +1305,8 @@ static bool is_temp_line(const char *line, char **prefix_out) {
   return true;
 }
 
-static int command_reduce(const config_t *cfg, const char *dir, const char *opt) {
+static int command_reduce(const config_t *cfg, const char *dir, const char *opt,
+                          const char *reject, int route) {
   char path[PATH_MAX];
   path_in(path, sizeof(path), dir, "p.c");
   sb_t text = {0};
@@ -822,7 +1314,7 @@ static int command_reduce(const config_t *cfg, const char *dir, const char *opt)
     fprintf(stderr, "ny-fuzz: cannot read %s\n", path);
     return 2;
   }
-  reducer_t rd = {.cfg = cfg, .dir = dir, .opt = opt};
+  reducer_t rd = {.cfg = cfg, .dir = dir, .opt = opt, .reject = reject, .route = route};
   if (!still_bad(&rd, text.data)) {
     fprintf(stderr, "ny-fuzz: %s does not differ at %s\n", path, opt);
     sb_free(&text);
@@ -899,7 +1391,7 @@ static void usage(void) {
   fputs(
       "usage: ny-fuzz run    [options]\n"
       "       ny-fuzz gen    --seed N [--small]\n"
-      "       ny-fuzz reduce --dir CASEDIR [--opt -O0] [options]\n"
+      "       ny-fuzz reduce --dir CASEDIR [--opt -O0] [--reject TEXT] [options]\n"
       "\n"
       "Compiles seeded, undefined-behaviour-free C programs with a reference\n"
       "compiler and with NYC and compares program output. Failing cases stay\n"
@@ -914,6 +1406,10 @@ static void usage(void) {
       "  --opts LIST    NYC optimization levels (default -O0,-O2)\n"
       "  --jobs N       parallel workers (default: half the CPUs, at most 4)\n"
       "  --timeout S    per-command timeout in seconds (default 30)\n"
+      "  --profile P    builtin program shape: all (default), int, struct, bits, va, atomic, alias, gnu\n"
+      "  --routes LIST  NYC code routes: object (default), direct, asm\n"
+      "  --ref2 CC      second reference compiler; disagreements are oracle disputes\n"
+      "  --baseline F   compare compile cost with F (--save-baseline writes it)\n"
       "  --small        smaller builtin programs\n"
       "  --keep         keep passing cases\n"
       "  --strict       count programs NYC rejects as failures\n"
@@ -963,12 +1459,15 @@ int main(int argc, char **argv) {
                   .seed_lo = 0,
                   .seed_hi = 200,
                   .gens = GEN_BUILTIN,
+                  .profile = -1,
+                  .routes = 1,
                   .timeout_s = 30};
   long cpus = sysconf(_SC_NPROCESSORS_ONLN);
   cfg.jobs = cpus > 4 ? 4 : cpus > 1 ? (int)cpus / 2 : 1; /* stay gentle */
   parse_opts(&cfg, "-O0,-O2");
   const char *case_dir = NULL;
   const char *reduce_opt = "-O0";
+  const char *reduce_reject = NULL;
   long gen_seed = 0;
   for (int i = 2; i < argc; ++i) {
     const char *a = argv[i];
@@ -981,8 +1480,38 @@ int main(int argc, char **argv) {
       cfg.outdir = argv[++i];
     else if (!strcmp(a, "--dir") && v)
       case_dir = argv[++i];
+    else if (!strcmp(a, "--reject") && v)
+      reduce_reject = argv[++i];
     else if (!strcmp(a, "--opt") && v)
       reduce_opt = argv[++i];
+    else if (!strcmp(a, "--routes") && v) {
+      cfg.routes = 0;
+      char *list = strdup(argv[++i]);
+      for (char *tok = strtok(list, ","); tok; tok = strtok(NULL, ","))
+        cfg.routes |= !strcmp(tok, "object") ? 1 : !strcmp(tok, "direct") ? 2
+                      : !strcmp(tok, "asm")  ? 4 : 0;
+      free(list);
+      if (!cfg.routes) {
+        usage();
+        return 2;
+      }
+    } else if (!strcmp(a, "--ref2") && v)
+      cfg.ref2 = argv[++i];
+    else if (!strcmp(a, "--baseline") && v)
+      cfg.baseline = argv[++i];
+    else if (!strcmp(a, "--profile") && v) {
+      const char *name = argv[++i];
+      cfg.profile = !strcmp(name, "all")      ? -1
+                    : !strcmp(name, "int")    ? 0
+                    : !strcmp(name, "struct") ? 1
+                    : !strcmp(name, "bits")   ? 2
+                    : !strcmp(name, "va")     ? 3
+                    : !strcmp(name, "atomic") ? 4
+                    : !strcmp(name, "alias")  ? 5
+                    : !strcmp(name, "gnu")    ? 6
+                                              : atoi(name);
+    } else if (!strcmp(a, "--save-baseline"))
+      cfg.save_baseline = true;
     else if (!strcmp(a, "--opts") && v)
       parse_opts(&cfg, argv[++i]);
     else if (!strcmp(a, "--jobs") && v)
@@ -1017,7 +1546,7 @@ int main(int argc, char **argv) {
     return command_run(&cfg);
   if (!strcmp(command, "gen")) {
     sb_t src = {0};
-    gen_builtin((uint64_t)gen_seed, cfg.small, &src);
+    gen_builtin((uint64_t)gen_seed, cfg.small, cfg.profile, &src);
     fwrite(src.data, 1, src.len, stdout);
     sb_free(&src);
     return 0;
@@ -1027,7 +1556,8 @@ int main(int argc, char **argv) {
       usage();
       return 2;
     }
-    return command_reduce(&cfg, case_dir, reduce_opt);
+    return command_reduce(&cfg, case_dir, reduce_opt, reduce_reject,
+                          cfg.routes == 4 ? 2 : cfg.routes == 2 ? 1 : 0);
   }
   usage();
   return 2;

@@ -495,7 +495,8 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         in->op == NYIR_VEC8_MUL_I64 || in->op == NYIR_VEC4_SHL_I64 ||
         in->op == NYIR_VEC4_SAR_I64 || in->op == NYIR_VEC8_SAR_I64 ||
         in->op == NYIR_VEC8_SHR_I64 || in->op == NYIR_VEC8_SHL_I64 ||
-        in->op == NYIR_VEC8_CMP_I64 || in->op == NYIR_VEC8_SELECT_I64;
+        in->op == NYIR_VEC8_CMP_I64 || in->op == NYIR_VEC8_SELECT_I64 ||
+        in->op == NYIR_VEC8_DIV_CONST_I64;
     if (i64_vector_result && in->dst >= 0 && in->dst < NY_X64_NIR_MAX_SLOTS)
       c->value_i64v2[in->dst] = true;
     if ((in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
@@ -1399,6 +1400,7 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         op == NYIR_VEC8_MUL_I64 || op == NYIR_VEC8_SAR_I64 ||
         op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_SHL_I64 ||
         op == NYIR_VEC8_CMP_I64 || op == NYIR_VEC8_SELECT_I64 ||
+        op == NYIR_VEC8_DIV_CONST_I64 ||
         op == NYIR_VEC8_REDUCE_ADD_I64 ||
         op == NYIR_VEC8_LOAD_F32 || op == NYIR_VEC8_STORE_F32 ||
         op == NYIR_VEC8_ADD_F32 || op == NYIR_VEC8_SUB_F32 ||
@@ -3794,6 +3796,20 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
         return false;
     return nyr_put(c->w, "\tmovq\t%r11, %rax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  }
+  case NYIR_VEC8_DIV_CONST_I64: {
+    int a = ny_x64_nir_slot(c, in->a);
+    int dst = ny_x64_nir_slot(c, in->dst);
+    if (a < 0 || dst < 0 || in->imm == 0 || in->imm == 1 || in->imm == -1 ||
+        in->imm == INT64_MIN)
+      return false;
+    for (int lane = 0; lane < 4; ++lane)
+      if (!ny_x64_nir_load(c, a + lane) ||
+          !nyr_printf(c->w, "\tmovabsq\t$%lld, %%rcx\n\tcqto\n\tidivq\t%%rcx\n",
+                      (long long)in->imm) ||
+          !ny_x64_nir_store(c, dst + lane))
+        return false;
+    return true;
   }
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64:
@@ -11109,7 +11125,11 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           const nyr_mach_inst_t *next = &mach->insts[pc + 1];
           int64_t right = 0;
 
-          if (next->opcode == NYR_MACH_SAR &&
+          /*
+           * A SAR already fused into a sext32 reads its own source, so the
+           * shift before it is a separate value and must be emitted.
+           */
+          if (next->opcode == NYR_MACH_SAR && !next->sext32 &&
               next->src0.kind == NYR_MACH_OPERAND_VREG &&
               next->src0.as.reg == in->dst.as.reg &&
               nyr_x64_mach_const_i64(mach, definitions, &next->src1, &right,

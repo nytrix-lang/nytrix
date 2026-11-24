@@ -2760,6 +2760,13 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
     if (inst->effects != NYR_MACH_EFFECT_NONE || !mach_is_none(&inst->src2))
       return false;
     if (inst->opcode == NYR_MACH_DIV &&
+        mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_V256_I64 &&
+        mach_same_value_type(func, &inst->dst, &inst->src0) &&
+        inst->src1.kind == NYR_MACH_OPERAND_IMM && inst->src1.as.imm != 0 &&
+        inst->src1.as.imm != 1 && inst->src1.as.imm != -1 &&
+        inst->src1.as.imm != INT64_MIN)
+      return true;
+    if (inst->opcode == NYR_MACH_DIV &&
         mach_is_integer_value(func, &inst->dst) &&
         mach_is_integer_value(func, &inst->src0) &&
         inst->src1.kind == NYR_MACH_OPERAND_IMM)
@@ -4890,6 +4897,7 @@ bool nyr_mach_opcode_supported(nyr_op_t op) {
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SHL_I64:
+  case NYIR_VEC8_DIV_CONST_I64:
   case NYIR_VEC8_CMP_I64:
   case NYIR_VEC8_SELECT_I64:
   case NYIR_VEC8_SET1_I64:
@@ -6378,6 +6386,16 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
           goto done;
         }
       }
+    } else if (in->op == NYIR_VEC8_DIV_CONST_I64) {
+      if (!(caps & NY_NATIVE_CAP_MACH_AVX2)) {
+        nyr_err(err, err_len, "machine lower: vec8 div requires AVX2");
+        goto done;
+      }
+      inst.opcode = NYR_MACH_DIV;
+      inst.dst = mach_vreg(&lowered, values[in->dst]);
+      inst.src0 = mach_vreg(&lowered, values[in->a]);
+      inst.src1 =
+          (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM, .as.imm = in->imm};
     } else if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
                in->op == NYIR_VEC8_SHL_I64) {
       if (!(caps & NY_NATIVE_CAP_MACH_AVX2)) {

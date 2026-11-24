@@ -2531,10 +2531,23 @@ static bool write_c_unit_assembly(
     }
     free(never_marked);
   }
-  for (size_t i = 0; ok && i < unit->count; ++i) {
-    bool is_local = unit->function_local && unit->function_local[i];
-    bool is_inline = unit->function_inline && unit->function_inline[i];
-    if (is_local) {
+  /*
+   * Drop out-of-line copies nothing references, as GCC does. A dropped
+   * function's own calls stop counting, so a chain of unused static inline
+   * helpers disappears together (iterate to a fixed point).
+   */
+  bool *dropped = calloc(unit->count ? unit->count : 1, sizeof(*dropped));
+  if (!dropped) {
+    snprintf(err, err_len, "out of memory pruning unreferenced static functions");
+    ok = false;
+  }
+  for (bool pruning = ok; pruning;) {
+    pruning = false;
+    for (size_t i = 0; i < unit->count; ++i) {
+      bool is_local = unit->function_local && unit->function_local[i];
+      bool is_inline = unit->function_inline && unit->function_inline[i];
+      if (dropped[i] || !is_local)
+        continue;
       bool has_jump_label_asm = false;
       bool has_unspecialized_alt_wrmsr = false;
       for (size_t inst = 0; inst < unit->funcs[i].len; ++inst)
@@ -2556,32 +2569,40 @@ static bool write_c_unit_assembly(
       bool unreferenced_static_inline =
           is_inline && !(unit->function_sections &&
                          unit->function_sections[i]);
-      if ((is_inline && has_jump_label_asm) || has_unspecialized_alt_wrmsr ||
-          always_inline_local || unreferenced_static_inline) {
-        bool referenced = false;
-        for (size_t caller = 0; caller < unit->count && !referenced; ++caller)
-          for (size_t inst = 0; inst < unit->funcs[caller].len; ++inst) {
-            const nyr_inst_t *call = &unit->funcs[caller].data[inst];
-            referenced |=
-                (call->op == NYIR_CALL || call->op == NYIR_ADDR_SYMBOL) &&
-                call->symbol && strcmp(call->symbol, unit->names[i]) == 0;
-          }
-        /*
-         * A data initializer (`static const struct pv_irq_ops ops = {
-         * .halt = native_halt }`) requires the out-of-line copy exactly
-         * like a call does; dropping it leaves the table with an
-         * undefined reference.
-         */
-        for (size_t data = 0; data < unit->data_count && !referenced; ++data)
-          for (size_t reloc = 0; reloc < unit->data[data].reloc_count;
-               ++reloc) {
-            const char *symbol = unit->data[data].relocs[reloc].symbol;
-            referenced |= symbol && strcmp(symbol, unit->names[i]) == 0;
-          }
-        if (!referenced)
+      if (!((is_inline && has_jump_label_asm) || has_unspecialized_alt_wrmsr ||
+            always_inline_local || unreferenced_static_inline))
+        continue;
+      bool referenced = false;
+      for (size_t caller = 0; caller < unit->count && !referenced; ++caller) {
+        if (dropped[caller])
           continue;
+        for (size_t inst = 0; inst < unit->funcs[caller].len; ++inst) {
+          const nyr_inst_t *call = &unit->funcs[caller].data[inst];
+          referenced |=
+              (call->op == NYIR_CALL || call->op == NYIR_ADDR_SYMBOL) &&
+              call->symbol && strcmp(call->symbol, unit->names[i]) == 0;
+        }
+      }
+      /*
+       * A data initializer (`static const struct pv_irq_ops ops = {
+       * .halt = native_halt }`) requires the out-of-line copy exactly
+       * like a call does; dropping it leaves the table with an
+       * undefined reference.
+       */
+      for (size_t data = 0; data < unit->data_count && !referenced; ++data)
+        for (size_t reloc = 0; reloc < unit->data[data].reloc_count; ++reloc) {
+          const char *symbol = unit->data[data].relocs[reloc].symbol;
+          referenced |= symbol && strcmp(symbol, unit->names[i]) == 0;
+        }
+      if (!referenced) {
+        dropped[i] = true;
+        pruning = true;
       }
     }
+  }
+  for (size_t i = 0; ok && i < unit->count; ++i) {
+    if (dropped && dropped[i])
+      continue;
     /*
      * Inlining and the optimizer can leave code behind a noreturn marker
      * (an inlined BUG() followed by its caller's continuation); remove what
@@ -2739,6 +2760,7 @@ static bool write_c_unit_assembly(
       ok = nyr_printf(&assembly, "\t.weak %s%s\n", target->symbol_prefix,
                       unit->names[i]);
   }
+  free(dropped);
   /*
    * Do not inject SSE into integer-only translation units.
    */
@@ -3816,6 +3838,18 @@ int main(int argc, char **argv) {
                              getenv("NYC_OPT_O0") ? NYR_OPT_O0 : NYR_OPT_O2,
                          .line_markers = true,
                          .stack_guard_offset = 40};
+  /*
+   * NYC_VERIFY=1 (test and debug runs) verifies the IR after every pass, so
+   * the first invalid boundary is the one reported. NYC_VERIFY=tv also
+   * validates each pass against its input on random straight-line inputs,
+   * which is slow (minutes for large functions).
+   */
+  const char *verify_env = getenv("NYC_VERIFY");
+  if (verify_env && *verify_env && strcmp(verify_env, "0") != 0) {
+    nyr_set_verify_each_pass(true);
+    if (strcmp(verify_env, "tv") == 0)
+      nyr_set_tv_seed(24);
+  }
   int result = 2;
   char *operands[4] = {argv[0]};
   int operand_count = 1;

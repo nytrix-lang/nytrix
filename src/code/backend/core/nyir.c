@@ -95,7 +95,7 @@ static bool nyr_op_v256_i64(nyr_op_t op) {
          op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_MUL_I64 ||
          op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64 ||
          op == NYIR_VEC8_SHL_I64 || op == NYIR_VEC8_CMP_I64 ||
-         op == NYIR_VEC8_SELECT_I64;
+         op == NYIR_VEC8_SELECT_I64 || op == NYIR_VEC8_DIV_CONST_I64;
 }
 
 /*
@@ -299,6 +299,7 @@ static void nyr_type_roots_fill(size_t value_count, const nyr_func_t *nyir,
     case NYIR_VEC8_SHL_I64:
     case NYIR_VEC8_CMP_I64:
     case NYIR_VEC8_SELECT_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
       op_bits = 4u | 32u;
       break;
     case NYIR_VEC4_ADD_F64:
@@ -773,7 +774,7 @@ static bool ti_fold(const nyr_inst_t *in, size_t value_count) {
       in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_MUL_I64 ||
       in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
       in->op == NYIR_VEC8_SHL_I64 || in->op == NYIR_VEC8_CMP_I64 ||
-      in->op == NYIR_VEC8_SELECT_I64;
+      in->op == NYIR_VEC8_SELECT_I64 || in->op == NYIR_VEC8_DIV_CONST_I64;
   bool v256_f64_ops =
       in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
       in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
@@ -1646,6 +1647,8 @@ const char *nyr_op_name(nyr_op_t op) {
     return "vec8.cmp.i64";
   case NYIR_VEC8_SELECT_I64:
     return "vec8.select.i64";
+  case NYIR_VEC8_DIV_CONST_I64:
+    return "vec8.div.const.i64";
   case NYIR_VEC8_SET1_I64:
     return "vec8.set1.i64";
   case NYIR_VEC4_STORE_I64:
@@ -1771,6 +1774,7 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
   case NYIR_VEC8_SHL_I64:
   case NYIR_VEC8_CMP_I64:
   case NYIR_VEC8_SELECT_I64:
+  case NYIR_VEC8_DIV_CONST_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_SELECT_I64:
   case NYIR_ROR32_I64:
@@ -1897,6 +1901,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SHL_I64:
+  case NYIR_VEC8_DIV_CONST_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_SHUFFLE_F64:
   case NYIR_VEC8_SHUFFLE_F32:

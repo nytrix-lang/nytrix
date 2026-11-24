@@ -992,6 +992,7 @@ static bool nyr_ir_eval_with_calls_profile_impl(
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
     case NYIR_VEC8_CMP_I64:
     case NYIR_VEC8_SELECT_I64:
     case NYIR_VEC8_SET1_I64:
@@ -1040,6 +1041,22 @@ static bool nyr_ir_eval_with_calls_profile_impl(
           goto unsupported;
         for (unsigned lane = 0; lane < width; ++lane)
           ptr[lane] = vec[lane];
+        break;
+      }
+      if (in->op == NYIR_VEC8_DIV_CONST_I64) {
+        if (in->imm == 0 || in->imm == 1 || in->imm == -1 ||
+            in->imm == INT64_MIN)
+          goto unsupported;
+        const int64_t *vec = NULL;
+        if (!nyr_eval_read_vector(&eval_slot, in->a, 4, &vec))
+          goto unsupported;
+        for (unsigned lane = 0; lane < 4; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] =
+              vec[lane] / in->imm;
+        eval_slot.vector_width[in->dst] = 4;
+        values[in->dst] = eval_slot.vector_values[(size_t)in->dst * 4];
+        known[in->dst] = true;
+        nyr_eval_note_value(result, in->dst);
         break;
       }
       if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
@@ -1525,6 +1542,7 @@ bool nyr_is_pure_i64_straightline(const nyr_func_t *f) {
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
     case NYIR_VEC8_CMP_I64:
     case NYIR_VEC8_SELECT_I64:
     case NYIR_VEC8_SET1_I64:

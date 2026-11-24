@@ -257,9 +257,14 @@ static uint64_t inst_fixed_clobbers(const nyr_mach_func_t *mach,
         !(in->opcode == NYR_MACH_MOD && divisor == INT64_C(2147483647))) {
       uint64_t ad = divisor > 0 ? (uint64_t)divisor
                                 : (uint64_t)(-(divisor + 1)) + 1;
+      if (in->dst.reg_class == NYR_MACH_REGCLASS_VECTOR)
+        return (ad & (ad - 1)) != 0 ? ((UINT64_C(1) << 7) | (UINT64_C(1) << 11))
+                                    : 0;
       if ((ad & (ad - 1)) != 0)
         return UINT64_C(1) << 11; /* RDX */
     }
+    if (in->dst.reg_class == NYR_MACH_REGCLASS_VECTOR)
+      return 0;
     return UINT64_C(0xf) << 8; /* General magic division uses R8/R9/RCX/RDX. */
   }
   if ((in->opcode == NYR_MACH_SHL || in->opcode == NYR_MACH_SAR ||

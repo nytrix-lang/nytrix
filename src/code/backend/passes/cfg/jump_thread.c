@@ -1210,8 +1210,24 @@ bool nyr_invert_fallthrough_branches(nyr_func_t *f) {
       continue;
     }
     cmp->cmp = inverted;
-    branch->imm = f->data[jump_at].imm;
+    /*
+     * Put the inverted branch where the unconditional jump was and leave the
+     * NOP before it. A NOP left between the branch and its fallthrough label
+     * would become a block of its own, and the target's PHI operands would
+     * name the wrong predecessor.
+     */
+    nyr_inst_t inverted_branch = *branch;
+    inverted_branch.imm = f->data[jump_at].imm;
     nyr_inst_discard(&f->data[jump_at]);
+    f->data[jump_at] = inverted_branch;
+    *branch = (nyr_inst_t){.op = NYIR_NOP,
+                           .dst = -1,
+                           .a = -1,
+                           .b = -1,
+                           .c = -1,
+                           .d = -1,
+                           .e = -1,
+                           .f = -1};
   }
   free(last_jump);
   free(label_pos);

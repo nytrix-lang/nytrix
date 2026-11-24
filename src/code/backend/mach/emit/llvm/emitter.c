@@ -270,7 +270,7 @@ static LLVMTypeRef ny_llvm_vector_type(ny_llvm_context_t *cg, nyr_op_t op) {
       op == NYIR_VEC8_REDUCE_ADD_I64 || op == NYIR_VEC8_SET1_I64 ||
       op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64 ||
       op == NYIR_VEC8_SHL_I64 || op == NYIR_VEC8_CMP_I64 ||
-      op == NYIR_VEC8_SELECT_I64)
+      op == NYIR_VEC8_SELECT_I64 || op == NYIR_VEC8_DIV_CONST_I64)
     return LLVMVectorType(cg->type_i64, 4);
   return NULL;
 }
@@ -362,6 +362,7 @@ static bool ny_llvm_infer_vector_value_types(ny_llvm_context_t *cg,
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
       valid = ny_llvm_vector_mark(types, parents, count, in->dst, type) &&
@@ -1813,6 +1814,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     case NYIR_VEC8_SHL_I64:
     case NYIR_VEC8_CMP_I64:
     case NYIR_VEC8_SELECT_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC8_REDUCE_ADD_I64: {
       LLVMTypeRef vector_type = ny_llvm_vector_type(cg, in->op);
@@ -1862,6 +1864,15 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
                       LLVMPointerType(vector_type, 0), "");
         LLVMValueRef store = LLVMBuildStore(cg->builder, vector, ptr);
         LLVMSetAlignment(store, 1);
+        break;
+      }
+      if (in->op == NYIR_VEC8_DIV_CONST_I64) {
+        LLVMValueRef lhs =
+            ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
+        LLVMValueRef denom = ny_llvm_vector_splat(
+            cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, true),
+            vector_type);
+        vals[in->dst] = LLVMBuildSDiv(cg->builder, lhs, denom, "");
         break;
       }
       if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||

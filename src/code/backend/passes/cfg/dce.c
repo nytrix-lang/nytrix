@@ -118,6 +118,27 @@ static bool dce_mark_address_taken_blocks(const nyr_func_t *f, nyr_cfg_t *cfg) {
   return true;
 }
 
+/*
+ * The label a PHI uses for predecessor block `pred`. A block holding only
+ * NOPs (a discarded branch left behind) is transparent: control reaches the
+ * successor from that block's own single predecessor.
+ */
+static int64_t dce_effective_pred_label(const nyr_func_t *f,
+                                        const nyr_cfg_t *cfg, size_t pred) {
+  for (int hops = 0; hops < 8; ++hops) {
+    if (cfg->block_label[pred] >= 0)
+      return cfg->block_label[pred];
+    for (size_t i = cfg->block_start[pred]; i < cfg->block_end[pred]; ++i)
+      if (f->data[i].op != NYIR_NOP)
+        return cfg->block_label[pred];
+    size_t edges = cfg->pred_offsets[pred + 1] - cfg->pred_offsets[pred];
+    if (edges != 1)
+      return cfg->block_label[pred];
+    pred = cfg->pred_blocks[cfg->pred_offsets[pred]];
+  }
+  return cfg->block_label[pred];
+}
+
 bool nyr_dce(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -187,7 +208,9 @@ bool nyr_dce(nyr_func_t *f) {
              edge < cfg.pred_offsets[block + 1]; ++edge) {
           size_t pred = cfg.pred_blocks[edge];
           if (cfg.reachable[pred] &&
-              cfg.block_label[pred] == phi->phi_incoming[k].predecessor_label) {
+              (cfg.block_label[pred] == phi->phi_incoming[k].predecessor_label ||
+               dce_effective_pred_label(f, &cfg, pred) ==
+                   phi->phi_incoming[k].predecessor_label)) {
             live = true;
             break;
           }

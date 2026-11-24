@@ -2410,6 +2410,16 @@ static bool nyr_private_entry_tbuf_source_symbol(const nyr_func_t *f, int value,
   const nyr_inst_t *in = &f->data[di];
   if (in->op == NYIR_COPY)
     return nyr_private_entry_tbuf_source_symbol(f, in->a, symbol, depth + 1);
+  if (in->op == NYIR_LOAD_LOCAL) {
+    static int no_early = -1;
+    if (no_early < 0) {
+      const char *env = getenv("NYTRIX_NO_EARLY_PRIVATE_GLOBAL_PROMOTE");
+      no_early = env && *env && strcmp(env, "0") != 0;
+    }
+    int stored = -1;
+    if (!no_early && nyr_guard_unique_local_store(f, in->imm, &stored))
+      return nyr_private_entry_tbuf_source_symbol(f, stored, symbol, depth + 1);
+  }
   if (in->op != NYIR_LOAD_I64 || in->a < 0)
     return false;
   int ai = nyr_private_entry_def(f, in->a);
@@ -5705,6 +5715,7 @@ bool nyr_inline_general(nyr_func_t *f) {
   const size_t initial_len = f->len;
   const size_t splice_budget = initial_len * 16u + 2048u;
   size_t spliced_total = 0;
+  bool budget_closed = false;
   bool changed_any = false;
   for (size_t iter = 0; iter < max_rounds; ++iter) {
     if (f->len > body_cap)
@@ -5722,6 +5733,15 @@ bool nyr_inline_general(nyr_func_t *f) {
       nyr_inst_t *call = &f->data[i];
       if (call->op != NYIR_CALL || !call->symbol)
         continue;
+      /*
+       * Once the splice budget is spent only forced (always_inline) callees
+       * still inline: they must never stay calls, and they are small.
+       */
+      if (budget_closed) {
+        const nyr_inline_callee_t *only = nyr_find_inline_callee_entry(call->symbol);
+        if (!(only && only->force))
+          continue;
+      }
       /*
        * CAPTURE_RET reads an extra ABI return register and must stay adjacent
        * to its call. This inliner models only the primary result.
@@ -5830,10 +5850,13 @@ bool nyr_inline_general(nyr_func_t *f) {
         }
         bool is_tiny_leaf =
             (callee->len <= 24 && !nyr_func_has_control_flow(callee));
-        if (!is_tiny_leaf)
+        const bool forced_callee = entry && entry->force;
+        if (!is_tiny_leaf && !forced_callee)
           spliced_total += inserted;
-        ++splice_count;
-        if (spliced_total > splice_budget || splice_count >= splice_cap) {
+        if (!forced_callee)
+          ++splice_count;
+        if (!forced_callee &&
+            (spliced_total > splice_budget || splice_count >= splice_cap)) {
           /*
            * Budget exhausted: keep the remaining calls as calls.  The body
            * is still valid IR; later cleanup passes see the same function.
@@ -5845,8 +5868,8 @@ bool nyr_inline_general(nyr_func_t *f) {
                       "[inline_general] budget exceeded, stop "
                       "(spliced=%zu splices=%zu/%zu)\n",
                       spliced_total, splice_count, splice_cap);
+          budget_closed = true;
           budget_exhausted = true;
-          break;
         }
         i += inserted - 1;
       } else {
@@ -5854,11 +5877,7 @@ bool nyr_inline_general(nyr_func_t *f) {
                          "callee clone/CFG splice legality check failed");
       }
     }
-    if (budget_exhausted) {
-      /*
-       * Calls copied from a just-spliced body may have been skipped by the
-       * insertion cursor. Keep the hint conservative when stopping early.
-       */
+    if (budget_exhausted && !changed) {
       f->has_symbol_calls = true;
       break;
     }

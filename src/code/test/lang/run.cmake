@@ -196,6 +196,16 @@ file(MAKE_DIRECTORY "${BINARY_DIR}")
 
 include("${CMAKE_CURRENT_LIST_DIR}/harness.cmake")
 
+# Optional lanes depend on host tools. Say which ones this run skips so a
+# missing tool cannot make the suite look more complete than it is.
+foreach(optional_tool IN ITEMS READELF OBJDUMP NM_TOOL LD LLD_LINK LD64_LLD
+        AARCH64_QEMU AARCH64_CC)
+  if(NOT DEFINED ${optional_tool} OR "${${optional_tool}}" STREQUAL "" OR
+     "${${optional_tool}}" MATCHES "-NOTFOUND$")
+    message(STATUS "C frontend lane skipped: ${optional_tool} is unavailable")
+  endif()
+endforeach()
+
 # Require fresh artifacts, bounded execution, and exact program output on each
 # x86-64 route. A machine disassembly is positive evidence for main because
 # functions that bypass machine lowering silently use the direct encoder.
@@ -2541,6 +2551,9 @@ if(NYC_AS_EXECUTABLE)
     OUTPUT_VARIABLE as_stdout
     ERROR_VARIABLE as_stderr
   )
+  if(NOT as_status EQUAL 0)
+    message(FATAL_ERROR "the host assembler failed --version\n${as_stdout}${as_stderr}")
+  endif()
   execute_process(
     COMMAND "${NYC}" -Wa,--version -c -x assembler-with-cpp /dev/null -o /dev/null
     RESULT_VARIABLE status
@@ -2780,7 +2793,11 @@ nyc_execute_ok(
 )
 if(READELF)
   execute_process(COMMAND "${READELF}" -S "${BINARY_DIR}/empty-unit.o"
+    RESULT_VARIABLE empty_unit_status
     OUTPUT_VARIABLE empty_unit_sections)
+  if(NOT empty_unit_status EQUAL 0)
+    message(FATAL_ERROR "readelf could not read the empty translation unit")
+  endif()
   if(NOT empty_unit_sections MATCHES "\\.symtab")
     message(FATAL_ERROR "empty translation unit object has no .symtab")
   endif()
@@ -4256,6 +4273,45 @@ foreach(complex_opt -O0 -O2)
   endif()
 endforeach()
 endforeach()
+# Fuzzer-found regressions run through both code routes at three levels.
+foreach(route_case IN ITEMS shift-sext-fusion licm-dead-loop)
+  file(READ "${SOURCE_DIR}/c/${route_case}.expected" route_expected)
+  foreach(route_opt IN ITEMS -O0 -O2 -O3)
+    foreach(route IN ITEMS object assembly)
+      set(route_obj "${BINARY_DIR}/${route_case}${route_opt}-${route}.o")
+      if(route STREQUAL "assembly")
+        set(route_asm "${BINARY_DIR}/${route_case}${route_opt}.s")
+        nyc_execute_output(
+          [=[nyc -S failed for ${route_case} ${route_opt}\n${stdout}${stderr}]=]
+          "${route_asm}"
+          COMMAND "${NYC}" ${route_opt} -S "${SOURCE_DIR}/c/${route_case}.c"
+                  -o "${route_asm}")
+        nyc_execute_output(
+          [=[assembling ${route_case} ${route_opt} failed\n${stdout}${stderr}]=]
+          "${route_obj}"
+          COMMAND "${CC}" -c "${route_asm}" -o "${route_obj}")
+      else()
+        nyc_execute_output(
+          [=[nyc -c failed for ${route_case} ${route_opt}\n${stdout}${stderr}]=]
+          "${route_obj}"
+          COMMAND "${NYC}" ${route_opt} -c "${SOURCE_DIR}/c/${route_case}.c"
+                  -o "${route_obj}")
+      endif()
+      set(route_exe "${BINARY_DIR}/${route_case}${route_opt}-${route}")
+      nyc_execute_output(
+        [=[linking ${route_case} failed\n${stdout}${stderr}]=]
+        "${route_exe}"
+        COMMAND "${CC}" "${route_obj}" -o "${route_exe}")
+      nyc_execute_ok(
+        [=[${route_case} ${route_opt} ${route} crashed\n${stdout}${stderr}]=]
+        COMMAND "${route_exe}")
+      if(NOT stdout STREQUAL route_expected)
+        message(FATAL_ERROR
+          "${route_case} ${route_opt} ${route} differs from GCC\nexpected:\n${route_expected}\ngot:\n${stdout}")
+      endif()
+    endforeach()
+  endforeach()
+endforeach()
 file(READ "${SOURCE_DIR}/c/complex-pointer-index.expected" complex_index_expected)
 foreach(complex_opt -O0 -O2)
   nyc_execute_ok(
@@ -4424,8 +4480,12 @@ if(AARCH64_CC)
   )
   if(AARCH64_QEMU)
     execute_process(COMMAND "${AARCH64_CC}" -print-sysroot
+                    RESULT_VARIABLE aarch64_sysroot_status
                     OUTPUT_VARIABLE aarch64_sysroot
                     OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT aarch64_sysroot_status EQUAL 0)
+      message(FATAL_ERROR "the AArch64 compiler could not report its sysroot")
+    endif()
     nyc_execute_ok(
       [=[AArch64 C aggregate runtime parity failed\n${stdout}${stderr}]=]
       COMMAND "${AARCH64_QEMU}" -L "${aarch64_sysroot}"
@@ -5535,9 +5595,13 @@ if(NM_TOOL)
   )
   execute_process(
     COMMAND "${NM_TOOL}" "${BINARY_DIR}/global-register.o"
+    RESULT_VARIABLE nm_status
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
   )
+  if(NOT nm_status EQUAL 0)
+    message(FATAL_ERROR "nm failed on global-register.o\n${stdout}${stderr}")
+  endif()
   if(stdout MATCHES "cur" OR stderr MATCHES "cur")
     message(FATAL_ERROR
       "nyc emitted a symbol for a global register variable\n${stdout}${stderr}")

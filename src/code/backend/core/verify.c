@@ -1421,6 +1421,7 @@ static bool nir_verify_dominance(const nyr_func_t *f, char *err,
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SHL_I64:
+    case NYIR_VEC8_DIV_CONST_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
@@ -2976,6 +2977,18 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
         return nir_verify_inst_err(
             f, err, err_len, in, i,
             "vector arithmetic shift count must be 0..63");
+      }
+      /*
+       * fall through
+       */
+    case NYIR_VEC8_DIV_CONST_I64:
+      if (in->op == NYIR_VEC8_DIV_CONST_I64 &&
+          (in->imm == 0 || in->imm == 1 || in->imm == -1 ||
+           in->imm == INT64_MIN)) {
+        free(defined);
+        return nir_verify_inst_err(
+            f, err, err_len, in, i,
+            "vector constant divisor cannot be 0, 1, -1, or INT64_MIN");
       }
       /*
        * fall through
