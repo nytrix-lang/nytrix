@@ -549,6 +549,20 @@ ny_native_operator_target_function(const nyr_builder_impl_t *b,
   return NULL;
 }
 
+/* A value produced by one of the dynamic element getters: they always
+ * return the canonical tagged word, whatever the element type proves. Scalar
+ * class metadata alone is not trusted here (raw int returns can be stamped
+ * tagged). */
+static bool nyr_is_dynamic_getter_result(nyr_builder_t *b, int v) {
+  const nyr_inst_t *p = NULL;
+  if (v < 0 || !nyr_def_of(b, v, &p) || !p || p->op != NYIR_CALL ||
+      !p->symbol)
+    return false;
+  return strcmp(p->symbol, "rt_value_get_index_raw") == 0 ||
+         strcmp(p->symbol, "rt_tbuf_get_any") == 0 ||
+         strcmp(p->symbol, "rt_value_get_tagged") == 0;
+}
+
 static int nyr_lower_binary(nyr_builder_t *b, const expr_t *e) {
   /* The representation fact is rewritten by the integer-arith exits below;
    * every other path (comparisons, strings, containers, f64) leaves it at 0
@@ -2160,6 +2174,18 @@ scalar_multiply:
        (nyr_index_read_is_proven_scalar(b, e->as.binary.right) &&
         (left_int_literal || nyr_ident_local_is_raw_int(b, e->as.binary.left) ||
          nyr_ident_global_is_raw_int(b, e->as.binary.left))))) {
+    /* The read's proof is about the element type; its call may still return
+     * the canonical tagged word (`l.get(i)` goes through the dynamic index
+     * bridge). Decode such an operand, or `l.get(1) == -12` compared the
+     * tagged -12 with the raw literal. */
+    if (nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_TAGGED)
+      a = nyr_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1,
+                                NYIR_SCALAR_I64_RAW);
+    if (nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_TAGGED)
+      rhs = nyr_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1,
+                                  NYIR_SCALAR_I64_RAW);
+    if (a < 0 || rhs < 0)
+      return -1;
     return nyr_ir_emit(
         &b->nyir,
         (nyr_inst_t){
@@ -4043,6 +4069,27 @@ scalar_multiply:
                               : NYIR_DIV_F64;
     expr_f64 = true;
     b->last_arith_raw = 0;
+  }
+  /* An integer comparison reaching the raw icmp with a tagged word on one
+   * side and a raw integer constant on the other compared encodings, not
+   * values (`xs.get(0) == 4` was false: tagged 9 against raw 4). Decode the
+   * tagged side; a raw integer peer proves the comparison is numeric. */
+  if (is_cmp && !use_f64_cmp && !use_f32_cmp && a >= 0 && rhs >= 0) {
+    const nyr_inst_t *pa = NULL, *pr = NULL;
+    bool a_const = (nyr_def_of(b, a, &pa) && pa && pa->op == NYIR_CONST_I64 &&
+                    nyr_value_scalar_class(b, a) != NYIR_SCALAR_I64_TAGGED) ||
+                   nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW;
+    bool r_const = (nyr_def_of(b, rhs, &pr) && pr && pr->op == NYIR_CONST_I64 &&
+                    nyr_value_scalar_class(b, rhs) != NYIR_SCALAR_I64_TAGGED) ||
+                   nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW;
+    if (r_const && !a_const && nyr_is_dynamic_getter_result(b, a))
+      a = nyr_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1,
+                                NYIR_SCALAR_I64_RAW);
+    else if (a_const && !r_const && nyr_is_dynamic_getter_result(b, rhs))
+      rhs = nyr_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1,
+                                  NYIR_SCALAR_I64_RAW);
+    if (a < 0 || rhs < 0)
+      return -1;
   }
   checked_arithmetic = !is_cmp && (op == NYIR_DIV_I64 || op == NYIR_MOD_I64)
                            ? nyr_ubsan_integer_op(b, e, op)
