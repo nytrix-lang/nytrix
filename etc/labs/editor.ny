@@ -249,14 +249,19 @@ def C_ACCENT_2 = gfx.color_hex("#d6d3e6")
 def C_CYAN = gfx.color_hex("#8ccfff")
 def C_OK = gfx.color_hex("#8bdc9a")
 def C_CHIP = gfx.color_hex("#050506")
-def C_KEYWORD = gfx.color_hex("#b6a0ff")
-def C_TYPE = gfx.color_hex("#bcaaff")
-def C_STRING = gfx.color_hex("#b4b8ff")
-def C_NUMBER = gfx.color_hex("#c9b6ff")
-def C_COMMENT = gfx.color_hex("#77717f")
-def C_FUNC = gfx.color_hex("#d1c2ff")
-def C_OPERATOR = gfx.color_hex("#c4bed2")
-def C_PROPERTY = gfx.color_hex("#ccbaff")
+;; Syntax palette: one hue per role, all readable on the black canvas.
+def C_KEYWORD = gfx.color_hex("#c099ff")
+def C_TYPE = gfx.color_hex("#4fd6be")
+def C_STRING = gfx.color_hex("#c3e88d")
+def C_NUMBER = gfx.color_hex("#ff966c")
+def C_COMMENT = gfx.color_hex("#6e76a6")
+def C_FUNC = gfx.color_hex("#82aaff")
+def C_OPERATOR = gfx.color_hex("#89ddff")
+def C_PUNCT = gfx.color_hex("#8790b8")
+def C_PREPROC = gfx.color_hex("#fca7ea")
+def C_PROPERTY = gfx.color_hex("#ffc777")
+def C_PARAM = gfx.color_hex("#ff98a4")
+def C_VAR = gfx.color_hex("#d6ddf8")
 def C_WARN = gfx.color_hex("#ff9580")
 def C_SELECT = gfx.color_hex("#b6a0ff")
 
@@ -384,6 +389,10 @@ _editor_values["palette_state"] = borrow(pal.state())
 _editor_values["chord_state"] = borrow(chord.empty_state())
 _editor_values["command_cfg"] = borrow(cmd.config())
 _editor_values["lsp_state"] = borrow(lsp.new())
+_editor_values["lsp_popup"] = dict(0)
+_editor_values["lsp_dirty_at"] = 0
+_editor_values["lsp_auto"] = ""
+_editor_values["lsp_auto_at"] = 0
 _editor_values["ui_state"] = borrow(interact.new())
 _editor_values["term_state"] = borrow(termpane.new(int(_editor_get("font_body")), TERM_BG, TERM_FG))
 _editor_values["completion_state"] = dict(6)
@@ -489,6 +498,7 @@ def probe_flags = {
    "TERMINAL": _editor_probe("TERMINAL"),
    "TERMINAL_DUMP": _editor_probe("TERMINAL_DUMP"),
    "SYNTAX": _editor_probe("SYNTAX"),
+   "LSP": _editor_probe("LSP"),
    "NAV": _editor_probe("NAV"),
    "UNDO": _editor_probe("UNDO"),
    "ESCAPE": _editor_probe("ESCAPE"),
@@ -2324,9 +2334,7 @@ fn _replace_multi_selections(str text) int {
    _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _touch_content()
-   if _editor_get("lsp_state").get("active", false) && _current_path().len > 0 {
-      _editor_get("lsp_state")["last_request"] = lsp.did_change(_editor_get("lsp_state"), _current_path(), _current_text())
-   }
+   _lsp_mark_dirty()
    0
 }
 
@@ -2459,9 +2467,7 @@ fn _apply_hist(dict res) int {
    _editor_values["st"] = res.get("st", _editor_get("st"))
    _follow_cursor()
    _touch_content()
-   if _editor_get("lsp_state").get("active", false) && _current_path().len > 0 {
-      _editor_get("lsp_state")["last_request"] = lsp.did_change(_editor_get("lsp_state"), _current_path(), _current_text())
-   }
+   _lsp_mark_dirty()
    def msg = to_str(res.get("status", ""))
    if msg.len > 0 { _status(msg) }
    0
@@ -2734,6 +2740,11 @@ fn _finish_rename() int {
    def entry = prompt.rename_entry(_editor_get("rename_state"))
    def action = to_str(entry.get("action", "rename"))
    def text = prompt.rename_text(_editor_get("rename_state"))
+   if action == "symbol" {
+      _editor_values["rename_state"] = prompt.rename_close(_editor_get("rename_state"))
+      if text.len > 0 && text != to_str(entry.get("name", "")) { _lsp_rename(text) }
+      return 0
+   }
    def created_path = action == "new-file" ? _new_file_path(entry, text) : ""
    if action == "new-file" {
       _editor_values["project_state"] = project.create_file(_editor_get("project_state"), prompt.rename_rel(_editor_get("rename_state")), text)
@@ -3049,7 +3060,8 @@ fn _save() int {
    def save_status = to_str(_editor_get("st").get("status", ""))
    def save_ok = path.len > 0 && !str.startswith(save_status, "save failed") && save_status != "read-only preview" && save_status != "memory buffer"
    if _editor_get("lsp_state").get("active", false) && save_ok && (!now_dirty || !was_dirty) {
-      _editor_get("lsp_state")["last_request"] = lsp.did_save(_editor_get("lsp_state"), path)
+      _lsp_flush_change()
+      _editor_values["lsp_state"] = lsp.did_save(_editor_get("lsp_state"), path)
    }
    0
 }
@@ -3404,6 +3416,19 @@ fn _completion_apply() int {
    def prefix = to_str(_editor_get("completion_state").get("prefix", ""))
    if insert.len > prefix.len && str.startswith(insert, prefix) {
       _edit_insert(str.str_slice(insert, prefix.len, insert.len))
+   } elif insert.len > 0 && insert != prefix {
+      ;; The server's text replaces the typed prefix (case or fuzzy match).
+      def int row = int(_editor_get("st").get("cursor_line", 0))
+      def int col = int(_editor_get("st").get("cursor_col", 0))
+      def int start = int(max(0, col - str.utf8_len(prefix)))
+      def lines = ed.current_lines(_editor_get("st"))
+      def line = to_str(lines.get(row, ""))
+      _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+      mut nl = lines
+      nl[row] = str.str_slice(line, 0, start) + str.str_slice(line, col, str.utf8_len(line))
+      _editor_values["st"] = ed.set_lines(_editor_get("st"), nl)
+      _editor_get("st")["cursor_col"] = start
+      _edit_insert(insert)
    } else {
       _status(to_str(item.get("detail", item.get("label", ""))))
    }
@@ -3411,7 +3436,10 @@ fn _completion_apply() int {
 }
 
 fn _completion_handle_key(any data) bool {
-   if !bool(_editor_get("completion_state").get("open", false)) { return false }
+   if !bool(_editor_get("completion_state").get("open", false)) {
+      if _editor_get("lsp_popup").len > 0 && window.event_key_is(data, key.KEY_ESCAPE) { _lsp_popup_close() return true }
+      return false
+   }
    def items = _editor_get("completion_state").get("items", [])
    if window.event_key_is(data, key.KEY_ESCAPE) { _completion_close() return true }
    if window.event_key_is(data, key.KEY_DOWN) {
@@ -4162,8 +4190,158 @@ fn _lsp_start() int {
    if ed.current_buffer(_editor_get("st")).get("readonly", false) { _status("lsp skipped for preview") return 0 }
    if _current_path().len <= 0 { _status("save before lsp") return 0 }
    _editor_values["lsp_state"] = lsp.start(_editor_get("lsp_state"), _current_path(), _current_text())
-   _lsp_output("LSP status", lsp.status(_editor_get("lsp_state")))
    _status(lsp.status(_editor_get("lsp_state")))
+   0
+}
+
+;; ---- language server ---------------------------------------------------
+;; Requests are asynchronous: _lsp_request sends, _lsp_pump (once per frame)
+;; routes the answers. Text changes are debounced into one didChange.
+
+def int LSP_CHANGE_DEBOUNCE_NS = 150000000
+def int LSP_COMPLETION_LIMIT = 80
+
+fn _lsp() dict { _editor_get("lsp_state") }
+
+fn _lsp_line_text(int line) str {
+   def lines = ed.current_lines(_editor_get("st"))
+   line >= 0 && line < lines.len ? to_str(lines.get(line, "")) : ""
+}
+
+fn _lsp_cursor() list {
+   def int line = int(_editor_get("st").get("cursor_line", 0))
+   def int col = int(_editor_get("st").get("cursor_col", 0))
+   [line, lsp.lsp_col(_lsp(), _lsp_line_text(line), col)]
+}
+
+fn _lsp_mark_dirty() int {
+   if _editor_get("lsp_popup").len > 0 && to_str(_editor_get("lsp_popup").get("kind", "")) == "hover" { _lsp_popup_close() }
+   if !bool(_lsp().get("active", false)) || _current_path().len <= 0 { return 0 }
+   _editor_values["lsp_dirty_at"] = ticks()
+   0
+}
+
+fn _lsp_flush_change() int {
+   if int(_editor_get("lsp_dirty_at")) == 0 { return 0 }
+   _editor_values["lsp_dirty_at"] = 0
+   def path = _current_path()
+   if path.len <= 0 || !bool(_lsp().get("active", false)) { return 0 }
+   _editor_values["lsp_state"] = lsp.did_change(_lsp(), path, _current_text())
+   0
+}
+
+fn _lsp_probe_at(str spec) int {
+   ;; "line:col", 1-based
+   def parts = str.split(spec, ":")
+   _editor_get("st")["cursor_line"] = int(max(0, str.atoi(to_str(parts.get(0, "1"))) - 1))
+   _editor_get("st")["cursor_col"] = int(max(0, str.atoi(to_str(parts.get(1, "1"))) - 1))
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   0
+}
+
+fn _lsp_probe_step() int {
+   ;; NY_EDITOR_PROBE_LSP=1 with NY_EDITOR_PROBE_LSP_HOVER / _DEF / _COMPLETE
+   ;; positions ("line:col"): drives the real request paths and prints results.
+   def int phase = int(_editor_values.get("lsp_probe_phase", 0))
+   def int frame = int(_editor_get("frame_count"))
+   if frame > 1500 { print("LSP_PROBE timeout phase=" + to_str(phase)) window.set_should_close(_editor_get("win"), true) return 0 }
+   if phase == 99 { return 0 }
+   if phase == 0 { _lsp_start() _editor_values["lsp_probe_phase"] = 1 return 0 }
+   if phase == 1 {
+      if !lsp.ready(_lsp()) { return 0 }
+      print("LSP_PROBE ready " + to_str(_lsp().get("server", "")))
+      _lsp_probe_at(common.env_trim("NY_EDITOR_PROBE_LSP_HOVER"))
+      _lsp_request("hover")
+      _editor_values["lsp_probe_phase"] = 2
+      return 0
+   }
+   if phase == 2 {
+      if _editor_get("lsp_popup").len <= 0 { return 0 }
+      print("LSP_PROBE hover " + str.str_replace(to_str(_editor_get("lsp_popup").get("text", "")), "\n", " | "))
+      if common.env_trim("NY_EDITOR_PROBE_LSP_HOLD") == "hover" { _editor_values["lsp_probe_phase"] = 99 return 0 }
+      _lsp_probe_at(common.env_trim("NY_EDITOR_PROBE_LSP_DEF"))
+      _editor_values["lsp_probe_line0"] = int(_editor_get("st").get("cursor_line", 0))
+      _lsp_request("definition")
+      _editor_values["lsp_probe_phase"] = 3
+      return 0
+   }
+   if phase == 3 {
+      if int(_editor_get("st").get("cursor_line", 0)) == int(_editor_values.get("lsp_probe_line0", -1)) { return 0 }
+      print("LSP_PROBE definition line=" + to_str(int(_editor_get("st").get("cursor_line", 0)) + 1) + " col=" + to_str(int(_editor_get("st").get("cursor_col", 0)) + 1))
+      _lsp_probe_at(common.env_trim("NY_EDITOR_PROBE_LSP_COMPLETE"))
+      _lsp_request("completion")
+      _editor_values["lsp_probe_phase"] = 4
+      return 0
+   }
+   if phase == 4 {
+      if to_str(_editor_get("completion_state").get("source", "")) != "lsp" { return 0 }
+      def items = _editor_get("completion_state").get("items", [])
+      print("LSP_PROBE completion prefix=" + to_str(_editor_get("completion_state").get("prefix", "")) + " items=" + to_str(items.len) + " first=" + to_str(items.get(0, dict(0)).get("label", "")))
+      _completion_close()
+      _lsp_probe_at(common.env_trim("NY_EDITOR_PROBE_LSP_DEF"))
+      _lsp_request("references")
+      _editor_values["lsp_probe_phase"] = 5
+      return 0
+   }
+   if phase == 5 {
+      if !str.startswith(to_str(ed.current_buffer(_editor_get("st")).get("name", "")), "lsp:") { return 0 }
+      def lines = ed.current_lines(_editor_get("st"))
+      print("LSP_PROBE references " + to_str(lines.get(0, "")))
+      print("LSP_PROBE diagnostics " + to_str(lsp.diagnostics_count(_lsp(), "")))
+      print("LSP_PROBE_OK")
+      _editor_values["lsp_probe_phase"] = 6
+      window.set_should_close(_editor_get("win"), true)
+   }
+   0
+}
+
+fn _lsp_auto(str kind) int {
+   ;; Typing-driven request: only when a server is ready, coalesced per frame.
+   if !lsp.ready(_lsp()) || !bool(_lsp().get("popups", true)) { return 0 }
+   _editor_values["lsp_auto"] = kind
+   _editor_values["lsp_auto_at"] = ticks()
+   0
+}
+
+fn _lsp_pump() int {
+   if !is_dict(_lsp().get("conn", nil)) { return 0 }
+   def auto = to_str(_editor_get("lsp_auto"))
+   if auto.len > 0 && ticks() - int(_editor_get("lsp_auto_at")) >= 60000000 {
+      _editor_values["lsp_auto"] = ""
+      _lsp_flush_change()
+      def pos = _lsp_cursor()
+      if auto == "completion" { _editor_values["lsp_state"] = lsp.completion(_lsp(), _current_path(), int(pos.get(0, 0)), int(pos.get(1, 0))) }
+      else { _editor_values["lsp_state"] = lsp.signature_help(_lsp(), _current_path(), int(pos.get(0, 0)), int(pos.get(1, 0))) }
+   }
+   def int dirty = int(_editor_get("lsp_dirty_at"))
+   if dirty > 0 && ticks() - dirty >= LSP_CHANGE_DEBOUNCE_NS { _lsp_flush_change() }
+   def events = lsp.pump(_lsp())
+   mut int i = 0
+   while i < events.len {
+      _lsp_event(events.get(i, dict(0)))
+      i += 1
+   }
+   0
+}
+
+def LSP_TRACE = common.env_truthy("NY_EDITOR_LSP_TRACE")
+
+fn _lsp_event(dict e) int {
+   def kind = to_str(e.get("kind", ""))
+   if LSP_TRACE { eprint("[lsp] event " + kind + " " + to_str(e.get("text", e.get("request", "")))) }
+   if kind == "ready" { _status(to_str(_lsp().get("last", "lsp ready"))) }
+   elif kind == "diagnostics" { _request_full_redraw(1) }
+   elif kind == "completion" { _lsp_show_completion(e) }
+   elif kind == "hover" { _lsp_show_hover(e) }
+   elif kind == "signature" { _lsp_show_signature(e) }
+   elif kind == "definition" { _lsp_jump(e.get("locations", []), "definition") }
+   elif kind == "references" { _lsp_show_locations(e.get("locations", []), "references") }
+   elif kind == "rename" { _lsp_apply_workspace(e.get("edits", dict(0)), "rename") }
+   elif kind == "apply_edit" { _lsp_apply_workspace(e.get("edits", dict(0)), "edit") }
+   elif kind == "format" { _lsp_apply_current(e.get("edits", []), "format") }
+   elif kind == "symbols" { _lsp_show_symbols(e) }
+   elif kind == "actions" { _lsp_show_actions(e) }
+   elif kind == "message" || kind == "error" { _status(to_str(e.get("text", ""))) }
    0
 }
 
@@ -4171,30 +4349,492 @@ fn _lsp_request(str kind) int {
    if ed.current_buffer(_editor_get("st")).get("readonly", false) { _status("lsp skipped for preview") return 0 }
    def path = _current_path()
    if path.len <= 0 { _status("save before lsp") return 0 }
-   def line = int(_editor_get("st").get("cursor_line", 0))
-   def col = int(_editor_get("st").get("cursor_col", 0))
-   if !_editor_get("lsp_state").get("active", false) { _editor_values["lsp_state"] = lsp.start(_editor_get("lsp_state"), path, _current_text()) }
+   if !is_dict(_lsp().get("conn", nil)) { _editor_values["lsp_state"] = lsp.start(_lsp(), path, _current_text()) }
+   elif !_lsp().get("docs", dict(0)).contains(lsp.uri_of(path)) { _editor_values["lsp_state"] = lsp.did_open(_lsp(), path, _current_text()) }
+   _lsp_flush_change()
+   def pos = _lsp_cursor()
+   def int line = int(pos.get(0, 0))
+   def int col = int(pos.get(1, 0))
+   if LSP_TRACE { eprint("[lsp] request " + kind + " " + path + " " + to_str(line) + ":" + to_str(col) + " ready=" + to_str(lsp.ready(_lsp()))) }
    if kind == "completion" {
-      _editor_values["lsp_state"] = lsp.completion(_editor_get("lsp_state"), path, line, col)
-      _completion_open(true)
+      _completion_open(false)
+      _editor_values["lsp_state"] = lsp.completion(_lsp(), path, line, col)
    } elif kind == "hover" {
-      _editor_values["lsp_state"] = lsp.hover(_editor_get("lsp_state"), path, line, col)
-      _completion_help("LSP hover", to_str(_editor_get("lsp_state").get("last", lsp.status(_editor_get("lsp_state")))))
+      _editor_values["lsp_state"] = lsp.hover(_lsp(), path, line, col)
+   } elif kind == "signature" {
+      _editor_values["lsp_state"] = lsp.signature_help(_lsp(), path, line, col)
    } elif kind == "definition" {
-      _editor_values["lsp_state"] = lsp.definition(_editor_get("lsp_state"), path, line, col)
-      _lsp_output("LSP " + kind, to_str(_editor_get("lsp_state").get("last_request", lsp.status(_editor_get("lsp_state")))))
+      _editor_values["lsp_state"] = lsp.definition(_lsp(), path, line, col)
+   } elif kind == "references" {
+      _editor_values["lsp_state"] = lsp.references(_lsp(), path, line, col)
+   } elif kind == "format" {
+      _editor_values["lsp_state"] = lsp.formatting(_lsp(), path)
+   } elif kind == "symbols" {
+      _editor_values["lsp_state"] = lsp.document_symbols(_lsp(), path)
+   } elif kind == "actions" {
+      _editor_values["lsp_state"] = lsp.code_actions(_lsp(), path, line, col)
    }
-   _status(to_str(_editor_get("lsp_state").get("last", "lsp")))
+   _status(to_str(_lsp().get("last", "lsp")))
+   0
+}
+
+fn _lsp_rename(str new_name) int {
+   def path = _current_path()
+   if path.len <= 0 || new_name.len <= 0 { return 0 }
+   _lsp_flush_change()
+   def pos = _lsp_cursor()
+   _editor_values["lsp_state"] = lsp.rename(_lsp(), path, int(pos.get(0, 0)), int(pos.get(1, 0)), new_name)
+   _status("rename to " + new_name)
    0
 }
 
 fn _lsp_diagnostics() int {
    def path = _current_path()
    if path.len <= 0 { _status("save before diagnostics") return 0 }
-   def res = tools.check_file(path)
-   _editor_get("lsp_state")["diagnostics"] = lsp.diagnostics_from_check(res)
-   _lsp_output("LSP diagnostics", lsp.diagnostics_text(_editor_get("lsp_state")))
-   _status("diagnostics")
+   if lsp.ready(_lsp()) {
+      _editor_get("lsp_state")["diagnostics"] = lsp.diagnostics_for(_lsp(), path)
+   } else {
+      def res = tools.check_file(path)
+      def ds = lsp.diagnostics_from_check(res)
+      _editor_get("lsp_state")["diagnostics"] = ds
+      _lsp().get("diag_by_path", dict(8))[path] = ds
+   }
+   _lsp_output("LSP diagnostics", lsp.diagnostics_text(_lsp()))
+   _status(to_str(lsp.diagnostics_count(_lsp(), path)) + " diagnostics")
+   0
+}
+
+;; ---- completion / hover / signature ----
+
+fn _lsp_show_completion(dict e) int {
+   if !bool(_lsp().get("popups", true)) { return 0 }
+   if lsp.norm_path(to_str(e.get("path", ""))) != lsp.norm_path(_current_path()) || int(e.get("line", -1)) != int(_editor_get("st").get("cursor_line", 0)) { return 0 }
+   def prefix = _word_prefix_before_cursor()
+   def lp = str.lower(prefix)
+   def items = e.get("items", [])
+   mut exact = []
+   mut loose = []
+   mut int i = 0
+   while i < items.len && exact.len < LSP_COMPLETION_LIMIT {
+      def it = items.get(i, dict(0))
+      i += 1
+      def label = to_str(it.get("label", ""))
+      def f = to_str(it.get("filter", label))
+      if prefix.len > 0 {
+         if str.startswith(f, prefix) { exact = exact.append(it) }
+         elif loose.len < LSP_COMPLETION_LIMIT && str.startswith(str.lower(f), lp) { loose = loose.append(it) }
+         continue
+      }
+      exact = exact.append(it)
+   }
+   mut out = exact
+   mut int j = 0
+   while j < loose.len && out.len < LSP_COMPLETION_LIMIT { out = out.append(loose.get(j)) j += 1 }
+   if out.len <= 0 {
+      if !bool(_editor_get("completion_state").get("open", false)) { _status("no completions") }
+      return 0
+   }
+   _editor_get("completion_state")["open"] = true
+   _editor_get("completion_state")["items"] = out
+   _editor_get("completion_state")["index"] = 0
+   _editor_get("completion_state")["top"] = 0
+   _editor_get("completion_state")["prefix"] = prefix
+   _editor_get("completion_state")["source"] = "lsp"
+   0
+}
+
+fn _lsp_popup_open(str kind, str title, str text, int line, int col, int hl_start=-1, int hl_end=-1) int {
+   _editor_values["lsp_popup"] = {"kind": kind, "title": title, "text": text, "line": line, "col": col, "path": _current_path(), "hl_start": hl_start, "hl_end": hl_end}
+   _request_full_redraw(1)
+   0
+}
+
+fn _lsp_popup_close() int {
+   if _editor_get("lsp_popup").len > 0 { _editor_values["lsp_popup"] = dict(0) _request_full_redraw(1) }
+   0
+}
+
+fn _lsp_show_hover(dict e) int {
+   def text = str.strip(to_str(e.get("text", "")))
+   if text.len <= 0 { _status("no hover information") return 0 }
+   if !bool(_lsp().get("popups", true)) { _lsp_output("hover", text) return 0 }
+   _lsp_popup_open("hover", "", text, int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)))
+}
+
+fn _lsp_show_signature(dict e) int {
+   def sig = e.get("signature", dict(0))
+   def label = to_str(sig.get("label", ""))
+   if label.len <= 0 { _lsp_popup_close() return 0 }
+   def doc = str.strip(to_str(sig.get("doc", "")))
+   _lsp_popup_open("signature", label, doc, int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)), int(sig.get("param_start", -1)), int(sig.get("param_end", -1)))
+}
+
+;; ---- locations ----
+
+fn _lsp_goto(dict loc) int {
+   def path = to_str(loc.get("path", ""))
+   if path.len <= 0 { return 0 }
+   if lsp.norm_path(path) != lsp.norm_path(_current_path()) { _open_file(path) } else { _nav_push_current() }
+   def lines = ed.current_lines(_editor_get("st"))
+   def int line = int(min(max(int(loc.get("line", 0)), 0), max(0, lines.len - 1)))
+   _editor_get("st")["cursor_line"] = line
+   _editor_get("st")["cursor_col"] = lsp.editor_col(_lsp(), to_str(lines.get(line, "")), int(loc.get("col", 0)))
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _follow_cursor()
+   _nav_record_current()
+   0
+}
+
+fn _lsp_jump(list locs, str what) int {
+   if locs.len <= 0 { _status("no " + what + " found") return 0 }
+   _lsp_goto(locs.get(0, dict(0)))
+   if locs.len > 1 { _lsp_show_locations(locs, what) }
+   _status(what + (locs.len > 1 ? " (" + to_str(locs.len) + " candidates)" : ""))
+   0
+}
+
+fn _lsp_file_line(str path, int line) str {
+   if lsp.norm_path(path) == lsp.norm_path(_current_path()) { return _lsp_line_text(line) }
+   def r = file_read(path)
+   if !is_ok(r) { return "" }
+   to_str(ed.split_lines(unwrap(r)).get(line, ""))
+}
+
+fn _lsp_show_locations(list locs, str what) int {
+   if locs.len <= 0 { _status("no " + what + " found") return 0 }
+   mut rows = []
+   mut int i = 0
+   while i < locs.len && i < 500 {
+      def l = locs.get(i, dict(0))
+      def p = to_str(l.get("path", ""))
+      def int ln = int(l.get("line", 0))
+      rows = rows.append(p + ":" + to_str(ln + 1) + ":" + to_str(int(l.get("col", 0)) + 1) + ":  " + str.strip(_lsp_file_line(p, ln)))
+      i += 1
+   }
+   _lsp_output(what + " (" + to_str(locs.len) + ")", str.join(rows, "\n"))
+   _status(to_str(locs.len) + " " + what)
+   0
+}
+
+fn _lsp_show_symbols(dict e) int {
+   def syms = e.get("symbols", [])
+   if syms.len <= 0 { _status("no symbols") return 0 }
+   def path = to_str(e.get("path", _current_path()))
+   mut rows = []
+   mut int i = 0
+   while i < syms.len {
+      def s = syms.get(i, dict(0))
+      def p = to_str(s.get("path", path))
+      rows = rows.append(p + ":" + to_str(int(s.get("line", 0)) + 1) + ":" + to_str(int(s.get("col", 0)) + 1) + ":  " + str.repeat("  ", int(s.get("depth", 0))) + to_str(s.get("kind", "")) + " " + to_str(s.get("name", "")) + "  " + to_str(s.get("detail", "")))
+      i += 1
+   }
+   _lsp_output("symbols (" + to_str(syms.len) + ")", str.join(rows, "\n"))
+   0
+}
+
+fn _lsp_show_actions(dict e) int {
+   def acts = e.get("actions", [])
+   if acts.len <= 0 { _status("no code actions here") return 0 }
+   ;; Apply the preferred (first) quick fix; list the rest.
+   def first = acts.get(0, dict(0))
+   def edits = first.get("edit", dict(0))
+   if is_dict(edits) && edits.len > 0 { _lsp_apply_workspace(edits, to_str(first.get("title", "action"))) }
+   def c = first.get("command", nil)
+   if is_dict(c) { _editor_values["lsp_state"] = lsp.execute_command(_lsp(), to_str(c.get("command", "")), c.get("arguments", [])) }
+   if acts.len > 1 {
+      mut rows = []
+      mut int i = 0
+      while i < acts.len { rows = rows.append(to_str(i + 1) + ". " + to_str(acts.get(i, dict(0)).get("title", ""))) i += 1 }
+      _lsp_output("code actions", str.join(rows, "\n"))
+   }
+   0
+}
+
+;; ---- edits ----
+
+fn _lsp_edit_before(dict a, dict b) bool {
+   def int al = int(a.get("line", 0))
+   def int bl = int(b.get("line", 0))
+   al > bl || (al == bl && int(a.get("col", 0)) > int(b.get("col", 0)))
+}
+
+fn _lsp_apply_lines(list lines, list edits) list {
+   ;; Apply from the end of the document backwards so earlier ranges stay valid.
+   mut order = []
+   mut int i = 0
+   while i < edits.len {
+      def e = edits.get(i, dict(0))
+      mut int k = 0
+      while k < order.len && !_lsp_edit_before(e, order.get(k, dict(0))) { k += 1 }
+      order = slice(order, 0, k).append(e).extend(slice(order, k, order.len))
+      i += 1
+   }
+   mut out = lines
+   i = 0
+   while i < order.len {
+      def e = order.get(i, dict(0))
+      def int sl = int(max(0, int(e.get("line", 0))))
+      def int el = int(max(sl, int(e.get("end_line", sl))))
+      def sline = sl < out.len ? to_str(out.get(sl, "")) : ""
+      def eline = el < out.len ? to_str(out.get(el, "")) : ""
+      def int sc = lsp.editor_col(_lsp(), sline, int(e.get("col", 0)))
+      def int ec = lsp.editor_col(_lsp(), eline, int(e.get("end_col", 0)))
+      def merged = str.str_slice(sline, 0, sc) + to_str(e.get("text", "")) + str.str_slice(eline, ec, str.utf8_len(eline))
+      def mid = ed.split_lines(merged)
+      def int hi = int(min(out.len, el + 1))
+      out = slice(out, 0, int(min(sl, out.len))).extend(mid).extend(slice(out, hi, out.len))
+      i += 1
+   }
+   out.len > 0 ? out : [""]
+}
+
+fn _lsp_apply_current(list edits, str what) int {
+   if edits.len <= 0 { _status(what + ": no changes") return 0 }
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), _lsp_apply_lines(ed.current_lines(_editor_get("st")), edits))
+   _buffer_changed(true)
+   _status(what + ": " + to_str(edits.len) + " edit" + (edits.len == 1 ? "" : "s"))
+   0
+}
+
+fn _lsp_apply_workspace(dict by_path, str what) int {
+   if by_path.len <= 0 { _status(what + ": no changes") return 0 }
+   def cur = _current_path()
+   mut int files = 0
+   mut int total = 0
+   for p in by_path.keys() {
+      def path = to_str(p)
+      def edits = by_path.get(p, [])
+      if edits.len <= 0 { continue }
+      total += edits.len
+      files += 1
+      if lsp.norm_path(path) == lsp.norm_path(cur) {
+         _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+         _editor_values["st"] = ed.set_lines(_editor_get("st"), _lsp_apply_lines(ed.current_lines(_editor_get("st")), edits))
+         continue
+      }
+      ;; Another open buffer: edit it in place; otherwise rewrite the file.
+      mut bool done = false
+      mut bs = _editor_get("st").get("buffers", [])
+      mut int bi = 0
+      while bi < bs.len {
+         mut b = bs.get(bi, dict(0))
+         if is_dict(b) && lsp.norm_path(_buffer_source_path(b)) == lsp.norm_path(path) {
+            b["lines"] = _lsp_apply_lines(b.get("lines", [""]), edits)
+            b["dirty"] = true
+            bs[bi] = b
+            done = true
+            break
+         }
+         bi += 1
+      }
+      if done { _editor_get("st")["buffers"] = bs continue }
+      def r = file_read(path)
+      if is_ok(r) {
+         def text = ed.join_lines(_lsp_apply_lines(ed.split_lines(unwrap(r)), edits))
+         file_write(path, text)
+      }
+   }
+   _buffer_changed(true)
+   _status(what + ": " + to_str(total) + " edits in " + to_str(files) + " file" + (files == 1 ? "" : "s"))
+   0
+}
+
+;; ---- drawing ----
+
+def C_DIAG_ERROR = gfx.color_hex("#ff6b7a")
+def C_DIAG_WARN = gfx.color_hex("#f2c56b")
+def C_DIAG_INFO = gfx.color_hex("#6bb8ff")
+def C_DIAG_HINT = gfx.color_hex("#8a8f98")
+
+fn _diag_color(int severity) any {
+   severity == 1 ? C_DIAG_ERROR : (severity == 2 ? C_DIAG_WARN : (severity == 3 ? C_DIAG_INFO : C_DIAG_HINT))
+}
+
+fn _draw_squiggle(f64 x0, f64 x1, f64 y, any c) int {
+   ;; A 2px zig-zag drawn as alternating dashes: cheap and crisp at any scale.
+   mut f64 x = x0
+   mut int k = 0
+   while x < x1 {
+      def f64 w = float(min(3.0, x1 - x))
+      _fill_rect(x, y + (k % 2 == 0 ? 0.0 : 1.5), w, 1.5, c)
+      x += 3.0
+      k += 1
+   }
+   0
+}
+
+fn _draw_diagnostics(dict lay) int {
+   def path = _current_path()
+   if path.len <= 0 { return 0 }
+   def ds = lsp.diagnostics_for(_lsp(), path)
+   if ds.len <= 0 { return 0 }
+   def lines = ed.current_lines(_editor_get("st"))
+   def int scroll = int(_editor_get("st").get("scroll", 0))
+   def int rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
+   def f64 text_x = _line_text_x(lay)
+   def f64 edit_x = float(lay.get("edit_x", 0.0))
+   def f64 right = edit_x + float(lay.get("edit_w", 0.0)) - 12.0
+   def f64 top = float(lay.get("edit_y", 0.0))
+   ;; Strongest diagnostic per line wins the gutter mark and the inline message.
+   mut dict worst = dict(16)
+   mut int i = 0
+   while i < ds.len {
+      def d = ds.get(i, dict(0))
+      i += 1
+      def int sl = int(d.get("line", 0))
+      def int el = int(max(sl, int(d.get("end_line", sl))))
+      if el < scroll || sl >= scroll + rows { continue }
+      def int sev = int(d.get("severity", 1))
+      def c = _diag_color(sev)
+      mut int ln = int(max(sl, scroll))
+      while ln <= el && ln < scroll + rows && ln < lines.len {
+         def text = to_str(lines.get(ln, ""))
+         def int a = ln == sl ? lsp.editor_col(_lsp(), text, int(d.get("col", 0))) : 0
+         mut int b = ln == el ? lsp.editor_col(_lsp(), text, int(d.get("end_col", 0))) : str.utf8_len(text)
+         if b <= a { b = a + 1 }
+         def f64 y = float(_editor_row_y(top, ln - scroll)) + float(ed.LINE_H) - 3.0
+         def f64 x0 = text_x + _measure_prefix(text, a)
+         def f64 x1 = float(min(right, float(max(x0 + 6.0, text_x + _measure_prefix(text, b)))))
+         _draw_squiggle(x0, x1, y, c)
+         ln += 1
+      }
+      def key = to_str(sl)
+      if !worst.contains(key) || int(worst.get(key, dict(0)).get("severity", 9)) > sev { worst[key] = d }
+   }
+   mut runs = []
+   def int sf = int(_editor_get("font_small"))
+   for k in worst.keys() {
+      def d = worst.get(k, dict(0))
+      def int ln = int(d.get("line", 0))
+      if ln < scroll || ln >= scroll + rows { continue }
+      def int sev = int(d.get("severity", 1))
+      def c = _diag_color(sev)
+      def f64 row_y = float(_editor_row_y(top, ln - scroll))
+      ;; gutter dot
+      _fill_rect(edit_x + 4.0, row_y + float(ed.LINE_H) * 0.5 - 3.0, 6.0, 6.0, c)
+      ;; inline message after the code, faded, truncated to the pane
+      def text = to_str(lines.get(ln, ""))
+      def f64 mx = text_x + _measure_prefix(text, str.utf8_len(text)) + 28.0
+      if mx < right - 40.0 {
+         def msg = _fit_chrome_text(sf, str.str_replace(to_str(d.get("message", "")), "\n", "  "), right - mx)
+         _fill_rect(mx - 10.0, row_y + 3.0, _measure_ui(sf, msg, 0.0) + 20.0, float(ed.LINE_H) - 6.0, gfx.color_alpha(c, 0.10))
+         runs = _append_text_run(runs, msg, mx, _row_text_y(sf, row_y, float(ed.LINE_H)), _pack(gfx.color_alpha(c, 0.92)))
+      }
+   }
+   _flush_rects()
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(sf, runs) }
+   0
+}
+
+fn _lsp_plain(str line) str {
+   ;; Markdown to plain text for popups: drop emphasis and code markers,
+   ;; turn headings and list markers into clean prefixes.
+   mut t = str.str_replace(str.str_replace(str.str_replace(line, "**", ""), "__", ""), "`", "")
+   def lead = str.strip(t)
+   if str.startswith(lead, "- ") || str.startswith(lead, "* ") { t = "•  " + str.str_slice(lead, 2, str.utf8_len(lead)) }
+   elif str.startswith(lead, "#") {
+      mut int i = 0
+      while i < lead.len && load8(lead, i) == 35 { i += 1 }
+      t = str.strip(str.str_slice(lead, i, str.utf8_len(lead)))
+   }
+   t
+}
+
+fn _lsp_wrap(int font, str text, f64 width, int max_lines) list {
+   mut out = []
+   def paras = str.split(text, "\n")
+   mut int p = 0
+   mut bool last_blank = true
+   while p < paras.len && out.len < max_lines {
+      def raw = to_str(paras.get(p, ""))
+      p += 1
+      if str.startswith(str.strip(raw), "```") { continue }
+      def para = _lsp_plain(raw)
+      if str.strip(para).len == 0 {
+         if !last_blank { out = out.append("") }
+         last_blank = true
+         continue
+      }
+      last_blank = false
+      def words = str.split(para, " ")
+      mut line = ""
+      mut int w = 0
+      while w < words.len {
+         def word = to_str(words.get(w, ""))
+         def cand = line.len > 0 ? line + " " + word : word
+         if line.len > 0 && _measure_ui(font, cand, 0.0) > width {
+            out = out.append(line)
+            if out.len >= max_lines { break }
+            line = word
+         } else { line = cand }
+         w += 1
+      }
+      if out.len < max_lines { out = out.append(line) }
+   }
+   out
+}
+
+fn _draw_lsp_popup(dict lay, f64 sw, f64 sh) int {
+   def pop = _editor_get("lsp_popup")
+   if pop.len <= 0 { return 0 }
+   if to_str(pop.get("path", "")) != _current_path() || int(pop.get("line", -1)) != int(_editor_get("st").get("cursor_line", 0)) {
+      _editor_values["lsp_popup"] = dict(0)
+      return 0
+   }
+   if bool(_editor_get("completion_state").get("open", false)) { return 0 }
+   def int bf = int(_editor_get("font_body"))
+   def int sf = int(_editor_get("font_small"))
+   def lines = ed.current_lines(_editor_get("st"))
+   def int row = int(pop.get("line", 0))
+   def int scroll = int(_editor_get("st").get("scroll", 0))
+   def line = to_str(lines.get(int(min(max(row, 0), max(0, lines.len - 1))), ""))
+   def f64 ax = _line_text_x(lay) + _measure_prefix(line, int(pop.get("col", 0)))
+   def f64 row_y = float(_editor_row_y(float(lay.get("edit_y", 0.0)), int(max(0, row - scroll))))
+   def f64 w = float(min(620.0, max(320.0, sw * 0.46)))
+   def f64 pad = 12.0
+   def title = to_str(pop.get("title", ""))
+   def body = _lsp_wrap(sf, to_str(pop.get("text", "")), w - pad * 2.0, 14)
+   def f64 lh = 18.0
+   def f64 title_h = title.len > 0 ? 28.0 : 0.0
+   def f64 h = pad * 2.0 + title_h + float(body.len) * lh
+   ;; Prefer above the cursor line, like a tooltip; fall below when no room.
+   mut f64 y = row_y - h - 6.0
+   if y < float(lay.get("edit_y", 0.0)) { y = row_y + float(ed.LINE_H) + 6.0 }
+   def fit = _fit_rect(ax - pad, y, w, h, sw, sh - float(ed.STATUS_H), 8.0)
+   def f64 x = float(fit.get(0, ax))
+   y = float(fit.get(1, y))
+   _fill_rect(x + 2.0, y + 3.0, w, h, gfx.color_alpha(C_BG, 0.45))
+   _fill_rect(x, y, w, h, gfx.color_alpha(C_PANE_2, 0.985))
+   _stroke_rect(x, y, w, h, C_LINE_2, 1.0)
+   _fill_rect(x, y, 2.0, h, to_str(pop.get("kind", "")) == "signature" ? C_CYAN : C_ACCENT)
+   mut body_runs = []
+   mut small_runs = []
+   if title.len > 0 {
+      def ty = _row_text_y(bf, y + pad - 4.0, 28.0)
+      def int hs = int(pop.get("hl_start", -1))
+      def int he = int(pop.get("hl_end", -1))
+      def t = _fit_chrome_text(bf, title, w - pad * 2.0)
+      if hs >= 0 && he > hs && he <= t.len {
+         def before = str.str_slice(t, 0, hs)
+         def mid = str.str_slice(t, hs, he)
+         def f64 bx = x + pad + _measure_ui(bf, before, 0.0)
+         _fill_rect(bx - 2.0, y + pad, _measure_ui(bf, mid, 0.0) + 4.0, 22.0, gfx.color_alpha(C_CYAN, 0.18))
+         body_runs = _append_text_run(body_runs, t, x + pad, ty, U_TEXT)
+      } else {
+         body_runs = _append_text_run(body_runs, t, x + pad, ty, U_TEXT)
+      }
+      _fill_rect(x + pad, y + pad + title_h - 3.0, w - pad * 2.0, 1.0, C_LINE)
+   }
+   mut int i = 0
+   while i < body.len {
+      def by = y + pad + title_h + float(i) * lh
+      small_runs = _append_text_run(small_runs, to_str(body.get(i, "")), x + pad, _row_text_y(sf, by, lh), U_MUTED)
+      i += 1
+   }
+   _flush_rects()
+   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(bf, body_runs) }
+   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(sf, small_runs) }
    0
 }
 
@@ -4365,6 +5005,16 @@ fn _run_command(str id) int {
    elif id == "lsp-complete" { _lsp_request("completion") }
    elif id == "lsp-hover" { _lsp_request("hover") }
    elif id == "lsp-definition" { _lsp_request("definition") }
+   elif id == "lsp-references" { _lsp_request("references") }
+   elif id == "lsp-format" { _lsp_request("format") }
+   elif id == "lsp-symbols" { _lsp_request("symbols") }
+   elif id == "lsp-actions" { _lsp_request("actions") }
+   elif id == "lsp-signature" { _lsp_request("signature") }
+   elif id == "lsp-rename" {
+      def word = _word_at_cursor()
+      if word.len <= 0 { _status("no symbol under cursor") }
+      else { _editor_values["rename_state"] = prompt.rename_start(_editor_get("rename_state"), {"name": word, "action": "symbol", "rel": word}) }
+   }
    else { _status("unknown command " + id) }
    if id != "palette" && id != "switch-buffer" { _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state")) }
    0
@@ -4768,15 +5418,22 @@ fn _handle_char(any data) int {
       ;; Typing deactivates an Emacs region rather than replacing it.
       _deactivate_mark()
    }
-   if cp == 40 { _insert_pair("(", ")") return 0 }
+   if cp == 40 { _insert_pair("(", ")") _lsp_auto("signature") return 0 }
    if cp == 91 { _insert_pair("[", "]") return 0 }
    if cp == 123 { _insert_pair("{", "}") return 0 }
    if cp == 34 { _insert_pair("\"", "\"") return 0 }
    if cp == 39 { _insert_pair("'", "'") return 0 }
    if cp >= 32 && cp != 127 {
       _edit_insert(chr(cp))
-      if bool(_editor_get("lsp_state").get("popups", true)) && _word_byte(cp) && _word_prefix_before_cursor().len >= 2 { _completion_open(false) }
-      else { _completion_close() }
+      if bool(_editor_get("lsp_state").get("popups", true)) && _word_byte(cp) && _word_prefix_before_cursor().len >= 2 {
+         _completion_open(false)
+         _lsp_auto("completion")
+      } elif cp == 46 {
+         _completion_close()
+         _lsp_auto("completion")
+      } else { _completion_close() }
+      if cp == 44 { _lsp_auto("signature") }
+      elif cp == 41 { _lsp_popup_close() }
    }
    0
 }
@@ -5652,12 +6309,14 @@ fn _tok_color(int kind) any {
       syntax.TOK_NUMBER, syntax.TOK_CONSTANT -> C_NUMBER
       syntax.TOK_COMMENT -> C_COMMENT
       syntax.TOK_FUNCTION -> C_FUNC
-      syntax.TOK_OPERATOR, syntax.TOK_PREPROC, syntax.TOK_PUNCT -> C_OPERATOR
+      syntax.TOK_OPERATOR -> C_OPERATOR
+      syntax.TOK_PUNCT -> C_PUNCT
+      syntax.TOK_PREPROC -> C_PREPROC
       syntax.TOK_PROPERTY, syntax.TOK_ATTR, syntax.TOK_KEY -> C_PROPERTY
-      syntax.TOK_PARAM, syntax.TOK_LABEL, syntax.TOK_REGISTER -> C_CYAN
+      syntax.TOK_PARAM, syntax.TOK_LABEL, syntax.TOK_REGISTER -> C_PARAM
       syntax.TOK_VALUE -> C_STRING
-      syntax.TOK_VARIABLE -> C_TEXT
-      _ -> C_TEXT
+      syntax.TOK_VARIABLE -> C_VAR
+      _ -> C_VAR
    }
 }
 
@@ -6944,6 +7603,12 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    def base_x = _line_text_x(lay) + _measure_prefix(line, int(_editor_get("st").get("cursor_col", 0)))
    def f64 base_y = float(_editor_row_y(float(lay.get("edit_y", 0.0)), max(0, visible_row))) + float(ed.LINE_H) + 4.0
    def int rows = int(min(items.len, 9))
+   def int sel = int(_editor_get("completion_state").get("index", 0))
+   mut int top = int(_editor_get("completion_state").get("top", 0))
+   if sel < top { top = sel }
+   if sel >= top + rows { top = sel - rows + 1 }
+   top = int(max(0, min(top, items.len - rows)))
+   _editor_get("completion_state")["top"] = top
    def f64 w0 = float(min(420.0, max(260.0, sw * 0.42)))
    def f64 h0 = 34.0 + float(rows) * 26.0
    def fit = _fit_rect(base_x, base_y, w0, h0, sw, sh - float(ed.STATUS_H), 8.0)
@@ -6964,8 +7629,8 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    _fill_rect(x + 12.0, y + 30.0, w - 24.0, 1.0, C_LINE)
    mut i = 0
    while i < rows {
-      def item = items.get(i, {})
-      def active = i == int(_editor_get("completion_state").get("index", 0))
+      def item = items.get(top + i, {})
+      def active = top + i == sel
       def yy = y + 40.0 + float(i) * 26.0
       def kind = to_str(item.get("kind", "symbol"))
       def col = _completion_color(kind)
@@ -7270,7 +7935,7 @@ fn _draw_rename_prompt(f64 sw, f64 sh) int {
    def h = float(fit.get(3, h0))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_ACCENT, 2.0)
-   _text(int(_editor_get("font_small")), "rename " + prompt.rename_rel(_editor_get("rename_state")), x + 16.0, y + 14.0, C_MUTED)
+   _text(int(_editor_get("font_small")), (to_str(prompt.rename_entry(_editor_get("rename_state")).get("action", "")) == "symbol" ? "rename symbol " + to_str(prompt.rename_entry(_editor_get("rename_state")).get("name", "")) : "rename " + prompt.rename_rel(_editor_get("rename_state"))), x + 16.0, y + 14.0, C_MUTED)
    _fill_rect(x + 14.0, y + 42.0, w - 28.0, 30.0, C_PANE)
    _stroke_rect(x + 14.0, y + 42.0, w - 28.0, 30.0, C_LINE, 1.0)
    def text = prompt.rename_text(_editor_get("rename_state"))
@@ -7759,7 +8424,7 @@ if probe_flags.get("SYNTAX", false) {
       bi += 1
    }
    _prepare_visible_runs(big, "huge.ny", BIG_FILE_LINES + 4, 4, 10.0, 10.0, 0.0, 180, false, true)
-   assert(_editor_get("visible_text_runs_cache").len > 3 && int(_editor_get("visible_text_runs_cache").get(3, U_TEXT)) == U_KEYWORD, "big file visible syntax stays highlighted")
+   assert(_editor_get("visible_text_runs_cache").len > 3 && int(_editor_get("visible_text_runs_cache").get(3, -1)) == int(syntax.TOK_KEYWORD), "big file visible syntax stays highlighted")
    assert(to_str(colorpicker.scan_hex_literal("bg: #b6a0ff;", 6).get("hex", "")) == "#b6a0ff", "hex color literal scanner")
    assert(to_str(colorpicker.scan_hex_literal("fg: #acf;", 6).get("hex", "")) == "#aaccff", "short hex color literal scanner")
    window.set_should_close(_editor_get("win"), true)
@@ -7806,6 +8471,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    _editor_values["chord_state"] = chord.tick(_editor_get("chord_state"), dt)
    _editor_values["ui_state"] = interact.tick(_editor_get("ui_state"), dt)
    if termpane.is_open(_editor_get("term_state")) { _editor_values["term_state"] = termpane.update(_editor_get("term_state")) }
+   _lsp_pump()
    _editor_values["fps_state"] = ui_runtime.fps_tick(_editor_get("fps_state"), dt)
    def fps = ui_runtime.fps_current(_editor_get("fps_state"), dt)
    if int(_editor_get("st").get("fps", -1)) != fps { _editor_get("st")["fps"] = fps }
@@ -7958,6 +8624,7 @@ while !gfx.window_should_close(_editor_get("win")) {
       assert(int(_editor_get("st").get("scroll", 0)) > 0 && !bool(_editor_get("st").get("scroll_follow", true)), "editor scrollbar drag scrolls")
       window.set_should_close(_editor_get("win"), true)
    }
+   if probe_flags.get("LSP", false) { _lsp_probe_step() }
    if probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) >= 18 { window.set_should_close(_editor_get("win"), true) }
    if probe_flags.get("TERMINAL_DUMP", false) && int(_editor_get("frame_count")) >= int(max(12, auto_dump_delay + 3)) { window.set_should_close(_editor_get("win"), true) }
    def mp = window.mouse_pos(_editor_get("win"))
@@ -8008,6 +8675,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    if bool(_editor_get("st").get("show_hierarchy", true)) { _draw_rail(lay) }
    def t_rail = FRAME_TRACE ? ticks() : 0
    _draw_editor(lay, caret)
+   _draw_diagnostics(lay)
    def t_editor = FRAME_TRACE ? ticks() : 0
    _draw_terminal(lay)
    def t_terminal = FRAME_TRACE ? ticks() : 0
@@ -8024,6 +8692,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    }
    _draw_rename_prompt(sw, sh)
    _draw_completion(lay, sw, sh)
+   _draw_lsp_popup(lay, sw, sh)
    _draw_which_key(sw, sh)
    _draw_gui_overlays(lay, sw, sh)
    def t_draw = FRAME_TRACE ? ticks() : 0
