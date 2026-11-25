@@ -661,6 +661,24 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
      * must stay an identifier.
      */
     if (len == 5 && memcmp(start, "quote", 5) == 0) {
+      /*
+       * After a comparison, logical or arithmetic operator `quote` is an
+       * operand: `if c == quote { ... }` compares against a variable named
+       * quote. Taking it as the keyword swallowed the if body as quoted code
+       * (the syntax highlighters' triple-quote scans never advanced).
+       */
+      if (lx && lx->src && start > lx->src) {
+        const char *b = start - 1;
+        while (b > lx->src && (*b == ' ' || *b == '\t'))
+          b--;
+        char c = *b;
+        char c0 = b > lx->src ? b[-1] : 0;
+        bool comparison = c == '=' && (c0 == '=' || c0 == '!' || c0 == '<' ||
+                                       c0 == '>');
+        if (comparison || c == '<' || c == '>' || c == '&' || c == '|' ||
+            c == '+' || c == '-' || c == '*' || c == '/' || c == '%')
+          break;
+      }
       const char *q = start + 5;
       while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n')
         q++;

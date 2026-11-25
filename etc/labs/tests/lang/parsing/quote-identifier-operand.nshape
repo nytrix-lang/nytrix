@@ -1,0 +1,36 @@
+shape quote_identifier_operand {
+  family "language/parsing"
+  generator "regression"
+  features ["ny", "parsing", "comptime", "quote"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "QUOTE-OPERAND-OK"
+  source ny <<'NY'
+use core
+;; `quote {` is the quote keyword only where an expression starts. After a
+;; comparison, logical or arithmetic operator it is a variable named quote;
+;; lexing it as the keyword swallowed the if body as quoted code.
+fn scan(str source, int start, int quote) int {
+   mut j = start
+   while j + 2 < source.len {
+      if load8(source, j) == quote && load8(source, j + 1) == quote && load8(source, j + 2) == quote {
+         j += 3
+         break
+      }
+      j += 1
+   }
+   j
+}
+fn is_quote(int c, int quote) bool {
+   if c == quote { return true }
+   false
+}
+assert(scan("x ''' y", 0, 39) == 5, "closing triple found")
+assert(scan("abcdefgh", 0, 39) == 6, "scan advances to the bound")
+assert(is_quote(39, 39) && !is_quote(40, 39), "quote parameter compares")
+def int quote = 7
+assert(quote + 1 == 8 && 1 + quote == 8, "arithmetic operand")
+print("QUOTE-OPERAND-OK")
+NY
+}
