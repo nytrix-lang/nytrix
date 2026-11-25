@@ -1513,16 +1513,12 @@ static char *nyc_apply_entry_notes(const char *name, const char *text) {
       free(out);
       return NULL;
     }
-    int n = snprintf(prefix, note_size,
-                     "\t.pushsection __patchable_function_entries,"
-                     "\"awo\",@progbits,%s\n\t.align 8\n"
-                     "\t.quad .Lnyc_pfe_%zu\n\t.popsection\n"
-                     ".Lnyc_pfe_%zu:\n",
-                     name, id, id);
+    int n = snprintf(prefix, note_size, ".Lnyc_pfe_%zu:\n", id);
     for (unsigned i = 0; i < nyc_patchable_before; ++i)
       n += snprintf(prefix + n, note_size - (size_t)n, "\tnop\n");
     out = nyc_text_insert(out, label_offset, prefix);
-    free(prefix);
+    if (!out) {
+      free(prefix);
   }
   return out;
 }
