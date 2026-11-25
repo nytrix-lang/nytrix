@@ -273,13 +273,13 @@ segment, annotation, and encoding limits.
 
 ## Linux kernel status
 
-Protected Linux 7.3.5 builds have linked `vmlinux`, the compressed kernel,
-and configured modules using NYC for target C and GNU `as` for assembly.
-Those runs did not produce a bootable `bzImage`. The latest setup replay
-meets the 64-sector limit but fails the separate 32 KiB setup memory limit.
-QEMU's direct PVH ELF boot is useful for diagnosing startup, but it is not
-a `bzImage` or userspace boot test. See the
-[verification evidence](#verification-evidence) for the remaining gates and the
+The unmodified upstream `v7.3` tag builds entirely with NYC (3002 C units, no
+`CC` step without NYC, zero build errors) and its `bzImage` boots both inits
+to `/init` under QEMU TCG (`qemu64`) and under KVM (`-cpu host`), with one and
+with four CPUs (`nyc-kernel-boot-latest`, about 17 minutes at 48 jobs). GNU
+`as` assembles the kernel's assembly. The one gate left is the IBT objtool
+report described under [remaining acceptance](#remaining-acceptance). See the
+[verification evidence](#verification-evidence) for the history and the
 [changelog](../CHANGELOG.md) for user-visible changes.
 
 ## Remaining acceptance
@@ -325,6 +325,56 @@ user-visible changes in the [changelog](../CHANGELOG.md).
 - [ ] **P4 — Conformance.** Pair positive execution and negative diagnostic
   tests for supported C and GNU C constructs encountered in Linux, SQLite,
   system headers, and other real workloads. Do not count untested features.
+
+### Working state (2026-11-25)
+
+State as the kernel session left it; nothing below is in progress.
+
+- **Next step for the kernel gate.** `___bpf_prog_run` uses computed goto
+  (`goto *jumptable[insn->code]`). NYIR has no indirect branch or jump-table
+  operation, so NYC lowers it to a compare chain over every label; objtool
+  then sees the `endbr64` of a label reached only through that chain as
+  unreachable. The fix is a real indirect-branch operation in the shared
+  NYIR (`br.indirect` over a known label set), its verifier and CFG edges,
+  and the x86 emitters (`jmp *reg`, labels kept as IBT targets). No commit
+  touches this yet.
+- **Gate recipe.** `cmake -DNYC_KERNEL_CLONE=ON` and the
+  `nyc-kernel-boot-latest` test (`src/code/test/lang/kernel.cmake`, helper
+  scripts embedded) clone the newest non-rc tag. The local
+  `tmp/lab/benchmarks/linux-7.3` tree carries four `CONFIG_CC_IS_NYC` patches
+  and is not a pristine gate. A pristine tag identifies NYC as GCC 12, which
+  turns on `X86_KERNEL_IBT`, `USE_X86_SEG_SUPPORT` and CET; the patched tree
+  hides defects that only those paths show.
+- **Bisecting a kernel miscompile.** A wrapper compiler that sends chosen
+  path prefixes to NYC and the rest to GCC (`hybrid.sh`/`hyb.sh` under
+  `tmp/lab/nyc32/nyc-kernel-latest`) narrows a failure to a directory, then a
+  file (`NYC_ONLY=<file>`). Match prefixes against `readlink -f` paths;
+  relative or symlinked paths miss silently. To find the compiler commit,
+  bisect in a separate worktree (`tmp/lab/head-wt`, build with
+  `-Wno-error=unused-function`) with the same hybrid wrapper.
+- **Boot marker.** With `-smp 4` the console interleaves CPUs, and
+  `NYC_KERNEL_INIT_REACHED` can arrive split in two; a gate that greps for
+  the whole string can report a false failure on SMP runs.
+- **Bugs found by the pristine KVM and SMP boots** (all fixed with execution
+  fixtures): an `rdmsr` inline asm silently dropped (`6d88e5ae`; unlowerable
+  asm now fails the compile), an 8-byte slot for an address-taken
+  `__int128` and its truth test reading the pointer (`f07f1163`), and an
+  in-place compound literal that zeroed whole words over a 4-byte spinlock
+  (`f03b5772`). A program-defined `memcpy` keeps its side effects
+  (`f07f1163`).
+- **Open items unchanged:** native/direct-object parity and frame-pointer
+  omission; P2 atomics and register-operand inline asm; P3 machine-level
+  verification; P4 conformance pairs.
+- **Failing ctests outside NYC** (Ny language, not diagnosed):
+  `ny-stdlib-debug-path` (stdlib functions carry no `!dbg`; an older
+  `build/release/ny-full` behaves the same), `ny-doc-search-ny-discovery`
+  (result order for `CHANGELOG.md#Added`), `nyr-ny-full-win64-aggregate`
+  (undefined reference linking the Win64 aggregate host). `nyr-c-frontend`
+  passes alone in about 70 s but can exceed its 120 s limit in a 24-way full
+  run.
+- **Process notes.** Never use `pkill -f`/`pgrep -f` with a pattern that also
+  appears in the calling command line (it matches itself). Concurrent
+  sessions share one checkout; stage only your own files.
 
 ## Verification evidence
 
