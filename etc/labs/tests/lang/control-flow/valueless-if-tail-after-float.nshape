@@ -1,0 +1,25 @@
+shape valueless_if_tail_after_float {
+  family "runtime/control-flow"
+  generator "regression"
+  features ["ny", "control-flow", "return", "float", "llvm"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O2; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "TAIL-OK"
+  source ny <<'NY'
+use core
+;; An untyped function whose last statement is a valueless `if` returns no
+;; value. A `def f64` computed before that `if` used to become the implicit
+;; result, so the LLVM route emitted `ret double` in an i64 function and the
+;; module failed verification (pong's draw_scene broke the shared core link).
+mut shown = 0
+fn draw(int n) {
+   def f64 gap = float(n) * 0.15
+   if gap > 1000.0 { shown += 1 }
+}
+draw(3)
+draw(10000)
+assert(shown == 1, "branch ran once")
+print("TAIL-OK")
+NY
+}

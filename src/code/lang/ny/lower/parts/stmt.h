@@ -9248,7 +9248,20 @@ static bool nyr_build_function(const program_t *prog, const stmt_t *fn,
        * another class. Other functions keep the last-value behaviour. */
       tail_without_value = tail && tail->kind == NY_S_IF &&
                            !nyr_if_stmt_yields_value(tail) &&
-                           nyr_stmt_has_bare_return(fn->as.fn.body, 0);
+                           (nyr_stmt_has_bare_return(fn->as.fn.body, 0) ||
+                            /* A stale float from inside the function (a
+                             * `def f64` before the final valueless `if`)
+                             * is never the result of an untyped function;
+                             * returning it made `ret double` in an i64
+                             * function on the LLVM route. */
+                            (b.last_value >= 0 &&
+                             (nyr_value_is_f64(&b, b.last_value, 0) ||
+                              nyr_value_scalar_class(&b, b.last_value) ==
+                                  NYIR_SCALAR_F32) &&
+                             !(fn->as.fn.return_type &&
+                               (ny_native_type_name_is_f64(
+                                    fn->as.fn.return_type) ||
+                                strcmp(fn->as.fn.return_type, "f32") == 0))));
     }
     int ret = b.last_value >= 0 && !tail_without_value ? b.last_value
                                                        : nyr_emit_const(&b, 0);
