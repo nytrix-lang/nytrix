@@ -187,7 +187,7 @@ two layers that mix freely in one function:
 `build/release/nyr` compiles NYR text files:
 
 ```sh
-nyr run etc/labs/tests/code/nyr/tour.nyr [args...]  # build and run; exit status is main's result
+nyr run etc/labs/tests/code/intermediate/nyr/tour.nyr [args...]  # build and run; exit status is main's result
 nyr build file.nyr -o prog               # executable linked with libc and libm by $CC
 nyr check file.nyr                       # parse, type-check and verify only
 nyr ir -O2 file.nyr                      # NYIR after optimization, printed as NYR text
@@ -317,7 +317,7 @@ extern { fn nyr_mul_add(int a, int b) int }
 Item types are `i64`/`u64`/`ptr` (8 bytes), `i32`/`u32` (4), `i16`/`u16` (2),
 `i8`/`u8` (1), and `f64`/`f32`. A type applies until the next one.
 `zero N` adds N zero bytes, a string adds its bytes, and a bare name adds the
-address of a function or data item. `etc/labs/tests/code/nyr/lowlevel.nyr` exercises
+address of a function or data item. `etc/labs/tests/code/intermediate/nyr/lowlevel.nyr` exercises
 all of this.
 
 Diagnostics name the file, line and column, and quote the source with a

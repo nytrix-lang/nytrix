@@ -2928,32 +2928,32 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
   install(TARGETS nyr-cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
   if(BUILD_TESTING)
     add_test(NAME nyr-text-tour
-      COMMAND nyr-cli run "${NYTRIX_ROOT}/etc/labs/tests/code/nyr/tour.nyr")
+      COMMAND nyr-cli run "${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/nyr/tour.nyr")
     set_tests_properties(nyr-text-tour PROPERTIES PASS_REGULAR_EXPRESSION
       "primes\\(100\\) = 25.*total = 5.00  bits = 240 -5 97.*x = 52 int\\(2.9\\)=2")
     add_test(NAME nyr-text-tour-O0
-      COMMAND nyr-cli run -O0 "${NYTRIX_ROOT}/etc/labs/tests/code/nyr/tour.nyr")
+      COMMAND nyr-cli run -O0 "${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/nyr/tour.nyr")
     set_tests_properties(nyr-text-tour-O0 PROPERTIES PASS_REGULAR_EXPRESSION
       "collatz\\(27\\) = 111.*x = 52 int\\(2.9\\)=2")
     add_test(NAME nyr-text-fib
-      COMMAND nyr-cli run "${NYTRIX_ROOT}/etc/labs/tests/code/nyr/fib.nyr")
+      COMMAND nyr-cli run "${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/nyr/fib.nyr")
     set_tests_properties(nyr-text-fib PROPERTIES PASS_REGULAR_EXPRESSION
       "fib\\(10\\) = 55.calls = 453")
     add_test(NAME nyr-text-lowlevel
-      COMMAND nyr-cli run "${NYTRIX_ROOT}/etc/labs/tests/code/nyr/lowlevel.nyr")
+      COMMAND nyr-cli run "${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/nyr/lowlevel.nyr")
     set_tests_properties(nyr-text-lowlevel PROPERTIES PASS_REGULAR_EXPRESSION
       "sum=100 max=250 pick=250 asm=22 fp=21")
     foreach(nyr_example fib tour lowlevel)
       foreach(nyr_level -O0 -O2)
         add_test(NAME nyr-text-roundtrip-${nyr_example}${nyr_level}
           COMMAND "${CMAKE_COMMAND}" "-DNYR=$<TARGET_FILE:nyr-cli>"
-            "-DSRC=${NYTRIX_ROOT}/etc/labs/tests/code/nyr/${nyr_example}.nyr"
+            "-DSRC=${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/nyr/${nyr_example}.nyr"
             "-DWORK=${CMAKE_BINARY_DIR}/nyr-text-roundtrip" "-DLEVEL=${nyr_level}"
-            -P "${NYTRIX_ROOT}/src/code/test/backend/nyr_text_roundtrip.cmake")
+            -P "${NYTRIX_ROOT}/src/code/test/backend/nyr.cmake")
       endforeach()
     endforeach()
     add_test(NAME nyr-text-diagnostic
-      COMMAND nyr-cli check "${NYTRIX_ROOT}/etc/labs/tests/code/nyr/bad-immutable.nyr")
+      COMMAND nyr-cli check "${NYTRIX_ROOT}/etc/labs/tests/code/intermediate/nyr/bad-immutable.nyr")
     set_tests_properties(nyr-text-diagnostic PROPERTIES PASS_REGULAR_EXPRESSION
       "bad-immutable.nyr:4:3: error: 'x' is immutable; declare it with 'mut'")
   endif()
