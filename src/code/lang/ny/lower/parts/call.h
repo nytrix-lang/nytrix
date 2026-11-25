@@ -422,6 +422,14 @@ static bool nyr_expr_has_raw_int_abi(const nyr_builder_t *b, const expr_t *e,
     if (ny_native_type_name_is_int(nyr_expr_type_name(b, e)))
       return true;
   }
+  /* A ternary over an `any`-declared arm yields that arm's canonical
+   * tagged word. A RAW_INT flow fact on the merge (HM refined from an int
+   * initializer) must not box it again: `f(c ? any_a : any_b)` passed
+   * handle*2+1 (sets.ny bound a garbage Vulkan pipeline). */
+  if (e->kind == NY_E_TERNARY &&
+      (nyr_expr_is_any((nyr_builder_t *)b, e->as.ternary.true_expr) ||
+       nyr_expr_is_any((nyr_builder_t *)b, e->as.ternary.false_expr)))
+    return false;
   if (e->semantic.resolved && e->semantic.rep == NY_SEM_REP_RAW_INT)
     return true;
   if (e->semantic.resolved &&

@@ -1,0 +1,25 @@
+shape any_global_ternary_argument {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "abi", "any"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "TERNARY-ANY-OK"
+  source ny <<'NY'
+use core
+;; `c ? any_global : any_global` passed straight to an `any` formal must keep
+;; the canonical word; a RAW_INT flow fact once boxed it again (x -> 2x+1).
+mut any lo = 0
+mut any hi = 0
+fn echo(f64 pad, any v) any { v }
+fn pick(bool wide) any { echo(1.0, wide ? hi : lo) }
+lo = 0x1000
+hi = 0x2000
+assert(pick(false) == 0x1000, "narrow arm")
+assert(pick(true) == 0x2000, "wide arm")
+def r = pick(true) ? 3 : 4
+assert(echo(0.0, r > 3 ? 1 : 0) == 0, "raw arms still box")
+print("TERNARY-ANY-OK")
+NY
+}
