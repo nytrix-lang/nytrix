@@ -172,7 +172,14 @@ def _COMMANDS = [
    ["Completion popup", "lsp-complete", "C-SPC l c", "request completions", "lsp"],
    ["LSP hover", "lsp-hover", "C-i", "request hover info", "lsp"],
    ["LSP hover", "lsp-hover", "C-SPC l h", "request hover info", "lsp"],
-   ["LSP definition request", "lsp-definition", "C-SPC l g", "emit definition request", "lsp"],
+   ["LSP definition", "lsp-definition", "C-SPC l g", "jump to definition via the language server", "lsp"],
+   ["Find references", "lsp-references", "S-F12", "list every reference to the symbol", "lsp"],
+   ["Find references", "lsp-references", "C-SPC l r", "list every reference to the symbol", "lsp"],
+   ["Rename symbol", "lsp-rename", "C-SPC l n", "rename the symbol across the workspace", "lsp"],
+   ["Format document", "lsp-format", "C-SPC l f", "format with the language server", "lsp"],
+   ["Document symbols", "lsp-symbols", "C-SPC l o", "list symbols in this file", "lsp"],
+   ["Code actions", "lsp-actions", "C-SPC l a", "apply the quick fix at the cursor", "lsp"],
+   ["Signature help", "lsp-signature", "C-SPC l k", "show the call signature", "lsp"],
 ]
 
 def _ALIASES = []
