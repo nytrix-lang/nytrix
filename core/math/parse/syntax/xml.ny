@@ -20,12 +20,12 @@ fn tokenize(str source, list out_tokens) list {
          i = j
       } elif ch == 60 && i + 3 < src_len && load8(source, i+1) == 33 && load8(source, i+2) == 45 && load8(source, i+3) == 45 {
          mut j = i + 4
-         while j + 2 < src_len { if load8(source, j) == 45 && load8(source, j + 1) == 45 && load8(source, j + 2) == 62 { j += 3 break } j += 1 }
+         mut _closed7 = false while j + 2 < src_len { if load8(source, j) == 45 && load8(source, j + 1) == 45 && load8(source, j + 2) == 62 { j += 3 _closed7 = true break } j += 1 } if !_closed7 { j = src_len }
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
       } elif ch == 60 && i + 1 < src_len && load8(source, i + 1) == 63 {
          mut j = i + 2
-         while j + 1 < src_len { if load8(source, j) == 63 && load8(source, j + 1) == 62 { j += 2 break } j += 1 }
+         mut _closed8 = false while j + 1 < src_len { if load8(source, j) == 63 && load8(source, j + 1) == 62 { j += 2 _closed8 = true break } j += 1 } if !_closed8 { j = src_len }
          out_tokens = _h.add_tok(out_tokens, 10, i, j - i)
          i = j
       } elif ch == 60 {

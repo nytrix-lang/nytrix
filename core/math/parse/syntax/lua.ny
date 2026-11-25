@@ -23,7 +23,7 @@ fn tokenize(str source, list out_tokens) list {
          i = j
       } elif ch == 45 && i + 1 < src_len && load8(source, i + 1) == 45 {
          mut j = i + 2
-         if j + 1 < src_len && load8(source, j) == 91 && load8(source, j + 1) == 91 { while j + 1 < src_len { if load8(source, j) == 93 && load8(source, j + 1) == 93 { j += 2 break } j += 1 } } else { while j < src_len && load8(source, j) != 10 { j += 1 } }
+         if j + 1 < src_len && load8(source, j) == 91 && load8(source, j + 1) == 91 { mut _closed3 = false while j + 1 < src_len { if load8(source, j) == 93 && load8(source, j + 1) == 93 { j += 2 _closed3 = true break } j += 1 } if !_closed3 { j = src_len } } else { while j < src_len && load8(source, j) != 10 { j += 1 } }
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
       } elif ch == 34 || ch == 39 {

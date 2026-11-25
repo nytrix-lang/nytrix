@@ -100,13 +100,17 @@ fn tokenize(str source, list out_tokens) list {
       } elif (ch == 34 || ch == 39) && i + 2 < src_len && load8(source, i + 1) == ch && load8(source, i + 2) == ch {
          def quote = ch
          mut j = i + 3
+         mut closed = false
          while j + 2 < src_len {
             if load8(source, j) == quote && load8(source, j + 1) == quote && load8(source, j + 2) == quote {
                j += 3
+               closed = true
                break
             }
             j += 1
          }
+         ;; Unterminated: the string runs to the end of the text.
+         if !closed { j = src_len }
          out_tokens = _h.add_tok(out_tokens, 2, i, j - i)
          i = j
       } elif ch == 34 || ch == 39 {

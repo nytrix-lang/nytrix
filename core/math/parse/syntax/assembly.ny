@@ -78,7 +78,7 @@ fn tokenize(str source, list out_tokens) list {
          i = j
       } elif ch == 47 && i + 1 < src_len && load8(source, i + 1) == 42 {
          mut j = i + 2
-         while j + 1 < src_len { if load8(source, j) == 42 && load8(source, j + 1) == 47 { j += 2 break } j += 1 }
+         mut _closed1 = false while j + 1 < src_len { if load8(source, j) == 42 && load8(source, j + 1) == 47 { j += 2 _closed1 = true break } j += 1 } if !_closed1 { j = src_len }
          out_tokens = _h.add_tok(out_tokens, 4, i, j - i)
          i = j
       } elif ch == 59 || ch == 33 {

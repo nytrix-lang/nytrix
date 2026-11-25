@@ -177,7 +177,8 @@ fn _scan_block_comment(str source, int i, int src_len) int {
       if load8(source, j) == 42 && load8(source, j + 1) == 47 { return j + 2 }
       j += 1
    }
-   j
+   ;; Unterminated: the comment runs to the end of the text.
+   src_len
 }
 
 fn _scan_run_chars(str source, int i, int src_len, str chars) int {

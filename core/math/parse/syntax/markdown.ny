@@ -28,11 +28,11 @@ fn tokenize(str source, list out_tokens) list {
          def c = ch
          mut j = i + 1
          if j < src_len && load8(source, j) == c && j + 1 < src_len && load8(source, j + 1) == c {
-            while j + 2 < src_len { if load8(source, j) == c && load8(source, j + 1) == c && load8(source, j + 2) == c { j += 3 break } j += 1 }
+            mut _closed4 = false while j + 2 < src_len { if load8(source, j) == c && load8(source, j + 1) == c && load8(source, j + 2) == c { j += 3 _closed4 = true break } j += 1 } if !_closed4 { j = src_len }
             out_tokens = _h.add_tok(out_tokens, 5, i, j - i)
             i = j
          } elif j < src_len && load8(source, j) == c {
-            while j + 1 < src_len { if load8(source, j) == c && load8(source, j + 1) == c { j += 2 break } j += 1 }
+            mut _closed5 = false while j + 1 < src_len { if load8(source, j) == c && load8(source, j + 1) == c { j += 2 _closed5 = true break } j += 1 } if !_closed5 { j = src_len }
             out_tokens = _h.add_tok(out_tokens, 1, i, j - i)
             i = j
          } else {
