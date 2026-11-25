@@ -6893,6 +6893,26 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
  * accesses keep the RAX form; they consume pending SIB without a
  * displacement. NYTRIX_NO_FRAME_ADD_SIB=1 disables it.
  */
+static bool mach_v256_frame_rhs_fold_disabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_V256_FRAME_RHS_FOLD");
+    disabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+static nyr_mach_type_t mach_v128_type(const nyr_mach_func_t *m,
+                                      const nyr_mach_operand_t *op);
+
+static bool mach_is_v256_type(const nyr_mach_func_t *mach,
+                              const nyr_mach_operand_t *op) {
+  if (!mach_is_v128(mach, op))
+    return false;
+  nyr_mach_type_t vt = mach_v128_type(mach, op);
+  return vt == NYR_MACH_TYPE_V256_I64 || vt == NYR_MACH_TYPE_V256_F64;
+}
+
 static bool mach_frame_sib_pending(nyr_x64_mach_enc_t *e, uint32_t addr,
                                    const nyr_mach_inst_t *use,
                                    const nyr_mach_operand_t *base,
@@ -6906,11 +6926,16 @@ static bool mach_frame_sib_pending(nyr_x64_mach_enc_t *e, uint32_t addr,
   if (disabled || !use || !base || !index || !e->addr_fold ||
       !e->addr_fold_known)
     return false;
-  bool scalar_use =
-      (use->opcode == NYR_MACH_LOAD && !mach_is_v128(e->mach, &use->dst)) ||
-      (use->opcode == NYR_MACH_STORE && !mach_is_v128(e->mach, &use->src0) &&
+  bool v256_ok = !mach_v256_frame_rhs_fold_disabled();
+  bool scalar_or_v256_use =
+      (use->opcode == NYR_MACH_LOAD &&
+       (!mach_is_v128(e->mach, &use->dst) ||
+        (v256_ok && mach_is_v256_type(e->mach, &use->dst)))) ||
+      (use->opcode == NYR_MACH_STORE &&
+       (!mach_is_v128(e->mach, &use->src0) ||
+        (v256_ok && mach_is_v256_type(e->mach, &use->src0))) &&
        mach_op_is_vreg(&use->dst, addr));
-  if (!scalar_use)
+  if (!scalar_or_v256_use)
     return false;
   const nyr_mach_operand_t *frame = NULL, *idx = NULL;
   if (base->kind == NYR_MACH_OPERAND_VREG && base->as.reg < e->mach->vreg_len &&
@@ -10125,6 +10150,146 @@ static bool mach_ymm_store_v256_sib(nyr_x64_mach_enc_t *e, unsigned s,
          (mod ? mach_u8(e, 0x00) : true);
 }
 
+/*
+ * vmovdqu ymm, [mem] (opc 0x6f) or vmovdqu [mem], ymm (opc 0x7f) with full
+ * ny_x64_mem_addr_t addressing (base + index*scale + disp).
+ */
+static bool mach_ymm_v256_mem_op(nyr_x64_mach_enc_t *e, unsigned reg,
+                                 const ny_x64_mem_addr_t *mem, unsigned opc) {
+  if (!e || !mem || reg >= 16 || mem->base >= 16 ||
+      (mem->index >= 0 && mem->index >= 16))
+    return mach_err(e, "x64: unsupported YMM memory operand");
+  unsigned char vex2 = 0xe1; /* R=X=B=1 (unused), mmmmm=0001 (0F) */
+  if (reg >= 8)
+    vex2 = (unsigned char)(vex2 & ~0x80u);
+  if (mem->index >= 0 && (unsigned)mem->index >= 8)
+    vex2 = (unsigned char)(vex2 & ~0x40u); /* inverted X: SIB index */
+  if (mem->base >= 8)
+    vex2 = (unsigned char)(vex2 & ~0x20u); /* inverted B: base */
+  return mach_u8(e, 0xc4) && mach_u8(e, vex2) && mach_u8(e, 0x7e) &&
+         mach_u8(e, opc) && mach_emit_mem(e, mem, reg);
+}
+
+/*
+ * VEX.256.66.0F opc ymmD, ymmA, [mem] for packed i64/f64 binops.
+ */
+static bool mach_ymm_op3_mem_addr(nyr_x64_mach_enc_t *e, unsigned dst,
+                                  unsigned a, const ny_x64_mem_addr_t *mem,
+                                  unsigned opc) {
+  if (!e || !mem || dst >= 16 || a >= 16 || mem->base >= 16 ||
+      (mem->index >= 0 && mem->index >= 16))
+    return mach_err(e, "x64: unsupported YMM binary memory operand");
+  unsigned char vex2 = (unsigned char)(dst >= 8 ? 0x61 : 0xe1);
+  if (mem->base >= 8)
+    vex2 = (unsigned char)(vex2 & ~0x20u);
+  if (mem->index >= 0 && (unsigned)mem->index >= 8)
+    vex2 = (unsigned char)(vex2 & ~0x40u);
+  unsigned char vex3 = (unsigned char)(0x05u | ((~a & 0x0fu) << 3));
+  return mach_u8(e, 0xc4) && mach_u8(e, vex2) && mach_u8(e, vex3) &&
+         mach_u8(e, opc) && mach_emit_mem(e, mem, dst);
+}
+
+/*
+ * Resolve a V256 load address produced by an adjacent LEA or ADD into either a
+ * direct [rbp + index*scale + disp] frame reference or a [base + index*scale]
+ * SIB address. When emit is true, seeds resident registers and reloads a
+ * spilled index into RAX if needed.
+ */
+static bool mach_v256_sib_or_frame_addr(nyr_x64_mach_enc_t *e, size_t load_index,
+                                        uint32_t addr_vreg, bool emit,
+                                        ny_x64_mem_addr_t *out_mem) {
+  size_t saved_inst = e->cur_inst;
+  e->cur_inst = load_index;
+  bool result = false;
+  do {
+    const nyr_mach_operand_t *base_op = NULL, *index_op = NULL;
+    unsigned scale = 0;
+    bool allow_ext = !mach_v256_frame_rhs_fold_disabled();
+    bool from_add = false;
+    bool ok = mach_sib_lea_mem(e, addr_vreg, load_index, &base_op, &index_op,
+                               &scale, NULL);
+    if (!ok && allow_ext) {
+      ok = mach_sib_add_mem(e, addr_vreg, load_index, &base_op, &index_op,
+                            &scale, NULL);
+      from_add = ok;
+    }
+    if (!ok || !base_op || !index_op ||
+        base_op->kind != NYR_MACH_OPERAND_VREG ||
+        index_op->kind != NYR_MACH_OPERAND_VREG ||
+        (scale != 1 && scale != 2 && scale != 4 && scale != 8))
+      break;
+
+    bool has_addr_fold = allow_ext && e->addr_fold && e->addr_fold_known;
+    bool base_is_frame = has_addr_fold &&
+                         base_op->as.reg < e->mach->vreg_len &&
+                         e->addr_fold_known[base_op->as.reg] &&
+                         e->addr_fold[base_op->as.reg].kind ==
+                             NYR_MACH_OPERAND_FRAME;
+    if (!base_is_frame && scale == 1 && has_addr_fold &&
+        index_op->as.reg < e->mach->vreg_len &&
+        e->addr_fold_known[index_op->as.reg] &&
+        e->addr_fold[index_op->as.reg].kind == NYR_MACH_OPERAND_FRAME) {
+      const nyr_mach_operand_t *tmp = base_op;
+      base_op = index_op;
+      index_op = tmp;
+      base_is_frame = true;
+    }
+
+    if (base_is_frame) {
+      int ip = mach_vreg_preg(e, index_op->as.reg);
+      if (ip < 0 || (from_add ? (ip & 7) == 4 : ip == 4))
+        break;
+      if (emit && !mach_seed_colored_preg(e, index_op->as.reg))
+        break;
+      if (out_mem) {
+        out_mem->base = 5; /* rbp */
+        out_mem->index = ip;
+        out_mem->scale = scale;
+        out_mem->disp = mach_slot_off(e, &e->addr_fold[base_op->as.reg]);
+      }
+      result = true;
+      break;
+    }
+
+    int bp = mach_vreg_preg(e, base_op->as.reg);
+    int ip = mach_vreg_preg(e, index_op->as.reg);
+    if (bp < 0)
+      break;
+    if (from_add && (ip < 0 || ip == 4))
+      break;
+    if (!emit) {
+      result = ip != 4 && (ip >= 0 || bp != 0);
+      break;
+    }
+    if (!mach_seed_colored_preg(e, base_op->as.reg))
+      break;
+    unsigned base = (unsigned)bp;
+    unsigned index = 0;
+    if (!from_add && (ip < 0 || ip == 4)) {
+      /*
+       * The folded YMM load and its consumer are adjacent, so RAX can reload
+       * a spilled index and serve directly as the SIB index.
+       */
+      if (base == 0 || !mach_load_op_rax(e, index_op))
+        break;
+      index = 0;
+    } else {
+      if (!mach_seed_colored_preg(e, index_op->as.reg))
+        break;
+      index = (unsigned)ip;
+    }
+    if (out_mem) {
+      out_mem->base = base;
+      out_mem->index = (int)index;
+      out_mem->scale = scale;
+      out_mem->disp = 0;
+    }
+    result = true;
+  } while (0);
+  e->cur_inst = saved_inst;
+  return result;
+}
+
 static bool mach_vector_ymm_load(nyr_x64_mach_enc_t *e,
                                  const nyr_mach_inst_t *in, int dst_off) {
   int assigned = in->dst.kind == NYR_MACH_OPERAND_VREG
@@ -10136,7 +10301,14 @@ static bool mach_vector_ymm_load(nyr_x64_mach_enc_t *e,
       return false;
   } else if (in->src0.kind == NYR_MACH_OPERAND_VREG) {
     unsigned b = 0, i = 0, s = 0;
-    if (mach_sib_query(e, &in->src0, &b, &i, &s)) {
+    if (e->pending_frame_valid &&
+        mach_op_is_vreg(&in->src0, e->pending_frame_vreg)) {
+      ny_x64_mem_addr_t mem = {5, (int)e->pending_frame_index,
+                               e->pending_frame_scale, e->pending_frame_disp};
+      e->pending_frame_valid = false;
+      if (!mach_ymm_v256_mem_op(e, d, &mem, 0x6f))
+        return false;
+    } else if (mach_sib_query(e, &in->src0, &b, &i, &s)) {
       if (!mach_ymm_load_v256_sib(e, d, b, i, s))
         return false;
     } else if (!mach_load_op_rax(e, &in->src0) ||
@@ -10178,6 +10350,15 @@ static bool mach_vector_ymm_store(nyr_x64_mach_enc_t *e,
     return mach_ymm_store_v256(e, dst_off, s);
   if (in->dst.kind == NYR_MACH_OPERAND_VREG) {
     unsigned b = 0, i = 0, sc = 0;
+    if (e->pending_frame_valid &&
+        mach_op_is_vreg(&in->dst, e->pending_frame_vreg)) {
+      ny_x64_mem_addr_t mem = {5, (int)e->pending_frame_index,
+                               e->pending_frame_scale, e->pending_frame_disp};
+      e->pending_frame_valid = false;
+      if (!mach_ymm_v256_mem_op(e, s, &mem, 0x7f))
+        return false;
+      return true;
+    }
     if (mach_sib_query(e, &in->dst, &b, &i, &sc)) {
       if (!mach_ymm_store_v256_sib(e, s, b, i, sc))
         return false;
@@ -10278,7 +10459,9 @@ static bool mach_vector_ymm_binop(nyr_x64_mach_enc_t *e,
   const nyr_mach_inst_t *folded_load = NULL;
   if (e->vec_fast_path && e->target &&
       (e->target->caps & NY_NATIVE_CAP_MACH_AVX2) &&
-      in->opcode == NYR_MACH_ADD && e->cur_inst > 0 &&
+      (in->opcode == NYR_MACH_ADD ||
+       (!mach_v256_frame_rhs_fold_disabled() && in->opcode == NYR_MACH_SUB)) &&
+      e->cur_inst > 0 &&
       mach_vector_ymm_rhs_load(e, e->cur_inst - 1, e->cur_inst, &in->src1,
                                NYR_MACH_TYPE_V256_I64))
     folded_load = &e->mach->insts[e->cur_inst - 1];
@@ -10291,39 +10474,11 @@ static bool mach_vector_ymm_binop(nyr_x64_mach_enc_t *e,
     if (!mach_ymm_op3_mem(e, d, a, mach_slot_off(e, &folded_load->src0), opc))
       return false;
   } else if (folded_load) {
-    const nyr_mach_operand_t *base_op = NULL, *index_op = NULL;
-    unsigned scale = 0;
-    unsigned base = 0, index = 0;
-    size_t saved_inst = e->cur_inst;
-    e->cur_inst--;
-    bool addr_ok = mach_sib_lea_mem(e, folded_load->src0.as.reg, e->cur_inst,
-                                    &base_op, &index_op, &scale, NULL);
-    if (addr_ok) {
-      int bp = mach_vreg_preg(e, base_op->as.reg);
-      int ip = mach_vreg_preg(e, index_op->as.reg);
-      addr_ok = bp >= 0;
-      if (addr_ok) {
-        base = (unsigned)bp;
-        if (ip < 0 || ip == 4) {
-          addr_ok = mach_load_op_rax(e, index_op);
-          index = 0;
-        } else {
-          index = (unsigned)ip;
-        }
-      }
-    }
-    e->cur_inst = saved_inst;
-    if (!addr_ok)
+    ny_x64_mem_addr_t mem = {0};
+    if (!mach_v256_sib_or_frame_addr(e, e->cur_inst - 1,
+                                     folded_load->src0.as.reg, true, &mem))
       return mach_err(e, "x64: lost resident ymm i64 rhs address");
-    unsigned char vex2 = (unsigned char)(d >= 8 ? 0x61 : 0xe1);
-    if (base >= 8)
-      vex2 = (unsigned char)(vex2 & ~0x20u);
-    if (index >= 8)
-      vex2 = (unsigned char)(vex2 & ~0x40u);
-    unsigned char vex3 = (unsigned char)(0x05u | ((~a & 0x0fu) << 3));
-    ny_x64_mem_addr_t mem = {base, (int)index, scale, 0};
-    if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
-        !mach_u8(e, opc) || !mach_emit_mem(e, &mem, d))
+    if (!mach_ymm_op3_mem_addr(e, d, a, &mem, opc))
       return false;
   } else if (in->src1.kind == NYR_MACH_OPERAND_VREG) {
     int breg = mach_vreg_vpreg(e, in->src1.as.reg);
@@ -10936,7 +11091,9 @@ static bool mach_vector_ymm_rhs_load(nyr_x64_mach_enc_t *e, size_t load_index,
        consumer->opcode != NYR_MACH_ADD && consumer->opcode != NYR_MACH_SUB &&
        consumer->opcode != NYR_MACH_MUL && consumer->opcode != NYR_MACH_DIV) ||
       (vector_type == NYR_MACH_TYPE_V256_I64 &&
-       consumer->opcode != NYR_MACH_ADD) ||
+       consumer->opcode != NYR_MACH_ADD &&
+       (mach_v256_frame_rhs_fold_disabled() ||
+        consumer->opcode != NYR_MACH_SUB)) ||
       !mach_op_is_vreg(rhs, load->dst.as.reg) ||
       mach_inst_input_uses_vreg(consumer, load->dst.as.reg) != 1 ||
       mach_op_is_vreg(&consumer->src0, load->dst.as.reg) ||
@@ -10954,22 +11111,8 @@ static bool mach_vector_ymm_rhs_load(nyr_x64_mach_enc_t *e, size_t load_index,
     return true;
   if (load->src0.kind != NYR_MACH_OPERAND_VREG)
     return false;
-  const nyr_mach_operand_t *base = NULL, *index = NULL;
-  unsigned scale = 0;
-  size_t saved_inst = e->cur_inst;
-  e->cur_inst = load_index;
-  if (!mach_sib_lea_mem(e, load->src0.as.reg, load_index, &base, &index, &scale,
-                        NULL)) {
-    e->cur_inst = saved_inst;
-    return false;
-  }
-  bool invalid = base->kind != NYR_MACH_OPERAND_VREG ||
-                 index->kind != NYR_MACH_OPERAND_VREG ||
-                 mach_vreg_preg(e, base->as.reg) < 0 ||
-                 mach_vreg_preg(e, index->as.reg) == 4 ||
-                 (scale != 1 && scale != 2 && scale != 4 && scale != 8);
-  e->cur_inst = saved_inst;
-  return !invalid;
+  return mach_v256_sib_or_frame_addr(e, load_index, load->src0.as.reg, false,
+                                     NULL);
 }
 
 static bool mach_vector_ymm_fp_binop(nyr_x64_mach_enc_t *e,
@@ -11010,42 +11153,11 @@ static bool mach_vector_ymm_fp_binop(nyr_x64_mach_enc_t *e,
         !mach_i32(e, mach_slot_off(e, &folded_load->src0)))
       return false;
   } else if (folded_load) {
-    const nyr_mach_operand_t *base_op = NULL, *index_op = NULL;
-    unsigned scale = 0;
-    unsigned base = 0, index = 0;
-    size_t saved_inst = e->cur_inst;
-    e->cur_inst--;
-    bool addr_ok = mach_sib_lea_mem(e, folded_load->src0.as.reg, e->cur_inst,
-                                    &base_op, &index_op, &scale, NULL);
-    if (addr_ok) {
-      int bp = mach_vreg_preg(e, base_op->as.reg);
-      int ip = mach_vreg_preg(e, index_op->as.reg);
-      addr_ok = bp >= 0;
-      if (addr_ok) {
-        base = (unsigned)bp;
-        if (ip < 0 || ip == 4) {
-          /*
-           * The folded YMM load and its consumer are adjacent, so RAX can
-           * reload a spilled index and serve directly as the SIB index.
-           */
-          addr_ok = mach_load_op_rax(e, index_op);
-          index = 0;
-        } else {
-          index = (unsigned)ip;
-        }
-      }
-    }
-    e->cur_inst = saved_inst;
-    if (!addr_ok)
+    ny_x64_mem_addr_t mem = {0};
+    if (!mach_v256_sib_or_frame_addr(e, e->cur_inst - 1,
+                                     folded_load->src0.as.reg, true, &mem))
       return mach_err(e, "x64: lost resident ymm rhs address");
-    unsigned char vex2 = (unsigned char)(d >= 8 ? 0x61 : 0xe1);
-    if (base >= 8)
-      vex2 = (unsigned char)(vex2 & ~0x20u);
-    if (index >= 8)
-      vex2 = (unsigned char)(vex2 & ~0x40u);
-    ny_x64_mem_addr_t mem = {base, (int)index, scale, 0};
-    if (!mach_u8(e, 0xc4) || !mach_u8(e, vex2) || !mach_u8(e, vex3) ||
-        !mach_u8(e, opc) || !mach_emit_mem(e, &mem, d))
+    if (!mach_ymm_op3_mem_addr(e, d, a_reg, &mem, opc))
       return false;
   } else if (in->src1.kind == NYR_MACH_OPERAND_VREG) {
     int breg = mach_vreg_vpreg(e, in->src1.as.reg);
@@ -15775,8 +15887,15 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             if (can_fold_rhs && e->cur_inst + 1 < mach->inst_len &&
                 mach_vector_ymm_rhs_load(e, e->cur_inst, e->cur_inst + 1,
                                          &mach->insts[e->cur_inst + 1].src1,
-                                         vt))
+                                         vt)) {
+              if (e->pending_sib_valid &&
+                  mach_op_is_vreg(&in->src0, e->pending_sib_vreg))
+                e->pending_sib_valid = false;
+              if (e->pending_frame_valid &&
+                  mach_op_is_vreg(&in->src0, e->pending_frame_vreg))
+                e->pending_frame_valid = false;
               break;
+            }
             if (!mach_vector_ymm_load(e, in, dst))
               return false;
             break;
@@ -16169,15 +16288,23 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               mach_sib_lea_all_uses_mem(e, in->dst.as.reg, e->cur_inst)))) {
           if (!mach_sib_elided_lea_preg_disabled() && !e->force_stack_reads &&
               adj_sib && !next_is_non_sib_v128_store) {
-            bool next_is_v256 =
+            bool next_is_vec =
                 next &&
                 ((next->opcode == NYR_MACH_LOAD &&
                   mach_is_v128(mach, &next->dst)) ||
                  (next->opcode == NYR_MACH_STORE &&
-                  mach_is_v128(mach, &next->src0))) &&
-                e->vec_fast_path;
+                  mach_is_v128(mach, &next->src0)));
+            bool next_is_blocked_vec =
+                mach_v256_frame_rhs_fold_disabled()
+                    ? (next_is_vec && e->vec_fast_path)
+                    : (next_is_vec &&
+                       !mach_is_v256_type(mach,
+                                          next->opcode == NYR_MACH_LOAD
+                                              ? &next->dst
+                                              : &next->src0) &&
+                       e->vec_fast_path);
             bool use_frame_fold =
-                !next_is_v256 && e->addr_fold && e->addr_fold_known &&
+                !next_is_blocked_vec && e->addr_fold && e->addr_fold_known &&
                 lea_base->as.reg < e->mach->vreg_len &&
                 e->addr_fold_known[lea_base->as.reg] &&
                 e->addr_fold[lea_base->as.reg].kind == NYR_MACH_OPERAND_FRAME;
@@ -16185,6 +16312,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             int ip = mach_vreg_preg(e, lea_index->as.reg);
             if (use_frame_fold) {
               if (ip >= 0 && ip != 4) {
+                if (!mach_seed_colored_preg(e, lea_index->as.reg))
+                  return false;
                 e->pending_frame_vreg = in->dst.as.reg;
                 e->pending_frame_index = (unsigned)ip;
                 e->pending_frame_scale = lea_scale;
