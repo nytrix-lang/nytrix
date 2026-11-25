@@ -424,7 +424,6 @@ void main(){
 
     vec3 unlitRgb = vertexCoverageMask ? baseTint.rgb : texBaseLinear * baseTint.rgb ;
     vec3 baseRgb = (vertexColorPrimary || vertexCoverageMask || baseTextureLinear) ? unlitRgb : linearToSrgb(unlitRgb) ;
-    if(vertexTextureIndex){ baseRgb = vec3(alphaMode == 2u ? 1.0 : 0.0, vertexColorMultiply ? 1.0 : 0.0, baseIndex < 1024u ? 1.0 : 0.0) ; }
     outColor = vec4(baseRgb, baseAlpha) ;
     return ;
   }
