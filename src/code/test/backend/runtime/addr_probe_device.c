@@ -6,9 +6,9 @@
  * EFAULT. The probe took that EFAULT as "unreadable", so raw stores into
  * mapped vertex buffers (store32 and friends) were silently dropped. Every
  * Linux process has such a mapping: the first page of [vvar] is readable and
- * refused by process_vm_readv; its second page is not readable at all. The
- * probe must accept the first, and still reject the second, PROT_NONE pages
- * and unmapped pages.
+ * refused by process_vm_readv. The probe must accept it, and still reject
+ * PROT_NONE pages and unmapped pages. (The pages after it vary by kernel, so
+ * only the first is asserted.)
  */
 #include "code/backend/runtime/shared.h"
 #include <stdio.h>
@@ -45,7 +45,6 @@ int main(void) {
     fclose(maps);
   if (vvar && vvar_end - vvar >= 2 * 4096u) {
     failed |= expect("[vvar] data page (VM_IO, readable)", vvar, 1);
-    failed |= expect("[vvar] second page (not readable)", vvar + 4096u, 0);
   } else {
     fprintf(stderr, "addr-probe-device: no [vvar] mapping; device case skipped\n");
   }
