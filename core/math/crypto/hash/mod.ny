@@ -493,14 +493,22 @@ fn sha512(any msg, int start=0, int count=0) str {
          wh[i] = (wh[i - 16] + s0h + wh[i - 7] + s1h + (low >> 32)) & 0xffffffff
          i += 1
       }
-      mut int ah = hh[0] mut int al = hl[0]
-      mut int bh = hh[1] mut int bl = hl[1]
-      mut int ch = hh[2] mut int cl = hl[2]
-      mut int dh = hh[3] mut int dl = hl[3]
-      mut int eh = hh[4] mut int el = hl[4]
-      mut int fh = hh[5] mut int fl = hl[5]
-      mut int gh = hh[6] mut int gl = hl[6]
-      mut int zh = hh[7] mut int zl = hl[7]
+      mut int ah = hh[0]
+      mut int al = hl[0]
+      mut int bh = hh[1]
+      mut int bl = hl[1]
+      mut int ch = hh[2]
+      mut int cl = hl[2]
+      mut int dh = hh[3]
+      mut int dl = hl[3]
+      mut int eh = hh[4]
+      mut int el = hl[4]
+      mut int fh = hh[5]
+      mut int fl = hl[5]
+      mut int gh = hh[6]
+      mut int gl = hl[6]
+      mut int zh = hh[7]
+      mut int zl = hl[7]
       i = 0
       while i < 80 {
          def int s1h = _sha512_rothi(eh, el, 14) ^ _sha512_rothi(eh, el, 18) ^ _sha512_rothi(eh, el, 41)
