@@ -27,6 +27,8 @@ use core.os.path as ospath
 use core.os.jsonrpc as rpc
 use core.os.ui.render.viewer.editor.tools as tools
 
+fn _as_list(any v) list { is_list(v) ? v : [] }
+
 fn _ext_key(str path) str {
    def ext = str.upper(str.str_replace(ospath.extname(path), ".", ""))
    ext.len > 0 ? ext : "TEXT"
@@ -754,7 +756,7 @@ fn pump(dict st) list {
 
 fn diagnostics_for(dict st, str path) list {
    "Server diagnostics last published for `path`."
-   to_list(st.get("diag_by_path", dict(0)).get(norm_path(path), []))
+   _as_list(st.get("diag_by_path", dict(0)).get(norm_path(path), []))
 }
 
 fn diagnostics_count(dict st, str path, int severity=0) int {
