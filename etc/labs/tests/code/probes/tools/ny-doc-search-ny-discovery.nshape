@@ -26,12 +26,14 @@ assert(comptime_search.get("code", 127) == 0,
 assert(str.find(comptime_search.get("stdout", ""), "etc/docs/learn/comptime.md") >= 0,
        "Ny-backed documentation search discovers comptime documentation")
 
+;; Keep headroom above append-only measurement/changelog sections in stats.md
+;; while still checking standalone vs embedded ranking across 64 rows.
 def ranked = run_capture(
    [cmake, "-E", "env", "NYTRIX_NY_FULL_BIN=" + full,
-    doc, "search", "--docs", "-n", "8", "parser"], [], nil, false)
+    doc, "search", "--docs", "-n", "64", "parser"], [], nil, false)
 assert(ranked.get("code", 127) == 0, "Ny-backed ranking command succeeds")
 def embedded = run_capture(
-   [full, "doc", "search", "--docs", "-n", "8", "parser"], [], nil, false)
+   [full, "doc", "search", "--docs", "-n", "64", "parser"], [], nil, false)
 assert(embedded.get("code", 127) == 0,
        "embedded documentation ranking command succeeds")
 def rank_output = ranked.get("stdout", "")
