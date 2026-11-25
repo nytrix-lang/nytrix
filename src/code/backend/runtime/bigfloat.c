@@ -862,8 +862,20 @@ static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
   return p;
 }
 
-static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
-                               uint32_t precision) {
+/*
+ * Result storage: `dst` when it is a dead BigFloat temporary with room (the
+ * rt_bigfloat_*_into entries), else a fresh allocation.
+ */
+static inline int64_t bf_out_alloc(size_t bytes, int64_t dst,
+                                   size_t dst_bytes) {
+  if (dst && bytes <= dst_bytes)
+    return dst;
+  return rt_malloc_uninit((int64_t)bytes);
+}
+
+static inline __attribute__((always_inline)) int64_t
+bf_from_u64_raw_dst(uint64_t mag, int sign, int64_t exp2, uint32_t precision,
+                    int64_t dst, size_t dst_bytes) {
   if (!mag || sign == 0)
     return bf_alloc_zero(precision);
 
@@ -876,7 +888,7 @@ static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
     size_t words = ((size_t)precision + 63u) / 64u;
     size_t shift = (size_t)precision - bits;
     size_t bytes = sizeof(ny_bigfloat_t) + words * sizeof(uint64_t);
-    int64_t p = rt_malloc_uninit((int64_t)bytes);
+    int64_t p = bf_out_alloc(bytes, dst, dst_bytes);
     if (!p)
       return 0;
 
@@ -910,6 +922,11 @@ static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
   int64_t out = bf_alloc_from_mag(sign, exp2, &m, precision);
   mag_free(&m);
   return out;
+}
+
+static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
+                               uint32_t precision) {
+  return bf_from_u64_raw_dst(mag, sign, exp2, precision, 0, 0);
 }
 
 static int64_t bf_clone_prec_shift(const ny_bigfloat_t *x, uint32_t precision,
@@ -1106,8 +1123,9 @@ fail:
   return 0;
 }
 
-static inline int64_t bf_addsub_obj(const ny_bigfloat_t *a,
-                                    const ny_bigfloat_t *b, bool subtract) {
+static inline __attribute__((always_inline)) int64_t
+bf_addsub_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
+                  int64_t dst, size_t dst_bytes) {
   uint32_t p = a->precision > b->precision ? a->precision : b->precision;
   if (!a->sign)
     return bf_clone_prec_shift(b, p, 0);
@@ -1118,12 +1136,20 @@ static inline int64_t bf_addsub_obj(const ny_bigfloat_t *a,
       !(subtract ? __builtin_sub_overflow(ai, bi, &ri)
                  : __builtin_add_overflow(ai, bi, &ri))) {
     uint64_t magnitude = ri < 0 ? (uint64_t)(-(ri + 1)) + 1u : (uint64_t)ri;
-    return bf_from_u64_raw(magnitude, ri < 0 ? -1 : ri > 0, 0, p);
+    return bf_from_u64_raw_dst(magnitude, ri < 0 ? -1 : ri > 0, 0, p, dst,
+                               dst_bytes);
   }
   return bf_addsub_slow(a, b, subtract, 0, p);
 }
 
-static int64_t bf_mul_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
+static inline int64_t bf_addsub_obj(const ny_bigfloat_t *a,
+                                    const ny_bigfloat_t *b, bool subtract) {
+  return bf_addsub_obj_dst(a, b, subtract, 0, 0);
+}
+
+static inline __attribute__((always_inline)) int64_t
+bf_mul_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
+               size_t dst_bytes) {
   uint32_t p = a->precision > b->precision ? a->precision : b->precision;
   if (!a->sign || !b->sign)
     return bf_from_u64_raw(0, 0, 0, p);
@@ -1147,12 +1173,12 @@ static int64_t bf_mul_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
     uint64_t hi = (uint64_t)(prod >> 64);
     uint64_t lo = (uint64_t)prod;
     if (!hi)
-      return bf_from_u64_raw(lo, sign, exponent, p);
+      return bf_from_u64_raw_dst(lo, sign, exponent, p, dst, dst_bytes);
     if (__builtin_expect(p == 256u, 1)) {
       unsigned lz = bf_clz64(hi);
       size_t shift = 128u + lz;
       size_t bytes = sizeof(ny_bigfloat_t) + 4u * sizeof(uint64_t);
-      int64_t out_p = rt_malloc_uninit((int64_t)bytes);
+      int64_t out_p = bf_out_alloc(bytes, dst, dst_bytes);
       if (!out_p)
         return 0;
       *(int64_t *)((char *)(uintptr_t)out_p - 8) = TAG_BIGFLOAT;
@@ -1181,7 +1207,13 @@ static int64_t bf_mul_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
   return result;
 }
 
-static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
+static int64_t bf_mul_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
+  return bf_mul_obj_dst(a, b, 0, 0);
+}
+
+static inline __attribute__((always_inline)) int64_t
+bf_div_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
+               size_t dst_bytes) {
   uint32_t p = a->precision > b->precision ? a->precision : b->precision;
   if (!b->sign)
     return bf_from_u64_raw(0, 0, 0, p);
@@ -1198,8 +1230,7 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
     uint64_t a_top = a->limb[az];
     uint64_t b_top = b->limb[bz];
     if ((a_top & (UINT64_C(1) << 63)) && (b_top & (UINT64_C(1) << 63))) {
-      uint64_t inv_rem = 0;
-      uint64_t inv = bf_div_u128_u64(~b_top, UINT64_MAX, b_top, &inv_rem);
+      uint64_t inv = bf_reciprocal_cached(b_top);
       uint64_t rem = 0, q3 = 0, q2 = 0, q1 = 0, q0 = 0;
       int64_t out_exp = a->exp2 - b->exp2 + removed_exp;
       if (a_top >= b_top) {
@@ -1222,7 +1253,7 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
         }
       }
       size_t bytes = sizeof(ny_bigfloat_t) + 4u * sizeof(uint64_t);
-      int64_t out_p = rt_malloc_uninit((int64_t)bytes);
+      int64_t out_p = bf_out_alloc(bytes, dst, dst_bytes);
       if (!out_p)
         return 0;
       *(int64_t *)((char *)(uintptr_t)out_p - 8) = TAG_BIGFLOAT;
@@ -1270,6 +1301,10 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
   mag_free(&num);
   mag_free(&quo);
   return result;
+}
+
+static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
+  return bf_div_obj_dst(a, b, 0, 0);
 }
 
 int64_t rt_bigfloat_from_value(int64_t v, int64_t precision_v) {
@@ -1339,6 +1374,69 @@ int64_t rt_bigfloat_div(int64_t av, int64_t bv) {
   if (!a || !b)
     return 0;
   return bf_div_obj(a, b);
+}
+
+/*
+ * `old` is the dead previous value of the variable the result overwrites
+ * (nyr_temp_recycle's fusion). Exact and one-limb results are written into
+ * its storage when it is a recyclable BigFloat temporary distinct from both
+ * operands; every other result recycles `old` like
+ * rt_free_temp_guard3(old, result, a, b), or for the loop form like
+ * rt_free_temp_loop(old, init, result, owned).
+ */
+static int64_t bf_op_into(int64_t old, int64_t av, int64_t bv, int op,
+                          bool loop, int64_t owned, int64_t init) {
+  ny_bigfloat_t *a = bf_ptr(av), *b = bf_ptr(bv);
+  size_t dst_bytes = 0;
+  if (a && b && old && old != av && old != bv &&
+      (!loop || (owned && old != init)))
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t dst = dst_bytes ? old : 0;
+  int64_t r = 0;
+  if (a && b) {
+    if (op == 0 || op == 1)
+      r = bf_addsub_obj_dst(a, b, op == 1, dst, dst_bytes);
+    else if (op == 2)
+      r = bf_mul_obj_dst(a, b, dst, dst_bytes);
+    else
+      r = bf_div_obj_dst(a, b, dst, dst_bytes);
+  }
+  if (r != old) {
+    if (loop)
+      (void)rt_free_temp_loop(old, init, r, owned);
+    else
+      (void)rt_free_temp_guard3(old, r, av, bv);
+  }
+  return r;
+}
+
+int64_t rt_bigfloat_add_into(int64_t old, int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 0, false, 0, 0);
+}
+int64_t rt_bigfloat_sub_into(int64_t old, int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 1, false, 0, 0);
+}
+int64_t rt_bigfloat_mul_into(int64_t old, int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 2, false, 0, 0);
+}
+int64_t rt_bigfloat_div_into(int64_t old, int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 3, false, 0, 0);
+}
+int64_t rt_bigfloat_add_into_loop(int64_t old, int64_t owned, int64_t init,
+                                  int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 0, true, owned, init);
+}
+int64_t rt_bigfloat_sub_into_loop(int64_t old, int64_t owned, int64_t init,
+                                  int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 1, true, owned, init);
+}
+int64_t rt_bigfloat_mul_into_loop(int64_t old, int64_t owned, int64_t init,
+                                  int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 2, true, owned, init);
+}
+int64_t rt_bigfloat_div_into_loop(int64_t old, int64_t owned, int64_t init,
+                                  int64_t a, int64_t b) {
+  return bf_op_into(old, a, b, 3, true, owned, init);
 }
 
 int64_t rt_bigfloat_neg(int64_t av) {

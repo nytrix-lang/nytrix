@@ -178,6 +178,49 @@ static const nyr_runtime_effect_entry_t nyr_runtime_effects[] = {
                           NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
     {"rt_bigint_sub", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                           NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    /* Fused by nyr_temp_recycle: may overwrite or free the dead `old`. */
+    {"rt_bigint_add_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                               NYIR_EFFECT_WRITE_MEMORY |
+                               NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigint_sub_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                               NYIR_EFFECT_WRITE_MEMORY |
+                               NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigint_div_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                               NYIR_EFFECT_WRITE_MEMORY |
+                               NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigint_add_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigint_sub_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigint_div_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_add_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                 NYIR_EFFECT_WRITE_MEMORY |
+                                 NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_sub_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                 NYIR_EFFECT_WRITE_MEMORY |
+                                 NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_mul_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                 NYIR_EFFECT_WRITE_MEMORY |
+                                 NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_div_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                 NYIR_EFFECT_WRITE_MEMORY |
+                                 NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_add_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_sub_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_mul_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+    {"rt_bigfloat_div_into_loop",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+         NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
     {"rt_bigint_mul", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                           NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
     {"rt_bigint_div", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |

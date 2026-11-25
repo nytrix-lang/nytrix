@@ -1,0 +1,137 @@
+shape bigint_into_reuse {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "bigint", "temp-recycle", "aliasing"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.big
+use core.math.nt (Z)
+
+;; Overwrites that nyr_temp_recycle fuses into rt_bigint_*_into: the result
+;; may be written into the previous value's limbs. Each case pins an aliasing
+;; or capacity edge of that reuse.
+def S = bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
+def a = bigint_mul(Z(3), S)
+def b = bigint_mul(Z(7), S)
+
+;; The old value is also an operand: never reused while it is read.
+mut g = a
+mut i = 0
+while i < 50 { g = bigint_add(g, b) i += 1 }
+assert(bigint_to_str(g) == "353000000000000000000000000000000000000000000000000000000000000", "add with old operand")
+
+;; Sign flip into the old storage.
+mut h = a
+i = 0
+while i < 7 { h = bigint_sub(a, b) i += 1 }
+assert(bigint_to_str(h) == "-4000000000000000000000000000000000000000000000000000000000000", "sub sign")
+
+;; Quotient into the old storage, multi-limb divisor.
+mut q = a
+i = 0
+while i < 5 { q = bigint_div(bigint_mul(a, b), S) i += 1 }
+assert(bigint_to_str(q) == "21000000000000000000000000000000000000000000000000000000000000", "div into")
+mut nq = a
+i = 0
+while i < 5 { nq = bigint_div(bigint_mul(bigint_sub(Z(0), a), b), S) i += 1 }
+assert(bigint_to_str(nq) == "-21000000000000000000000000000000000000000000000000000000000000", "negative div into")
+
+;; A carry that needs one more limb than the old value holds.
+def m = bigint_from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935")
+mut c = Z(1)
+i = 0
+while i < 3 { c = bigint_add(m, m) i += 1 }
+assert(bigint_to_str(c) == "231584178474632390847141970017375815706539969331281128078915168015826259279870", "carry growth")
+
+;; Every result escapes into a list: none may be recycled or overwritten.
+mut saved = []
+mut w = a
+i = 0
+while i < 4 { w = bigint_add(w, b) saved.append(w) i += 1 }
+assert(bigint_to_str(saved[0]) == "10000000000000000000000000000000000000000000000000000000000000", "saved 0")
+assert(bigint_to_str(saved[1]) == "17000000000000000000000000000000000000000000000000000000000000", "saved 1")
+assert(bigint_to_str(saved[2]) == "24000000000000000000000000000000000000000000000000000000000000", "saved 2")
+assert(bigint_to_str(saved[3]) == "31000000000000000000000000000000000000000000000000000000000000", "saved 3")
+
+;; Loop-carried accumulators (rt_free_temp_loop form).
+fn newton(bigint temp, bigint guess) bigint {
+  mut r = guess
+  mut j = 0
+  while j < 20 { r = bigint_div(bigint_add(r, bigint_div(temp, r)), Z(2)) j += 1 }
+  r
+}
+fn powscale(bigint base0, int e0) bigint {
+  mut r = S
+  mut base = base0
+  mut e = e0
+  while e > 0 {
+    if e % 2 == 1 { r = bigint_div(bigint_mul(r, base), S) }
+    base = bigint_div(bigint_mul(base, base), S)
+    e = e / 2
+  }
+  r
+}
+fn doubling(bigint x) bigint {
+  mut r = x
+  mut j = 0
+  while j < 10 { r = bigint_add(r, r) j += 1 }
+  r
+}
+fn cross(bigint x, bigint y) bigint {
+  mut r = x
+  mut j = 0
+  while j < 6 { r = bigint_sub(y, r) j += 1 }
+  r
+}
+def guess = bigint_from_str("1414213562373095048801688724209698078569671875376948073176679")
+assert(bigint_to_str(newton(bigint_mul(bigint_mul(Z(2), S), S), guess)) == "1414213562373095048801688724209698078569671875376948073176679", "newton")
+assert(bigint_to_str(powscale(a, 9)) == "19683000000000000000000000000000000000000000000000000000000000000", "powscale")
+assert(bigint_to_str(doubling(a)) == "3072000000000000000000000000000000000000000000000000000000000000", "doubling")
+assert(bigint_to_str(cross(a, b)) == "3000000000000000000000000000000000000000000000000000000000000", "cross")
+;; Inputs are untouched.
+assert(bigint_to_str(a) == "3000000000000000000000000000000000000000000000000000000000000", "a kept")
+assert(bigint_to_str(b) == "7000000000000000000000000000000000000000000000000000000000000", "b kept")
+assert(bigint_to_str(guess) == "1414213562373095048801688724209698078569671875376948073176679", "guess kept")
+
+;; BigFloat overwrites (rt_bigfloat_*_into): exact, one-limb and general
+;; results, the old value as an operand, and results that escape.
+def fa = bf_from_int(3)
+def fb = bf_from_int(7)
+mut fx = fa
+i = 0
+while i < 9 { fx = bf_add(fa, fb) i += 1 }
+assert(bf_eq(fx, bf_from_int(10)), "bf add into")
+i = 0
+while i < 9 { fx = bf_sub(fa, fb) i += 1 }
+assert(bf_eq(fx, bf_from_int(-4)), "bf sub sign")
+i = 0
+while i < 9 { fx = bf_mul(fa, fb) i += 1 }
+assert(bf_eq(fx, bf_from_int(21)), "bf mul into")
+i = 0
+while i < 9 { fx = bf_div(fb, fa) i += 1 }
+assert(bf_eq(bf_mul(fx, fa), fb) || bf_to_float(fx) == 7.0 / 3.0, "bf div into")
+mut fy = fa
+i = 0
+while i < 6 { fy = bf_add(fy, fy) i += 1 }
+assert(bf_eq(fy, bf_from_int(192)), "bf old operand")
+mut fsaved = []
+mut fz = fa
+i = 0
+while i < 3 { fz = bf_mul(fz, fb) fsaved.append(fz) i += 1 }
+assert(bf_eq(fsaved[0], bf_from_int(21)), "bf saved 0")
+assert(bf_eq(fsaved[1], bf_from_int(147)), "bf saved 1")
+assert(bf_eq(fsaved[2], bf_from_int(1029)), "bf saved 2")
+fn bf_series(any x, int n) any {
+  mut acc = x
+  mut j = 0
+  while j < n { acc = bf_add(bf_mul(acc, x), x) j += 1 }
+  acc
+}
+assert(bf_eq(bf_series(bf_from_int(2), 5), bf_from_int(126)), "bf loop-carried")
+assert(bf_eq(fa, bf_from_int(3)) && bf_eq(fb, bf_from_int(7)), "bf inputs kept")
+print("ok bigint into reuse")
+NY
+}

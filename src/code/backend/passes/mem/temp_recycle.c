@@ -848,6 +848,207 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
   return true;
 }
 
+static bool tr_into_disabled(void) {
+  static int disabled = -1;
+  if (__builtin_expect(disabled < 0, 0)) {
+    const char *e = getenv("NYTRIX_NO_TEMP_INTO");
+    disabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
+static bool tr_inst_uses(const nyr_inst_t *in, int v) {
+  if (in->a == v || in->b == v || in->c == v || in->d == v || in->e == v ||
+      in->f == v)
+    return true;
+  for (size_t k = 0; k < in->phi_incoming_len; ++k)
+    if (in->phi_incoming[k].value == v)
+      return true;
+  for (size_t k = 0; in->extra_args && k < in->extra_args_len; ++k)
+    if (in->extra_args[k] == v)
+      return true;
+  return false;
+}
+
+/*
+ * Fuse a BigInt add, sub or div with the recycle of the value it replaces:
+ *
+ *   n = call rt_bigint_add(a, b) ; ... ; call rt_free_temp_guardN(p, n, a, b)
+ *   ->  n = call rt_bigint_add_into(p, a, b)
+ *
+ * The free proves p dead from the free on. Moving that death up to the
+ * producer is sound when nothing in between can observe p: same block, no
+ * use of p, no memory read and no call other than the recycle of another
+ * temporary. The _into entries keep the guard semantics (p equal to an
+ * operand is neither reused nor freed) and write the result into p's limbs
+ * when they fit, saving the allocation and the free.
+ * NYTRIX_NO_TEMP_INTO=1 disables it.
+ */
+/* p plus every value that copies or forwards it, transitively. */
+static size_t tr_alias_set(const nyr_func_t *f, int p, int *set, size_t cap) {
+  size_t n = 0;
+  set[n++] = p;
+  bool grew = true;
+  while (grew) {
+    grew = false;
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->dst < 0 || !tr_is_alias_forwarder(in))
+        continue;
+      bool src_in = false, dst_in = false;
+      for (size_t k = 0; k < n; ++k) {
+        src_in |= set[k] == in->a;
+        dst_in |= set[k] == in->dst;
+      }
+      if (src_in && !dst_in) {
+        if (n == cap)
+          return 0;
+        set[n++] = in->dst;
+        grew = true;
+      }
+    }
+  }
+  return n;
+}
+
+static size_t tr_fuse_into(nyr_func_t *f) {
+  if (tr_into_disabled())
+    return 0;
+  int *defs = nyr_build_defs(f);
+  if (!defs)
+    return 0;
+  size_t fused = 0;
+  for (size_t j = 0; j < f->len; ++j) {
+    nyr_inst_t *fr = &f->data[j];
+    if (fr->op != NYIR_CALL || !fr->symbol ||
+        (fr->flags & NYIR_INST_F_INDIRECT))
+      continue;
+    bool loop = strcmp(fr->symbol, "rt_free_temp_loop") == 0 && fr->imm == 4;
+    if (!loop && (strncmp(fr->symbol, "rt_free_temp_guard", 18) != 0 ||
+                  fr->imm < 2 || fr->imm > 4))
+      continue;
+    int p = fr->a, n = loop ? fr->c : fr->b;
+    if (p < 0 || n < 0 || n >= f->next_value || defs[n] < 0)
+      continue;
+    int root = loop ? nyr_strip_copy_chain(f, defs, n, 0) : n;
+    if (root < 0 || root >= f->next_value || defs[root] < 0 ||
+        (size_t)defs[root] >= j)
+      continue;
+    size_t k = (size_t)defs[root];
+    nyr_inst_t *pr = &f->data[k];
+    if (pr->op != NYIR_CALL || !pr->symbol || pr->imm != 2 || pr->extra_args ||
+        pr->arg_sizes || (pr->flags & NYIR_INST_F_INDIRECT) || pr->a < 0 ||
+        pr->b < 0 || pr->a == p || pr->b == p)
+      continue;
+    const char *into = NULL;
+    if (strcmp(pr->symbol, "rt_bigint_add") == 0)
+      into = loop ? "rt_bigint_add_into_loop" : "rt_bigint_add_into";
+    else if (strcmp(pr->symbol, "rt_bigint_sub") == 0)
+      into = loop ? "rt_bigint_sub_into_loop" : "rt_bigint_sub_into";
+    else if (strcmp(pr->symbol, "rt_bigint_div") == 0)
+      into = loop ? "rt_bigint_div_into_loop" : "rt_bigint_div_into";
+    else if (strcmp(pr->symbol, "rt_bigfloat_add") == 0)
+      into = loop ? "rt_bigfloat_add_into_loop" : "rt_bigfloat_add_into";
+    else if (strcmp(pr->symbol, "rt_bigfloat_sub") == 0)
+      into = loop ? "rt_bigfloat_sub_into_loop" : "rt_bigfloat_sub_into";
+    else if (strcmp(pr->symbol, "rt_bigfloat_mul") == 0)
+      into = loop ? "rt_bigfloat_mul_into_loop" : "rt_bigfloat_mul_into";
+    else if (strcmp(pr->symbol, "rt_bigfloat_div") == 0)
+      into = loop ? "rt_bigfloat_div_into_loop" : "rt_bigfloat_div_into";
+    if (!into)
+      continue;
+    if (!loop) {
+      /* The guards must be exactly {n, a, b}. */
+      int g[3] = {fr->b, fr->imm >= 3 ? fr->c : fr->b,
+                  fr->imm >= 4 ? fr->d : fr->b};
+      int want[3] = {n, pr->a, pr->b};
+      bool same = true;
+      for (int x = 0; x < 3 && same; ++x) {
+        bool hit = false;
+        for (int y = 0; y < 3; ++y)
+          hit |= g[y] == want[x];
+        same = hit;
+      }
+      for (int y = 0; y < 3 && same; ++y)
+        same = g[y] == n || g[y] == pr->a || g[y] == pr->b;
+      if (!same)
+        continue;
+    } else if (fr->b < 0 || fr->d < 0) {
+      continue;
+    }
+    int alias[16];
+    size_t alias_n = tr_alias_set(f, p, alias, 16);
+    if (!alias_n)
+      continue;
+    bool clean = true;
+    for (size_t i = k + 1; i < j && clean; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      /*
+       * Recycling another temporary cannot observe p: its guard arguments
+       * are compared by identity only, so p may appear among them.
+       */
+      bool other_free = in->op == NYIR_CALL && in->symbol &&
+                        !(in->flags & NYIR_INST_F_INDIRECT) &&
+                        strncmp(in->symbol, "rt_free_temp", 12) == 0;
+      for (size_t x = 0; x < alias_n && clean; ++x) {
+        if (in->dst == alias[x] || (other_free && in->a == alias[x]))
+          clean = false;
+        else if (!other_free && tr_inst_uses(in, alias[x]))
+          clean = false;
+      }
+      if (!other_free && (in->op == NYIR_LABEL || in->op == NYIR_PHI ||
+                          in->op == NYIR_CALL || tr_is_terminator(in->op) ||
+                          (nyr_inst_effects(in) & NYIR_EFFECT_READ_MEMORY)))
+        clean = false;
+    }
+    if (!clean)
+      continue;
+    bool dst_used = false;
+    if (fr->dst >= 0)
+      for (size_t i = 0; i < f->len && !dst_used; ++i)
+        dst_used = i != j && tr_inst_uses(&f->data[i], fr->dst);
+    if (dst_used)
+      continue;
+    const char *sym = nyr_func_own_symbol_copy(f, into);
+    if (!sym)
+      continue;
+    int a = pr->a, b = pr->b;
+    nyr_scalar_class_t pc = nyr_call_arg_class_get(fr, 0);
+    nyr_scalar_class_t ac = nyr_call_arg_class_get(pr, 0);
+    nyr_scalar_class_t bc = nyr_call_arg_class_get(pr, 1);
+    if (loop) {
+      nyr_scalar_class_t oc = nyr_call_arg_class_get(fr, 3);
+      nyr_scalar_class_t ic = nyr_call_arg_class_get(fr, 1);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 0, pc);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 1, oc);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 2, ic);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 3, ac);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 4, bc);
+      pr->imm = 5;
+      pr->a = p;
+      pr->b = fr->d;
+      pr->c = fr->b;
+      pr->d = a;
+      pr->e = b;
+    } else {
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 0, pc);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 1, ac);
+      nyr_call_arg_class_set(pr->arg_scalar_classes, 2, bc);
+      pr->imm = 3;
+      pr->a = p;
+      pr->b = a;
+      pr->c = b;
+    }
+    pr->symbol = sym;
+    memset(pr->arg_contracts, 0, sizeof(pr->arg_contracts));
+    pr->effects = nyr_inst_effects(pr);
+    *fr = tr_make_base(NYIR_NOP, -1);
+    fused++;
+  }
+  free(defs);
+  return fused;
+}
+
 bool nyr_temp_recycle(nyr_func_t *f) {
   if (!f || f->len == 0 || tr_disabled())
     return false;
@@ -892,6 +1093,11 @@ bool nyr_temp_recycle(nyr_func_t *f) {
     goto fail;
   }
   tr_edits_free(&edits, false);
+  {
+    size_t fused = tr_fuse_into(&work);
+    if (fused && tr_trace_enabled())
+      fprintf(stderr, "[temp-recycle] into=%zu\n", fused);
+  }
 
   char verr[256] = {0};
   if (!nyr_ir_verify(&work, verr, sizeof(verr))) {

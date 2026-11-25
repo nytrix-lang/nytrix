@@ -1992,6 +1992,58 @@ int64_t rt_free_temp(int64_t ptr) {
   return 1;
 }
 
+/*
+ * Body bytes of `ptr` when rt_free_temp would recycle it as a `tag` object
+ * (chunk-backed, live, magic, tag, not immortal), else 0. Nothing changes:
+ * a caller that has proven `ptr` dead may overwrite its payload in place
+ * instead of freeing it and allocating the next result.
+ */
+static size_t rt_temp_reuse_header(uintptr_t uptr, int64_t tag) {
+  const char *base = (const char *)uptr - 32;
+  if (*(const uint64_t *)base != NY_MAGIC1 ||
+      *(const int64_t *)(base + 24) != tag ||
+      *(const uint64_t *)(base + 16) != 0)
+    return 0;
+  size_t body = *(const uint64_t *)(base + 8);
+  if (body & 1)
+    body >>= 1;
+  return body;
+}
+
+static __attribute__((noinline)) size_t rt_temp_reuse_bytes_slow(int64_t ptr,
+                                                                 int64_t tag) {
+  if (rt_rc_enabled() || g_sh_cap != 0)
+    return 0;
+  uintptr_t uptr = (uintptr_t)ptr;
+  const rt_block_chunk_t *chunk = rt_block_chunk_find(uptr);
+  if (!chunk || !rt_block_chunk_live_get(chunk, uptr))
+    return 0;
+  return rt_temp_reuse_header(uptr, tag);
+}
+
+size_t rt_temp_reuse_bytes(int64_t ptr, int64_t tag) {
+  if (!ptr || (ptr & 15))
+    return 0;
+  uintptr_t uptr = (uintptr_t)ptr;
+  uintptr_t c_end =
+      atomic_load_explicit(&g_rt_chunk0_end, memory_order_acquire);
+  uintptr_t c_start =
+      atomic_load_explicit(&g_rt_chunk0_start, memory_order_relaxed);
+  /* First chunk with the policy flags already settled: no lookup. */
+  if (__builtin_expect(uptr - c_start < c_end - c_start && g_rc_enabled == 0 &&
+                           g_sh_cap == 0,
+                       1)) {
+    const _Atomic(uint8_t) *live =
+        (const _Atomic(uint8_t) *)atomic_load_explicit(&g_rt_chunk0_live,
+                                                       memory_order_relaxed);
+    if (!atomic_load_explicit(&live[(uptr - c_start) >> 4],
+                              memory_order_acquire))
+      return 0;
+    return rt_temp_reuse_header(uptr, tag);
+  }
+  return rt_temp_reuse_bytes_slow(ptr, tag);
+}
+
 int64_t rt_free_temp_guard1(int64_t ptr, int64_t g0) {
   if (!ptr || ptr == g0)
     return 0;

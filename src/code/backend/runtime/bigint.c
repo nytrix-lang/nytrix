@@ -3306,8 +3306,9 @@ static bool _bi_row_payload_len(int64_t row, size_t *out_len) {
  * Add or subtract validated limb views directly into the final heap object.
  * This preserves the BigInt ABI without temporary operand or result copies.
  */
-static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
-                                    int64_t *out) {
+static inline __attribute__((always_inline)) bool
+_bi_try_add_heap_dst(int64_t a, int64_t b, int sub_b, int64_t dst,
+                     size_t dst_words, int64_t *out) {
   int as = 0, bs = 0;
   size_t aw = 0, bw = 0;
   uint64_t asmall[1], bsmall[1];
@@ -3324,9 +3325,17 @@ static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
     if (top >= UINT64_MAX)
       ++capacity;
   }
-  int64_t result = _bi_alloc(capacity);
-  if (!result)
-    return false;
+  int64_t result = 0;
+  if (dst) {
+    /* In place: `dst` is a dead temporary distinct from both operands. */
+    if (capacity > dst_words)
+      return false;
+    result = dst;
+  } else {
+    result = _bi_alloc(capacity);
+    if (!result)
+      return false;
+  }
   uint64_t *rl = (uint64_t *)(uintptr_t)(result + 16);
   int rs = 0;
   size_t rw = 0;
@@ -3385,6 +3394,11 @@ static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
   *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)rw);
   *out = result;
   return true;
+}
+
+static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
+                                    int64_t *out) {
+  return _bi_try_add_heap_dst(a, b, sub_b, 0, 0, out);
 }
 
 static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
@@ -3568,9 +3582,24 @@ static inline bool _bi_small_cache_enabled(void) {
   return g_bi_small_cache_disabled == 0;
 }
 
-static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
-                                           const uint64_t *bl, size_t bw,
-                                           int want_remainder, int64_t *out) {
+/*
+ * Result storage for a quotient: `dst` when it is a dead temporary with room
+ * (the _into entries), else a fresh object. Like _bi_alloc, it records the
+ * word count; the caller fills sign and limbs.
+ */
+static inline int64_t _bi_alloc_dst(size_t words, int64_t dst,
+                                    size_t dst_words) {
+  if (dst && words <= dst_words) {
+    *(int64_t *)(uintptr_t)(dst + 8) = rt_tag_v((int64_t)words);
+    return dst;
+  }
+  return _bi_alloc(words);
+}
+
+static inline __attribute__((always_inline)) bool
+_bi_try_div_small_limbs_dst(int64_t a, int bs, const uint64_t *bl, size_t bw,
+                            int want_remainder, int64_t *out, int64_t dst,
+                            size_t dst_words) {
   if (bw != 1 || bl[0] == 0)
     return false;
   int as = 0;
@@ -3600,7 +3629,7 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
       return *out != 0;
     }
     if (shift == 0) {
-      int64_t result = _bi_alloc(aw);
+      int64_t result = _bi_alloc_dst(aw, dst, dst_words);
       if (!result)
         return false;
       if (aw > 0)
@@ -3613,7 +3642,7 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
     size_t orig_aw = aw;
     if ((al[aw - 1] >> shift) == 0u)
       --aw;
-    int64_t result = _bi_alloc(aw);
+    int64_t result = _bi_alloc_dst(aw, dst, dst_words);
     if (!result)
       return false;
     if (aw > 0) {
@@ -3652,7 +3681,7 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
    */
   if (al[aw - 1] < d)
     rem = al[--aw];
-  int64_t result = _bi_alloc(aw);
+  int64_t result = _bi_alloc_dst(aw, dst, dst_words);
   if (!result)
     return false;
   uint64_t *q = (uint64_t *)(uintptr_t)(result + 16);
@@ -3665,6 +3694,12 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
   *(int64_t *)(uintptr_t)result = rt_tag_v(sign);
   *out = result;
   return true;
+}
+
+static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
+                                           const uint64_t *bl, size_t bw,
+                                           int want_remainder, int64_t *out) {
+  return _bi_try_div_small_limbs_dst(a, bs, bl, bw, want_remainder, out, 0, 0);
 }
 
 static inline bool _bi_try_div_small_heap(int64_t a, int64_t b,
@@ -3948,6 +3983,68 @@ int64_t rt_bigint_sub(int64_t a, int64_t b) {
   return _bi_add_slow(a, b, 1);
 }
 
+/*
+ * `old` is the previous value of a variable the result overwrites, proven
+ * dead by nyr_temp_recycle (see its add/sub fusion). Reuse its limbs when it
+ * is a recyclable BigInt temporary that is neither operand and is large
+ * enough; otherwise compute normally and recycle `old` like
+ * rt_free_temp_guard3(old, result, a, b) would. Small-int operand pairs keep
+ * the ordinary path, whose result representation differs.
+ */
+static int64_t _bi_addsub_into(int64_t old, int64_t a, int64_t b, int sub_b) {
+  if (old && old != a && old != b && (!is_int(a) || !is_int(b))) {
+    size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+    int64_t fast = 0;
+    if (body >= 16u &&
+        _bi_try_add_heap_dst(a, b, sub_b, old, (body - 16u) / sizeof(uint64_t),
+                             &fast))
+      return fast;
+  }
+  int64_t r = sub_b ? rt_bigint_sub(a, b) : rt_bigint_add(a, b);
+  (void)rt_free_temp_guard3(old, r, a, b);
+  return r;
+}
+
+int64_t rt_bigint_add_into(int64_t old, int64_t a, int64_t b) {
+  return _bi_addsub_into(old, a, b, 0);
+}
+
+int64_t rt_bigint_sub_into(int64_t old, int64_t a, int64_t b) {
+  return _bi_addsub_into(old, a, b, 1);
+}
+
+/*
+ * Loop-carried forms: `old` is the accumulator's previous value, which
+ * rt_free_temp_loop(old, init, result, owned) would recycle at the latch.
+ * It is reused only when that call would free it and it is not an operand.
+ */
+static int64_t _bi_addsub_into_loop(int64_t old, int64_t owned, int64_t init,
+                                    int64_t a, int64_t b, int sub_b) {
+  if (owned && old != init) {
+    if (old && old != a && old != b && (!is_int(a) || !is_int(b))) {
+      size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+      int64_t fast = 0;
+      if (body >= 16u &&
+          _bi_try_add_heap_dst(a, b, sub_b, old,
+                               (body - 16u) / sizeof(uint64_t), &fast))
+        return fast;
+    }
+  }
+  int64_t r = sub_b ? rt_bigint_sub(a, b) : rt_bigint_add(a, b);
+  (void)rt_free_temp_loop(old, init, r, owned);
+  return r;
+}
+
+int64_t rt_bigint_add_into_loop(int64_t old, int64_t owned, int64_t init,
+                                int64_t a, int64_t b) {
+  return _bi_addsub_into_loop(old, owned, init, a, b, 0);
+}
+
+int64_t rt_bigint_sub_into_loop(int64_t old, int64_t owned, int64_t init,
+                                int64_t a, int64_t b) {
+  return _bi_addsub_into_loop(old, owned, init, a, b, 1);
+}
+
 static __attribute__((noinline)) int64_t
 _bi_mul_large_limbs(int as, const uint64_t *al, size_t aw, int bs,
                     const uint64_t *bl, size_t bw) {
@@ -4129,7 +4226,8 @@ static __attribute__((noinline)) int64_t _bi_div_large(const _bn_t *na,
  * an <= 16). Avoids the 3 KiB stack scratch and intermediate _bn_t copy.
  */
 static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
-                                  const uint64_t *bl, size_t n) {
+                                  const uint64_t *bl, size_t n, int64_t dst,
+                                  size_t dst_words) {
   size_t m = an - n;
   uint64_t vn[8], un[17];
   unsigned shift = (unsigned)__builtin_clzll(bl[n - 1]);
@@ -4153,7 +4251,8 @@ static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
     un[an] = carry;
   }
 
-  int64_t result = _bi_alloc(m + 1);
+  /* `dst`: a dead temporary distinct from both operands (div_into). */
+  int64_t result = dst && m + 1 <= dst_words ? dst : _bi_alloc(m + 1);
   if (!result)
     return 0;
   uint64_t *qd = (uint64_t *)(uintptr_t)(result + 16);
@@ -4226,7 +4325,8 @@ static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
   return result;
 }
 
-int64_t rt_bigint_div(int64_t a, int64_t b) {
+static inline __attribute__((always_inline)) int64_t
+_bi_div_dst(int64_t a, int64_t b, int64_t dst, size_t dst_words) {
   int na_sign = 0, nb_sign = 0;
   size_t na_count = 0, nb_count = 0;
   uint64_t small_a[1], small_b[1];
@@ -4237,12 +4337,14 @@ int64_t rt_bigint_div(int64_t a, int64_t b) {
     (void)_bi_read_heap_limbs(b, &nb_sign, &limbs_b, &nb_count, small_b);
   }
   int64_t fast = 0;
-  if (_bi_try_div_small_limbs(a, nb_sign, limbs_b, nb_count, 0, &fast))
+  if (_bi_try_div_small_limbs_dst(a, nb_sign, limbs_b, nb_count, 0, &fast, dst,
+                                  dst_words))
     return fast;
   if (__builtin_expect(
           !_bi_read_heap_limbs(a, &na_sign, &limbs_a, &na_count, small_a), 0)) {
     a = _bi_coerce_fallback(a);
-    if (_bi_try_div_small_limbs(a, nb_sign, limbs_b, nb_count, 0, &fast))
+    if (_bi_try_div_small_limbs_dst(a, nb_sign, limbs_b, nb_count, 0, &fast,
+                                    dst, dst_words))
       return fast;
     (void)_bi_read_heap_limbs(a, &na_sign, &limbs_a, &na_count, small_a);
   }
@@ -4272,10 +4374,45 @@ int64_t rt_bigint_div(int64_t a, int64_t b) {
     return _bi_from_i64(na_sign == nb_sign ? 1 : -1);
   if (__builtin_expect(nb_count >= 2 && nb_count <= 8 && na_count <= 16, 1))
     return _bi_div_short_heap(na_sign, limbs_a, na_count, nb_sign, limbs_b,
-                              nb_count);
+                              nb_count, dst, dst_words);
   _bn_t na = {.d = (uint64_t *)limbs_a, .count = na_count, .sign = na_sign};
   _bn_t nb = {.d = (uint64_t *)limbs_b, .count = nb_count, .sign = nb_sign};
   return _bi_div_large(&na, &nb);
+}
+
+int64_t rt_bigint_div(int64_t a, int64_t b) { return _bi_div_dst(a, b, 0, 0); }
+
+/*
+ * Quotient into `old`, the dead previous value of the variable it
+ * overwrites (nyr_temp_recycle's fusion), when the short-division path
+ * produces it and it fits; any other result recycles `old` exactly like
+ * rt_free_temp_guard3(old, result, a, b).
+ */
+int64_t rt_bigint_div_into(int64_t old, int64_t a, int64_t b) {
+  size_t words = 0;
+  if (old && old != a && old != b) {
+    size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+    if (body >= 16u)
+      words = (body - 16u) / sizeof(uint64_t);
+  }
+  int64_t r = _bi_div_dst(a, b, words ? old : 0, words);
+  if (r != old)
+    (void)rt_free_temp_guard3(old, r, a, b);
+  return r;
+}
+
+int64_t rt_bigint_div_into_loop(int64_t old, int64_t owned, int64_t init,
+                                int64_t a, int64_t b) {
+  size_t words = 0;
+  if (owned && old && old != init && old != a && old != b) {
+    size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+    if (body >= 16u)
+      words = (body - 16u) / sizeof(uint64_t);
+  }
+  int64_t r = _bi_div_dst(a, b, words ? old : 0, words);
+  if (r != old)
+    (void)rt_free_temp_loop(old, init, r, owned);
+  return r;
 }
 
 int64_t rt_bigint_mul_div_small(int64_t a, int64_t multiplier,

@@ -363,6 +363,48 @@ RT_DEF("__bigint_add", rt_bigint_add, 2, "fn __bigint_add(a, b)",
        "Adds two BigInt values using the runtime bigint implementation.")
 RT_DEF("__bigint_sub", rt_bigint_sub, 2, "fn __bigint_sub(a, b)",
        "Subtracts two BigInt values using the runtime bigint implementation.")
+RT_DEF("__bigint_add_into", rt_bigint_add_into, 3,
+       "fn __bigint_add_into(old, a, b)",
+       "Adds BigInts, reusing the dead temporary old for the result.")
+RT_DEF("__bigint_sub_into", rt_bigint_sub_into, 3,
+       "fn __bigint_sub_into(old, a, b)",
+       "Subtracts BigInts, reusing the dead temporary old for the result.")
+RT_DEF("__bigint_div_into", rt_bigint_div_into, 3,
+       "fn __bigint_div_into(old, a, b)",
+       "Divides BigInts, reusing the dead temporary old for the quotient.")
+RT_DEF("__bigint_add_into_loop", rt_bigint_add_into_loop, 5,
+       "fn __bigint_add_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigInt add reusing the dead previous accumulator.")
+RT_DEF("__bigint_sub_into_loop", rt_bigint_sub_into_loop, 5,
+       "fn __bigint_sub_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigInt sub reusing the dead previous accumulator.")
+RT_DEF("__bigint_div_into_loop", rt_bigint_div_into_loop, 5,
+       "fn __bigint_div_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigInt div reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_add_into", rt_bigfloat_add_into, 3,
+       "fn __bigfloat_add_into(old, a, b)",
+       "BigFloat add reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_sub_into", rt_bigfloat_sub_into, 3,
+       "fn __bigfloat_sub_into(old, a, b)",
+       "BigFloat sub reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_mul_into", rt_bigfloat_mul_into, 3,
+       "fn __bigfloat_mul_into(old, a, b)",
+       "BigFloat mul reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_div_into", rt_bigfloat_div_into, 3,
+       "fn __bigfloat_div_into(old, a, b)",
+       "BigFloat div reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_add_into_loop", rt_bigfloat_add_into_loop, 5,
+       "fn __bigfloat_add_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigFloat add reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_sub_into_loop", rt_bigfloat_sub_into_loop, 5,
+       "fn __bigfloat_sub_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigFloat sub reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_mul_into_loop", rt_bigfloat_mul_into_loop, 5,
+       "fn __bigfloat_mul_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigFloat mul reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_div_into_loop", rt_bigfloat_div_into_loop, 5,
+       "fn __bigfloat_div_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigFloat div reusing the dead previous accumulator.")
 RT_DEF("__bigint_mul", rt_bigint_mul, 2, "fn __bigint_mul(a, b)",
        "Multiplies two BigInt values using the runtime bigint implementation.")
 RT_DEF(
