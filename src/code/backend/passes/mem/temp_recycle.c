@@ -870,20 +870,6 @@ static bool tr_inst_uses(const nyr_inst_t *in, int v) {
   return false;
 }
 
-/*
- * Fuse a BigInt add, sub or div with the recycle of the value it replaces:
- *
- *   n = call rt_bigint_add(a, b) ; ... ; call rt_free_temp_guardN(p, n, a, b)
- *   ->  n = call rt_bigint_add_into(p, a, b)
- *
- * The free proves p dead from the free on. Moving that death up to the
- * producer is sound when nothing in between can observe p: same block, no
- * use of p, no memory read and no call other than the recycle of another
- * temporary. The _into entries keep the guard semantics (p equal to an
- * operand is neither reused nor freed) and write the result into p's limbs
- * when they fit, saving the allocation and the free.
- * NYTRIX_NO_TEMP_INTO=1 disables it.
- */
 /* p plus every value that copies or forwards it, transitively. */
 static size_t tr_alias_set(const nyr_func_t *f, int p, int *set, size_t cap) {
   size_t n = 0;
@@ -911,6 +897,22 @@ static size_t tr_alias_set(const nyr_func_t *f, int p, int *set, size_t cap) {
   return n;
 }
 
+/*
+ * Fuse a BigInt add/sub/div or BigFloat add/sub/mul/div with the recycle of
+ * the value it replaces:
+ *
+ *   n = call rt_bigint_add(a, b) ; ... ; call rt_free_temp_guardN(p, n, a, b)
+ *   ->  n = call rt_bigint_add_into(p, a, b)
+ *
+ * and the loop form rt_free_temp_loop(p, init, n, owned) into the
+ * _into_loop entry. The free proves p dead from the free on. Moving that
+ * point up to the producer is sound when nothing in between can observe p
+ * or a copy of it: same block, no use, no memory read and no call other than
+ * the recycle of another temporary. The _into entries keep the guard or loop
+ * semantics (p equal to an operand is neither reused nor freed) and write
+ * the result into p's storage when it fits, saving the allocation and the
+ * free. NYTRIX_NO_TEMP_INTO=1 disables it.
+ */
 static size_t tr_fuse_into(nyr_func_t *f) {
   if (tr_into_disabled())
     return 0;
