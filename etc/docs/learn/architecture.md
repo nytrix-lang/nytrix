@@ -186,7 +186,7 @@ and self-aliasing, and float output against `snprintf("%g")`. Build and run it
 on the host with:
 
 ```bash
-cc -O2 -Isrc etc/labs/tests/code/intermediate/ny/bare/runtime-payload.c \
+cc -O2 -Isrc src/code/test/lang/ny/runtime-payload.c \
   -o /tmp/nyr-bare-payload
 /tmp/nyr-bare-payload 1000000
 ```
@@ -195,7 +195,7 @@ For AArch64, cross-build and run under QEMU:
 
 ```bash
 aarch64-linux-gnu-gcc -O2 -Isrc \
-  etc/labs/tests/code/intermediate/ny/bare/runtime-payload.c \
+  src/code/test/lang/ny/runtime-payload.c \
   -o /tmp/nyr-bare-payload-a64
 qemu-aarch64 -L /usr/aarch64-linux-gnu \
   /tmp/nyr-bare-payload-a64 100000

@@ -146,6 +146,28 @@ fn hexdump(bytes data, int start, int count) str {
    return result
 }
 
+fn fmt_bytes(f64 n) str {
+   "Formats a byte count with binary units: 512 B, 1.5 KiB, 2.0 GiB; \"N/A\"
+   for a negative (unknown) count."
+   if n < 0.0 { return "N/A" }
+   if n > 0.0 && n < 1.0 { return to_str(round(n, 2)) + " B" }
+   mut v = n
+   def units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
+   mut int i = 0
+   while v >= 1024.0 && i < 5 { v /= 1024.0 i += 1 }
+   to_str(round(v, i == 0 ? 0 : 1)) + " " + to_str(units.get(i, "B"))
+}
+
+fn fmt_rate(f64 n) str {
+   "Formats bytes per second, e.g. 3.2 MiB/s; \"N/A\" when negative."
+   n < 0.0 ? "N/A" : fmt_bytes(n) + "/s"
+}
+
+fn fmt_pct(f64 x, int digits=1) str {
+   "Formats a percentage with `digits` decimals, e.g. 42.5%."
+   to_str(round(x, digits)) + "%"
+}
+
 #main {
    assert_eq(rpad("hi", 5, "."), "...hi", "rpad")
    assert_eq(lpad("hi", 5, "."), "hi...", "lpad")
@@ -156,5 +178,8 @@ fn hexdump(bytes data, int start, int count) str {
    assert_eq(fmt_oct(8), "0o10", "fmt_oct")
    assert_eq(repeat_str("ab", 3), "ababab", "repeat_str")
    assert_eq(join_items(", ", [1, 2, 3]), "1, 2, 3", "join_items")
+   assert_eq(fmt_bytes(1536.0), "1.5 KiB", "fmt_bytes")
+   assert_eq(fmt_rate(-1.0), "N/A", "fmt_rate")
+   assert_eq(fmt_pct(42.46), "42.5%", "fmt_pct")
    print("format tests passed")
 }
