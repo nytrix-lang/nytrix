@@ -28,6 +28,7 @@ use core.os.ui.render.viewer.editor.history as history
 use core.os.ui.render.viewer.editor.interaction as interact
 use core.os.ui.render.viewer.editor.keychord as chord
 use core.os.ui.render.viewer.editor.lsp as lsp
+use core.os.ui.render.viewer.editor.dap as dap
 use core.os.ui.render.viewer.editor.outline as outline
 use core.os.ui.render.viewer.editor.palette as pal
 use core.os.ui.render.viewer.editor.project as project
@@ -390,6 +391,8 @@ _editor_values["chord_state"] = borrow(chord.empty_state())
 _editor_values["command_cfg"] = borrow(cmd.config())
 _editor_values["lsp_state"] = borrow(lsp.new())
 _editor_values["lsp_popup"] = dict(0)
+_editor_values["dap_state"] = borrow(dap.new())
+_editor_values["dap_panel"] = true
 _editor_values["lsp_dirty_at"] = 0
 _editor_values["lsp_auto"] = ""
 _editor_values["lsp_auto_at"] = 0
@@ -499,6 +502,7 @@ def probe_flags = {
    "TERMINAL_DUMP": _editor_probe("TERMINAL_DUMP"),
    "SYNTAX": _editor_probe("SYNTAX"),
    "LSP": _editor_probe("LSP"),
+   "DAP": _editor_probe("DAP"),
    "NAV": _editor_probe("NAV"),
    "UNDO": _editor_probe("UNDO"),
    "ESCAPE": _editor_probe("ESCAPE"),
@@ -2819,14 +2823,14 @@ fn _context_action(str id) int {
          if entry.get("dir", false) { _status("select a file to debug") return 0 }
          _open_file(path)
       }
-      _debug_start_current()
+      _dap_start()
    }
    elif id == "debug-break_point" {
       if scope != "editor" {
          if entry.get("dir", false) { _status("select a file for break_point") return 0 }
          _open_file(path)
       }
-      _debug_breakpoint()
+      _dap_toggle_breakpoint()
    }
    elif id == "diff-clipboard" {
       if scope != "editor" {
@@ -4109,6 +4113,8 @@ fn _click_editor(dict lay, f64 x, f64 y) int {
    def row = ed.row_at(lay, y, int(_editor_get("st").get("scroll", 0)))
    def lines = ed.current_lines(_editor_get("st"))
    if row < 0 || row >= lines.len { return 0 }
+   ;; The gutter (line numbers) toggles breakpoints.
+   if x >= float(lay.get("edit_x", 0.0)) && x < _line_text_x(lay) - 6.0 { return _dap_toggle_breakpoint(row) }
    _place_cursor(lay, x, y)
 }
 
@@ -4290,6 +4296,47 @@ fn _lsp_probe_step() int {
       print("LSP_PROBE diagnostics " + to_str(lsp.diagnostics_count(_lsp(), "")))
       print("LSP_PROBE_OK")
       _editor_values["lsp_probe_phase"] = 6
+      window.set_should_close(_editor_get("win"), true)
+   }
+   0
+}
+
+fn _dap_probe_step() int {
+   ;; NY_EDITOR_PROBE_DAP=1 NY_EDITOR_PROBE_DAP_BP=<1-based line>: breakpoint,
+   ;; start, report the stop, step once, continue to the end.
+   def int phase = int(_editor_values.get("dap_probe_phase", 0))
+   if int(_editor_get("frame_count")) > 3000 { print("DAP_PROBE timeout phase=" + to_str(phase)) window.set_should_close(_editor_get("win"), true) return 0 }
+   if phase == 99 { return 0 }
+   if phase == 0 {
+      _dap_toggle_breakpoint(int(max(0, str.atoi(common.env_trim("NY_EDITOR_PROBE_DAP_BP")) - 1)))
+      _dap_start()
+      _editor_values["dap_probe_phase"] = 1
+      return 0
+   }
+   if phase == 1 {
+      if !dap.stopped(_dap()) || dap.stack(_dap()).len <= 0 { return 0 }
+      def loc = dap.stop_location(_dap())
+      print("DAP_PROBE stopped " + to_str(loc.get("name", "")) + " line=" + to_str(int(loc.get("line", 0)) + 1) + " cursor=" + to_str(int(_editor_get("st").get("cursor_line", 0)) + 1) + " frames=" + to_str(dap.stack(_dap()).len))
+      if common.env_trim("NY_EDITOR_PROBE_DAP_HOLD") == "stop" { _editor_values["dap_probe_phase"] = 99 return 0 }
+      _editor_values["dap_probe_line"] = int(loc.get("line", 0))
+      _dap_step("next")
+      _editor_values["dap_probe_phase"] = 2
+      return 0
+   }
+   if phase == 2 {
+      if !dap.stopped(_dap()) || dap.stack(_dap()).len <= 0 { return 0 }
+      print("DAP_PROBE stepped line=" + to_str(int(dap.stop_location(_dap()).get("line", 0)) + 1))
+      _dap_toggle_breakpoint(int(max(0, str.atoi(common.env_trim("NY_EDITOR_PROBE_DAP_BP")) - 1)))
+      _dap_step("continue")
+      _editor_values["dap_probe_phase"] = 3
+      return 0
+   }
+   if phase == 3 {
+      if dap.running(_dap()) { return 0 }
+      print("DAP_PROBE ended " + dap.status(_dap()))
+      print("DAP_PROBE output " + str.str_replace(str.strip(dap.output_text(_dap())), "\n", " | "))
+      print("DAP_PROBE_OK")
+      _editor_values["dap_probe_phase"] = 99
       window.set_should_close(_editor_get("win"), true)
    }
    0
@@ -4838,6 +4885,209 @@ fn _draw_lsp_popup(dict lay, f64 sw, f64 sh) int {
    0
 }
 
+;; ---- debugger (DAP) -------------------------------------------------------
+;; F8 starts (or F5 continues), F9 toggles a breakpoint (also a gutter click),
+;; C-SPC d n/s/f step over/in/out, C-SPC d q stops. Execution stops jump to
+;; the source line; a panel shows the stack, variables and program output.
+
+def C_BREAK = gfx.color_hex("#ff5f6d")
+def C_EXEC = gfx.color_hex("#ffc777")
+
+fn _dap() dict { _editor_get("dap_state") }
+
+fn _dap_start() int {
+   if dap.running(_dap()) {
+      if dap.stopped(_dap()) { _editor_values["dap_state"] = dap.continue_run(_dap()) }
+      _status(dap.status(_dap()))
+      return 0
+   }
+   def path = _current_path()
+   if path.len <= 0 || !file_exists(path) { _status("save the file before debugging") return 0 }
+   if !ed.current_buffer(_editor_get("st")).get("readonly", false) && ed.current_buffer(_editor_get("st")).get("dirty", false) { _save() }
+   _editor_values["dap_state"] = dap.launch(_dap(), path, [], project.root(_editor_get("project_state")))
+   _editor_values["dap_panel"] = true
+   _status(dap.status(_dap()))
+   0
+}
+
+fn _dap_toggle_breakpoint(int line=-1) int {
+   def path = _current_path()
+   if path.len <= 0 { _status("save the file before adding breakpoints") return 0 }
+   def int row = line >= 0 ? line : int(_editor_get("st").get("cursor_line", 0))
+   _editor_values["dap_state"] = dap.toggle_breakpoint(_dap(), path, row)
+   _status((dap.has_breakpoint(_dap(), path, row) ? "breakpoint at " : "removed breakpoint at ") + ospath.basename(path) + ":" + to_str(row + 1))
+   _request_full_redraw(1)
+   0
+}
+
+fn _dap_step(str how) int {
+   if !dap.running(_dap()) { _status("no debug session (F8 starts one)") return 0 }
+   if how == "pause" { _editor_values["dap_state"] = dap.pause(_dap()) }
+   elif !dap.stopped(_dap()) { _status("program is running") return 0 }
+   elif how == "continue" { _editor_values["dap_state"] = dap.continue_run(_dap()) }
+   elif how == "next" { _editor_values["dap_state"] = dap.step_over(_dap()) }
+   elif how == "step" { _editor_values["dap_state"] = dap.step_in(_dap()) }
+   elif how == "finish" { _editor_values["dap_state"] = dap.step_out(_dap()) }
+   _status(dap.status(_dap()))
+   0
+}
+
+fn _dap_stop() int {
+   if !dap.running(_dap()) { _status("no debug session") return 0 }
+   _editor_values["dap_state"] = dap.stop(_dap())
+   _status("debug session stopped")
+   _request_full_redraw(1)
+   0
+}
+
+fn _dap_evaluate() int {
+   if !dap.stopped(_dap()) { _status("evaluate needs a stopped program") return 0 }
+   def sel = ed.selection_valid(_editor_get("st")) ? ed.selection_text(_editor_get("st")) : _word_at_cursor()
+   if sel.len <= 0 { _status("nothing to evaluate") return 0 }
+   _editor_values["dap_state"] = dap.evaluate(_dap(), sel)
+   0
+}
+
+fn _dap_show_location() int {
+   def loc = dap.stop_location(_dap())
+   def path = to_str(loc.get("path", ""))
+   if path.len <= 0 || !file_exists(path) { return 0 }
+   if lsp.norm_path(path) != lsp.norm_path(_current_path()) { _open_file(path) }
+   def lines = ed.current_lines(_editor_get("st"))
+   _editor_get("st")["cursor_line"] = int(min(max(int(loc.get("line", 0)), 0), max(0, lines.len - 1)))
+   _editor_get("st")["cursor_col"] = 0
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _follow_cursor()
+   _request_full_redraw(1)
+   0
+}
+
+fn _dap_pump() int {
+   if !is_dict(_dap().get("conn", nil)) { return 0 }
+   def events = dap.pump(_dap())
+   mut int i = 0
+   while i < events.len {
+      def e = events.get(i, dict(0))
+      def kind = to_str(e.get("kind", ""))
+      if kind == "frames" { _dap_show_location() _status(dap.status(_dap())) }
+      elif kind == "evaluate" { _status(to_str(e.get("expr", "")) + " = " + to_str(e.get("value", ""))) }
+      elif kind == "exited" || kind == "terminated" || kind == "error" { _status(dap.status(_dap())) _request_full_redraw(1) }
+      elif kind == "output" || kind == "continued" || kind == "variables" { _request_full_redraw(1) }
+      i += 1
+   }
+   0
+}
+
+fn _draw_debug_gutter(dict lay) int {
+   def path = _current_path()
+   if path.len <= 0 { return 0 }
+   def bps = dap.breakpoints_for(_dap(), path)
+   def loc = dap.stopped(_dap()) ? dap.stop_location(_dap()) : dict(0)
+   def bool here = loc.len > 0 && lsp.norm_path(to_str(loc.get("path", ""))) == lsp.norm_path(path)
+   if bps.len <= 0 && !here { return 0 }
+   def int scroll = int(_editor_get("st").get("scroll", 0))
+   def int rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
+   def f64 top = float(lay.get("edit_y", 0.0))
+   def f64 gx = float(lay.get("edit_x", 0.0))
+   def f64 lh = float(ed.LINE_H)
+   if here {
+      def int ln = int(loc.get("line", 0))
+      if ln >= scroll && ln < scroll + rows {
+         def f64 y = float(_editor_row_y(top, ln - scroll))
+         _fill_rect(gx, y, float(lay.get("edit_w", 0.0)), lh, gfx.color_alpha(C_EXEC, 0.10))
+         _fill_rect(gx, y, 3.0, lh, C_EXEC)
+      }
+   }
+   mut int i = 0
+   while i < bps.len {
+      def int ln = int(bps.get(i, -1))
+      i += 1
+      if ln < scroll || ln >= scroll + rows { continue }
+      def f64 y = float(_editor_row_y(top, ln - scroll))
+      def f64 d = float(min(9.0, lh - 8.0))
+      ;; A rounded dot left of the line numbers: a cross of rects reads as a
+      ;; circle at this size.
+      def f64 cx = gx + 4.0
+      def f64 cy = y + (lh - d) * 0.5
+      _fill_rect(cx + 2.0, cy, d - 4.0, d, C_BREAK)
+      _fill_rect(cx, cy + 2.0, d, d - 4.0, C_BREAK)
+      _fill_rect(cx + 1.0, cy + 1.0, d - 2.0, d - 2.0, C_BREAK)
+   }
+   _flush_rects()
+   0
+}
+
+fn _draw_debug_panel(dict lay, f64 sw, f64 sh) int {
+   if !bool(_editor_values.get("dap_panel", false)) { return 0 }
+   def st = _dap()
+   if !dap.running(st) && dap.output_text(st).len <= 0 { return 0 }
+   def int bf = int(_editor_get("font_body"))
+   def int sf = int(_editor_get("font_small"))
+   def f64 w = float(min(440.0, max(300.0, float(lay.get("edit_w", 0.0)) * 0.36)))
+   def f64 x = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) - w - 14.0
+   def f64 y = float(lay.get("edit_y", 0.0)) + 12.0
+   mut rows = []
+   def frames = dap.stack(st)
+   mut int i = 0
+   while i < frames.len && i < 6 {
+      def f = frames.get(i, dict(0))
+      rows = rows.append([(i == int(st.get("frame", 0)) ? "▸ " : "  ") + to_str(f.get("name", "?")), ospath.basename(to_str(f.get("path", ""))) + ":" + to_str(int(f.get("line", 0)) + 1), i == 0 ? U_TEXT : U_MUTED])
+      i += 1
+   }
+   for s in dap.variables(st) {
+      def vars = s.get("vars", [])
+      if vars.len <= 0 { continue }
+      rows = rows.append([to_str(s.get("name", "")), "", U_ACCENT])
+      mut int j = 0
+      while j < vars.len && j < 8 {
+         def v = vars.get(j, dict(0))
+         rows = rows.append(["  " + to_str(v.get("name", "")), to_str(v.get("value", "")), U_MUTED])
+         j += 1
+      }
+   }
+   def out_lines = str.split(str.strip(dap.output_text(st)), "\n")
+   mut tail = []
+   mut int k = int(max(0, out_lines.len - 5))
+   while k < out_lines.len { def l = to_str(out_lines.get(k, "")) if l.len > 0 && !str.startswith(l, "ny-dap: building") { tail = tail.append(l) } k += 1 }
+   def f64 rh = 20.0
+   def f64 head_h = 32.0
+   def f64 h = head_h + float(rows.len) * rh + (tail.len > 0 ? 10.0 + float(tail.len) * 18.0 : 0.0) + 10.0
+   _fill_rect(x + 2.0, y + 3.0, w, h, gfx.color_alpha(C_BG, 0.45))
+   _fill_rect(x, y, w, h, gfx.color_alpha(C_PANE_2, 0.97))
+   _stroke_rect(x, y, w, h, C_LINE_2, 1.0)
+   def phase = dap.running(st) ? (dap.stopped(st) ? "Paused" : "Running") : "Ended"
+   def pc = dap.stopped(st) ? C_EXEC : (dap.running(st) ? C_OK : C_DIM)
+   _fill_rect(x + 12.0, y + 13.0, 7.0, 7.0, pc)
+   mut body = []
+   mut small = []
+   body = _append_text_run(body, phase, x + 26.0, _row_text_y(bf, y + 2.0, 28.0), U_TEXT)
+   small = _append_right_run(small, sf, _fit_chrome_text(sf, dap.status(st), w * 0.6), x + w - 12.0, _row_text_y(sf, y + 2.0, 28.0), U_DIM)
+   _fill_rect(x + 10.0, y + head_h - 2.0, w - 20.0, 1.0, C_LINE)
+   mut int r = 0
+   while r < rows.len {
+      def row = rows.get(r, [])
+      def f64 ry = y + head_h + float(r) * rh
+      def left = _fit_chrome_text(sf, to_str(row.get(0, "")), w * 0.48)
+      small = _append_text_run(small, left, x + 14.0, _row_text_y(sf, ry, rh), int(row.get(2, U_MUTED)))
+      def right = _fit_chrome_text(sf, to_str(row.get(1, "")), w * 0.46)
+      small = _append_right_run(small, sf, right, x + w - 14.0, _row_text_y(sf, ry, rh), U_DIM)
+      r += 1
+   }
+   if tail.len > 0 {
+      def f64 oy = y + head_h + float(rows.len) * rh + 6.0
+      _fill_rect(x + 10.0, oy, w - 20.0, 1.0, C_LINE)
+      mut int t = 0
+      while t < tail.len {
+         small = _append_text_run(small, _fit_chrome_text(sf, to_str(tail.get(t, "")), w - 28.0), x + 14.0, _row_text_y(sf, oy + 4.0 + float(t) * 18.0, 18.0), U_ACCENT_2)
+         t += 1
+      }
+   }
+   _flush_rects()
+   if body.len > 0 { gfx.draw_text_runs_flat_colors(bf, body) }
+   if small.len > 0 { gfx.draw_text_runs_flat_colors(sf, small) }
+   0
+}
+
 fn _run_command(str id) int {
    _editor_values["ui_state"] = interact.history_add(_editor_get("ui_state"), id)
    _request_full_redraw(2)
@@ -4862,13 +5112,18 @@ fn _run_command(str id) int {
    elif id == "run" { _run_current_file() }
    elif id == "check" { _check_current_file() }
    elif id == "format" { _format_current_file() }
-   elif id == "debug" || id == "dap-debug" || id == "debug-start" { _debug_start_current() }
-   elif id == "debug-break_point" { _debug_breakpoint() }
-   elif id == "debug-continue" { _debug_send("continue") }
-   elif id == "debug-next" { _debug_send("next") }
-   elif id == "debug-step" { _debug_send("step") }
-   elif id == "debug-finish" { _debug_send("finish") }
-   elif id == "debug-backtrace" { _debug_send("bt") }
+   elif id == "debug" || id == "dap-debug" || id == "debug-start" { _dap_start() }
+   elif id == "debug-stop" { _dap_stop() }
+   elif id == "debug-pause" { _dap_step("pause") }
+   elif id == "debug-eval" { _dap_evaluate() }
+   elif id == "debug-panel" { _editor_values["dap_panel"] = !bool(_editor_values.get("dap_panel", true)) _request_full_redraw(1) }
+   elif id == "debug-terminal" { _debug_start_current() }
+   elif id == "debug-break_point" { _dap_toggle_breakpoint() }
+   elif id == "debug-continue" { if dap.running(_dap()) { _dap_step("continue") } else { _dap_start() } }
+   elif id == "debug-next" { _dap_step("next") }
+   elif id == "debug-step" { _dap_step("step") }
+   elif id == "debug-finish" { _dap_step("finish") }
+   elif id == "debug-backtrace" { _lsp_output("debugger", dap.state_text(_dap()) + "\n\nOutput\n" + dap.output_text(_dap()) + "\n\nDebugger\n" + dap.console_text(_dap())) }
    elif id == "debug-until-line" { _debug_until_current_line() }
    elif id == "debug-jump-line" { _debug_jump_current_line() }
    elif id == "debug-inspect-line" { _debug_inspect_line() }
@@ -8472,6 +8727,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    _editor_values["ui_state"] = interact.tick(_editor_get("ui_state"), dt)
    if termpane.is_open(_editor_get("term_state")) { _editor_values["term_state"] = termpane.update(_editor_get("term_state")) }
    _lsp_pump()
+   _dap_pump()
    _editor_values["fps_state"] = ui_runtime.fps_tick(_editor_get("fps_state"), dt)
    def fps = ui_runtime.fps_current(_editor_get("fps_state"), dt)
    if int(_editor_get("st").get("fps", -1)) != fps { _editor_get("st")["fps"] = fps }
@@ -8625,6 +8881,7 @@ while !gfx.window_should_close(_editor_get("win")) {
       window.set_should_close(_editor_get("win"), true)
    }
    if probe_flags.get("LSP", false) { _lsp_probe_step() }
+   if probe_flags.get("DAP", false) { _dap_probe_step() }
    if probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) >= 18 { window.set_should_close(_editor_get("win"), true) }
    if probe_flags.get("TERMINAL_DUMP", false) && int(_editor_get("frame_count")) >= int(max(12, auto_dump_delay + 3)) { window.set_should_close(_editor_get("win"), true) }
    def mp = window.mouse_pos(_editor_get("win"))
@@ -8675,6 +8932,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    if bool(_editor_get("st").get("show_hierarchy", true)) { _draw_rail(lay) }
    def t_rail = FRAME_TRACE ? ticks() : 0
    _draw_editor(lay, caret)
+   _draw_debug_gutter(lay)
    _draw_diagnostics(lay)
    def t_editor = FRAME_TRACE ? ticks() : 0
    _draw_terminal(lay)
@@ -8693,6 +8951,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    _draw_rename_prompt(sw, sh)
    _draw_completion(lay, sw, sh)
    _draw_lsp_popup(lay, sw, sh)
+   _draw_debug_panel(lay, sw, sh)
    _draw_which_key(sw, sh)
    _draw_gui_overlays(lay, sw, sh)
    def t_draw = FRAME_TRACE ? ticks() : 0
