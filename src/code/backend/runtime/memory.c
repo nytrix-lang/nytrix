@@ -1436,8 +1436,20 @@ struct raw_ptr_node_slab {
   raw_ptr_node_slab_t *free_next;
   raw_ptr_node_t *free_nodes;
   size_t free_count;
+  bool in_arena;
   raw_ptr_node_t nodes[RAW_PTR_SLAB_CAPACITY];
 };
+
+/*
+ * Slabs are carved from 8 MiB anonymous mappings advised for transparent
+ * huge pages. A program holding a few hundred thousand raw blocks keeps
+ * about as many nodes; as separate malloc'd slabs they faulted in 4 KiB at a
+ * time (gcbench: 3,300 of its 10,800 page faults). Arena slabs are never
+ * returned to the system; an empty one stays on the free list.
+ */
+#define RAW_PTR_ARENA_BYTES ((size_t)8 << 20)
+static unsigned char *g_raw_ptr_arena_cur = NULL;
+static unsigned char *g_raw_ptr_arena_end = NULL;
 
 static atomic_flag g_raw_ptr_lock = ATOMIC_FLAG_INIT;
 static raw_ptr_node_t *g_raw_ptr_table[RAW_PTR_HASH_BUCKETS] = {0};
@@ -1515,9 +1527,31 @@ static void raw_ptr_slab_add_free(raw_ptr_node_slab_t *slab) {
 static raw_ptr_node_t *raw_ptr_node_acquire(void) {
   raw_ptr_node_slab_t *slab = g_raw_ptr_free_slabs;
   if (!slab) {
-    slab = (raw_ptr_node_slab_t *)malloc(sizeof(*slab));
+    bool in_arena = false;
+#if !defined(_WIN32) && defined(MAP_ANONYMOUS)
+    size_t slab_bytes = (sizeof(*slab) + 63u) & ~(size_t)63u;
+    if ((size_t)(g_raw_ptr_arena_end - g_raw_ptr_arena_cur) < slab_bytes) {
+      void *m = mmap(NULL, RAW_PTR_ARENA_BYTES, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      if (m != MAP_FAILED) {
+#if defined(MADV_HUGEPAGE)
+        (void)madvise(m, RAW_PTR_ARENA_BYTES, MADV_HUGEPAGE);
+#endif
+        g_raw_ptr_arena_cur = (unsigned char *)m;
+        g_raw_ptr_arena_end = (unsigned char *)m + RAW_PTR_ARENA_BYTES;
+      }
+    }
+    if ((size_t)(g_raw_ptr_arena_end - g_raw_ptr_arena_cur) >= slab_bytes) {
+      slab = (raw_ptr_node_slab_t *)(void *)g_raw_ptr_arena_cur;
+      g_raw_ptr_arena_cur += slab_bytes;
+      in_arena = true;
+    }
+#endif
+    if (!slab)
+      slab = (raw_ptr_node_slab_t *)malloc(sizeof(*slab));
     if (!slab)
       return NULL;
+    slab->in_arena = in_arena;
     slab->free_prev = NULL;
     slab->free_next = NULL;
     slab->free_nodes = NULL;
@@ -1602,7 +1636,8 @@ static bool raw_ptr_unregister(uintptr_t p) {
     match->next = slab->free_nodes;
     slab->free_nodes = match;
     ++slab->free_count;
-    if (slab->free_count == RAW_PTR_SLAB_CAPACITY && g_raw_ptr_slab_count > 1) {
+    if (slab->free_count == RAW_PTR_SLAB_CAPACITY && g_raw_ptr_slab_count > 1 &&
+        !slab->in_arena) {
       raw_ptr_slab_remove_free(slab);
       --g_raw_ptr_slab_count;
       empty_slab = slab;
