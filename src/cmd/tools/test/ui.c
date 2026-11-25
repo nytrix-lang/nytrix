@@ -113,6 +113,14 @@ static void replay_env(const char *app, int width, int height) {
   }
   setenv("NYTRIX_UI_REPLAY", "1", 1);
   setenv("NY_UI_RENDER_BACKEND", "mock", 1);
+  const char *allow_display = getenv("NYTRIX_TEST_ALLOW_DISPLAY");
+  if (!allow_display || !*allow_display || strcmp(allow_display, "0") == 0 ||
+      strcmp(allow_display, "false") == 0 || strcmp(allow_display, "off") == 0 ||
+      strcmp(allow_display, "no") == 0) {
+    unsetenv("DISPLAY");
+    unsetenv("WAYLAND_DISPLAY");
+    unsetenv("WAYLAND_SOCKET");
+  }
   setenv("NY_UI_MOCK_TEXT_FAST", strcmp(app, "editor") ? "bars" : "off", 1);
   setenv("NYTRIX_FIXTURE_TIMEOUT_MS", "0", 1);
   setenv("NYTRIX_FIXTURE_FRAME_MS", "100", 1);

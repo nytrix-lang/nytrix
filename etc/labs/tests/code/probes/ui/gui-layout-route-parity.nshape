@@ -8,9 +8,14 @@ shape gui_layout_route_parity {
   expect_message "GUI-LAYOUT-ROUTE-PARITY-OK"
   source ny <<'NY'
 use core
+use core.common as common
 use core.os.ui.render as gfx
 use core.os.ui.render.viewer.gui as gui
-gfx.apply_backend_env()
+if common.env_trim("NY_UI_RENDER_BACKEND").len > 0 {
+   gfx.apply_backend_env()
+} else {
+   gfx.set_backend_type(gfx.BACKEND_MOCK)
+}
 assert(gfx.init_window(800, 600, "lay"), "open")
 gui.set_enabled(true)
 gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])

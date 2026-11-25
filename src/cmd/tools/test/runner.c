@@ -1636,6 +1636,17 @@ static void apply_test_child_env(int fixture_mode) {
   }
   if (test_env_falsey("NYTRIX_STD_CACHE"))
     ny_setenv("NYTRIX_STD_CACHE", "0", 1);
+#ifndef _WIN32
+  /*
+   * Keep automated test runs headless unless display access is explicitly
+   * requested, so desktop UI/window probes never pop windows on a live seat.
+   */
+  if (!test_env_truthy("NYTRIX_TEST_ALLOW_DISPLAY")) {
+    ny_unsetenv("DISPLAY");
+    ny_unsetenv("WAYLAND_DISPLAY");
+    ny_unsetenv("WAYLAND_SOCKET");
+  }
+#endif
 }
 
 static const char *test_warn_arg(void) {
@@ -3540,6 +3551,13 @@ static void debug_replay_env(void) {
   ny_setenv("NYTRIX_AOT_CACHE", "0", 1);
   ny_setenv("NYTRIX_STD_CACHE", "0", 1);
   ny_setenv("NYTRIX_TEST_NO_NATIVE_CACHE", "1", 1);
+#ifndef _WIN32
+  if (!test_env_truthy("NYTRIX_TEST_ALLOW_DISPLAY")) {
+    ny_unsetenv("DISPLAY");
+    ny_unsetenv("WAYLAND_DISPLAY");
+    ny_unsetenv("WAYLAND_SOCKET");
+  }
+#endif
 }
 
 static int run_debug_argv_capture(char *const argv[], int timeout_sec,

@@ -197,6 +197,185 @@ static unsigned test_link_ret_bits(ny_test_link_ret_kind_t kind) {
   }
 }
 
+#ifdef __linux__
+static int test_path_needs_headless_wayland(const char *path) {
+  return path && strstr(path, "probes/ui/wayland-seat-input.nshape") != NULL &&
+         !test_env_truthy("NYTRIX_TEST_ALLOW_DISPLAY");
+}
+
+static int test_has_executable_in_path(const char *exe) {
+  if (!exe || !*exe)
+    return 0;
+  const char *path_env = getenv("PATH");
+  if (!path_env || !*path_env)
+    path_env = "/usr/bin:/bin";
+  size_t exe_len = strlen(exe);
+  const char *p = path_env;
+  while (*p) {
+    const char *colon = strchr(p, ':');
+    size_t dir_len = colon ? (size_t)(colon - p) : strlen(p);
+    if (dir_len > 0 && dir_len + 1 + exe_len < PATH_MAX) {
+      char cand[PATH_MAX];
+      memcpy(cand, p, dir_len);
+      cand[dir_len] = '/';
+      memcpy(cand + dir_len + 1, exe, exe_len + 1);
+      if (access(cand, X_OK) == 0)
+        return 1;
+    }
+    if (!colon)
+      break;
+    p = colon + 1;
+  }
+  return 0;
+}
+
+static void test_remove_temp_dir(const char *dir) {
+  if (!dir || !*dir)
+    return;
+  DIR *dp = opendir(dir);
+  if (dp) {
+    size_t dir_len = strlen(dir);
+    struct dirent *de;
+    while ((de = readdir(dp)) != NULL) {
+      if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+        continue;
+      size_t name_len = strlen(de->d_name);
+      if (dir_len + 1 + name_len < PATH_MAX) {
+        char item[PATH_MAX];
+        memcpy(item, dir, dir_len);
+        item[dir_len] = '/';
+        memcpy(item + dir_len + 1, de->d_name, name_len + 1);
+        (void)unlink(item);
+      }
+    }
+    closedir(dp);
+  }
+  (void)rmdir(dir);
+}
+
+static void run_child_under_headless_weston(const char *bin,
+                                            char *const argv[]) {
+  if (!test_has_executable_in_path("weston")) {
+    execv(bin, argv);
+    _exit(127);
+  }
+  char rt_dir[PATH_MAX];
+  int rt_n = snprintf(rt_dir, sizeof(rt_dir), "%s/ny-wl-XXXXXX", nyt_temp_dir());
+  if (rt_n < 0 || (size_t)rt_n >= sizeof(rt_dir) || !mkdtemp(rt_dir)) {
+    execv(bin, argv);
+    _exit(127);
+  }
+  if (chmod(rt_dir, 0700) != 0) {
+    test_remove_temp_dir(rt_dir);
+    execv(bin, argv);
+    _exit(127);
+  }
+  char sock[64];
+  int sock_n = snprintf(sock, sizeof(sock), "ny-wl-%ld", (long)getpid());
+  size_t rt_len = strlen(rt_dir);
+  if (sock_n <= 0 || (size_t)sock_n >= sizeof(sock) ||
+      rt_len + 1 + (size_t)sock_n >= PATH_MAX) {
+    test_remove_temp_dir(rt_dir);
+    execv(bin, argv);
+    _exit(127);
+  }
+  char sock_path[PATH_MAX];
+  memcpy(sock_path, rt_dir, rt_len);
+  sock_path[rt_len] = '/';
+  memcpy(sock_path + rt_len + 1, sock, (size_t)sock_n + 1);
+
+  pid_t wl_pid = fork();
+  if (wl_pid == 0) {
+    ny_setenv("XDG_RUNTIME_DIR", rt_dir, 1);
+    ny_unsetenv("DISPLAY");
+    ny_unsetenv("WAYLAND_DISPLAY");
+    ny_unsetenv("WAYLAND_SOCKET");
+    int dn_in = open("/dev/null", O_RDONLY);
+    if (dn_in >= 0) {
+      dup2(dn_in, STDIN_FILENO);
+      if (dn_in != STDIN_FILENO)
+        close(dn_in);
+    }
+    int dn_out = open("/dev/null", O_WRONLY);
+    if (dn_out >= 0) {
+      dup2(dn_out, STDOUT_FILENO);
+      dup2(dn_out, STDERR_FILENO);
+      if (dn_out != STDOUT_FILENO && dn_out != STDERR_FILENO)
+        close(dn_out);
+    }
+    execlp("weston", "weston", "-B", "headless", "--no-config",
+           "--renderer=noop", "-S", sock, (char *)NULL);
+    _exit(127);
+  }
+  if (wl_pid < 0) {
+    test_remove_temp_dir(rt_dir);
+    execv(bin, argv);
+    _exit(127);
+  }
+  int ready = 0;
+  for (int i = 0; i < 150; i++) {
+    if (access(sock_path, F_OK) == 0) {
+      ready = 1;
+      break;
+    }
+    int wst = 0;
+    if (waitpid(wl_pid, &wst, WNOHANG) != 0) {
+      wl_pid = -1;
+      break;
+    }
+    struct timespec ts = {0, 20000000L};
+    nanosleep(&ts, NULL);
+  }
+  if (!ready) {
+    if (wl_pid > 0) {
+      int wst = 0;
+      kill(wl_pid, SIGTERM);
+      while (waitpid(wl_pid, &wst, 0) < 0 && errno == EINTR) {
+      }
+    }
+    test_remove_temp_dir(rt_dir);
+    execv(bin, argv);
+    _exit(127);
+  }
+  ny_setenv("XDG_RUNTIME_DIR", rt_dir, 1);
+  ny_setenv("WAYLAND_DISPLAY", sock, 1);
+  pid_t test_pid = fork();
+  if (test_pid == 0) {
+    execv(bin, argv);
+    _exit(127);
+  }
+  int test_status = 0;
+  if (test_pid > 0) {
+    while (waitpid(test_pid, &test_status, 0) < 0 && errno == EINTR) {
+    }
+  }
+  int wst = 0;
+  kill(wl_pid, SIGTERM);
+  int reaped = 0;
+  for (int i = 0; i < 25; i++) {
+    if (waitpid(wl_pid, &wst, WNOHANG) != 0) {
+      reaped = 1;
+      break;
+    }
+    struct timespec ts = {0, 20000000L};
+    nanosleep(&ts, NULL);
+  }
+  if (!reaped) {
+    kill(wl_pid, SIGKILL);
+    while (waitpid(wl_pid, &wst, 0) < 0 && errno == EINTR) {
+    }
+  }
+  test_remove_temp_dir(rt_dir);
+  if (test_pid <= 0)
+    _exit(127);
+  if (WIFEXITED(test_status))
+    _exit(WEXITSTATUS(test_status));
+  if (WIFSIGNALED(test_status))
+    _exit(128 + WTERMSIG(test_status));
+  _exit(1);
+}
+#endif
+
 static ny_test_proc_t run_one_start(const char *bin, const char *path,
                                     const char *exec_path, const char *std_path,
                                     const char *std_bc, const char *output_path,
@@ -345,6 +524,10 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
         close(devnull);
       }
     }
+#ifdef __linux__
+    if (test_path_needs_headless_wayland(path))
+      run_child_under_headless_weston(bin, argv);
+#endif
     execv(bin, argv);
     _exit(127);
   }
