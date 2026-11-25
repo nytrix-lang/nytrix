@@ -1023,6 +1023,31 @@ static inline bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
   }
   if ((x->sign != 1 && x->sign != -1) || x->words == 0)
     return false;
+  uint64_t limit = x->sign < 0 ? (UINT64_C(1) << 63) : (uint64_t)INT64_MAX;
+  /*
+   * A default-precision value with one significant limb (every small
+   * integer): the general scan below reduces to the top limb's shifts.
+   */
+  if (x->words == 4u && (x->limb[0] | x->limb[1] | x->limb[2]) == 0) {
+    uint64_t t = x->limb[3];
+    if (!t)
+      return false;
+    int64_t trailing = 192 + (int64_t)__builtin_ctzll(t);
+    if (x->exp2 < -trailing || x->exp2 > INT64_MAX - trailing)
+      return false;
+    int64_t shift = x->exp2 + trailing;
+    if (shift < 0 || shift >= 64)
+      return false;
+    uint64_t sig = t >> __builtin_ctzll(t);
+    if (sig > (limit >> (unsigned)shift))
+      return false;
+    uint64_t magnitude = sig << (unsigned)shift;
+    *out = x->sign < 0 ? (magnitude == (UINT64_C(1) << 63)
+                              ? INT64_MIN
+                              : -(int64_t)magnitude)
+                       : (int64_t)magnitude;
+    return true;
+  }
 
   uint64_t top = x->limb[x->words - 1];
   if (!top)
@@ -1055,7 +1080,6 @@ static inline bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
   if (bit && word + 1u < x->words)
     sig |= x->limb[word + 1u] << (64u - bit);
 
-  uint64_t limit = x->sign < 0 ? (UINT64_C(1) << 63) : (uint64_t)INT64_MAX;
   if (sig > (limit >> (unsigned)shift))
     return false;
   uint64_t magnitude = sig << (unsigned)shift;

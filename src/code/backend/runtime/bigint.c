@@ -566,6 +566,41 @@ static void _bn_words_mul(uint64_t *r, const uint64_t *a, size_t an,
   }
   if (n < orig_n)
     memset(r + n, 0, (orig_n - n) * sizeof(*r));
+  /*
+   * Up to 4 x 4 limbs: plain schoolbook into a local product. The size
+   * dispatch, squaring test and per-row add-mul calls below cost about as
+   * much as the 16 multiplies themselves (a 4 x 4 product took 273
+   * instructions).
+   */
+  if (an == 4u && bn == 4u) {
+    /* Constant bounds: fully unrolled, the product stays in registers. */
+    uint64_t t[8] = {0};
+    for (size_t i = 0; i < 4u; ++i) {
+      uint64_t carry = 0;
+      for (size_t j = 0; j < 4u; ++j) {
+        __uint128_t prod = (__uint128_t)a[i] * b[j] + t[i + j] + carry;
+        t[i + j] = (uint64_t)prod;
+        carry = (uint64_t)(prod >> 64);
+      }
+      t[i + 4u] = carry;
+    }
+    memcpy(r, t, sizeof(t));
+    return;
+  }
+  if (an <= 4u && bn <= 4u) {
+    uint64_t t[8] = {0};
+    for (size_t i = 0; i < an; ++i) {
+      uint64_t carry = 0;
+      for (size_t j = 0; j < bn; ++j) {
+        __uint128_t prod = (__uint128_t)a[i] * b[j] + t[i + j] + carry;
+        t[i + j] = (uint64_t)prod;
+        carry = (uint64_t)(prod >> 64);
+      }
+      t[i + bn] = carry;
+    }
+    memcpy(r, t, n * sizeof(*r));
+    return;
+  }
   size_t max = an > bn ? an : bn;
   size_t k = max / 2;
   if (an <= KARATSUBA_THRESHOLD || bn <= KARATSUBA_THRESHOLD || an <= k ||
