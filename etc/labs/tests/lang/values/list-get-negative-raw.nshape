@@ -1,0 +1,26 @@
+shape list_get_negative_raw {
+  family "runtime/values"
+  generator "regression"
+  features ["ny", "list", "abi", "any"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "NEG-GET-OK"
+  source ny <<'NY'
+use core
+;; A raw negative element congruent to 4 mod 8 (-4, -12, -20, ...) carries
+;; bit 63 and the callable tag in its low bits; the dynamic read used to keep
+;; it unboxed as if it were a callable handle, so get() returned nil.
+def l = [4, -12, 9, -4, -20, -1, -8]
+assert(l.get(1) == -12 && l.get(1, 0) == -12, "get of -12")
+assert(l.get(3) == -4 && l.get(4) == -20, "get of -4 and -20")
+assert(l.get(5) == -1 && l.get(6) == -8, "other negatives")
+mut n = []
+n = n.append(-12)
+def any g = n.get(0)
+assert(g == -12 && is_int(g), "appended negative stays an int")
+fn first(list xs) any { xs.get(0) }
+assert(first([-12, 3]) == -12, "through a list parameter")
+print("NEG-GET-OK")
+NY
+}

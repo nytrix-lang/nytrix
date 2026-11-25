@@ -105,10 +105,17 @@ extern char **environ;
 #define NY_DYNAMIC_CALLABLE_TAG_MASK NY_VALUE_PTR_TAG_MASK
 #define NY_DYNAMIC_CALLABLE_TAG UINT64_C(4)
 #define NY_DYNAMIC_CALLABLE_MARK (UINT64_C(1) << 63)
+/* The table ID sits in bits 3..57 but stays far below 2^29, so bits 32..57
+ * are clear in every real handle. A raw negative integer such as -12
+ * (0xfff...f4) also has bit 63 set and tag 4; requiring the clear ID bits
+ * keeps it from being mistaken for a callable (list.get(i) returned it
+ * unboxed, so such elements read back as nil). */
+#define NY_DYNAMIC_CALLABLE_ID_HIGH UINT64_C(0x03FFFFFF00000000)
 #define NY_DYNAMIC_CALLABLE_IS(v)                            \
   (((((uint64_t)(v)) & NY_DYNAMIC_CALLABLE_MARK) != 0ULL) && \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAG_MASK) ==        \
-    NY_DYNAMIC_CALLABLE_TAG))
+    NY_DYNAMIC_CALLABLE_TAG) &&                              \
+   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_ID_HIGH) == 0ULL))
 int64_t rt_dynamic_callable_encode(void *fn, uint64_t flags);
 void *rt_dynamic_callable_decode(int64_t callable);
 #define NY_DYNAMIC_CALLABLE_ENCODE(p) rt_dynamic_callable_encode((void *)(p), 0)
