@@ -813,6 +813,21 @@ fn _layout_sh(dict lay) f64 {
    float(lay.get("status_y", 0.0)) + float(lay.get("status_h", ed.STATUS_H))
 }
 
+fn _fit_chrome_text(int font, str text, f64 width) str {
+   if width <= 0.0 || text.len == 0 { return "" }
+   if _measure_ui(font, text, float(str.utf8_len(text)) * 8.0) <= width { return text }
+   if _measure_ui(font, "...", 24.0) > width { return "" }
+   mut int lo = 0
+   mut int hi = str.utf8_len(text)
+   while lo < hi {
+      def int mid = (lo + hi + 1) / 2
+      def candidate = str.utf8_slice(text, 0, mid) + "..."
+      if _measure_ui(font, candidate, float(mid + 3) * 8.0) <= width { lo = mid }
+      else { hi = mid - 1 }
+   }
+   str.utf8_slice(text, 0, lo) + "..."
+}
+
 fn _fit_rect(f64 x, f64 y, f64 w, f64 h, f64 sw, f64 sh, f64 margin=8.0) list {
    def f64 max_w = float(max(1.0, sw - margin * 2.0))
    def f64 max_h = float(max(1.0, sh - margin * 2.0))
