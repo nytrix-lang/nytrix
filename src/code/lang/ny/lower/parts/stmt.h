@@ -7665,6 +7665,9 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
       int saved_last = b->last_value;
       bool saved_last_raw = b->last_value_raw_scalar;
       bool saved_last_f64 = b->last_value_f64;
+      /* An exit inside the block already ran its defers on that path. */
+      if (b->emitted_return && b->defer_count > defer_mark)
+        b->defer_count = defer_mark;
       if ((!b->capture_defers || b->defer_capture_mark != defer_mark) &&
           !nyr_emit_defers(b, defer_mark)) {
         b->last_value = saved_last;
@@ -7910,7 +7913,8 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
     if (b->loop_depth == 0)
       return nyr_fail(b, "native NYIR lower: "
                          "break outside loop");
-    if (!nyr_emit_defers(b, b->loop_frames[b->loop_depth - 1].defer_mark))
+    if (!nyr_emit_exit_defers(b,
+                              b->loop_frames[b->loop_depth - 1].defer_mark))
       return false;
     b->emitted_return = true;
     return nyr_emit_br(b, b->loop_frames[b->loop_depth - 1].end_label);
@@ -7918,7 +7922,8 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
     if (b->loop_depth == 0)
       return nyr_fail(b, "native NYIR lower: continue "
                          "outside loop");
-    if (!nyr_emit_defers(b, b->loop_frames[b->loop_depth - 1].defer_mark))
+    if (!nyr_emit_exit_defers(b,
+                              b->loop_frames[b->loop_depth - 1].defer_mark))
       return false;
     b->emitted_return = true;
     return nyr_emit_br(b, b->loop_frames[b->loop_depth - 1].continue_label);
@@ -7944,7 +7949,7 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
     v = nyr_normalize_return(b, s->as.ret.value, v);
     if (v < 0)
       return false;
-    if (!nyr_emit_defers(b, 0))
+    if (!nyr_emit_exit_defers(b, 0))
       return false;
     return nyr_emit_ret(b, v);
   }
@@ -7971,7 +7976,7 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
                       "native NYIR lower: cannot "
                       "allocate goto '%s'",
                       s->as.go.name ? s->as.go.name : "");
-    if (!nyr_emit_defers(b, 0) || !nyr_emit_br(b, label->label))
+    if (!nyr_emit_exit_defers(b, 0) || !nyr_emit_br(b, label->label))
       return false;
     b->emitted_return = true;
     b->last_value = -1;

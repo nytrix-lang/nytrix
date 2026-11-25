@@ -5400,6 +5400,29 @@ static bool nyr_emit_defers(nyr_builder_impl_t *b, size_t mark) {
 }
 
 /*
+ * Run the deferred bodies registered since mark, LIFO, for an early exit
+ * (return, break, continue, goto) while keeping them registered. The exit
+ * leaves only the path it is on: the fall-through path and every later exit
+ * of the same scope still have to pop them. Dropping them here made a
+ * `return` in a guard clause skip the defers of the function's tail exit,
+ * so the runtime defer stack kept a stale entry whose closure ran, with a
+ * dead environment, at the caller's next pop.
+ */
+static bool nyr_emit_exit_defers(nyr_builder_impl_t *b, size_t mark) {
+  if (!b || b->defer_count <= mark)
+    return true;
+  size_t saved_return = b->emitted_return;
+  for (size_t i = b->defer_count; i > mark; --i) {
+    if (nyr_emit_runtime_call(b, "rt_pop_run_defer", -1, -1, -1, 0, 0) < 0) {
+      b->emitted_return = saved_return;
+      return false;
+    }
+  }
+  b->emitted_return = saved_return;
+  return true;
+}
+
+/*
  * Lower a statement body inside a synthetic scope: defers registered by the
  * body are emitted (LIFO) when the body finishes, so single-statement loop/if
  * bodies get per-iteration / per-branch defer semantics.  For block bodies
@@ -5410,8 +5433,11 @@ static bool nyr_lower_scoped_body(nyr_builder_impl_t *b, const stmt_t *body) {
   size_t defer_mark = b->defer_count;
   if (!nyr_lower_stmt(b, body))
     return false;
-  if (b->emitted_return)
-    return true; /* return/break/continue already ran the defers */
+  if (b->emitted_return) {
+    /* return/break/continue already ran the defers on this path */
+    b->defer_count = defer_mark;
+    return true;
+  }
   int saved_last = b->last_value;
   if (!nyr_emit_defers(b, defer_mark))
     return false;

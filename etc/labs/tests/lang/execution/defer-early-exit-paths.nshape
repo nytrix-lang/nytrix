@@ -1,0 +1,74 @@
+shape defer_early_exit_paths {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "defer", "control-flow"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "t | t | b2 b1 | b2 b1 | b1 | t o 3 | l l l 2 | g2 g1 2 g1 0 DEFER-EXITS-OK"
+  source ny <<'NY'
+use core
+;; An early exit runs the defers on its own path only; every later exit of
+;; the same scope must still run them. A guard-clause `return` once dropped
+;; the function's defers, so its tail exit left a stale runtime entry that
+;; ran (with a dead environment) at the caller's next pop.
+mut log = []
+fn note(str s) any { log = append(log, s) }
+fn tail(int n) any {
+   mut c = [1]
+   defer { if c[0] { note("t") } }
+   if n < 0 { return 0 }
+   def out = [n]
+   out
+}
+fn twice(int n) int {
+   defer { note("b1") }
+   if n == 0 { return 0 }
+   defer { note("b2") }
+   if n == 1 { return 1 }
+   n
+}
+fn outer() int {
+   defer { note("o") }
+   def r = tail(2)
+   r[0] + 1
+}
+fn loop3() int {
+   mut i = 0
+   while i < 5 {
+      defer { note("l") }
+      if i == 2 { break }
+      i += 1
+      if i < 9 { continue }
+   }
+   i
+}
+fn guard(int n) int {
+   defer { note("g1") }
+   if n > 0 {
+      defer { note("g2") }
+      if n > 1 { return 2 }
+   }
+   0
+}
+tail(-1)
+note("|")
+tail(1)
+note("|")
+twice(2)
+note("|")
+twice(1)
+note("|")
+twice(0)
+note("|")
+note(to_str(outer()))
+note("|")
+note(to_str(loop3()))
+note("|")
+note(to_str(guard(2)))
+note(to_str(guard(0)))
+mut s = ""
+for x in log { s = s + x + " " }
+print(s + "DEFER-EXITS-OK")
+NY
+}
