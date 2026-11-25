@@ -1,0 +1,64 @@
+;; A tour of NYR text.
+extern {
+  fn printf(ptr fmt, ...) i32
+  fn calloc(int n, int size) ptr
+  fn free(ptr p)
+}
+
+mut f64 total = 0.0
+def LIMIT = 100
+
+fn hyp(f64 a, f64 b) f64 { return sqrt(a * a + b * b) }
+
+fn sum7(int a, int b, int c, int d, int e, int f, int g) int {
+  return a + b + c + d + e + f + g
+}
+
+fn classify(int n) int {
+  if n < 0 { return -1 } elif n == 0 { return 0 } else { return 1 }
+}
+
+fn collatz(int n) int {
+  mut steps = 0
+  while n != 1 {
+    n = n % 2 == 0 ? n / 2 : 3 * n + 1
+    steps++
+  }
+  return steps
+}
+
+fn primes(int limit) int {
+  def sieve = calloc(limit + 1, 1)
+  mut count = 0
+  for (mut i = 2 i <= limit i += 1) {
+    if load8(sieve, 0) == 99 { break }
+    if load8(sieve + i) != 0 { continue }
+    count += 1
+    for (mut j = i * i j <= limit j += i) { store8(sieve + j, 1) }
+  }
+  free(sieve)
+  return count
+}
+
+fn first_over(int limit) int {
+  mut n = 1
+again:
+  n = n << 1
+  if n <= limit && n != 64 || n == 2 { goto again }
+  return n
+}
+
+fn main() int {
+  printf("hyp = %.3f\n", hyp(3.0, 4.0))
+  printf("sum7 = %ld\n", sum7(1, 2, 3, 4, 5, 6, 7))
+  printf("classify = %ld %ld %ld\n", classify(-5), classify(0), classify(9))
+  printf("collatz(27) = %ld\n", collatz(27))
+  printf("primes(%ld) = %ld\n", LIMIT, primes(LIMIT))
+  printf("first_over = %ld\n", first_over(1000))
+  for k in 1..4 { total += f64(k) * 0.5 }
+  printf("total = %.2f  bits = %ld %ld %ld\n", total, 0xff & ~0x0f, -17 >> 2, 'A' ^ 32)
+  mut x = 10
+  x *= 3 x -= 4 x <<= 1
+  printf("x = %ld int(2.9)=%ld\n", x, int(2.9))
+  return 0
+}

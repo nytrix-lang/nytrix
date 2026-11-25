@@ -1,0 +1,6 @@
+;; Diagnostic fixture: `def` bindings are immutable.
+fn main() int {
+  def x = 1
+  x = 2
+  return x
+}

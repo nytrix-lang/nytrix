@@ -1,0 +1,60 @@
+;; NYR at the instruction level: SSA values (%x), blocks (@b), any NYIR
+;; opcode by name, !flags, raw data and assembly. Mixes freely with the
+;; Ny-style statements in the same function.
+extern { fn printf(ptr fmt, ...) i32 }
+
+;; QBE-style data: typed items, strings, zero fill and symbol references.
+data table align 16 = { i64 10, 20, 30, 40 }
+data bytes = { u8 1, 2, 3, 250 }
+data greeting = { "sum=%ld max=%ld pick=%ld asm=%ld fp=%ld\n", u8 0 }
+data handlers = { ptr twice, ptr thrice }
+
+;; A function written directly in assembly, callable like any other.
+asm {
+  "\t.text"
+  "\t.globl nyr_mul_add"
+  "nyr_mul_add:"
+  "\tleaq (%rsi,%rdi,4), %rax"
+  "\tret"
+}
+extern { fn nyr_mul_add(int a, int b) int }
+
+fn twice(int x) int { return x * 2 }
+fn thrice(int x) int { return x * 3 }
+
+;; Explicit SSA loop with a phi and a forward reference.
+fn sum_table(ptr base, int n) int {
+@entry
+  %b = load.local 0
+  %n = load.local 1
+  %zero = const.i64 0
+  br @loop
+@loop
+  %i = phi [%zero, @entry], [%i2, @body]
+  %acc = phi [%zero, @entry], [%acc2, @body]
+  %more = cmp.i64 lt %i, %n
+  br.if %more, @body, @done
+@body
+  %off = shl.i64 %i, 3
+  %p = add.i64 %b, %off
+  %v = load.i64 %p
+  %acc2 = add.i64 %acc, %v
+  %i2 = add.i64 %i, 1
+  br @loop
+@done
+  ret %acc
+}
+
+fn main() int {
+  def total = sum_table(table, 4)
+  %m = select.i64 1, 7, 9                ;; branch-free choice
+  %last = load.i64 bytes, 3 !byte        ;; zero-extended byte load
+  %big = cmp.i64 gt %last, 200
+  %pick = select.i64 %big, %last, %m
+  %mx = call $nyr_mul_add(5, 2)           ;; b + 4a = 22
+  def fp = load64(handlers, 8)            ;; function pointer from data
+  %r = call %fp(7)                        ;; indirect call
+  %f = $printf                            ;; address of a C function
+  %n = call %f(greeting, total, %last, %pick, %mx, %r) !variadic
+  return 0
+}

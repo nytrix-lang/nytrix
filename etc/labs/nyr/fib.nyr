@@ -1,0 +1,17 @@
+;; NYR text: Ny-flavoured, lowered straight to NYIR
+extern { fn printf(ptr fmt, ...) i32 }
+
+def greeting = "fib(%ld) = %ld\n"
+mut calls = 0
+
+fn fib(int n) int {
+  calls += 1
+  if n < 2 { return n }
+  return fib(n - 1) + fib(n - 2)
+}
+
+fn main() int {
+  for i in 0..10 { printf(greeting, i, fib(i)) }
+  printf("calls = %ld\n", calls)
+  return 0
+}
