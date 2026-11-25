@@ -6683,36 +6683,223 @@ fn _tokenize_language(str lang, str line) list {
    }
 }
 
+;; ---- multi-line syntax state --------------------------------------------
+;; The tokenizers see one line at a time. A line that starts inside a block
+;; comment or an open string gets that prefix coloured here, and the rest of
+;; the line is tokenized normally. States: "" (code), "c" (block comment),
+;; "s<delim>" (inside a string closed by <delim>).
+
+def int SYNTAX_STATE_MAX_LINES = 60000
+
+fn _syn_line_comment(str lang) str {
+   case lang {
+      "nytrix" -> ";"
+      "c", "javascript", "typescript" -> "//"
+      "python", "bash", "cmake", "yaml" -> "#"
+      "lua" -> "--"
+      _ -> ""
+   }
+}
+
+fn _syn_block(str lang) list {
+   case lang {
+      "c", "javascript", "typescript" -> ["/*", "*/"]
+      "lua" -> ["--[[", "]]"]
+      "html", "xml", "markdown" -> ["<!--", "-->"]
+      _ -> []
+   }
+}
+
+;; Delimiters whose strings may continue onto the next line.
+fn _syn_spanning(str lang, str delim) bool {
+   case lang {
+      "nytrix" -> true
+      "python" -> delim.len == 3
+      "javascript", "typescript" -> delim == "`"
+      "bash" -> delim == "\"" || delim == "'"
+      "lua" -> delim == "]]"
+      _ -> false
+   }
+}
+
+fn _syn_at(str line, int i, str pat) bool {
+   if pat.len <= 0 || i + pat.len > line.len { return false }
+   mut int k = 0
+   while k < pat.len {
+      if load8(line, i + k) != load8(pat, k) { return false }
+      k += 1
+   }
+   true
+}
+
+;; Byte index just past `delim` closing a string that starts at `i`, or -1.
+fn _syn_string_end(str line, int i, str delim) int {
+   mut int j = i
+   while j < line.len {
+      def c = load8(line, j)
+      if c == 92 && delim != "]]" { j += 2 continue }
+      if _syn_at(line, j, delim) { return j + delim.len }
+      j += 1
+   }
+   -1
+}
+
+;; Byte index just past the closer of `state` in `line`, or -1 when the
+;; construct continues past this line.
+fn _syn_close(str lang, str line, str state) int {
+   if state == "c" {
+      def blk = _syn_block(lang)
+      if blk.len < 2 { return 0 }
+      def close = to_str(blk.get(1, ""))
+      mut int j = 0
+      while j < line.len {
+         if _syn_at(line, j, close) { return j + close.len }
+         j += 1
+      }
+      return -1
+   }
+   _syn_string_end(line, 0, str.str_slice(state, 1, str.utf8_len(state)))
+}
+
+;; State at the end of `line` when it starts in `state`.
+fn _syn_scan(str lang, str line, str state) str {
+   mut st = state
+   mut int i = 0
+   if st.len > 0 {
+      def e = _syn_close(lang, line, st)
+      if e < 0 { return st }
+      i = e
+      st = ""
+   }
+   def lc = _syn_line_comment(lang)
+   def blk = _syn_block(lang)
+   def bopen = blk.len >= 2 ? to_str(blk.get(0, "")) : ""
+   while i < line.len {
+      if bopen.len > 0 && _syn_at(line, i, bopen) {
+         ;; search for the closer after the opener only
+         mut int j = i + bopen.len
+         def close = to_str(blk.get(1, ""))
+         mut int found = -1
+         while j < line.len {
+            if _syn_at(line, j, close) { found = j + close.len break }
+            j += 1
+         }
+         if found < 0 { return "c" }
+         i = found
+         continue
+      }
+      if lc.len > 0 && _syn_at(line, i, lc) { return "" }
+      def c = load8(line, i)
+      if c == 34 || c == 39 || (c == 96 && (lang == "javascript" || lang == "typescript")) {
+         mut delim = chr(c)
+         if (lang == "python" || lang == "nytrix") && i + 2 < line.len && load8(line, i + 1) == c && load8(line, i + 2) == c { delim = delim + delim + delim }
+         def e = _syn_string_end(line, i + delim.len, delim)
+         if e < 0 { return _syn_spanning(lang, delim) ? "s" + delim : "" }
+         i = e
+         continue
+      }
+      if lang == "lua" && _syn_at(line, i, "[[") {
+         def e = _syn_string_end(line, i + 2, "]]")
+         if e < 0 { return "s]]" }
+         i = e
+         continue
+      }
+      i += 1
+   }
+   ""
+}
+
+fn _syntax_line_state(str lang, int li) str {
+   if li <= 0 || _syn_line_comment(lang).len == 0 && _syn_block(lang).len == 0 && lang != "nytrix" { return "" }
+   def lines = ed.current_lines(_editor_get("st"))
+   if lines.len > SYNTAX_STATE_MAX_LINES || li >= lines.len + 1 { return "" }
+   if int(_editor_values.get("syn_state_rev", -1)) != int(_editor_get("content_rev")) || to_str(_editor_values.get("syn_state_lang", "")) != lang {
+      _editor_values["syn_state_rev"] = int(_editor_get("content_rev"))
+      _editor_values["syn_state_lang"] = lang
+      _editor_values["syn_states"] = borrow([""])
+   }
+   mut states = _editor_values.get("syn_states", [""])
+   while states.len <= li && states.len - 1 < lines.len {
+      def k = states.len - 1
+      states = states.append(_syn_scan(lang, to_str(lines.get(k, "")), to_str(states.get(k, ""))))
+   }
+   _editor_values["syn_states"] = borrow(states)
+   to_str(states.get(li, ""))
+}
+
+fn _tokenize_stateful(str lang, str line, int li) list {
+   def state = li > 0 ? _syntax_line_state(lang, li) : ""
+   if state.len == 0 { return _tokenize_language(lang, line) }
+   def int kind = state == "c" ? int(syntax.TOK_COMMENT) : int(syntax.TOK_STRING)
+   def int close = _syn_close(lang, line, state)
+   if close < 0 { return [[kind, 0, line.len]] }
+   mut out = [[kind, 0, close]]
+   if close >= line.len { return out }
+   ;; Tokenize the remainder (code-point slice) and shift back to bytes.
+   def rest = str.str_slice(line, _byte_to_cp(line, close), str.utf8_len(line))
+   for t in _tokenize_language(lang, rest) {
+      out = out.append([int(t.get(0, 0)), int(t.get(1, 0)) + close, int(t.get(2, 0))])
+   }
+   out
+}
+
+fn _byte_to_cp(str line, int b) int {
+   mut int i = 0
+   mut int cps = 0
+   while i < b && i < line.len {
+      def c = load8(line, i)
+      i += c < 0x80 ? 1 : (c < 0xE0 ? 2 : (c < 0xF0 ? 3 : 4))
+      cps += 1
+   }
+   cps
+}
+
 fn _tokenize_line(str filename, str line, int li=-1) list {
    def lang = _syntax_lang(filename)
    if lang == "markdown" {
       def fenced_lang = _markdown_fenced_lang_at(li)
       if fenced_lang.len > 0 { return _tokenize_language(fenced_lang, line) }
    }
-   _tokenize_language(lang, line)
+   _tokenize_stateful(lang, line, li)
 }
 
 fn _syntax_key(str filename, int li, str line) str {
    filename + ":" + to_str(li) + ":" + to_str(line.len) + ":" + to_str(hash(line))
 }
 
+fn _wide_cp(int cp) bool {
+   (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) || (cp >= 0xAC00 && cp <= 0xD7A3) ||
+   (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
+   (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x20000 && cp <= 0x3FFFD)
+}
+
+;; Pixel offset of code point column `col`: one cell per character, two for
+;; East Asian wide characters and emoji, tabs to the next 4-cell stop.
 fn _prefix_x(str line, int col) int {
-   def int safe_col = col < 0 ? 0 : col > line.len ? line.len : col
+   if col <= 0 { return 0 }
    mut int advance = int(float(_editor_get("FONT_BODY_ADV")))
    if advance < 1 { advance = 1 }
    def int tab_width = advance * 4
    mut int x = 0
    mut int i = 0
-   while i < safe_col {
+   mut int cps = 0
+   while cps < col && i < line.len {
       def int c = load8(line, i)
       if c == 9 {
          x = (x / tab_width + 1) * tab_width
+         i += 1
       } elif c < 128 {
          x += advance
-      } elif (c & 192) != 128 {
-         x += advance * 2
+         i += 1
+      } else {
+         def int n = c < 0xE0 ? 2 : (c < 0xF0 ? 3 : 4)
+         mut int cp = n == 2 ? (c & 31) : (n == 3 ? (c & 15) : (c & 7))
+         mut int k = 1
+         while k < n && i + k < line.len { cp = (cp << 6) | (load8(line, i + k) & 63) k += 1 }
+         x += _wide_cp(cp) ? advance * 2 : advance
+         i += n
       }
-      i += 1
+      cps += 1
    }
    x
 }
@@ -6727,6 +6914,23 @@ fn _syntax_runs(str filename, str line, int li) list {
    if _editor_get("syntax_run_cache").contains(key) { return _editor_get("syntax_run_cache").get(key, []) }
    def toks = _tokenize_line(filename, line, li)
    mut runs = []
+   ;; Tokenizers report byte offsets; slicing and x positions use code points.
+   def int cp_len = str.utf8_len(line)
+   def bool ascii = cp_len == line.len
+   mut cp_at = []
+   if !ascii {
+      mut int b = 0
+      mut int cps = 0
+      while b < line.len {
+         def c = load8(line, b)
+         def int n = c < 0x80 ? 1 : (c < 0xE0 ? 2 : (c < 0xF0 ? 3 : 4))
+         mut int k = 0
+         while k < n { cp_at = cp_at.append(cps) k += 1 }
+         b += n
+         cps += 1
+      }
+      cp_at = cp_at.append(cps)
+   }
    if toks.len == 0 {
       if line.len > 0 { runs = runs.append([line, syntax.TOK_TEXT, 0.0]) }
    } else {
@@ -6735,8 +6939,10 @@ fn _syntax_runs(str filename, str line, int li) list {
       while i < toks.len {
          def tok = toks.get(i)
          def int kind = int(tok.get(0, syntax.TOK_TEXT))
-         def int start = min(max(int(tok.get(1, 0)), 0), line.len)
-         def int end = int(min(line.len, start + int(max(0, int(tok.get(2, 0))))))
+         def int bstart = min(max(int(tok.get(1, 0)), 0), line.len)
+         def int bend = int(min(line.len, bstart + int(max(0, int(tok.get(2, 0))))))
+         def int start = ascii ? bstart : int(cp_at.get(bstart, cp_len))
+         def int end = ascii ? bend : int(cp_at.get(bend, cp_len))
          if start > cursor {
             def int xoff = _prefix_x(line, cursor)
             runs = runs.append([str.str_slice(line, cursor, start), syntax.TOK_TEXT, xoff])
@@ -6749,9 +6955,9 @@ fn _syntax_runs(str filename, str line, int li) list {
          }
          i += 1
       }
-      if cursor < line.len {
+      if cursor < cp_len {
          def int xoff = _prefix_x(line, cursor)
-         runs = runs.append([str.str_slice(line, cursor, line.len), syntax.TOK_TEXT, xoff])
+         runs = runs.append([str.str_slice(line, cursor, cp_len), syntax.TOK_TEXT, xoff])
       }
    }
    _editor_get("syntax_run_cache")[key] = borrow(runs)
@@ -8880,6 +9086,7 @@ while !gfx.window_should_close(_editor_get("win")) {
       assert(int(_editor_get("st").get("scroll", 0)) > 0 && !bool(_editor_get("st").get("scroll_follow", true)), "editor scrollbar drag scrolls")
       window.set_should_close(_editor_get("win"), true)
    }
+   if int(_editor_get("frame_count")) == 30 && common.env_truthy("NY_EDITOR_PROBE_READY") { print("EDITOR_READY") }
    if probe_flags.get("LSP", false) { _lsp_probe_step() }
    if probe_flags.get("DAP", false) { _dap_probe_step() }
    if probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) >= 18 { window.set_should_close(_editor_get("win"), true) }
