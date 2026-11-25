@@ -1290,6 +1290,8 @@ typedef struct tp_use_alias_index_slot_t {
   uint64_t hash;
   const char *alias;
   const char *module;
+  const char *file; /* source of the `use`; aliases are per module */
+  size_t seq;       /* insertion order: the first `use` wins program-wide */
 } tp_use_alias_index_slot_t;
 
 static _Thread_local struct {
@@ -1302,7 +1304,8 @@ static _Thread_local struct {
   size_t len;
 } g_tp_use_alias_index;
 
-static void tp_use_alias_index_put(const char *alias, const char *module) {
+static void tp_use_alias_index_put(const char *alias, const char *module,
+                                   const char *file) {
   if (!alias || !*alias || !module || !*module)
     return;
   if ((g_tp_use_alias_index.len + 1u) * 10u >= g_tp_use_alias_index.cap * 7u) {
@@ -1330,13 +1333,15 @@ static void tp_use_alias_index_put(const char *alias, const char *module) {
   size_t mask = g_tp_use_alias_index.cap - 1u;
   size_t pos = (size_t)h & mask;
   while (g_tp_use_alias_index.slots[pos].hash) {
-    if (g_tp_use_alias_index.slots[pos].hash == h &&
-        strcmp(g_tp_use_alias_index.slots[pos].alias, alias) == 0)
-      return; /* first match wins, preserving AST order */
+    const tp_use_alias_index_slot_t *e = &g_tp_use_alias_index.slots[pos];
+    if (e->hash == h && strcmp(e->alias, alias) == 0 &&
+        (e->file == file || (e->file && file && strcmp(e->file, file) == 0)))
+      return; /* first match in a file wins, preserving AST order */
     pos = (pos + 1u) & mask;
   }
-  g_tp_use_alias_index.slots[pos] =
-      (tp_use_alias_index_slot_t){.hash = h, .alias = alias, .module = module};
+  g_tp_use_alias_index.slots[pos] = (tp_use_alias_index_slot_t){
+      .hash = h, .alias = alias, .module = module, .file = file,
+      .seq = g_tp_use_alias_index.len};
   g_tp_use_alias_index.len++;
 }
 
@@ -1348,7 +1353,8 @@ static void tp_use_alias_index_collect_stmt(stmt_t *s) {
     if (!s->as.use.import_all && s->as.use.imports.len == 0 &&
         s->as.use.alias && *s->as.use.alias && s->as.use.module &&
         *s->as.use.module)
-      tp_use_alias_index_put(s->as.use.alias, s->as.use.module);
+      tp_use_alias_index_put(s->as.use.alias, s->as.use.module,
+                             s->tok.filename);
     return;
   case NY_S_BLOCK:
     for (size_t i = 0; i < s->as.block.body.len; ++i)
@@ -1363,8 +1369,13 @@ static void tp_use_alias_index_collect_stmt(stmt_t *s) {
   }
 }
 
-static const char *tp_lookup_program_use_alias(codegen_t *cg,
-                                               const char *alias) {
+/* `use M as alias` for an expression in `file`: that file's own `use` when
+ * it has one, else the program's first. Two modules may bind the same alias
+ * to different modules (`use core.str as s` in a program, `use ...gl.state
+ * as s` in the GL renderer); one flat table resolved both to whichever was
+ * collected first. */
+static const char *tp_lookup_use_alias_impl(codegen_t *cg, const char *alias,
+                                            const char *file, bool file_only) {
   if (!cg || !alias || !*alias)
     return NULL;
   if (g_tp_use_alias_index.cg != cg || g_tp_use_alias_index.prog != cg->prog ||
@@ -1395,22 +1406,51 @@ static const char *tp_lookup_program_use_alias(codegen_t *cg,
     h = 1u;
   size_t mask = g_tp_use_alias_index.cap - 1u;
   size_t pos = (size_t)h & mask;
+  const tp_use_alias_index_slot_t *first = NULL;
   for (; g_tp_use_alias_index.slots[pos].hash; pos = (pos + 1u) & mask) {
-    if (g_tp_use_alias_index.slots[pos].hash == h &&
-        strcmp(g_tp_use_alias_index.slots[pos].alias, alias) == 0)
-      return g_tp_use_alias_index.slots[pos].module;
+    const tp_use_alias_index_slot_t *e = &g_tp_use_alias_index.slots[pos];
+    if (e->hash != h || strcmp(e->alias, alias) != 0)
+      continue;
+    if (file && e->file && strcmp(e->file, file) == 0)
+      return e->module;
+    if (!first || e->seq < first->seq)
+      first = e;
   }
-  return NULL;
+  return first && !file_only ? first->module : NULL;
+}
+
+static const char *tp_lookup_file_use_alias(codegen_t *cg, const char *alias,
+                                            const char *file) {
+  return tp_lookup_use_alias_impl(cg, alias, file, true);
+}
+
+static const char *tp_lookup_program_use_alias(codegen_t *cg, const char *alias,
+                                               const char *file) {
+  return tp_lookup_use_alias_impl(cg, alias, file, false);
 }
 
 static bool tp_resolve_module_expr_path(codegen_t *cg, expr_t *e, char *out,
                                         size_t out_cap) {
   if (!cg || !e || !out || out_cap == 0)
     return false;
+  /*
+   * An alias the expression's own file declares wins: the codegen alias
+   * table is scoped by the module being emitted, which is not the module
+   * whose function inference is visiting.
+   */
+  if (e->kind == NY_E_IDENT && e->as.ident.name && e->tok.filename) {
+    const char *own = tp_lookup_file_use_alias(cg, e->as.ident.name,
+                                               e->tok.filename);
+    if (own && *own && ny_module_path_exists(cg, own)) {
+      int n = snprintf(out, out_cap, "%s", own);
+      return n > 0 && (size_t)n < out_cap;
+    }
+  }
   if (ny_resolve_module_expr_path(cg, NULL, 0, e, out, out_cap))
     return true;
   if (e->kind == NY_E_IDENT && e->as.ident.name) {
-    const char *use_alias = tp_lookup_program_use_alias(cg, e->as.ident.name);
+    const char *use_alias =
+        tp_lookup_program_use_alias(cg, e->as.ident.name, e->tok.filename);
     if (use_alias && *use_alias && ny_module_path_exists(cg, use_alias)) {
       int n = snprintf(out, out_cap, "%s", use_alias);
       return n > 0 && (size_t)n < out_cap;
