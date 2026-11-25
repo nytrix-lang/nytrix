@@ -1299,6 +1299,7 @@ int64_t rt_free_temp(int64_t ptr);
 int64_t rt_free_temp_guard1(int64_t ptr, int64_t g0);
 int64_t rt_free_temp_guard2(int64_t ptr, int64_t g0, int64_t g1);
 int64_t rt_free_temp_guard3(int64_t ptr, int64_t g0, int64_t g1, int64_t g2);
+uint64_t rt_alloc_count_total(void);
 int64_t rt_free_temp_loop(int64_t old_v, int64_t init_v, int64_t next_v,
                            int64_t owned);
 int64_t rt_ptr_add(int64_t ptr, int64_t offset);

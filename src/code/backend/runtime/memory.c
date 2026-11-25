@@ -147,8 +147,33 @@ static inline rt_alloc_tls_t *rt_alloc_tls_get(void) {
     return &g_rt_main_alloc_tls;
   return rt_alloc_tls_slow(tp);
 }
+
+/*
+ * Allocation counter for the thread that owns g_rt_main_alloc_tls. It has a
+ * single writer, so a relaxed load/store pair replaces the lock-prefixed
+ * increment, which had to drain the header stores just before it on every
+ * allocation. Other threads keep counting in g_ny_alloc_count.
+ */
+static _Atomic uint64_t g_rt_owner_alloc_count;
+static inline void rt_alloc_count_bump(const rt_alloc_tls_t *tls) {
+  if (__builtin_expect(tls == &g_rt_main_alloc_tls, 1)) {
+    atomic_store_explicit(
+        &g_rt_owner_alloc_count,
+        atomic_load_explicit(&g_rt_owner_alloc_count, memory_order_relaxed) + 1,
+        memory_order_relaxed);
+    return;
+  }
+  atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
+}
+#define RT_OWNER_ALLOC_COUNT()                                                 \
+  atomic_load_explicit(&g_rt_owner_alloc_count, memory_order_relaxed)
 #else
 static inline rt_alloc_tls_t *rt_alloc_tls_get(void) { return &g_rt_alloc_tls; }
+static inline void rt_alloc_count_bump(const rt_alloc_tls_t *tls) {
+  (void)tls;
+  atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
+}
+#define RT_OWNER_ALLOC_COUNT() ((uint64_t)0)
 #endif
 
 static inline bool rt_block_chunk_live_get(const rt_block_chunk_t *c,
@@ -1254,7 +1279,7 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
   *(uint64_t *)((char *)p + 24) = 0;
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
-  atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
+  rt_alloc_count_bump(tls);
   if (__builtin_expect(bump, 1)) {
     rt_block_chunk_live_set(tls->block_cur_chunk, (uintptr_t)res, 1u);
   } else if (__builtin_expect(cached_chunk != NULL, 1)) {
@@ -1344,7 +1369,7 @@ int64_t rt_malloc_i64(int64_t size) {
   *(uint64_t *)((char *)p + 24) = 0;
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
-  atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
+  rt_alloc_count_bump(tls);
   if (__builtin_expect(bump, 1)) {
     rt_block_chunk_live_set(tls->block_cur_chunk, (uintptr_t)res, 1u);
   } else if (__builtin_expect(cached_chunk != NULL, 1)) {
@@ -2072,6 +2097,12 @@ int64_t rt_drop_owned_slot(int64_t slot_ptr) {
   return rt_drop_owned(v);
 }
 
+uint64_t rt_alloc_count_total(void) {
+  return (uint64_t)atomic_load_explicit(&g_ny_alloc_count,
+                                        memory_order_relaxed) +
+         RT_OWNER_ALLOC_COUNT();
+}
+
 int64_t rt_pool_release(void) {
   int64_t freed_count = 0;
   rt_alloc_tls_t *tls = rt_alloc_tls_get();
@@ -2106,8 +2137,7 @@ static void rt_report_runtime_counters(void) {
     if (atomic_exchange_explicit(&g_ny_counter_reported, true,
                                  memory_order_relaxed))
       return;
-    uint_fast64_t allocs =
-        atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+    uint_fast64_t allocs = rt_alloc_count_total();
     uint_fast64_t reallocs =
         atomic_load_explicit(&g_ny_realloc_count, memory_order_relaxed);
     fprintf(stderr,
@@ -2133,8 +2163,7 @@ int64_t rt_runtime_cleanup(void) {
     FILE *out = fopen(emit_report, "ab");
     if (out) {
       extern atomic_uint_fast64_t g_ny_gc_alloc_count;
-      uint_fast64_t allocs =
-          atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+      uint_fast64_t allocs = rt_alloc_count_total();
       uint_fast64_t gc_allocs =
           atomic_load_explicit(&g_ny_gc_alloc_count, memory_order_relaxed);
       allocs = UINT_FAST64_MAX - allocs < gc_allocs ? UINT_FAST64_MAX

@@ -81,6 +81,23 @@ static inline uint64_t _bi_div_u128_u64(uint64_t high, uint64_t low,
 }
 
 /*
+ * Two-by-one reciprocal of a normalized divisor, floor((2^128 - 1) / d) -
+ * 2^64. Loops divide by the same scale over and over, and the hardware
+ * 128/64 division behind it costs tens of cycles, so the last divisor's value
+ * is kept per thread (d has its top bit set, so 0 never matches).
+ */
+static inline uint64_t _bi_reciprocal_cached(uint64_t d) {
+  static _Thread_local uint64_t last_d, last_inv;
+  if (d == last_d)
+    return last_inv;
+  uint64_t rem = 0;
+  uint64_t inv = _bi_div_u128_u64(~d, UINT64_MAX, d, &rem);
+  last_d = d;
+  last_inv = inv;
+  return inv;
+}
+
+/*
  * Möller-Granlund Algorithm 4 (udiv_qrnnd_preinv): exact 2-by-1 limb division
  * for normalized d >= 2^63, u1 < d, and v = floor((2^128 - 1) / d) - 2^64.
  */
@@ -128,9 +145,12 @@ static inline int64_t _bi_alloc(size_t word_count) {
 }
 
 static int64_t _bi_from_i64(int64_t v);
-static inline bool _bi_read_heap_limbs(int64_t v, int *sign,
-                                       const uint64_t **limbs, size_t *words,
-                                       uint64_t small[1]);
+/* Forced inline: every arithmetic entry decodes one or two operands, and an
+ * out-of-line call keeps sign/limbs/words in memory across six saved
+ * registers; that was a third of a 4-limb add. */
+static inline __attribute__((always_inline)) bool
+_bi_read_heap_limbs(int64_t v, int *sign, const uint64_t **limbs, size_t *words,
+                    uint64_t small[1]);
 
 typedef struct {
   int sign;
@@ -884,10 +904,8 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
   bool use_adx = _bn_has_adx();
 #endif
   uint64_t inverse = 0;
-  if (!direct_division) {
-    uint64_t inv_rem = 0;
-    inverse = _bi_div_u128_u64(~divisor, UINT64_MAX, divisor, &inv_rem);
-  }
+  if (!direct_division)
+    inverse = _bi_reciprocal_cached(divisor);
   for (size_t jj = m + 1; jj-- > 0;) {
     size_t j = jj;
     uint64_t qhat, rhat;
@@ -3142,9 +3160,9 @@ static inline bool _bi_try_add_limb2(int64_t a, int64_t b, int sub_b,
   return _bi_try_add_limb2_kind(a, b, sub_b, 0, out);
 }
 
-static inline bool _bi_read_heap_limbs(int64_t v, int *sign,
-                                       const uint64_t **limbs, size_t *words,
-                                       uint64_t small[1]) {
+static inline __attribute__((always_inline)) bool
+_bi_read_heap_limbs(int64_t v, int *sign, const uint64_t **limbs, size_t *words,
+                    uint64_t small[1]) {
   if (!sign || !limbs || !words || !small)
     return false;
   *sign = 0;
@@ -3152,7 +3170,7 @@ static inline bool _bi_read_heap_limbs(int64_t v, int *sign,
   *words = 0;
   small[0] = 0;
   if (is_int(v)) {
-    int64_t raw = rt_untag_v(v);
+    int64_t raw = v >> NY_VALUE_INT_SHIFT;
     if (raw == 0)
       return true;
     *sign = raw < 0 ? -1 : 1;
@@ -3162,6 +3180,43 @@ static inline bool _bi_read_heap_limbs(int64_t v, int *sign,
   }
   if (!is_ptr(v))
     return false;
+  /*
+   * First allocator chunk: the same liveness, size, tag and length checks as
+   * the generic path below, written out so the decode stays in registers.
+   */
+  {
+    uintptr_t c_end =
+        atomic_load_explicit(&g_rt_chunk0_end, memory_order_acquire);
+    uintptr_t c_start =
+        atomic_load_explicit(&g_rt_chunk0_start, memory_order_relaxed);
+    uintptr_t p = (uintptr_t)v;
+    if (p - c_start < c_end - c_start && !(p & 15u)) {
+      const _Atomic(uint8_t) *live =
+          (const _Atomic(uint8_t) *)atomic_load_explicit(&g_rt_chunk0_live,
+                                                         memory_order_relaxed);
+      if (atomic_load_explicit(&live[(p - c_start) >> 4],
+                               memory_order_acquire)) {
+        const int64_t *h = (const int64_t *)p;
+        int64_t raw_size = h[-3];
+        size_t heap = (size_t)((raw_size & 1) ? raw_size >> 1 : raw_size);
+        int64_t sv = h[0], wv = h[1];
+        if (heap < 16u || h[-1] != TAG_BIGINT || !is_int(sv) || !is_int(wv))
+          return false;
+        int64_t sraw = sv >> NY_VALUE_INT_SHIFT;
+        int64_t wraw = wv >> NY_VALUE_INT_SHIFT;
+        if (wraw < 0 || (uint64_t)wraw > (heap - 16u) / sizeof(uint64_t))
+          return false;
+        const uint64_t *l = (const uint64_t *)(p + 16u);
+        size_t n = (size_t)wraw;
+        while (n > 0 && l[n - 1] == 0)
+          n--;
+        *limbs = l;
+        *words = n;
+        *sign = n == 0 ? 0 : (sraw < 0 ? -1 : (sraw > 0 ? 1 : 0));
+        return true;
+      }
+    }
+  }
   uintptr_t base = (uintptr_t)v;
   size_t heap_size = 0;
   bool managed = rt_heap_size_fast(v, &heap_size);
@@ -3174,8 +3229,8 @@ static inline bool _bi_read_heap_limbs(int64_t v, int *sign,
   memcpy(&words_v, (const void *)(base + 8u), sizeof(words_v));
   if (tag != TAG_BIGINT || !is_int(sign_v) || !is_int(words_v))
     return false;
-  int64_t s = rt_untag_v(sign_v);
-  int64_t w = rt_untag_v(words_v);
+  int64_t s = sign_v >> NY_VALUE_INT_SHIFT;
+  int64_t w = words_v >> NY_VALUE_INT_SHIFT;
   if (w < 0 || (uint64_t)w > SIZE_MAX / sizeof(uint64_t))
     return false;
   size_t n = (size_t)w;
@@ -3287,10 +3342,15 @@ static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
       memcpy(rl, al, aw * sizeof(*al));
   } else if (as == bs) {
     uint64_t carry = 0;
-    size_t n = aw > bw ? aw : bw;
-    for (size_t i = 0; i < n; ++i) {
-      __uint128_t sum =
-          (__uint128_t)(i < aw ? al[i] : 0) + (i < bw ? bl[i] : 0) + carry;
+    const uint64_t *ll = aw >= bw ? al : bl, *sl = aw >= bw ? bl : al;
+    size_t n = aw >= bw ? aw : bw, m = aw >= bw ? bw : aw, i = 0;
+    for (; i < m; ++i) {
+      __uint128_t sum = (__uint128_t)ll[i] + sl[i] + carry;
+      rl[i] = (uint64_t)sum;
+      carry = (uint64_t)(sum >> 64);
+    }
+    for (; i < n; ++i) {
+      __uint128_t sum = (__uint128_t)ll[i] + carry;
       rl[i] = (uint64_t)sum;
       carry = (uint64_t)(sum >> 64);
     }
@@ -4100,10 +4160,8 @@ static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
   uint64_t divisor = vn[n - 1];
   bool use_preinv = m >= 2u;
   uint64_t inverse = 0;
-  if (use_preinv) {
-    uint64_t inv_rem = 0;
-    inverse = _bi_div_u128_u64(~divisor, UINT64_MAX, divisor, &inv_rem);
-  }
+  if (use_preinv)
+    inverse = _bi_reciprocal_cached(divisor);
 #if defined(__x86_64__) && !defined(_WIN32) &&                                 \
     (defined(__GNUC__) || defined(__clang__))
   bool use_adx = _bn_has_adx();

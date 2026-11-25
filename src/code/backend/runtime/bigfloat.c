@@ -425,6 +425,22 @@ static inline uint64_t bf_div_u128_u64(uint64_t high, uint64_t low,
 }
 
 /*
+ * floor((2^128 - 1) / d) - 2^64 for a normalized d, cached per thread for the
+ * last divisor: repeated division by one value skips the hardware divide
+ * (d has its top bit set, so the zero initial key never matches).
+ */
+static inline uint64_t bf_reciprocal_cached(uint64_t d) {
+  static _Thread_local uint64_t last_d, last_inv;
+  if (d == last_d)
+    return last_inv;
+  uint64_t rem = 0;
+  uint64_t inv = bf_div_u128_u64(~d, UINT64_MAX, d, &rem);
+  last_d = d;
+  last_inv = inv;
+  return inv;
+}
+
+/*
  * Möller-Granlund Algorithm 4 (udiv_qrnnd_preinv): exact 2-by-1 limb division
  * for normalized d >= 2^63, u1 < d, and v = floor((2^128 - 1) / d) - 2^64.
  */
@@ -550,10 +566,8 @@ static bool mag_div(bf_mag_t *q, bool *inexact, const bf_mag_t *u,
   uint64_t divisor = vn[n - 1];
   bool use_preinv = m >= 2u;
   uint64_t inv = 0;
-  if (use_preinv) {
-    uint64_t inv_rem = 0;
-    inv = bf_div_u128_u64(~divisor, UINT64_MAX, divisor, &inv_rem);
-  }
+  if (use_preinv)
+    inv = bf_reciprocal_cached(divisor);
   for (size_t jj = m + 1; jj-- > 0;) {
     size_t j = jj;
     uint64_t qhat, rhat;

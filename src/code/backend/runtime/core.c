@@ -8995,10 +8995,8 @@ int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line) {
     g_trace_profile_child_ns[g_cs_depth] = 0;
     g_trace_profile_child_cpu_ns[g_cs_depth] = 0;
     if (profile_enabled) {
-      extern atomic_uint_fast64_t g_ny_alloc_count;
       extern atomic_uint_fast64_t g_ny_gc_alloc_count;
-      g_trace_profile_alloc_start[g_cs_depth] =
-          atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+      g_trace_profile_alloc_start[g_cs_depth] = rt_alloc_count_total();
       g_trace_profile_gc_alloc_start[g_cs_depth] =
           atomic_load_explicit(&g_ny_gc_alloc_count, memory_order_relaxed);
     }
@@ -9031,10 +9029,8 @@ int64_t rt_trace_exit(void) {
     uint64_t cpu_child = g_trace_profile_child_cpu_ns[frame];
     uint64_t cpu_exclusive =
         cpu_elapsed >= cpu_child ? cpu_elapsed - cpu_child : 0;
-    extern atomic_uint_fast64_t g_ny_alloc_count;
     extern atomic_uint_fast64_t g_ny_gc_alloc_count;
-    uint64_t alloc_end =
-        atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+    uint64_t alloc_end = rt_alloc_count_total();
     uint64_t gc_alloc_end =
         atomic_load_explicit(&g_ny_gc_alloc_count, memory_order_relaxed);
     uint64_t alloc_start = g_trace_profile_alloc_start[frame];
@@ -10236,7 +10232,7 @@ int64_t rt_get_ny_counter(int64_t idx_v) {
   int64_t idx = rt_untag_v(idx_v);
   uint64_t val = 0;
   if (idx == 0)
-    val = atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+    val = rt_alloc_count_total();
   else if (idx == 1)
     val = atomic_load_explicit(&g_ny_realloc_count, memory_order_relaxed);
   else if (idx == 2)
@@ -10245,10 +10241,8 @@ int64_t rt_get_ny_counter(int64_t idx_v) {
 }
 
 int64_t rt_runtime_alloc_count(void) {
-  extern atomic_uint_fast64_t g_ny_alloc_count;
   extern atomic_uint_fast64_t g_ny_gc_alloc_count;
-  uint64_t count =
-      atomic_load_explicit(&g_ny_alloc_count, memory_order_relaxed);
+  uint64_t count = rt_alloc_count_total();
   uint64_t gc_count =
       atomic_load_explicit(&g_ny_gc_alloc_count, memory_order_relaxed);
   count = UINT64_MAX - count < gc_count ? UINT64_MAX : count + gc_count;
