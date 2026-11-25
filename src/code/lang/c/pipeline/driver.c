@@ -1519,6 +1519,21 @@ static char *nyc_apply_entry_notes(const char *name, const char *text) {
     out = nyc_text_insert(out, label_offset, prefix);
     if (!out) {
       free(prefix);
+      return NULL;
+    }
+    /*
+     * The record follows the label: its section is link-ordered to the
+     * function symbol, which LLVM's assembler requires to be defined (in a
+     * section) already. GNU as accepts either order.
+     */
+    size_t after_label = label_offset + (size_t)n + strlen(name) + 2;
+    snprintf(prefix, note_size,
+             "\t.pushsection __patchable_function_entries,"
+             "\"awo\",@progbits,%s\n\t.align 8\n"
+             "\t.quad .Lnyc_pfe_%zu\n\t.popsection\n",
+             name, id);
+    out = nyc_text_insert(out, after_label, prefix);
+    free(prefix);
   }
   return out;
 }
