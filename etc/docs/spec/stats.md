@@ -5355,4 +5355,79 @@ marked EXTERN), revcomp (1.6 us; NYR spills block-local temporaries in the
 unrolled body), fhourstones NYC (inlining `won`/`evaluate` disables their
 full unroll), cd NYR (wrapping `-x` blocks the fold).
 
+### BigInt in-place results, decode fast path, and raw-registry slabs
+
+bigint-oracle NYR was the last fixture clearly above 2x of C (2.55x on a
+quiet host: 9.3 ms vs GMP's 3.66 ms). A 4-limb `bigint_add` cost 619
+instructions: two operand decodes (~90 each, out of line), the add (~180),
+`rt_malloc_impl` (~137) and `rt_free_temp` of the value it replaced (~105).
+GMP's `mpz_add(ox, oa, ob)` writes into `ox` and allocates nothing.
+
+Landed:
+
+- **Forced-inline operand decode with a first-chunk fast path**
+  (`runtime/bigint.c`). `_bi_read_heap_limbs` was a call even where marked
+  `inline` (the runtime is one unity translation unit and the inliner's unit
+  growth budget runs out), so sign/limbs/words went through memory. It is now
+  `always_inline`, and an object in the allocator's first chunk is checked
+  (live byte, size, tag, length) without the generic `rt_heap_size_fast` and
+  `rt_untag_v` calls. 4-limb add loop: 274 M -> 233 M cycles.
+- **In-place BigInt results** (`passes/mem/temp_recycle.c` `tr_fuse_into`,
+  `NYTRIX_NO_TEMP_INTO=1`). `n = rt_bigint_{add,sub,div}(a, b)` followed in
+  the same block by the recycle of the value it overwrites
+  (`rt_free_temp_guardN(p, n, a, b)` or the loop form
+  `rt_free_temp_loop(p, init, n, owned)`) becomes
+  `rt_bigint_{add,sub,div}_into[_loop](p, ...)`. The free proves `p` dead;
+  moving that point up to the producer is sound when nothing in between
+  observes `p` or a copy of it (no use, no memory read, no call other than
+  another temporary's recycle, where `p` may appear as an identity guard).
+  The runtime entries write the result into `p`'s limbs when `p` is a
+  recyclable temporary (`rt_temp_reuse_bytes`: chunk-backed, live, magic, tag,
+  not immortal) distinct from both operands with room for the result, and
+  otherwise compute normally and recycle `p` with the original guard
+  semantics. Division reuses `p` on the short (2-8 limb) and one-limb paths.
+  Add loop: 568 -> 335 instructions per add.
+- **Cached two-by-one reciprocal** (`bigint.c`, `bigfloat.c`): the last
+  normalized divisor's `floor((2^128-1)/d) - 2^64` is kept per thread, so a
+  loop dividing by one scale skips the hardware 128/64 `div` (14% of
+  `rt_bigint_div` samples).
+- **Owner-thread allocation counter** (`memory.c`): the thread that owns
+  `g_rt_main_alloc_tls` counts allocations with a relaxed load/store instead
+  of `lock inc`, which waited for the header stores just before it on every
+  allocation; other threads keep the atomic. Readers use
+  `rt_alloc_count_total()`.
+- **Raw-registry slabs from huge-page arenas** (`memory.c`): registry nodes
+  for `malloc_raw`/`calloc_raw` blocks came from separate 12 KiB `malloc`
+  slabs; gcbench keeps ~250 K raw blocks alive and took 3,300 extra 4 KiB
+  faults for their nodes. Slabs are now carved from 8 MiB `MADV_HUGEPAGE`
+  mappings (never returned). gcbench page faults 10,751 -> 7,817 (C: 7,419).
+- **Unrolled 4 x 4 limb product and a one-limb `bf_exact_i64` path**
+  (`bigint.c`, `bigfloat.c`): `_bn_words_mul` spent 273 instructions on a
+  4 x 4 product in size dispatch and per-row add-mul calls; a constant-bound
+  schoolbook (fully unrolled) and a variable one for up to 4 x 4 replace them
+  (162 per call including the trim). `bf_exact_i64` reads a default-precision
+  value with one significant limb straight from its top limb.
+
+Results (quiet host, checksums unchanged; A/B of HEAD 6f397070 against HEAD
+plus these changes, all 110 fixtures on both routes, no other row moved
+beyond noise):
+
+| fixture | route | before | after | C |
+|---|---|---|---|---|
+| bigint-oracle | NYR bench (JIT) | 9.3 ms (2.52x) | 7.0 ms (1.90x) | 3.68 ms |
+| bigint-oracle | LLVM bench | 9.1 ms | 6.9 ms | |
+| bigint-oracle | NYR AOT instructions | 99.2 M | 70.2 M | |
+| gcbench | NYR bench (JIT) | 44.8-46.7 ms (2.0-2.1x) | 38.7-39.1 ms (1.72-1.77x) | 22.0 ms |
+
+Rejected:
+
+- **Donating the dead value to the next allocation** (`rt_temp_donate` before
+  any BigInt/BigFloat producer, the result `malloc` taking the parked block,
+  `rt_temp_donate_end` after): the donate validation (~94 instructions) plus
+  the end call (~31) cost as much as the `rt_free_temp` (~108) they replaced,
+  and `malloc`'s donor path costs what a pool pop does. JIT 8.08 -> 8.18 ms.
+- **Fibonacci hashing of raw-registry buckets**: no change in chain walks, and
+  it scattered consecutive allocations that the old `(p >> 4) ^ (p >> 12)`
+  fold kept in neighbouring buckets.
+
 </details>
