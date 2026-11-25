@@ -1,0 +1,60 @@
+shape ui_anim_motion {
+  family "ui/animation"
+  generator "embedded"
+  features ["ny", "ui", "animation", "spring", "easing"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "anim tests passed"
+  source ny <<'NY'
+use core
+use core.os.ui.anim as anim
+fn near(f64 a, f64 b, f64 eps=0.0001) bool { a - b < eps && b - a < eps }
+;; Every curve starts at 0 and ends at 1.
+for c in ["linear", "in-quad", "quad", "in-out-quad", "in-cubic", "cubic", "in-out-cubic", "quint", "expo", "in-out-expo", "back", "elastic", "bounce"] {
+   assert(near(anim.ease(c, 0.0), 0.0) && near(anim.ease(c, 1.0), 1.0), "endpoints " + c)
+}
+assert(near(anim.ease_in_out_cubic(0.5), 0.5), "symmetric midpoint")
+assert(anim.ease_out_back(0.8) > 1.0, "back overshoots")
+assert(near(anim.tween(10.0, 20.0, 0.5, 1.0, "linear"), 15.0), "tween")
+;; A critically damped spring converges without overshoot.
+def crit = anim.spring(2.0, 1.0)
+mut pos = 0.0
+mut vel = 0.0
+mut peak = 0.0
+mut i = 0
+while i < 120 {
+   def r = anim.spring_step(crit, pos, vel, 100.0, 1.0 / 60.0)
+   pos = float(r.get(0)) vel = float(r.get(1))
+   if pos > peak { peak = pos }
+   i += 1
+}
+assert(near(pos, 100.0, 0.05) && peak <= 100.0 + 1e-6, "critical: settles, no overshoot")
+;; An under-damped spring overshoots, then settles.
+def wobbly = anim.spring(2.0, 0.3)
+pos = 0.0 vel = 0.0 peak = 0.0 i = 0
+while i < 600 {
+   def r = anim.spring_step(wobbly, pos, vel, 100.0, 1.0 / 60.0)
+   pos = float(r.get(0)) vel = float(r.get(1))
+   if pos > peak { peak = pos }
+   i += 1
+}
+assert(peak > 105.0 && near(pos, 100.0, 0.05), "under-damped overshoots then settles")
+;; Huge frame times stay stable (closed form, not Euler).
+def big = anim.spring_step(anim.spring(2.0, 0.5), 0.0, 0.0, 1.0, 5.0)
+assert(near(float(big.get(0)), 1.0, 0.01), "stable with a 5 s step")
+;; Animator: first request snaps, later ones move toward the new target.
+mut a = anim.animator()
+a = anim.step(a, 1.0 / 60.0)
+assert(near(anim.value(a, "x", 10.0), 10.0) && !anim.busy(a), "first value snaps")
+a = anim.step(a, 1.0 / 60.0)
+def v1 = anim.value(a, "x", 50.0)
+assert(v1 > 10.0 && v1 < 50.0 && anim.busy(a), "moves toward a new target")
+mut f = 0
+while f < 240 { a = anim.step(a, 1.0 / 60.0) anim.value(a, "x", 50.0) f += 1 }
+assert(near(anim.value(a, "x", 50.0), 50.0) && !anim.busy(a), "comes to rest")
+def mid = anim.mix_color([0.0, 0.0, 0.0, 1.0], [1.0, 0.5, 0.0, 1.0], 0.5)
+assert(near(float(mid.get(0)), 0.5) && near(float(mid.get(1)), 0.25), "colour lerp")
+print("anim tests passed")
+NY
+}

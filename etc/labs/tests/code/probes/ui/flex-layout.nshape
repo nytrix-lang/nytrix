@@ -1,0 +1,71 @@
+shape ui_flex_layout {
+  family "ui/layout"
+  generator "embedded"
+  features ["ny", "ui", "layout", "flex"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "layout tests passed"
+  source ny <<'NY'
+use core
+use core.os.ui.flex as flex
+fn _near(any a, f64 b) bool { def f64 d = float(a) - b d < 0.01 && d > -0.01 }
+;; App shell: header, sidebar + main, footer.
+def ui = flex.node({"id": "root", "dir": "col", "w": "grow", "h": "grow", "pad": 10, "gap": 10}, [
+   flex.node({"id": "head", "w": "grow", "h": 40}),
+   flex.node({"id": "body", "w": "grow", "h": "grow", "gap": 10}, [
+      flex.node({"id": "side", "w": 200, "h": "grow"}),
+      flex.node({"id": "main", "w": "grow", "h": "grow"}),
+      flex.node({"id": "aside", "w": "25%", "h": "50%"})]),
+   flex.node({"id": "foot", "w": "grow", "h": 24})])
+def r = flex.solve(ui, 1000.0, 600.0)
+def head = flex.rect_of(r, "head")
+assert(_near(head.get(0), 10.0) && _near(head.get(1), 10.0) && _near(head.get(2), 980.0) && _near(head.get(3), 40.0), "header spans the padded width")
+def body = flex.rect_of(r, "body")
+assert(_near(body.get(1), 60.0) && _near(body.get(3), 600.0 - 20.0 - 40.0 - 24.0 - 20.0), "body grows to the remaining height")
+def side = flex.rect_of(r, "side")
+def aside = flex.rect_of(r, "aside")
+def main_r = flex.rect_of(r, "main")
+assert(_near(aside.get(2), 980.0 * 0.25) && _near(aside.get(3), float(body.get(3)) * 0.5), "percent sizes")
+assert(_near(main_r.get(2), 980.0 - 200.0 - 245.0 - 20.0), "grow takes the rest")
+assert(_near(main_r.get(0), 10.0 + 200.0 + 10.0), "main follows the sidebar and gap")
+assert(_near(flex.rect_of(r, "foot").get(1), 600.0 - 10.0 - 24.0), "footer at the bottom")
+;; Weighted grow with a max clamp re-shares the rest.
+def g1 = {"grow": 1}
+def g2 = {"grow": 2}
+def grow_tree = flex.node({"id": "r", "w": 300, "h": 10}, [
+   flex.node({"id": "a", "w": g1, "h": 10}),
+   flex.node({"id": "b", "w": g2, "h": 10, "max_w": 50})])
+def g = flex.solve(grow_tree, 300.0, 10.0)
+assert(_near(flex.rect_of(g, "b").get(2), 50.0) && _near(flex.rect_of(g, "a").get(2), 250.0), "max clamp re-shared")
+;; Justify and align.
+def just_tree = flex.node({"id": "r", "w": 100, "h": 50, "justify": "center", "align": "center"}, [flex.node({"id": "c", "w": 20, "h": 10})])
+def j = flex.solve(just_tree, 100.0, 50.0)
+assert(_near(flex.rect_of(j, "c").get(0), 40.0) && _near(flex.rect_of(j, "c").get(1), 20.0), "centered child")
+def between_tree = flex.node({"id": "r", "w": 100, "h": 10, "justify": "between"}, [
+   flex.node({"id": "a", "w": 10, "h": 10}), flex.node({"id": "b", "w": 10, "h": 10}), flex.node({"id": "c", "w": 10, "h": 10})])
+def sb = flex.solve(between_tree, 100.0, 10.0)
+assert(_near(flex.rect_of(sb, "b").get(0), 45.0) && _near(flex.rect_of(sb, "c").get(0), 90.0), "space between")
+;; Overflow shrinks fit children down to their minimum.
+def shrink_tree = flex.node({"id": "r", "w": 100, "h": 10}, [
+   flex.node({"id": "a", "w": "fit", "h": 10, "min_w": 30}, [flex.node({"id": "a1", "w": 80, "h": 10})]),
+   flex.node({"id": "b", "w": "fit", "h": 10, "min_w": 10}, [flex.node({"id": "b1", "w": 60, "h": 10})])])
+def s = flex.solve(shrink_tree, 100.0, 10.0)
+assert(_near(float(flex.rect_of(s, "a").get(2)) + float(flex.rect_of(s, "b").get(2)), 100.0), "shrunk to fit")
+;; Wrapped text grows the height of its container.
+def text_tree = flex.node({"id": "card", "dir": "col", "w": 120, "h": "fit", "pad": 4}, [flex.text("para", "one two three four five six", {"w": "grow", "wrap": true})])
+def t = flex.solve(text_tree, 400.0, 400.0)
+def para = t.get("boxes").get(1)
+assert(para.get("lines").len >= 2 && _near(flex.rect_of(t, "card").get(3), float(para.get("lines").len) * 16.0 + 8.0), "wrapped text height")
+;; Scroll offsets children and clips them; floats anchor to the parent.
+def badge_float = {"anchor": "tr", "x": 4, "y": -4}
+def scroll_tree = flex.node({"id": "list", "dir": "col", "w": 100, "h": 50, "scroll_y": 30}, [
+   flex.node({"id": "i0", "w": "grow", "h": 40}), flex.node({"id": "i1", "w": "grow", "h": 40}),
+   flex.node({"id": "badge", "w": 16, "h": 16, "float": badge_float})])
+def sc = flex.solve(scroll_tree, 100.0, 50.0)
+assert(_near(flex.rect_of(sc, "i1").get(1), 10.0), "scrolled child")
+assert(_near(flex.rect_of(sc, "badge").get(0), 88.0) && _near(flex.rect_of(sc, "badge").get(1), -4.0), "floating badge")
+assert(flex.boxes_at(sc, 50.0, 5.0).contains("i0") && !flex.boxes_at(sc, 50.0, 60.0).contains("i1"), "hit test honours clip")
+print("layout tests passed")
+NY
+}
