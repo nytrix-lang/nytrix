@@ -2008,6 +2008,11 @@ fn check_event(any win) any {
          return 0
       }
       def e0 = q0.get(head0)
+      ;; The caller reads the event after this returns; resetting the queue
+      ;; below releases its list, so the window keeps the event alive until
+      ;; the next poll. Without this a drained queue handed back a freed
+      ;; event (type 0, data 0) and injected clicks were lost.
+      win["_last_event"] = e0
       head0 += 1
       if head0 >= q0.len {
          win["events"] = []
@@ -2076,6 +2081,7 @@ fn check_event(any win) any {
    mut q_n = q.len
    while head < q_n {
       def e = q.get(head)
+      cw["_last_event"] = e
       head += 1
       if head >= q_n {
          q = []
