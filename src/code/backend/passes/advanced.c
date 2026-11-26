@@ -6768,7 +6768,8 @@ bool nyr_addr_reassoc(nyr_func_t *f) {
       p = (size_t)db + 1;
     else
       continue;
-    while (p < f->len && f->data[p].op == NYIR_PHI &&
+    while (p < f->len &&
+           (f->data[p].op == NYIR_PHI || f->data[p].op == NYIR_NOP) &&
            cfg.inst_block[p] == cfg.inst_block[p - 1])
       ++p;
     bool members_after = true;
