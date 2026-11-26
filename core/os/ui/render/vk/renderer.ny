@@ -2310,6 +2310,7 @@ fn _pack_base_tex_word(int tex_id, int vc_mode) int {
    if band(vc_mode, 2) != 0 { flags = flags | 0x20000000 }
    if band(vc_mode, 8) != 0 { flags = flags | 0x04000000 }
    if band(vc_mode, 16) != 0 { flags = flags | 0x08000000 }
+   if band(vc_mode, 32) != 0 { flags = flags | 0x02000000 }
    if tex_id >= 0 && !_format_is_srgb(texture_format(tex_id)) { flags = flags | 0x02000000 }
    (tex_id >= 0 ? band(tex_id, 0xffff) : 0x80000000) | flags
 }

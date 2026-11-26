@@ -27,7 +27,7 @@ use core.os.ui.render.vk.pipeline (blend_op_pipeline, _ensure_circle_pipeline,
    _get_unlit_nocull_pipeline,
    push_constants)
 use core.os.ui.render.vk.renderer (_check_flush, _flush, _sync_pc, set_ui_material, set_unlit, set_target_pipeline)
-use core.os.ui.render.vk.texture (bind_texture, bind_default_texture, bindless_sync_texture_slot)
+use core.os.ui.render.vk.texture (bind_texture, bind_default_texture, bindless_sync_texture_slot, texture_format)
 
 mut _ui_rect_trace_hits = 0
 
@@ -191,9 +191,15 @@ fn _bind_texture_slot_fast(any tid) any {
 @inline
 fn _bind_vertex_texture_fast(any tex_id) any {
    _set_unlit_true_fast()
-   _ensure_ui_vertex_material_fast()
    mut tid = tex_id
    if !is_int(tid) || tid < 0 || tid >= _textures.len { tid = _default_texture }
+   ;; UI textured batches carry per-vertex texture indices (base_tex_id = -1),
+   ;; so _pack_base_tex_word cannot infer texture format from base_tex_id.
+   ;; Set bit 32 (baseTextureLinear) for UNORM textures so the unlit shader
+   ;; passes sRGB bytes through 1:1 instead of double-gamma-encoding them.
+   def int fmt = texture_format(tid)
+   def bool is_srgb = fmt == 43 || fmt == 50
+   _ensure_ui_vertex_material_mode_fast(is_srgb ? 12 : 44)
    _bind_texture_slot_fast(tid)
 }
 
