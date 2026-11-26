@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Trash</title>
+  <path fill="#f87171" d="M8 2.5H16V5H21V7.5H3V5H8Z"/>
+  <path fill="#f87171" fill-rule="evenodd" d="M5 9H19L18 19.5A2 2 0 0 1 16 21.5H8A2 2 0 0 1 6 19.5ZM9 11.5L9.5 18.8H11.2L10.9 11.5ZM13.1 11.5L12.8 18.8H14.5L15 11.5Z"/>
+</svg>

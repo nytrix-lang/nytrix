@@ -773,44 +773,68 @@ fn _next_event() any {
    window.check_event(window.get_win(_editor_get("win")))
 }
 
+def int EDITOR_ICON_RASTER = 192
+
+fn _editor_icon_tex(str name) int {
+   if gfx.get_backend_type() == RENDER_BACKEND_MOCK { return -1 }
+   def int tex = icons.icon_tex(name, EDITOR_ICON_RASTER)
+   if tex > 0 { return tex }
+   name == "file" ? -1 : icons.icon_tex("file", EDITOR_ICON_RASTER)
+}
+
 fn _draw_icon(str name, f64 x, f64 y, f64 size, any tint=C_TEXT) int {
-   if name == "vcs_branches" {
-      def f64 t = float(max(1.0, size / 10.0))
-      def f64 sx = x + size * 0.27
-      def f64 mx = x + size * 0.68
-      def f64 top = y + size * 0.78
-      def f64 bottom = y + size * 0.22
-      _fill_rect(sx, bottom, t, top - bottom, tint)
-      _fill_rect(sx, top - t, mx - sx, t, tint)
-      _fill_rect(sx, bottom, mx - sx, t, tint)
-      _fill_rect(mx - t, bottom + t, t, top - bottom - t * 2.0, tint)
-      def f64 node = float(max(t * 2.2, size * 0.22))
-      _fill_rect(sx - node * 0.5, top - node * 0.5, node, node, tint)
-      _fill_rect(mx - node * 0.5, top - node * 0.5, node, node, tint)
-      _fill_rect(mx - node * 0.5, bottom - node * 0.5, node, node, tint)
-      return 0
-   }
+   if size <= 0.0 { return 0 }
    if gfx.get_backend_type() == RENDER_BACKEND_MOCK {
-      if MOCK_BENCH_FAST { return 0 }
-      _stroke_rect(x, y, size, size, tint, 1.0)
+      if !MOCK_BENCH_FAST { _stroke_rect(x, y, size, size, tint, 1.0) }
       return 0
    }
-   def int raster_size = int(max(16.0, ceil(size)))
-   def tex = icons.icon_tex(name, raster_size)
-   if tex > 0 {
-      _draw_tex_rect(tex, x, y, size, size, tint)
-   } else {
-      _stroke_rect(x, y, size, size, tint, 1.0)
+   def int tex = _editor_icon_tex(name)
+   if tex <= 0 { return 0 }
+   def sz = gfx.texture_size(tex)
+   def f64 tw = float(sz.get(0, 0))
+   def f64 th = float(sz.get(1, 0))
+   if tw <= 0.0 || th <= 0.0 { return 0 }
+   def f64 scale = size / float(max(tw, th))
+   def f64 w = tw * scale
+   def f64 h = th * scale
+   _draw_tex_rect(tex, _snap_px(x + (size - w) * 0.5), _snap_px(y + (size - h) * 0.5), w, h, gfx.WHITE)
+}
+
+fn _editor_file_icon(dict e) str {
+   if bool(e.get("dir", false)) { return "folder" }
+   def name = to_str(e.get("name", ""))
+   def kind = to_str(e.get("kind", project.file_kind(name)))
+   def str ext = to_str(str.lower(ospath.extname(name)))
+   if kind == "term" || kind == "terminal" { return "terminal" }
+   if kind == "diff" { return "git_branch" }
+   if ext == ".ny" || ext == ".nyt" { return "nytrix" }
+   if ext == ".c" || ext == ".h" { return "nyc" }
+   case kind {
+      "code" -> "file_code"
+      "doc" -> "text_file"
+      "data" -> "dict"
+      "image" -> "image"
+      "model" -> "file_3d"
+      "shader" -> "asset_material"
+      "font" -> "str"
+      "audio" -> "sound"
+      "video" -> "play"
+      "archive" -> "package"
+      "binary" -> "compiler"
+      _ -> "file"
    }
-   0
 }
 
-fn _layout_sw(dict lay) f64 {
-   float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0))
-}
-
-fn _layout_sh(dict lay) f64 {
-   float(lay.get("status_y", 0.0)) + float(lay.get("status_h", ed.STATUS_H))
+fn _editor_symbol_icon(str kind) str {
+   case kind {
+      "fn" -> "callable"
+      "struct" -> "collections"
+      "enum" -> "dict"
+      "module" -> "mod"
+      "main" -> "play"
+      "def", "mut" -> "tag"
+      _ -> "atom"
+   }
 }
 
 fn _fit_chrome_text(int font, str text, f64 width) str {
@@ -826,6 +850,14 @@ fn _fit_chrome_text(int font, str text, f64 width) str {
       else { hi = mid - 1 }
    }
    str.utf8_slice(text, 0, lo) + "..."
+}
+
+fn _layout_sw(dict lay) f64 {
+   float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0))
+}
+
+fn _layout_sh(dict lay) f64 {
+   float(lay.get("status_y", 0.0)) + float(lay.get("status_h", ed.STATUS_H))
 }
 
 fn _fit_rect(f64 x, f64 y, f64 w, f64 h, f64 sw, f64 sh, f64 margin=8.0) list {
@@ -1175,7 +1207,7 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
       if scale_h < scale { scale = scale_h }
       _draw_tex_rect(tex, x + pad + 12.0, y + pad + 14.0, iw * scale, ih * scale, gfx.WHITE)
    } else {
-      _draw_icon("asset_image", x + pad + 24.0, y + pad + 24.0, 44.0, C_WARN)
+      _draw_icon("image", x + pad + 24.0, y + pad + 24.0, 44.0, C_WARN)
       _text(int(_editor_get("font_body")), "SVG preview unavailable", x + pad + 82.0, y + pad + 24.0, C_WARN)
    }
    mut lines = _svg_meta_lines(path, 0)
@@ -3959,14 +3991,15 @@ fn _term_tab_hit(dict lay, f64 mx, f64 my) dict {
    def start_x = x + 6.0
    mut i = 0
    while i < n {
-      def tx = start_x + float(i) * tw
-      if mx >= tx && mx < tx + tw {
-         return _tab_hit_result(mx >= tx + tw - 23.0 ? "close" : "select", i, true)
+      def f64 tx = _snap_px(start_x + float(i) * tw)
+      def f64 right = tx + float(min(tw - 2.0, x + w - tx - 40.0))
+      if right - tx > 36.0 && mx >= tx && mx < right && my >= y + 3.0 && my < y + TERM_TAB_H - 2.0 {
+         return _tab_hit_result(mx >= right - 22.0 ? "close" : "select", i, true)
       }
       i += 1
    }
-   def plus_x = start_x + float(n) * tw + 3.0
-   if mx >= plus_x && mx <= plus_x + 24.0 { return _tab_hit_result("new", n, true) }
+   def f64 plus_x = _snap_px(start_x + float(n) * tw + 3.0)
+   if plus_x + 24.0 < x + w - 8.0 && mx >= plus_x && mx < plus_x + 24.0 { return _tab_hit_result("new", n, true) }
    _tab_hit_result("", -1, false)
 }
 
@@ -7395,8 +7428,9 @@ fn _top_tab_hit(dict lay, f64 mx, f64 my) dict {
    mut i = 0
    while i < bs.len {
       def x = start_x + float(i) * tab_w
-      if mx >= x && mx <= x + tab_w && my >= 3.0 && my <= top_h - 3.0 {
-         return _tab_hit_result(mx >= x + tab_w - 24.0 ? "close" : "select", i, true)
+      def f64 right = min(x + tab_w - 2.0, sw - 6.0)
+      if right - x >= 36.0 && mx >= x && mx < right && my >= 3.0 && my < top_h - 2.0 {
+         return _tab_hit_result(mx >= right - 22.0 ? "close" : "select", i, true)
       }
       i += 1
    }
@@ -7439,18 +7473,18 @@ fn _draw_top(dict lay, int fps) int {
    while i < bs.len {
       def b = bs.get(i, {})
       def x = 6.0 + float(i) * tab_w
-      if x < sw - 8.0 {
+      def f64 right = min(x + tab_w - 2.0, sw - 6.0)
+      if right - x >= 36.0 {
          def on = i == active
          def dirty = bool(b.get("dirty", false))
-         def kind = to_str(b.get("kind", project.file_kind(to_str(b.get("name", "")))))
-         def icon = kind == "image" ? "asset_image" : (kind == "diff" ? "vcs_branches" : (kind == "term" ? "terminal" : "code_edit"))
+         def icon = _editor_file_icon(b)
          _fill_rect(x, 3.0, min(tab_w - 2.0, sw - x - 6.0), top_h - 5.0, on ? C_PANE_2 : C_PANE)
          _stroke_rect(x, 3.0, min(tab_w - 2.0, sw - x - 6.0), top_h - 5.0, on ? C_LINE_2 : C_LINE, 1.0)
          if on { _fill_rect(x, top_h - 2.0, min(tab_w - 2.0, sw - x - 6.0), 2.0, C_ACCENT) }
          _draw_icon(icon, x + 8.0, _center_y(3.0, top_h - 5.0, 14.0), 14.0, on ? C_ACCENT : C_MUTED)
          def tab_label = _modeline_text((dirty ? "* " : "") + to_str(b.get("name", "buffer")))
-         runs = _append_text_run(runs, _preview_modeline(tab_label, max(20.0, tab_w - 50.0)), x + 28.0, tab_text_y, on ? U_TEXT : U_MUTED)
-         runs = _append_text_run(runs, "x", x + tab_w - 18.0, tab_text_y, on ? U_MUTED : U_DIM)
+         runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_modeline")), tab_label, right - x - 52.0), x + 28.0, tab_text_y, on ? U_TEXT : U_MUTED)
+         _draw_icon("close", right - 18.0, _center_y(3.0, top_h - 5.0, 12.0), 12.0, on ? C_MUTED : C_DIM)
       }
       i += 1
    }
@@ -7474,8 +7508,11 @@ fn _draw_section_title(str icon, str title, f64 x, f64 y, f64 w, str right="") i
    def text_y = _row_text_y(int(_editor_get("font_small")), y, SECTION_H)
    _draw_icon(icon, x + 8.0, icon_y, 15.0, C_MUTED)
    mut runs = []
-   runs = _append_text_run(runs, title, x + 30.0, text_y, U_MUTED)
-   if right.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), right, x + w - 8.0, text_y, U_MUTED) }
+   def int font = int(_editor_get("font_small"))
+   def tail = _fit_chrome_text(font, right, max(0.0, w * 0.40 - 8.0))
+   def f64 tail_w = _measure_ui(font, tail, 0.0)
+   runs = _append_text_run(runs, _fit_chrome_text(font, title, w - 46.0 - tail_w), x + 30.0, text_y, U_MUTED)
+   if tail.len > 0 { runs = _append_right_run(runs, font, tail, x + w - 8.0, text_y, U_MUTED) }
    _flush_rects()
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    0
@@ -7534,7 +7571,7 @@ fn _toggle_rail_section(str section) int {
 
 fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
    def active = _rail_tab()
-   def tabs = [["files", "file_tree", "Files"], ["timeline", "history", "Time"], ["git", "vcs_branches", "Git"]]
+   def tabs = [["files", "tree", "Files"], ["timeline", "history", "Time"], ["git", "git_branch", "Git"]]
    def tab_w = w / 3.0
    mut runs = []
    mut i = 0
@@ -7547,8 +7584,14 @@ fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
       def bg_color = on ? _pack(gfx.color_alpha(C_ACCENT, 0.13)) : _pack(C_PANE_2)
       _fill_rect(tx, y, tab_w, RAIL_TABS_H, bg_color)
       _stroke_rect(tx, y, tab_w, RAIL_TABS_H, on ? C_ACCENT : C_LINE, 1.0)
-      _draw_icon(to_str(t.get(1, "")), tx + 8.0, _center_y(y, RAIL_TABS_H, 15.0), 15.0, on ? C_ACCENT : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(to_str(t.get(2, "")), int(max(4.0, (tab_w - 30.0) / 7.0))), tx + 29.0, text_y, on ? U_TEXT : U_MUTED)
+      def int font = int(_editor_get("font_small"))
+      def label = to_str(t.get(2, ""))
+      def f64 label_w = _measure_ui(font, label, 32.0)
+      def bool show_label = tab_w >= label_w + 31.0
+      def f64 group_w = show_label ? label_w + 21.0 : 15.0
+      def f64 ix = _snap_px(tx + (tab_w - group_w) * 0.5)
+      _draw_icon(to_str(t.get(1, "")), ix, _center_y(y, RAIL_TABS_H, 15.0), 15.0, on ? C_ACCENT : C_MUTED)
+      if show_label { runs = _append_text_run(runs, label, ix + 21.0, text_y, on ? U_TEXT : U_MUTED) }
       i += 1
    }
    _flush_rects()
@@ -7561,7 +7604,7 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
    def rows = project.changes(_editor_get("project_state"))
    def counts = project.counts(_editor_get("project_state"))
    def dirty = int(counts.get("modified", 0)) + int(counts.get("added", 0)) + int(counts.get("deleted", 0)) + int(counts.get("untracked", 0))
-   _draw_section_title("vcs_branches", "CHANGES", x, y, w, project.branch(_editor_get("project_state")) + (dirty > 0 ? " +" + to_str(dirty) : ""))
+   _draw_section_title("git_branch", "CHANGES", x, y, w, project.branch(_editor_get("project_state")) + (dirty > 0 ? " +" + to_str(dirty) : ""))
    def visible = project.visible_count(h)
    def scroll = project.clamp_scroll(int(_editor_get("st").get("git_scroll", 0)), rows.len, visible)
    _editor_get("st")["git_scroll"] = scroll
@@ -7574,8 +7617,8 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
       def col = _git_color(code)
       def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, project.TREE_ROW_H)
       def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, project.TREE_ROW_H)
-      _draw_icon(project.file_icon(e), x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, col)
-      runs = _append_text_run(runs, widgets.preview(to_str(e.get("rel", "")), int(max(8.0, (w - 74.0) / 7.2))), x + 34.0, text_y, U_MUTED)
+      _draw_icon(_editor_file_icon(e), x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, col)
+      runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_small")), to_str(e.get("rel", "")), w - 64.0), x + 34.0, text_y, U_MUTED)
       runs = _queue_git_badge(runs, code, x + w - 8.0, yy)
       i += 1
    }
@@ -7622,9 +7665,12 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
       def detail = to_str(row.get(2, ""))
       def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, project.TREE_ROW_H)
       def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, project.TREE_ROW_H)
-      _draw_icon(kind == "buffer" ? "text_file" : "status_indicator", x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(label, int(max(8.0, (w - 50.0) / 7.2))), x + 34.0, text_y, kind == "buffer" ? U_TEXT : U_MUTED)
-      if detail.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), widgets.preview(detail, 12), x + w - 8.0, text_y, U_DIM) }
+      _draw_icon(kind == "buffer" ? "text_file" : "info", x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
+      def int font = int(_editor_get("font_small"))
+      def tail = _fit_chrome_text(font, detail, max(0.0, w * 0.32 - 8.0))
+      def f64 tail_w = _measure_ui(font, tail, 0.0)
+      runs = _append_text_run(runs, _fit_chrome_text(font, label, w - 50.0 - tail_w), x + 34.0, text_y, kind == "buffer" ? U_TEXT : U_MUTED)
+      if tail.len > 0 { runs = _append_right_run(runs, font, tail, x + w - 8.0, text_y, U_DIM) }
       i += 1
    }
    if rows.len == 0 { runs = _append_text_run(runs, "no timeline yet", x + 12.0, y + 36.0, U_MUTED) }
@@ -7634,20 +7680,7 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
 }
 
 fn _draw_tree_disclosure(bool open, f64 x, f64 y, any tint) int {
-   if open {
-      _fill_rect(x + 2.0, y + 7.0, 2.0, 2.0, tint)
-      _fill_rect(x + 4.0, y + 5.0, 2.0, 2.0, tint)
-      _fill_rect(x + 6.0, y + 3.0, 2.0, 2.0, tint)
-      _fill_rect(x + 8.0, y + 5.0, 2.0, 2.0, tint)
-      _fill_rect(x + 10.0, y + 7.0, 2.0, 2.0, tint)
-   } else {
-      _fill_rect(x + 2.0, y + 9.0, 2.0, 2.0, tint)
-      _fill_rect(x + 4.0, y + 7.0, 2.0, 2.0, tint)
-      _fill_rect(x + 6.0, y + 5.0, 2.0, 2.0, tint)
-      _fill_rect(x + 4.0, y + 3.0, 2.0, 2.0, tint)
-      _fill_rect(x + 2.0, y + 1.0, 2.0, 2.0, tint)
-   }
-   0
+   _draw_icon(open ? "collapse" : "chevron", x, y, 12.0, tint)
 }
 
 fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
@@ -7656,7 +7689,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
    def dirty = int(counts.get("modified", 0)) + int(counts.get("added", 0)) + int(counts.get("deleted", 0)) + int(counts.get("untracked", 0))
    def branch = project.branch(_editor_get("project_state"))
    def right = (branch.len > 0 ? branch : "cwd") + (dirty > 0 ? " +" + to_str(dirty) : "")
-   _draw_section_title("file_tree", ospath.basename(project.root(_editor_get("project_state"))), x, y, w, right)
+   _draw_section_title("tree", ospath.basename(project.root(_editor_get("project_state"))), x, y, w, right)
    def rows = project.tree(_editor_get("project_state"))
    def visible = project.visible_count(h)
    def scroll = project.clamp_scroll(int(_editor_get("st").get("tree_scroll", 0)), rows.len, visible)
@@ -7676,7 +7709,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
       def selected = _project_selection_contains(e)
       if selected { _fill_rect(x + 4.0, yy, w - 8.0, row_h, gfx.color_alpha(C_ACCENT, active ? 0.25 : 0.14)) }
       elif active { _fill_rect(x + 4.0, yy, w - 8.0, row_h, gfx.color_alpha(C_ACCENT, 0.18)) }
-      mut ix = x + 8.0 + float(depth) * 12.0
+      mut f64 ix = x + 8.0 + float(min(float(depth) * 12.0, max(0.0, w - 86.0)))
       def arrow_slot = 16.0
       if e.get("dir", false) {
          _draw_tree_disclosure(bool(e.get("open", false)), ix + 1.0, _center_y(yy, row_h, 12.0), selected ? C_ACCENT : C_MUTED)
@@ -7686,8 +7719,8 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
       def text_x = file_x + 24.0
       def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, row_h)
       def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, row_h)
-      _draw_icon(project.file_icon(e), file_x, _center_y(yy, row_h, 16.0), 16.0, (active || selected) ? C_ACCENT : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(to_str(e.get("name", "")), int(max(8.0, (w - (text_x - x) - 26.0) / 7.2))), text_x, text_y, (active || selected) ? U_TEXT : U_MUTED)
+      _draw_icon(_editor_file_icon(e), file_x, _center_y(yy, row_h, 16.0), 16.0, (active || selected) ? C_ACCENT : C_MUTED)
+      runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_small")), to_str(e.get("name", "")), x + w - text_x - 30.0), text_x, text_y, (active || selected) ? U_TEXT : U_MUTED)
       runs = _queue_git_badge(runs, to_str(e.get("git", "")), x + w - 8.0, yy)
       i += 1
    }
@@ -7706,7 +7739,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
 
 fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
    def syms = _outline_symbols()
-   _draw_section_title("graph_edit", "OUTLINE", x, y, w, to_str(syms.len))
+   _draw_section_title("tree", "OUTLINE", x, y, w, to_str(syms.len))
    def visible = _outline_visible(h)
    def scroll = _outline_clamp(int(_editor_get("st").get("outline_scroll", 0)), syms.len, visible)
    _editor_get("st")["outline_scroll"] = scroll
@@ -7721,8 +7754,8 @@ fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
       def active = line == int(_editor_get("st").get("cursor_line", 0))
       if active { _fill_rect(x + 4.0, yy, w - 8.0, row_h, gfx.color_alpha(C_ACCENT, 0.16)) }
       def text_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
-      _draw_icon(to_str(s.get("icon", "graph_node")), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, active ? C_ACCENT : C_MUTED)
-      runs = _append_text_run(runs, widgets.preview(to_str(s.get("name", "")), int(max(8.0, (w - 72.0) / 7.2))), x + 32.0, text_y, active ? U_TEXT : U_MUTED)
+      _draw_icon(_editor_symbol_icon(to_str(s.get("kind", ""))), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, active ? C_ACCENT : C_MUTED)
+      runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_small")), to_str(s.get("name", "")), w - 48.0 - _measure_ui(int(_editor_get("font_small")), to_str(line + 1), 0.0)), x + 32.0, text_y, active ? U_TEXT : U_MUTED)
       runs = _append_right_run(runs, int(_editor_get("font_small")), to_str(line + 1), x + w - 8.0, text_y, U_MUTED)
       i += 1
    }
@@ -7758,7 +7791,7 @@ fn _draw_rail(dict lay) int {
    def show_project = bool(_editor_get("st").get("show_project", true))
    def show_outline = bool(_editor_get("st").get("show_outline", true))
    if !show_project && !show_outline {
-      _draw_section_title("box_container", "PANES", x, body_y, w, "hidden")
+      _draw_section_title("box", "PANES", x, body_y, w, "hidden")
       _text(int(_editor_get("font_small")), "C-SPC t p project  C-SPC t o outline", x + 12.0, body_y + 36.0, C_MUTED)
       return 0
    }
@@ -7903,23 +7936,28 @@ fn _draw_terminal(dict lay) int {
    while i < n {
       def tx = _snap_px(x + 6.0 + float(i) * tw)
       def f64 tab_w = float(min(tw - 2.0, x + w - tx - 40.0))
-      if tab_w <= 16.0 { break }
+      if tab_w <= 36.0 { break }
       def on = i == active
       def text_y = _row_text_y(int(_editor_get("font_small")), y + 3.0, TERM_TAB_H - 5.0)
       _fill_rect(tx, y + 3.0, tab_w, TERM_TAB_H - 5.0, on ? C_PANE : C_CHIP)
       _stroke_rect(tx, y + 3.0, tab_w, TERM_TAB_H - 5.0, on ? C_ACCENT : C_LINE, 1.0)
       if on { _fill_rect(tx, y + TERM_TAB_H - 2.0, tab_w, 2.0, C_ACCENT) }
-      runs = _append_text_run(runs, widgets.preview(termpane.tab_title(_editor_get("term_state"), i), int(max(4.0, (tab_w - 30.0) / float(_editor_get("FONT_SMALL_ADV"))))), tx + 9.0, text_y, on ? U_TEXT : U_MUTED)
-      runs = _append_text_run(runs, "x", tx + tab_w - 15.0, text_y, on ? U_MUTED : U_DIM)
+      _draw_icon("terminal", tx + 7.0, _center_y(y + 3.0, TERM_TAB_H - 5.0, 14.0), 14.0)
+      runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_small")), termpane.tab_title(_editor_get("term_state"), i), tab_w - 50.0), tx + 27.0, text_y, on ? U_TEXT : U_MUTED)
+      _draw_icon("close", tx + tab_w - 18.0, _center_y(y + 3.0, TERM_TAB_H - 5.0, 12.0), 12.0)
       i += 1
    }
    def plus_x = _snap_px(x + 6.0 + float(n) * tw + 3.0)
    if plus_x + 24.0 < x + w - 8.0 {
       _fill_rect(plus_x, y + 3.0, 24.0, TERM_TAB_H - 5.0, C_CHIP)
       _stroke_rect(plus_x, y + 3.0, 24.0, TERM_TAB_H - 5.0, C_LINE, 1.0)
-      runs = _append_center_run(runs, int(_editor_get("font_small")), "+", plus_x + 12.0, _row_text_y(int(_editor_get("font_small")), y + 3.0, TERM_TAB_H - 5.0), U_ACCENT)
+      _draw_icon("add", plus_x + 5.0, _center_y(y + 3.0, TERM_TAB_H - 5.0, 14.0), 14.0)
    }
-   runs = _append_right_run(runs, int(_editor_get("font_small")), "F6 shell  F7 repl", x + w - 10.0, _row_text_y(int(_editor_get("font_small")), y + 3.0, TERM_TAB_H - 5.0), U_DIM)
+   def int hint_font = int(_editor_get("font_small"))
+   def f64 hint_width = _measure_ui(hint_font, "F6 shell  F7 repl", 0.0)
+   if plus_x + 34.0 + hint_width <= x + w - 10.0 {
+      runs = _append_right_run(runs, hint_font, "F6 shell  F7 repl", x + w - 10.0, _row_text_y(hint_font, y + 3.0, TERM_TAB_H - 5.0), U_DIM)
+   }
    _flush_rects()
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    _stroke_rect(x, y, w, h, to_str(_editor_get("st").get("focus", "editor")) == "terminal" ? C_ACCENT : C_LINE, to_str(_editor_get("st").get("focus", "editor")) == "terminal" ? 2.0 : 1.0)
@@ -7927,23 +7965,38 @@ fn _draw_terminal(dict lay) int {
 }
 
 fn _command_icon(str tag, str id) str {
-   if id == "run" { return "asset_play" }
-   if id == "check" || id == "lsp-diagnostics" { return "import_check" }
-   if id == "format" { return "code_highlighter" }
-   if id == "diff-clipboard" { return "vcs_branches" }
+   if id == "save" || id == "save-all" { return "save" }
+   if id == "copy" || id == "copy-path" || id == "copy-relative-path" || id == "copy-line-info" || id == "duplicate-line" { return "copy" }
+   if id == "cut" || id == "kill-line" { return "cut" }
+   if id == "paste" { return "paste" }
+   if id == "delete-file" || id == "delete-line" { return "trash" }
+   if id == "new-file" || id == "new-scratch" { return "add" }
+   if id == "kill-buffer" || id == "terminal-close" || id == "cancel" || id == "quit" { return "close" }
+   if id == "undo" || id == "undo-file-op" || id == "go-back" || id == "prev" || id == "find-prev" { return "back" }
+   if id == "redo" || id == "redo-file-op" || id == "go-forward" || id == "next" || id == "find-next" { return "forward" }
+   if id == "open-file" || id == "open" { return "folder" }
+   if id == "refresh" || id == "reload" { return "refresh" }
+   if id == "rename" { return "code_edit" }
+   if id == "go-definition" { return "callable" }
+   if id == "lsp-hover" { return "info" }
+   if id == "lsp-complete" { return "list" }
+   if id == "run" { return "play" }
+   if id == "check" || id == "lsp-diagnostics" { return "check" }
+   if id == "format" { return "format" }
+   if id == "diff-clipboard" { return "git_branch" }
    if id == "palette" || tag == "search" { return "search" }
    if tag == "file" { return "file" }
-   if tag == "diff" { return "vcs_branches" }
-   if tag == "run" { return "asset_script" }
+   if tag == "diff" { return "git_branch" }
+   if tag == "run" { return "script" }
    if tag == "debug" { return "debug" }
-   if tag == "project" { return "file_tree" }
+   if tag == "project" { return "tree" }
    if tag == "edit" { return "code_edit" }
    if tag == "buffer" { return "text_file" }
-   if tag == "pane" { return "box_container" }
+   if tag == "pane" { return "box" }
    if tag == "terminal" { return "terminal" }
-   if tag == "lsp" { return "asset_world" }
-   if tag == "toggle" { return "check_button" }
-   "status_indicator"
+   if tag == "lsp" { return "globe" }
+   if tag == "toggle" { return "check" }
+   "info"
 }
 
 fn _command_color(str tag) any {
@@ -8038,10 +8091,10 @@ fn _draw_palette(f64 sw, f64 sh) int {
    while i < rows && start + i < matches.len {
       def row = matches.get(start + i)
       def actual = start + i
-      def detail = to_str(row.get(2, ""))
+      def shortcut = to_str(row.get(2, ""))
       def label = to_str(row.get(0, ""))
-      def info = to_str(row.get(3, ""))
-      if gui.selectable("pal_" + to_str(actual), label + (info.len > 0 ? "   " + info : ""), actual == sel_idx, w - 28.0, float(PALETTE_ROW_H) - 4.0, detail, -1, false) { chosen = actual }
+      def int tex = _editor_icon_tex(_command_icon(to_str(row.get(4, "")), to_str(row.get(1, ""))))
+      if gui.selectable("pal_" + to_str(actual), label + (shortcut.len > 0 ? "   " + shortcut : ""), actual == sel_idx, w - 28.0, float(PALETTE_ROW_H) - 4.0, "", tex, false) { chosen = actual }
       _probe_note_rect("pal_" + to_str(i))
       i += 1
    }
@@ -8100,8 +8153,10 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    mut small_runs = []
    def header_body_y = _row_text_y(int(_editor_get("font_body")), y, 30.0)
    def header_small_y = _row_text_y(int(_editor_get("font_small")), y, 30.0)
-   body_runs = _append_text_run(body_runs, prefix.len > 0 ? prefix : "completion", x + 36.0, header_body_y, U_TEXT)
-   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), "Enter accept  Esc close", x + w - 12.0, header_small_y, U_MUTED)
+   def int sf = int(_editor_get("font_small"))
+   def hint = _fit_chrome_text(sf, "Enter accept  Esc close", w * 0.48)
+   body_runs = _append_text_run(body_runs, _fit_chrome_text(int(_editor_get("font_body")), prefix.len > 0 ? prefix : "completion", w - 56.0 - _measure_ui(sf, hint, 0.0)), x + 36.0, header_body_y, U_TEXT)
+   small_runs = _append_right_run(small_runs, sf, hint, x + w - 12.0, header_small_y, U_MUTED)
    _fill_rect(x + 12.0, y + 30.0, w - 24.0, 1.0, C_LINE)
    mut i = 0
    while i < rows {
@@ -8113,9 +8168,11 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
       def body_y = _row_text_y(int(_editor_get("font_body")), yy - 4.0, 24.0)
       def small_y = _row_text_y(int(_editor_get("font_small")), yy - 4.0, 24.0)
       if active { _fill_rect(x + 8.0, yy - 4.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-      _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "code_edit" : "doc"), x + 14.0, _center_y(yy - 4.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
-      body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
-      small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
+      _draw_icon(kind == "lsp" ? "network" : (kind == "keyword" ? "code_edit" : "callable"), x + 14.0, _center_y(yy - 4.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
+      def tail = _fit_chrome_text(sf, to_str(item.get("detail", "")), w * 0.37)
+      def f64 tail_w = _measure_ui(sf, tail, 0.0)
+      body_runs = _append_text_run(body_runs, _fit_chrome_text(int(_editor_get("font_body")), to_str(item.get("label", "")), w - 64.0 - tail_w), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
+      small_runs = _append_right_run(small_runs, sf, tail, x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
       i += 1
    }
    _flush_rects()
@@ -8582,26 +8639,26 @@ fn _draw_status(dict lay) int {
    def f64 clip_adv = float(max(1.0, float(_editor_get("FONT_MODELINE_CLIP_ADV"))))
    def f64 right_need = float(str.utf8_len(right)) * clip_adv + 12.0
    def f64 left_need = float(str.utf8_len(left)) * clip_adv + 32.0
-   def f64 right_w = float(min(right_need, max(128.0, content_w * 0.48)))
-   def f64 left_w = float(min(left_need, max(96.0, content_w * 0.38)))
+   def f64 right_w = float(min(right_need, content_w * 0.48))
+   def f64 left_w = float(min(left_need, content_w * 0.38))
    def f64 left_x = pad + 8.0
    def f64 right_x = sw - pad - 8.0
    def f64 right_start = right_x - right_w
-   def left_icon = mode == "MOD" ? "status_warning" : (mode == "RO" ? "lock" : "status_success")
+   def left_icon = mode == "MOD" ? "alert" : (mode == "RO" ? "lock" : "check")
    def f64 left_text_x = left_x + 20.0
    def f64 mid_icon_x = left_x + left_w + 10.0
    def f64 mid_x = mid_icon_x + 20.0
-   def f64 mid_w = float(max(24.0, right_start - mid_x - 12.0))
+   def f64 mid_w = float(max(0.0, right_start - mid_x - 12.0))
    def text_y = _text_center_y_for(int(_editor_get("font_modeline")), y, h)
    _fill_rect(0.0, y, 4.0, h, mode == "MOD" ? C_WARN : (mode == "RO" ? C_CYAN : C_ACCENT))
    mut runs = []
-   runs = _append_text_run(runs, _preview_modeline(left, max(24.0, left_w - 20.0)), left_text_x, text_y, mode == "MOD" ? U_WARN : (mode == "RO" ? U_CYAN : U_ACCENT))
-   runs = _append_text_run(runs, _preview_modeline(mid, mid_w), mid_x, text_y, chord.pending(_editor_get("chord_state")) ? U_ACCENT : (dirty > 0 ? U_ACCENT_2 : U_DIM))
-   runs = _append_right_run(runs, int(_editor_get("font_modeline")), _preview_modeline(right, right_w), right_x, text_y, live_status != "ready" ? U_ACCENT : U_MUTED)
+   runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_modeline")), left, left_w - 20.0), left_text_x, text_y, mode == "MOD" ? U_WARN : (mode == "RO" ? U_CYAN : U_ACCENT))
+   runs = _append_text_run(runs, _fit_chrome_text(int(_editor_get("font_modeline")), mid, mid_w), mid_x, text_y, chord.pending(_editor_get("chord_state")) ? U_ACCENT : (dirty > 0 ? U_ACCENT_2 : U_DIM))
+   runs = _append_right_run(runs, int(_editor_get("font_modeline")), _fit_chrome_text(int(_editor_get("font_modeline")), right, right_w), right_x, text_y, live_status != "ready" ? U_ACCENT : U_MUTED)
    _flush_rects()
    def icon_y = _center_y(y, h, 14.0)
    _draw_icon(left_icon, left_x, icon_y, 14.0, mode == "MOD" ? C_WARN : (mode == "RO" ? C_CYAN : C_ACCENT))
-   _draw_icon("vcs_branches", mid_icon_x, icon_y, 14.0, dirty > 0 ? C_ACCENT_2 : C_DIM)
+   if mid_w > 0.0 { _draw_icon("git_branch", mid_icon_x, icon_y, 14.0, dirty > 0 ? C_ACCENT_2 : C_DIM) }
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_modeline")), runs) }
    0
 }
