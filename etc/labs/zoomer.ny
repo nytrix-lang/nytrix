@@ -314,14 +314,13 @@ fn camera_pan(f64 dx, f64 dy) any {
    0
 }
 
-;; Keeps the capture covering the window: panning stops at the edge of the
-;; screenshot instead of showing black outside it. When the capture is smaller
-;; than the window at the current scale the limit is zero and it stays centred.
+;; Keeps the capture reachable: allows free click-and-drag panning at any zoom
+;; level (including 1:1) while preventing the screenshot from being lost off-screen.
 fn clamp_camera(f64 win_w, f64 win_h) any {
+   win_w win_h
    if shot_w <= 0 || shot_h <= 0 { return 0 }
-   def f64 s = math.max(cam_scale, 0.0001)
-   def f64 lim_x = math.max(0.0, float(shot_w) * 0.5 - win_w / (2.0 * s))
-   def f64 lim_y = math.max(0.0, float(shot_h) * 0.5 - win_h / (2.0 * s))
+   def f64 lim_x = float(shot_w) * 0.5
+   def f64 lim_y = float(shot_h) * 0.5
    cam_x = clamp(cam_x, -lim_x, lim_x)
    cam_y = clamp(cam_y, -lim_y, lim_y)
    cam_tx = clamp(cam_tx, -lim_x, lim_x)
@@ -329,7 +328,7 @@ fn clamp_camera(f64 win_w, f64 win_h) any {
    0
 }
 
-fn update_camera(f64 dt, bool dragging, f64 win_w, f64 win_h) any {
+fn update_camera(f64 dt, bool dragging_now, f64 win_w, f64 win_h) any {
    ;; Lerp scale towards target (recenter animation).
    if float(math.abs(cam_target_scale - cam_scale)) > 0.001 {
       cam_scale = cam_scale + (cam_target_scale - cam_scale) * cf("scale_lerp_speed") * dt
@@ -350,19 +349,22 @@ fn update_camera(f64 dt, bool dragging, f64 win_w, f64 win_h) any {
       cam_ty = cam_y
       cam_delta_scale = cam_delta_scale - cam_delta_scale * dt * cf("scale_friction")
    }
-   ;; Drag inertia.
-   if !dragging && math.sqrt(cam_vx * cam_vx + cam_vy * cam_vy) > VELOCITY_THRESHOLD {
-      cam_x = cam_x + cam_vx * dt
-      cam_y = cam_y + cam_vy * dt
-      cam_tx = cam_x
-      cam_ty = cam_y
-      cam_vx = cam_vx - cam_vx * dt * cf("drag_friction")
-      cam_vy = cam_vy - cam_vy * dt * cf("drag_friction")
+   ;; While dragging, the image tracks the pointer 1:1 with zero lerp lag.
+   if !dragging_now {
+      ;; Drag inertia.
+      if math.sqrt(cam_vx * cam_vx + cam_vy * cam_vy) > VELOCITY_THRESHOLD {
+         cam_x = cam_x + cam_vx * dt
+         cam_y = cam_y + cam_vy * dt
+         cam_tx = cam_x
+         cam_ty = cam_y
+         cam_vx = cam_vx - cam_vx * dt * cf("drag_friction")
+         cam_vy = cam_vy - cam_vy * dt * cf("drag_friction")
+      }
+      ;; Keyboard pan and recenter animation.
+      def f64 lerp = clamp(cf("camera_position_lerp_speed") * dt, 0.0, 1.0)
+      cam_x = cam_x + (cam_tx - cam_x) * lerp
+      cam_y = cam_y + (cam_ty - cam_y) * lerp
    }
-   ;; Keyboard pan and recenter animation.
-   def f64 lerp = cf("camera_position_lerp_speed") * dt
-   cam_x = cam_x + (cam_tx - cam_x) * lerp
-   cam_y = cam_y + (cam_ty - cam_y) * lerp
    clamp_camera(win_w, win_h)
    0
 }
@@ -960,6 +962,197 @@ fn uv_y(f64 py, f64 win_h) f64 {
    0.5 + ((py - win_h * 0.5) / cam_scale + cam_y) / float(shot_h)
 }
 
+;; ---------------------------------------------------------------------------
+;; GPU focus / liquid-glass shader (Vulkan)
+;;
+;; Renders the desktop capture and optical liquid-glass flashlight bubble in a
+;; single per-pixel pass: exact 1:1 sRGB pass-through when the flashlight is
+;; off, and smooth SDF refraction, bevel chromatic dispersion, Fresnel rim
+;; specular, and band-free radial dimming when on. Falls back to the host mesh
+;; path on non-Vulkan backends.
+;; ---------------------------------------------------------------------------
+
+def str FOCUS_VS = """#version 450
+layout(location=1) in vec2 uv;
+layout(location=0) out vec2 vUv;
+void main() {
+   vUv = uv;
+   gl_Position = vec4(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y, 0.0, 1.0);
+}
+"""
+
+def str FOCUS_FS = """#version 450
+#extension GL_EXT_nonuniform_qualifier : enable
+layout(location=0) in vec2 vUv;
+layout(location=0) out vec4 outColor;
+layout(set=0, binding=0) uniform sampler2D texSamplers[1024];
+layout(push_constant) uniform ZoomerPC {
+   layout(offset=64) vec4 win_shot;
+   layout(offset=80) vec4 cam;
+   layout(offset=96) vec4 fl_pos;
+   layout(offset=112) vec4 fl_def;
+} pc;
+
+vec2 screenToUv(vec2 sp) {
+   return vec2(0.5) + ((sp - pc.win_shot.xy * 0.5) / max(pc.cam.z, 0.0001) + pc.cam.xy) / max(pc.win_shot.zw, vec2(1.0));
+}
+
+vec3 sampleCapture(int tid, vec2 uv) {
+   if (tid < 0 || tid >= 1024) { return vec3(0.043, 0.047, 0.063); }
+   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      vec2 pxOut = max(vec2(0.0), max(-uv, uv - vec2(1.0))) * pc.win_shot.zw * max(pc.cam.z, 0.0001);
+      float edge = max(pxOut.x, pxOut.y);
+      if (edge <= 1.25) { return vec3(0.18, 0.20, 0.25); }
+      return vec3(0.043, 0.047, 0.063);
+   }
+   return texture(texSamplers[nonuniformEXT(uint(tid))], uv).rgb;
+}
+
+float bubbleSdf(vec2 sp, out vec2 localNorm) {
+   float radius = max(2.0, pc.fl_pos.z);
+   vec2 d = sp - pc.fl_pos.xy;
+   vec2 st = pc.fl_def.xy;
+   float sl = length(st);
+   if (sl < 0.01) {
+      float len = length(d);
+      localNorm = len > 1e-4 ? d / len : vec2(0.0, -1.0);
+      return len - radius;
+   }
+   vec2 u = st / sl;
+   float along = dot(d, u);
+   float perp = -d.x * u.y + d.y * u.x;
+   float ra = clamp(radius * (1.0 + sl), radius * 0.5, radius * 2.0);
+   float rp = clamp(radius * (1.0 - pc.fl_pos.w), radius * 0.3, radius * 1.5);
+   float m = min(ra, rp);
+   vec2 q = vec2(along / ra, perp / rp);
+   float ql = length(q);
+   vec2 gLocal = ql > 1e-4 ? vec2(q.x / ra, q.y / rp) / ql : vec2(0.0, -1.0);
+   vec2 gWorld = u * gLocal.x + vec2(-u.y, u.x) * gLocal.y;
+   float gl = length(gWorld);
+   localNorm = gl > 1e-4 ? gWorld / gl : vec2(0.0, -1.0);
+   return ql * m - m;
+}
+
+void main() {
+   vec2 sp = vUv * pc.win_shot.xy;
+   int shotTid = int(pc.fl_def.z + 0.5);
+   int blurTid = int(pc.fl_def.w + 0.5);
+   float flShadow = pc.cam.w;
+
+   vec2 baseUv = screenToUv(sp);
+   if (flShadow <= 0.001) {
+      outColor = vec4(sampleCapture(shotTid, baseUv), 1.0);
+      return;
+   }
+
+   float dim = clamp(flShadow / 0.8, 0.0, 1.0);
+   vec2 grad;
+   float sd = bubbleSdf(sp, grad);
+   float radius = max(2.0, pc.fl_pos.z);
+
+   // Smooth blurred + deeply vignetted backdrop outside the glass.
+   vec3 sharpBg = sampleCapture(shotTid, baseUv);
+   vec3 blurBg = (blurTid >= 0 && blurTid < 1024) ? sampleCapture(blurTid, baseUv) : sharpBg;
+   vec3 bgBase = mix(sharpBg, blurBg, smoothstep(0.05, 0.45, dim));
+   float outerT = clamp(max(sd, 0.0) / max(radius * 1.15, 24.0), 0.0, 1.0);
+   float vig = mix(0.28, 0.0, smoothstep(0.0, 1.0, outerT));
+   float dropShadow = 1.0 - 0.55 * dim * exp(-max(sd, 0.0) / max(radius * 0.12, 8.0));
+   vec3 outsideCol = bgBase * mix(1.0, vig, dim) * dropShadow;
+
+   // Inside the optical liquid-glass lens.
+   float mask = 1.0 - smoothstep(-1.1, 1.1, sd);
+   if (mask <= 0.001) {
+      outColor = vec4(outsideCol, 1.0);
+      return;
+   }
+
+   // Bevel dome profile: flat/crystal-clear core with curved refractive rim.
+   float rimWidth = clamp(radius * 0.24, 14.0, 64.0);
+   float rimT = clamp(1.0 + sd / rimWidth, 0.0, 1.0); // 0 in core, 1 at rim
+   float bevel = rimT * rimT;
+   float domeSlope = bevel * 0.72;
+   vec3 N = normalize(vec3(grad * domeSlope, sqrt(max(0.04, 1.0 - domeSlope * domeSlope))));
+
+   // Radial magnification (1.75x center -> 1.0x rim) + physical Snell rim refraction.
+   vec2 d = sp - pc.fl_pos.xy;
+   float distNorm = clamp(length(d) / radius, 0.0, 1.0);
+   float zoom = mix(1.0, 1.0 + 0.75 * (1.0 - distNorm * distNorm), dim);
+   vec3 refr = refract(vec3(0.0, 0.0, -1.0), N, 1.0 / 1.45);
+   vec2 refrPx = refr.xy * rimWidth * 0.65 * dim;
+   vec2 glassSp = pc.fl_pos.xy + d / zoom + refrPx;
+
+   // Subtle chromatic dispersion only along the curved glass bevel.
+   float dispPx = bevel * 2.2 * dim;
+   vec2 uvR = screenToUv(glassSp + grad * dispPx);
+   vec2 uvG = screenToUv(glassSp);
+   vec2 uvB = screenToUv(glassSp - grad * dispPx);
+   vec3 glassCol = vec3(
+      sampleCapture(shotTid, uvR).r,
+      sampleCapture(shotTid, uvG).g,
+      sampleCapture(shotTid, uvB).b
+   );
+
+   // Studio Fresnel rim highlight + soft top-left specular arc + crisp edge.
+   float fresnel = pow(clamp(1.0 - N.z, 0.0, 1.0), 2.6);
+   vec3 lightDir = normalize(vec3(-0.55, -0.72, 0.42));
+   vec3 halfVec = normalize(lightDir + vec3(0.0, 0.0, 1.0));
+   float spec = pow(max(dot(N, halfVec), 0.0), 28.0) * bevel;
+   float rimLine = exp(-pow(abs(sd + 1.0) / 1.6, 2.0));
+   float topArc = clamp(dot(-grad, normalize(vec2(0.55, 0.80))) * 0.5 + 0.5, 0.0, 1.0);
+
+   glassCol += vec3(0.75, 0.86, 1.0) * fresnel * 0.14 * dim;
+   glassCol += vec3(1.0, 1.0, 1.0) * spec * 0.48 * dim;
+   glassCol += vec3(0.92, 0.96, 1.0) * rimLine * (0.14 + 0.26 * topArc * topArc) * dim;
+
+   outColor = vec4(mix(outsideCol, clamp(glassCol, 0.0, 1.0), mask), 1.0);
+}
+"""
+
+mut any focus_pipe = 0
+mut ptr focus_pc = 0
+
+fn init_focus_shader() bool {
+   if bool(focus_pipe) && focus_pc != 0 { return true }
+   if !gfx.vk_available() { return false }
+   def v = gfx.compile_shader(FOCUS_VS, "vert")
+   if !v { return false }
+   def f = gfx.compile_shader(FOCUS_FS, "frag")
+   if !f { return false }
+   focus_pipe = gfx.create_pipeline(v, f, 3, 0, 0, 0)
+   if !focus_pipe { return false }
+   focus_pc = malloc(64)
+   if !focus_pc { return false }
+   true
+}
+
+fn free_focus_shader() any {
+   if focus_pc != 0 { free(focus_pc) focus_pc = 0 }
+   focus_pipe = 0
+   0
+}
+
+fn draw_focus_gpu(f64 win_w, f64 win_h) bool {
+   if !focus_pipe || !focus_pc || shot_tex <= 0 { return false }
+   memset(focus_pc, 0, 64)
+   store32_f32(focus_pc, win_w, 0)
+   store32_f32(focus_pc, win_h, 4)
+   store32_f32(focus_pc, float(shot_w), 8)
+   store32_f32(focus_pc, float(shot_h), 12)
+   store32_f32(focus_pc, cam_x, 16)
+   store32_f32(focus_pc, cam_y, 20)
+   store32_f32(focus_pc, cam_scale, 24)
+   store32_f32(focus_pc, fl_shadow, 28)
+   store32_f32(focus_pc, fl_x, 32)
+   store32_f32(focus_pc, fl_y, 36)
+   store32_f32(focus_pc, math.max(2.0, fl_radius * cam_scale), 40)
+   store32_f32(focus_pc, fl_squeeze, 44)
+   store32_f32(focus_pc, fl_stretch_x, 48)
+   store32_f32(focus_pc, fl_stretch_y, 52)
+   store32_f32(focus_pc, float(shot_tex), 56)
+   store32_f32(focus_pc, float(blur_tex > 0 ? blur_tex : -1), 60)
+   gfx.draw_shader_rect(0.0, 0.0, win_w, win_h, focus_pipe, focus_pc, 64, 64)
+}
+
 fn draw_desktop(f64 win_w, f64 win_h) any {
    ;; Only swap in the blurred capture once the bubble has actually faded in, so
    ;; a quick toggle never drops a blurry frame over the desktop.
@@ -1489,7 +1682,7 @@ fn selftest() any {
    check(near(uv_x(101.0, 800.0) - uv_x(100.0, 800.0), 0.5 / 800.0, 0.000000001), "2x zoom halves the step")
    check(near(uv_x(800.0, 800.0), 0.75, 0.0001), "zoom halves the sampled span")
 
-   ;; Camera clamping: the capture keeps covering the window.
+   ;; Camera clamping: free pan across the capture, clamped to its half-extents.
    shot_w = 1920
    shot_h = 1080
    cam_scale = 1.0
@@ -1498,9 +1691,9 @@ fn selftest() any {
    cam_tx = cam_x
    cam_ty = cam_y
    clamp_camera(1280.0, 720.0)
-   check(near(cam_x, 320.0, 0.001), "camera x clamps to the capture edge")
-   check(near(cam_y, -180.0, 0.001), "camera y clamps to the capture edge")
-   check(near(cam_tx, 320.0, 0.001), "camera target clamps too")
+   check(near(cam_x, 960.0, 0.001), "camera x clamps to the capture half-width")
+   check(near(cam_y, -540.0, 0.001), "camera y clamps to the capture half-height")
+   check(near(cam_tx, 960.0, 0.001), "camera target clamps too")
 
    ;; Picker: the point under the pointer round-trips through capture space.
    shot_w = 800
@@ -1660,7 +1853,8 @@ if cbool("hide_cursor_on_flashlight") || start_pick {
 
 trace("window ready on " + gfx.get_active_backend_name())
 upload_textures()
-trace("textures " + to_str(shot_tex) + " " + to_str(blur_tex))
+def bool use_focus_gpu = init_focus_shader()
+trace("textures " + to_str(shot_tex) + " " + to_str(blur_tex) + " gpu_focus=" + to_str(use_focus_gpu))
 def bool headless = gfx.get_active_backend_name() == "mock"
 
 if shot_tex <= 0 {
@@ -1683,7 +1877,7 @@ font_small = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 14)
 
 if font_big > 0 { gfx.font_prepare(font_big, "0123456789ABCDEF#") }
 if font_small > 0 { gfx.font_prepare(font_small, "abcdefghijklmnopqrstuvwxyz0123456789 ,-/+") }
-flashlight_reset(0.0, 0.0)
+flashlight_reset(float(init_w) * 0.5, float(init_h) * 0.5)
 picker_on = start_pick
 
 ;; NYTRIX_ZOOMER_FLASHLIGHT=1 starts with the bubble on (handy for scripted
@@ -1730,16 +1924,28 @@ while running && !gfx.window_should_close(win) {
    def f64 dt = clamp(float(now - last_frame_ticks) / 1000000000.0, 0.0, 0.05)
    last_frame_ticks = now
 
-   def bool drag_now = window.mouse_down(win, 0) && !picker_on
-   if drag_now && prev_drag {
-      def f64 dx = (mouse_x - drag_prev_x) / cam_scale
-      def f64 dy = (mouse_y - drag_prev_y) / cam_scale
+   def bool btn_down = window.mouse_down(win, 0)
+   if !btn_down { dragging = false }
+   def bool drag_now = (dragging || btn_down) && !picker_on
+   if drag_now && !prev_drag {
+      drag_prev_x = mouse_x
+      drag_prev_y = mouse_y
+      cam_vx = 0.0
+      cam_vy = 0.0
+   } elif drag_now && prev_drag {
+      def f64 drag_scale = math.max(cam_scale, 0.0001)
+      def f64 dx = (mouse_x - drag_prev_x) / drag_scale
+      def f64 dy = (mouse_y - drag_prev_y) / drag_scale
       cam_x = cam_x - dx
       cam_y = cam_y - dy
       cam_tx = cam_x
       cam_ty = cam_y
-      cam_vx = -dx / math.max(dt, 0.0001)
-      cam_vy = -dy / math.max(dt, 0.0001)
+      def f64 vdt = math.max(dt, 0.004)
+      def f64 ivx = clamp(-dx / vdt, -6000.0, 6000.0)
+      def f64 ivy = clamp(-dy / vdt, -6000.0, 6000.0)
+      def f64 blend = clamp(dt * 18.0, 0.15, 0.55)
+      cam_vx = cam_vx + (ivx - cam_vx) * blend
+      cam_vy = cam_vy + (ivy - cam_vy) * blend
    }
    if drag_now {
       drag_prev_x = mouse_x
@@ -1749,10 +1955,12 @@ while running && !gfx.window_should_close(win) {
 
    hint_age = hint_age + dt
    update_camera(dt, drag_now, w, h)
-   update_flashlight(dt, mouse_x, mouse_y)
+   def f64 fl_target_x = (mouse_x <= 0.5 && mouse_y <= 0.5 && frames < 10) ? (w * 0.5) : mouse_x
+   def f64 fl_target_y = (mouse_x <= 0.5 && mouse_y <= 0.5 && frames < 10) ? (h * 0.5) : mouse_y
+   update_flashlight(dt, fl_target_x, fl_target_y)
    update_picker(mouse_x, mouse_y, w, h)
 
-   if !gfx.begin_frame_clear([0.10, 0.10, 0.10, 1.0]) {
+   if !gfx.begin_frame_clear([0.043, 0.047, 0.063, 1.0]) {
       surface_failures += 1
       if surface_failures >= 120 {
          eprint("zoomer: the render surface is unavailable")
@@ -1763,8 +1971,10 @@ while running && !gfx.window_should_close(win) {
    }
    surface_failures = 0
    gfx.set_ortho_2d(0.0, w, h, 0.0)
-   draw_desktop(w, h)
-   draw_flashlight(w, h)
+   if !use_focus_gpu || !draw_focus_gpu(w, h) {
+      draw_desktop(w, h)
+      draw_flashlight(w, h)
+   }
    draw_picker(w, h)
    draw_hint(w, h, hint_alpha(hint_age))
    if dump_pending { gfx.request_frame_capture() }
@@ -1800,6 +2010,7 @@ while running && !gfx.window_should_close(win) {
 
 if font_big > 0 { gfx.font_destroy(font_big) }
 if font_small > 0 { gfx.font_destroy(font_small) }
+free_focus_shader()
 free_shot()
 free_lens_tables()
 if shot_tex > 0 { gfx.texture_destroy(shot_tex) }
