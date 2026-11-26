@@ -3430,6 +3430,15 @@ static int repl_help_word_at(const char *buf, int len, int pos, char *out,
   return 1;
 }
 
+/*
+ * Multiline continuation support. The REPL driver asks the editor to hand
+ * control back when backspace is pressed on an empty continuation line, so the
+ * previous line can be reopened for editing, and can seed the next edit.
+ */
+const char *ny_readline_prefill = NULL;
+int ny_readline_allow_pop = 0;
+int ny_readline_pop_request = 0;
+
 char *ny_readline(const char *prompt) {
 #ifdef _WIN32
   HANDLE initial_hin = GetStdHandle(STD_INPUT_HANDLE);
@@ -3448,6 +3457,12 @@ char *ny_readline(const char *prompt) {
   buf[0] = '\0';
   int len = 0;
   int pos = 0;
+  ny_readline_pop_request = 0;
+  if (ny_readline_prefill && *ny_readline_prefill) {
+    if (repl_set_buffer_text(&buf, &cap, &len, &pos, ny_readline_prefill, 256))
+      pos = len;
+  }
+  ny_readline_prefill = NULL;
   int hist_idx = ny_hist_len;
   char *saved_buf = NULL;
   char *undo_buf = NULL;
@@ -3877,6 +3892,11 @@ char *ny_readline(const char *prompt) {
                         k == K_ALT_SHIFT_UP || k == K_ALT_SHIFT_DOWN ||
                         k == K_ALT_SHIFT_HOME || k == K_ALT_SHIFT_END);
     int extend_sel = extend_linear || extend_block;
+    if ((k == K_BACKSPACE || k == K_CTRL_BACKSPACE) && ny_readline_allow_pop &&
+        len == 0) {
+      ny_readline_pop_request = 1;
+      break;
+    }
     if (k == K_BACKSPACE) {
       if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
                                         &sel_mode) &&

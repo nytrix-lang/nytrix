@@ -3546,9 +3546,16 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   sa_int.sa_flags = 0;
   sigaction(SIGINT, &sa_int, &prev_sigint);
 #endif
+  int cont_empty_rows = 0;
+  int cont_last_chunk = -1;
+  static char *cont_prefill = NULL;
   while (1) {
     g_repl_sigint = 0;
     repl_reset_redisplay();
+    if (!input_buffer) {
+      cont_empty_rows = 0;
+      cont_last_chunk = -1;
+    }
     char prompt_buf[512];
     const char *prompt;
     if (quiet_repl) {
@@ -3596,7 +3603,46 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     } else if (batch_mode) {
       break;
     } else if (tty_in) {
+      ny_readline_allow_pop = input_buffer != NULL;
       line = ny_readline(prompt);
+      ny_readline_allow_pop = 0;
+      if (ny_readline_pop_request) {
+        /*
+         * Backspace on an empty continuation line: drop that row, then
+         * either another stray empty row or reopen the previous input line
+         * for editing instead of leaving the user stuck below it.
+         */
+        ny_readline_pop_request = 0;
+        free(line);
+        line = NULL;
+        int up = 1;
+        if (cont_empty_rows > 0) {
+          cont_empty_rows--;
+        } else if (input_buffer) {
+          char *nl = strrchr(input_buffer, '\n');
+          size_t start = cont_last_chunk >= 0 ? (size_t)cont_last_chunk
+                                              : (nl ? (size_t)(nl - input_buffer) + 1 : 0);
+          if (start > strlen(input_buffer))
+            start = nl ? (size_t)(nl - input_buffer) + 1 : 0;
+          free(cont_prefill);
+          cont_prefill = ny_strdup(input_buffer + start);
+          up = 1;
+          for (const char *c = cont_prefill; *c; ++c)
+            if (*c == '\n')
+              up++;
+          if (start == 0) {
+            free(input_buffer);
+            input_buffer = NULL;
+          } else {
+            input_buffer[start - 1] = '\0';
+          }
+          cont_last_chunk = -1;
+          ny_readline_prefill = cont_prefill;
+        }
+        printf("\r\x1b[J\x1b[%dA\r\x1b[J", up);
+        fflush(stdout);
+        continue;
+      }
       if (line && g_repl_sigint) {
         free(line);
         line = NULL;
@@ -3683,6 +3729,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     if (input_buffer && !from_init && strlen(line) == 0) {
       free(line);
       if (!is_input_complete(input_buffer)) {
+        cont_empty_rows++;
         continue;
       }
       goto process_input;
@@ -3704,6 +3751,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         break;
       }
       input_buffer = grown;
+      cont_last_chunk = (int)old_len + 1;
       input_buffer[old_len] = '\n';
       memmove(input_buffer + old_len + 1, line, line_len + 1);
       free(line);
