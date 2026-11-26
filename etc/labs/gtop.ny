@@ -13,7 +13,7 @@
 use core
 use core.common as common
 use core.str as s
-use core.math (min, max)
+use core.math (min, max, abs)
 use core.os as os
 use core.os.fs as fs
 use core.os.info as info
@@ -801,6 +801,62 @@ fn axis_value(f64 v,f64 ceiling,str unit) str {
    if unit != "" { return metric(v,unit) }
    ceiling > 0.0 ? fmt.fmt_pct(v) : fmt.fmt_rate(v)
 }
+fn plot_series(int plot_x, int plot_y, int plot_w, int plot_h, list values, int start_idx, int total_slots, f64 limit, list color, f64 fill_alpha, f64 stroke_h) any {
+   def int count = values.len - start_idx
+   if count <= 0 || plot_w <= 0 || plot_h <= 0 || total_slots <= 0 { return 0 }
+   def list fill_col = [color.get(0), color.get(1), color.get(2), fill_alpha]
+   def int base_y = plot_y + plot_h
+   gui.push_clip_rect([float(plot_x), float(plot_y), float(plot_w), float(plot_h)])
+   mut int prev_x = -1
+   mut f64 prev_h = -1.0
+   mut int i = start_idx
+   while i < values.len {
+      def f64 v = float(values.get(i, -1.0))
+      def int slot = total_slots - count + (i - start_idx)
+      def int sx0 = plot_x + int(float(slot) * float(plot_w) / float(total_slots) + 0.5)
+      def int sx1 = plot_x + int(float(slot + 1) * float(plot_w) / float(total_slots) + 0.5)
+      if v >= 0.0 {
+         def f64 bh = float(min(float(plot_h), max(0.0, (v / limit) * float(plot_h))))
+         if prev_x >= 0 && prev_h >= 0.0 && sx0 > prev_x {
+            def int span = sx0 - prev_x
+            if float(abs(bh - prev_h)) < 0.75 {
+               def f64 avg_h = (prev_h + bh) * 0.5
+               def f64 sy = float(min(float(base_y) - stroke_h, float(base_y) - avg_h))
+               if avg_h > 0.0 { gui.paint_rect(float(prev_x), float(base_y) - avg_h, float(span), avg_h, fill_col) }
+               gui.paint_rect(float(prev_x), sy, float(span), stroke_h, color)
+            } else {
+               mut int cx = prev_x
+               while cx < sx0 {
+                  def f64 ch0 = prev_h + (bh - prev_h) * float(cx - prev_x) / float(span)
+                  def f64 ch1 = prev_h + (bh - prev_h) * float(cx + 1 - prev_x) / float(span)
+                  def f64 ch = (ch0 + ch1) * 0.5
+                  def f64 top_h = float(max(ch0, ch1))
+                  def f64 seg_h = float(max(stroke_h, float(abs(ch1 - ch0)) + stroke_h))
+                  def f64 sy = float(min(float(base_y) - stroke_h, float(base_y) - top_h))
+                  if ch > 0.0 { gui.paint_rect(float(cx), float(base_y) - ch, 1.0, ch, fill_col) }
+                  gui.paint_rect(float(cx), sy, 1.0, seg_h, color)
+                  cx += 1
+               }
+            }
+         }
+         def bool next_missing = i + 1 >= values.len || float(values.get(i + 1, -1.0)) < 0.0
+         if next_missing && sx1 > sx0 {
+            def int bw = sx1 - sx0
+            def f64 sy = float(min(float(base_y) - stroke_h, float(base_y) - bh))
+            if bh > 0.0 { gui.paint_rect(float(sx0), float(base_y) - bh, float(bw), bh, fill_col) }
+            gui.paint_rect(float(sx0), sy, float(bw), stroke_h, color)
+         }
+         prev_x = sx0
+         prev_h = bh
+      } else {
+         prev_x = -1
+         prev_h = -1.0
+      }
+      i += 1
+   }
+   gui.pop_clip_rect()
+   0
+}
 fn graph(str id, str title, list values, f64 ceiling, list color, f64 h=104.0,str unit="") any {
    mut f64 top = ceiling
    if top <= 0.0 {
@@ -854,71 +910,19 @@ fn graph(str id, str title, list values, f64 ceiling, list color, f64 h=104.0,st
    gui.paint_rect(x, y, 1.0, hh, gui.theme_color("border"))
    gui.paint_rect(float(px0 + pw - 1), y, 1.0, hh, gui.theme_color("border"))
    def int plot_x = px0 + 1, plot_y = py0 + 1, plot_w = int(max(1, pw - 2)), plot_h = int(max(1, ph - 2))
-   def list fill_col = [color.get(0), color.get(1), color.get(2), 0.18]
-   def f64 stroke_h = max(1.5, 1.8 * z)
-   gui.push_clip_rect([float(plot_x), float(plot_y), float(plot_w), float(plot_h)])
-   mut int prev_x = -1
-   mut f64 prev_h = -1.0
-   mut int i = 0
-   while i < values.len {
-      def f64 v = float(values.get(i, -1.0))
-      def int sx0 = plot_x + int(float(120 - values.len + i) * float(plot_w) / 120.0 + 0.5)
-      def int sx1 = plot_x + int(float(120 - values.len + i + 1) * float(plot_w) / 120.0 + 0.5)
-      if v >= 0.0 {
-         def f64 bh = float(min(float(plot_h), max(0.0, (v / limit) * float(plot_h))))
-         if prev_x >= 0 && prev_h >= 0.0 && sx0 > prev_x {
-            def int span = sx0 - prev_x
-            if abs(bh - prev_h) < 0.75 {
-               def f64 sy = float(min(float(plot_y + plot_h) - stroke_h, float(plot_y + plot_h) - bh))
-               if bh > 0.0 { gui.paint_rect(float(prev_x), float(plot_y + plot_h) - bh, float(span), bh, fill_col) }
-               gui.paint_rect(float(prev_x), sy, float(span), stroke_h, color)
-            } else {
-               mut int cx = prev_x
-               while cx < sx0 {
-                  def f64 t0 = float(cx - prev_x) / float(span)
-                  def f64 t1 = float(cx + 1 - prev_x) / float(span)
-                  def f64 ch0 = prev_h + (bh - prev_h) * t0
-                  def f64 ch1 = prev_h + (bh - prev_h) * t1
-                  def f64 ch = (ch0 + ch1) * 0.5
-                  def f64 top_h = float(max(ch0, ch1))
-                  def f64 seg_h = float(max(stroke_h, abs(ch1 - ch0) + stroke_h))
-                  def f64 sy = float(min(float(plot_y + plot_h) - stroke_h, float(plot_y + plot_h) - top_h))
-                  if ch > 0.0 { gui.paint_rect(float(cx), float(plot_y + plot_h) - ch, 1.0, ch, fill_col) }
-                  gui.paint_rect(float(cx), sy, 1.0, seg_h, color)
-                  cx += 1
-               }
-            }
-         } else {
-            def int bw = int(max(1, sx1 - sx0))
-            def f64 sy = float(min(float(plot_y + plot_h) - stroke_h, float(plot_y + plot_h) - bh))
-            if bh > 0.0 { gui.paint_rect(float(sx0), float(plot_y + plot_h) - bh, float(bw), bh, fill_col) }
-            gui.paint_rect(float(sx0), sy, float(bw), stroke_h, color)
-         }
-         if i == values.len - 1 && sx1 > sx0 {
-            def int bw = sx1 - sx0
-            def f64 sy = float(min(float(plot_y + plot_h) - stroke_h, float(plot_y + plot_h) - bh))
-            if bh > 0.0 { gui.paint_rect(float(sx0), float(plot_y + plot_h) - bh, float(bw), bh, fill_col) }
-            gui.paint_rect(float(sx0), sy, float(bw), stroke_h, color)
-         }
-         prev_x = sx0
-         prev_h = bh
-      } else {
-         prev_x = -1
-         prev_h = -1.0
-      }
-      i += 1
-   }
-   gui.pop_clip_rect()
-   def f64 fy = y + hh + float(max(2.0 * z, (ftr_h - small_h) * 0.5 - 1.0 * z))
+   plot_series(plot_x, plot_y, plot_w, plot_h, values, 0, 120, limit, color, 0.18, max(1.5, 1.8 * z))
+   def f64 fy = y + hh + float(max(2.0 * z, (ry + rh - 1.0 - (y + hh) - small_h) * 0.5))
    gui.paint_text(x, fy, to_str(values.len) + " / 120 samples", gui.theme_color("text_dim"), true)
    gui.paint_text(x + w - measure_small("now"), fy, "now", gui.theme_color("text_dim"), true)
    if gui.item_hovered() && values.len > 0 {
       def mouse = gui.mouse_xy()
       def f64 mx = float(mouse.get(0, 0.0))
       if mx >= float(plot_x) && mx < float(plot_x + plot_w) {
-         def int ix = int((mx - float(plot_x)) * 120.0 / float(plot_w)) - 120 + values.len
-         if ix >= 0 && ix < values.len {
-            def f64 v = float(values.get(ix, -1.0))
+         def f64 rel = (mx - float(plot_x)) * 120.0 / float(plot_w)
+         def int ix = int(rel) - 120 + int(values.len)
+         if ix >= 0 && ix < int(values.len) {
+            def int idx = int(ix)
+            def f64 v = float(values.get(idx, -1.0))
             gui.paint_rect(mx, float(plot_y), 1.0, float(plot_h), gui.theme_color("text_dim"))
             gui.tooltip(v < 0.0 ? "Unavailable" : axis_value(v,ceiling,unit))
          }
@@ -1128,57 +1132,7 @@ fn card_meter(list rect, f64 value, list color, list samples) any {
    if w < 295.0*z || samples.len < 2 { return 0 }
    def int gx0 = int(x + w - w*0.36 + 0.5), gy0 = int(y + 29.0*z + 0.5)
    def int gw_i = int(max(4.0, w*0.36 + 0.5)), gh_i = int(max(4.0, 22.0*z + 0.5))
-   def int n_start = int(max(0, samples.len-40))
-   def list fill_col = [color.get(0),color.get(1),color.get(2),0.14]
-   def f64 stroke_h = max(1.5, 1.5*z)
-   mut int i = n_start
-   mut int prev_x = -1
-   mut f64 prev_h = -1.0
-   while i < samples.len {
-      def f64 v = float(samples.get(i,-1.0))
-      def int sx0 = gx0 + int(float(40 - samples.len + i) * float(gw_i) / 40.0 + 0.5)
-      def int sx1 = gx0 + int(float(40 - samples.len + i + 1) * float(gw_i) / 40.0 + 0.5)
-      if v >= 0.0 {
-         def f64 bh = float(min(float(gh_i), max(0.0, v*float(gh_i)/100.0)))
-         if prev_x >= 0 && prev_h >= 0.0 && sx0 > prev_x {
-            def int span = sx0 - prev_x
-            if abs(bh - prev_h) < 0.75 {
-               def f64 sy = float(min(float(gy0 + gh_i) - stroke_h, float(gy0 + gh_i) - bh))
-               if bh > 0.0 { gui.paint_rect(float(prev_x), float(gy0 + gh_i) - bh, float(span), bh, fill_col) }
-               gui.paint_rect(float(prev_x), sy, float(span), stroke_h, color)
-            } else {
-               mut int cx = prev_x
-               while cx < sx0 {
-                  def f64 t0 = float(cx - prev_x) / float(span)
-                  def f64 t1 = float(cx + 1 - prev_x) / float(span)
-                  def f64 ch0 = prev_h + (bh - prev_h) * t0
-                  def f64 ch1 = prev_h + (bh - prev_h) * t1
-                  def f64 ch = (ch0 + ch1) * 0.5
-                  def f64 top_h = float(max(ch0, ch1))
-                  def f64 seg_h = float(max(stroke_h, abs(ch1 - ch0) + stroke_h))
-                  def f64 sy = float(min(float(gy0 + gh_i) - stroke_h, float(gy0 + gh_i) - top_h))
-                  if ch > 0.0 { gui.paint_rect(float(cx), float(gy0 + gh_i) - ch, 1.0, ch, fill_col) }
-                  gui.paint_rect(float(cx), sy, 1.0, seg_h, color)
-                  cx += 1
-               }
-            }
-         } else {
-            def int bw = int(max(1, sx1 - sx0))
-            def f64 sy = float(min(float(gy0 + gh_i) - stroke_h, float(gy0 + gh_i) - bh))
-            if bh > 0.0 { gui.paint_rect(float(sx0), float(gy0 + gh_i) - bh, float(bw), bh, fill_col) }
-            gui.paint_rect(float(sx0), sy, float(bw), stroke_h, color)
-         }
-         if i == samples.len - 1 && sx1 > sx0 {
-            def int bw = sx1 - sx0
-            def f64 sy = float(min(float(gy0 + gh_i) - stroke_h, float(gy0 + gh_i) - bh))
-            if bh > 0.0 { gui.paint_rect(float(sx0), float(gy0 + gh_i) - bh, float(bw), bh, fill_col) }
-            gui.paint_rect(float(sx0), sy, float(bw), stroke_h, color)
-         }
-         prev_x = sx0
-         prev_h = bh
-      } else { prev_x = -1 prev_h = -1.0 }
-      i += 1
-   }
+   plot_series(gx0, gy0, gw_i, gh_i, samples, int(max(0, samples.len-40)), 40, 100.0, color, 0.14, max(1.5, 1.5*z))
    0
 }
 fn cards() any {

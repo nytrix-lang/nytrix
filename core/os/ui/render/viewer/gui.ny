@@ -3685,9 +3685,10 @@ fn stat_card(any id, any label, any value, any detail="", f64 w=0.0, f64 h=0.0, 
    _gui_rect_fast(x, y, ww, hh, _window_bg_u32)
    _gui_rect_fast(x + 1.0, y + 1.0, max(1.0, ww - 2.0), max(1.0, hh - 2.0), _window_body_u32)
    _gui_rect_fast(x + 1.0, y + _sx(18.0), max(1.0, ww - 2.0), max(1.0, hh - _sx(19.0)), _panel_u32)
-   def hdr_h = _sx(20.0)
+   def hdr_h = _sx(24.0)
+   def bar_h = _sx(3.0)
    _gui_rect_fast(x + 1.0, y + 1.0, max(1.0, ww - 2.0), hdr_h, _window_hdr_u32)
-   _gui_rect_fast(x + 1.0, y + 1.0, max(1.0, ww - 2.0), _sx(3.0), color_pack(float(accent_col.get(0,
+   _gui_rect_fast(x + 1.0, y + 1.0, max(1.0, ww - 2.0), bar_h, color_pack(float(accent_col.get(0,
                0.31)),
          float(accent_col.get(1,
                0.71)),
@@ -3699,14 +3700,14 @@ fn stat_card(any id, any label, any value, any detail="", f64 w=0.0, f64 h=0.0, 
    def detail_font = _font_small_id()
    mut value_h = _font_h_for(value_font)
    def detail_h = _font_h_for(detail_font)
-   def label_y = y + _sx(4.0)
-   mut value_y = y + hdr_h + _sx(9.0)
-   mut detail_y = y + hh - detail_h - _sx(9.0)
-   if detail_s.len > 0 && detail_y < value_y + value_h + _sx(6.0) {
+   def label_y = y + 1.0 + bar_h + max(_sx(2.0), (hdr_h - bar_h - detail_h) * 0.5)
+   mut value_y = y + hdr_h + _sx(7.0)
+   mut detail_y = y + hh - detail_h - _sx(11.0)
+   if detail_s.len > 0 && detail_y < value_y + value_h + _sx(5.0) {
       value_font = _font_body()
       value_h = _font_h_for(value_font)
-      value_y = y + hdr_h + _sx(7.0)
-      detail_y = y + hh - detail_h - _sx(7.0)
+      value_y = y + hdr_h + _sx(6.0)
+      detail_y = y + hh - detail_h - _sx(10.0)
    }
    _draw_text_ui_small_clipped(label_s, x + _item_pad_x(), label_y, _text_dim_u32, ww - _item_pad_x() * 2.0, clip)
    _draw_text_ui_ex_clipped(value_font,
