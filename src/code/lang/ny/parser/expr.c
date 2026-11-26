@@ -1808,31 +1808,33 @@ static expr_t *parse_primary(parser_t *p) {
  * colon from a later statement.
  */
 static bool expr_ternary_has_colon(parser_t *p) {
-  const char *s = p->lex.src + p->lex.pos;
+  lexer_t lx = p->lex;
+  lx.quiet = true;
+  lx.intern_identifiers = false;
   int depth = 0;
   bool seen_token = false;
-  while (*s && *s != ';') {
-    if (*s == '(' || *s == '[' || *s == '{') {
-      depth++;
-    } else if (*s == ')' || *s == ']' || *s == '}') {
-      if (--depth < 0)
-        return false;
-    } else if (*s == ':' && depth == 0) {
-      return true;
-    } else if (*s == '\n' && depth == 0) {
-      const char *line = s + 1;
-      while (*line == ' ' || *line == '\t' || *line == '\r')
-        line++;
-      if (*line == ':')
+  for (;;) {
+    token_t tok = lexer_next(&lx);
+    if (tok.kind == NY_T_EOF || tok.kind == NY_T_SEMI)
+      return false;
+    if (depth == 0 && lx.skipped_newline) {
+      if (tok.kind == NY_T_COLON)
         return true;
       if (seen_token)
         return false;
     }
-    if (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n')
-      seen_token = true;
-    s++;
+    if (tok.kind == NY_T_LPAREN || tok.kind == NY_T_LBRACK ||
+        tok.kind == NY_T_LBRACE || tok.kind == NY_T_DOLLAR_LBRACE) {
+      depth++;
+    } else if (tok.kind == NY_T_RPAREN || tok.kind == NY_T_RBRACK ||
+               tok.kind == NY_T_RBRACE) {
+      if (--depth < 0)
+        return false;
+    } else if (tok.kind == NY_T_COLON && depth == 0) {
+      return true;
+    }
+    seen_token = true;
   }
-  return false;
 }
 
 static expr_t *parse_postfix(parser_t *p) {
