@@ -6876,11 +6876,14 @@ def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
         lines.append(f"| {name} | {fmt(g)} | {within} | {len(vals) - within} | {len(vals)} |")
     lines += ["", _chart_trend([(lab, *g) for _, lab, _, g in runs]), "",
               _chart_bands(series), "", _chart_bars(bars), "",
-              f"### Largest gaps above {BENCH_RUNTIME_CEILING:g}× (C reference ≥ 1 ms)", "",
-              "| Benchmark | Backend | Runtime / C | C time |", "|---|---|---|---|"]
-    lines += [f"| {n} | {backend} | {r:.2f}× | {c:.1f} ms |" for n, backend, r, c in gaps[:15]]
-    lines += ["", "Bars for workloads whose C reference is under 1 ms are drawn lighter: "
-              "their ratios are dominated by timer resolution.", "", MEASUREMENT_CHARTS_END]
+              "Bars for workloads whose C reference is under 1 ms are drawn lighter: "
+              "their ratios are dominated by timer resolution."]
+    if gaps:
+        lines += ["",
+                  f"### Largest gaps above {BENCH_RUNTIME_CEILING:g}× (C reference ≥ 1 ms)", "",
+                  "| Benchmark | Backend | Runtime / C | C time |", "|---|---|---|---|"]
+        lines += [f"| {n} | {backend} | {r:.2f}× | {c:.1f} ms |" for n, backend, r, c in gaps[:15]]
+    lines += ["", MEASUREMENT_CHARTS_END]
     block = "\n".join(lines)
     try:
         text = doc.read_text(encoding="utf-8")
