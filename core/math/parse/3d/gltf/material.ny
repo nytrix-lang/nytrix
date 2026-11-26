@@ -57,13 +57,13 @@ fn _gltf_extract_embedded_image(any gltf_data, int img_idx) str {
    if blen <= 0 { return "" }
    def buffer_data = gltf_data.get("buffer_data", 0)
    def buf_idx = int(bv.get("buffer", 0))
-   mut bin_blob = 0
+   mut any bin_blob = nil
    if is_list(buffer_data) && buf_idx >= 0 && buf_idx < buffer_data.len {
-      def b = buffer_data[buf_idx]
+      def any b = buffer_data[buf_idx]
       bin_blob = b
    }
    if !bin_blob {
-      def binary_data = gltf_data.get("binary_data", 0)
+      def any binary_data = gltf_data.get("binary_data", 0)
       bin_blob = binary_data
    }
    if !bin_blob { return "" }

@@ -68,6 +68,7 @@ fn _check_gl_error(str where) bool {
       fn _ny_glScissor(i32 x, i32 y, i32 width, i32 height) as "glScissor"
       fn _ny_glDepthFunc(u32 func) as "glDepthFunc"
       fn _ny_glFrontFace(u32 mode) as "glFrontFace"
+      fn _ny_glAlphaFunc(u32 func, f32 ref) as "glAlphaFunc"
       fn _ny_glBlendFunc(u32 sfactor, u32 dfactor) as "glBlendFunc"
       fn _ny_glBlendFuncSeparate(u32 srcRGB, u32 dstRGB, u32 srcAlpha, u32 dstAlpha) as "glBlendFuncSeparate"
       fn _ny_glBindBuffer(u32 target, u32 buffer) as "glBindBuffer"
@@ -1000,7 +1001,9 @@ fn _filter_value(int filter, bool min_filter=false, bool mips=false) int {
 }
 
 fn _format_internal(int fmt) int {
-   if fmt == 43 { return GL_SRGB8_ALPHA8 }
+   ;; Fixed-function GL draws directly to an sRGB-encoded framebuffer without
+   ;; GL_FRAMEBUFFER_SRGB; uploading sRGB textures as GL_SRGB8_ALPHA8 would
+   ;; linearize on sample without re-encoding on write, darkening glTF albedos.
    if fmt == 9 { return GL_INTENSITY8 }
    GL_RGBA8
 }
@@ -1172,7 +1175,21 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
       else { _call1u("glDisable", GL_DEPTH_TEST) }
       _depth_test_enabled = depth_write
    }
+   ;; Never let 3D mesh face-culling leak into 2D/UI draws.
+   if !depth_write && _mesh_cull_enabled {
+      _ny_glDisable(GL_CULL_FACE)
+      _mesh_cull_enabled = false
+   }
    _check_gl_error("draw_state.depth")
+   ;; Handle glTF ALPHA_MODE=MASK (alpha_mode==1) via fixed-function alpha test.
+   def int alpha_mode = depth_write ? band(int(_current_alpha_u32), 3) : 0
+   if alpha_mode == 1 {
+      def f64 cutoff = float(band(bshr(int(_current_alpha_u32), 8), 255)) / 255.0
+      _call1u("glEnable", 0x0BC0)
+      #linux { _ny_glAlphaFunc(0x0206, cutoff) }
+   } else {
+      _call1u("glDisable", 0x0BC0)
+   }
    ;; UI draws call with depth_write=false and still need normal alpha blending.
    ;; Mesh draws call with depth_write=true; switch GL_BLEND from the active
    ;; material instead of leaving it globally enabled for every opaque object.
@@ -1229,10 +1246,16 @@ fn _apply_lighting(bool enabled) bool {
    _call1("glEnable", GL_LIGHT0)
    _call1("glEnable", GL_COLOR_MATERIAL)
    _call2("glColorMaterial", GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+   _call2("glLightModeli", 0x0B52, 1)
    _call3("glLightfv", GL_LIGHT0, GL_AMBIENT, p + 0)
    _call3("glLightfv", GL_LIGHT0, GL_DIFFUSE, p + 16)
    _call3("glLightfv", GL_LIGHT0, GL_SPECULAR, p + 32)
+   ;; Keep the directional light fixed in world/view space rather than rotating
+   ;; with each mesh's model matrix.
+   _call0("glPushMatrix")
+   _call0("glLoadIdentity")
    _call3("glLightfv", GL_LIGHT0, GL_POSITION, p + 48)
+   _call0("glPopMatrix")
    _lighting_enabled = true
    true
 }

@@ -489,6 +489,7 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
       c_valid, c_ptr, c_cnt, c_stride, c_comp, c_type_count, c_norm,
       tex_id, morph_targets_n){
       _gltf_release_vertex_pack_accessors(pos_res, uv0_res, uv1_res, c_res, n_res, t_res)
+      buf_cleanup = 0
       mut out = dict(4)
       out["ptr"] = buf
       out["count"] = count

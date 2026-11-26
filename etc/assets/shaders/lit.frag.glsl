@@ -74,9 +74,9 @@ vec2 applyUvXf(vec2 uv, uint xf0, uint xf1){
   vec2 suv = uv * scl ;
   float cr = cos(rot) ;
   float sr = sin(rot) ;
-  // Keep the shader decode aligned with the CPU fallback matrix path.
-  // Apply scale, then the authored rotation, then offset.
-  return vec2(cr * suv.x - sr * suv.y, sr * suv.x + cr * suv.y) + off ;
+  // Keep the shader decode aligned with the glTF KHR_texture_transform spec,
+  // lit_fast.frag.glsl, and the GL fallback: scale, rotate (CW in UV), then offset.
+  return vec2(cr * suv.x + sr * suv.y, -sr * suv.x + cr * suv.y) + off ;
 }
 vec2 baseUv(){ return applyUvXf(((pc.baseUvXf1 >> 30u) != 0u) ? vUV2 : vUV, pc.baseUvXf0, pc.baseUvXf1) ; }
 vec2 mapUv(uint packedIndex, uint xf0, uint xf1){ return applyUvXf(((packedIndex & 0x10000u) != 0u) ? vUV2 : vUV, xf0, xf1) ; }

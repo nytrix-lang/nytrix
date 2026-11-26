@@ -4441,11 +4441,9 @@ fn _mat_mr_word(int met_rough_id, int met_rough_uv_set) int {
 
 fn _mat_alpha_mode_code(str alpha_mode) int {
    def m = str.upper(str.strip(to_str(alpha_mode)))
-   return case m {
-      "MASK" -> 1
-      "BLEND" -> 2
-      _ -> 0
-   }
+   if m == "MASK" { return 1 }
+   if m == "BLEND" { return 2 }
+   0
 }
 
 fn _mat_clamp01_vec3(any v) list {

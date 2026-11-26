@@ -11083,20 +11083,41 @@ fn _scene_draw_group_gpu_gl(
    mut i = 0
    while i < gpu_part_count {
       def base = gpu_slab + i * 256
-      if load32(base, 228) != 0 {
+      def vis = load32(base, 228)
+      if vis != 0 {
          def tex_id = load32(base, 0)
-         def sbuf = load64(base, 16)
-         def sbuf_off = load64(base, 24)
-         def ibuf = load64(base, 32)
-         def ibuf_off = load64(base, 40)
+         def sbuf = load64_h(base, 16)
+         def sbuf_off = load64_h(base, 24)
+         def ibuf = load64_h(base, 32)
+         def ibuf_off = load64_h(base, 40)
          def idx_count = load32(base, 48)
          def vertex_count = load32(base, 52)
          def index_type = load32(base, 56)
          def prim = load32(base, 60)
+         if ui_profile.env_truthy_cached("NY_MESH_PIPE_TRACE") && i < 4 {
+            ui_profile.print_text("[mesh:gpu_gl] i=" + to_str(i) +
+               " vis=" + to_str(vis) +
+               " sbuf=" + to_str(sbuf) +
+               " ibuf=" + to_str(ibuf) +
+               " idx=" + to_str(idx_count) +
+               " vtx=" + to_str(vertex_count) +
+               " tex=" + to_str(tex_id))
+         }
          if sbuf && ((ibuf && idx_count > 0) || vertex_count > 0) {
             def part_vc_mode = load32(base, 248)
             def part_unlit = load32(base, 132) != 0 || (tex_id <= 0 && part_vc_mode == 0)
+            def normal_word = load32(base, 236)
+            mut part_nocull = band(normal_word, 0x40000) != 0 || prim != 0
+            mut part_flip = band(normal_word, 0x20000) != 0
+            if is_list(gpu_parts_cached) && i < gpu_parts_cached.len {
+               def rec = gpu_parts_cached[i]
+               if is_list(rec) {
+                  if (int(rec.get(8, 0)) & 4) != 0 { part_nocull = true }
+                  if int(rec.get(44, 0)) != 0 { part_flip = true }
+               }
+            }
             lib_glr.set_unlit(part_unlit)
+            lib_glr.set_mesh_raster_state(part_nocull, part_flip)
             lib_glr.set_material_packed(
                load32(base, 136), load32(base, 140), load32(base, 144),
                load32(base, 148), load32(base, 152), tex_id,

@@ -20,10 +20,11 @@ void main(){
   gl_Position = pc.vp * wp ;
   gl_PointSize = 1.0 ;
   bool modelIdentityHint = (pc.isMask & 2) != 0 ;
-  mat3 normalMat = modelIdentityHint ? mat3(1.0) : transpose(inverse(mat3(pc.model))) ;
-  float normalSign = (!modelIdentityHint && determinant(mat3(pc.model)) < 0.0) ? -1.0 : 1.0 ;
-  vNormal = (normalMat * inNormal) * normalSign ;
-  vTangent = vec4((normalMat * inTangent.xyz) * normalSign, inTangent.w) ;
+  mat3 model3 = mat3(pc.model) ;
+  bool negDet = !modelIdentityHint && determinant(model3) < 0.0 ;
+  mat3 normalMat = modelIdentityHint ? mat3(1.0) : transpose(inverse(model3)) ;
+  vNormal = normalMat * inNormal ;
+  vTangent = vec4(modelIdentityHint ? inTangent.xyz : (model3 * inTangent.xyz), negDet ? -inTangent.w : inTangent.w) ;
   vColor = inColor ;
   vUV = inUV ;
   vTexIndex = inTexIndex ;
