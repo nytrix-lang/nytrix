@@ -32,6 +32,15 @@
 
 enum { IVM_MAX_ROUNDS = 16, IVM_MAX_PHIS = 32, IVM_MAX_BASES = 32 };
 
+static bool ivm_scaled_enabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *e = getenv("NYTRIX_NO_IV_MERGE_SCALED");
+    disabled = (e && e[0] && e[0] != '0') ? 1 : 0;
+  }
+  return !disabled;
+}
+
 typedef struct {
   size_t at; /* phi instruction index */
   int phi;
@@ -156,6 +165,86 @@ static bool ivm_all_rebaseable(const nyr_func_t *f, const nyr_cfg_t *cfg,
 }
 
 /*
+ * Decompose `v = scale * root + offset` (mod 2^64) through small integer
+ * arithmetic chains so scaled loop inits like `(i << 3)` vs `i - 1` resolve to
+ * a constant offset instead of per-outer-iteration materialization.
+ */
+static bool ivm_linear_of(const nyr_func_t *f, const int *defs, int v,
+                          int *root_out, int64_t *scale_out,
+                          int64_t *off_out) {
+  int cur = v;
+  int64_t scale = 1;
+  int64_t off = 0;
+  for (int depth = 0; depth < 8 && cur >= 0 && cur < f->next_value; ++depth) {
+    int at = defs[cur];
+    if (at < 0)
+      break;
+    const nyr_inst_t *d = &f->data[at];
+    int64_t c = 0;
+    if (d->op == NYIR_COPY && d->a >= 0) {
+      cur = d->a;
+      continue;
+    }
+    if (d->op == NYIR_ADD_I64 && d->a >= 0 && d->b >= 0) {
+      if (ivm_const(f, defs, d->b, &c)) {
+        off = (int64_t)((uint64_t)off + (uint64_t)scale * (uint64_t)c);
+        cur = d->a;
+        continue;
+      }
+      if (ivm_const(f, defs, d->a, &c)) {
+        off = (int64_t)((uint64_t)off + (uint64_t)scale * (uint64_t)c);
+        cur = d->b;
+        continue;
+      }
+    } else if (d->op == NYIR_SUB_I64 && d->a >= 0 && d->b >= 0 &&
+               ivm_const(f, defs, d->b, &c)) {
+      off = (int64_t)((uint64_t)off - (uint64_t)scale * (uint64_t)c);
+      cur = d->a;
+      continue;
+    } else if (d->op == NYIR_SHL_I64 && d->a >= 0 &&
+               ivm_const(f, defs, d->b, &c) && c >= 0 && c <= 62) {
+      scale = (int64_t)((uint64_t)scale * (UINT64_C(1) << (unsigned)c));
+      cur = d->a;
+      continue;
+    } else if (d->op == NYIR_MUL_I64 && d->a >= 0 && d->b >= 0) {
+      if (ivm_const(f, defs, d->b, &c)) {
+        scale = (int64_t)((uint64_t)scale * (uint64_t)c);
+        cur = d->a;
+        continue;
+      }
+      if (ivm_const(f, defs, d->a, &c)) {
+        scale = (int64_t)((uint64_t)scale * (uint64_t)c);
+        cur = d->b;
+        continue;
+      }
+    }
+    break;
+  }
+  *root_out = cur;
+  *scale_out = scale;
+  *off_out = off;
+  return cur >= 0;
+}
+
+static bool ivm_init_diff(const nyr_func_t *f, const int *defs, int init1,
+                          int64_t scale, int init2, int64_t *diff_out) {
+  int64_t c1 = 0, c2 = 0;
+  if (ivm_const(f, defs, init1, &c1) && ivm_const(f, defs, init2, &c2)) {
+    *diff_out = (int64_t)((uint64_t)c2 - (uint64_t)scale * (uint64_t)c1);
+    return true;
+  }
+  int r1 = -1, r2 = -1;
+  int64_t s1 = 0, s2 = 0, o1 = 0, o2 = 0;
+  if (ivm_linear_of(f, defs, init1, &r1, &s1, &o1) &&
+      ivm_linear_of(f, defs, init2, &r2, &s2, &o2) && r1 == r2 &&
+      (uint64_t)s2 == (uint64_t)scale * (uint64_t)s1) {
+    *diff_out = (int64_t)((uint64_t)o2 - (uint64_t)scale * (uint64_t)o1);
+    return true;
+  }
+  return false;
+}
+
+/*
  * Collect the merge-eligible header PHIs of one loop.
  */
 static size_t ivm_collect(const nyr_func_t *f, const nyr_cfg_t *cfg,
@@ -163,6 +252,7 @@ static size_t ivm_collect(const nyr_func_t *f, const nyr_cfg_t *cfg,
                           int64_t pre_label, int64_t latch_label,
                           ivm_iv_t *out) {
   size_t n = 0;
+  bool allow_sub = ivm_scaled_enabled();
   for (size_t i = cfg->block_start[header];
        i < cfg->block_end[header] && n < IVM_MAX_PHIS; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -182,13 +272,21 @@ static size_t ivm_collect(const nyr_func_t *f, const nyr_cfg_t *cfg,
     if (init < 0 || next < 0 || next >= f->next_value || defs[next] < 0)
       continue;
     const nyr_inst_t *inc = &f->data[defs[next]];
-    if (inc->op != NYIR_ADD_I64 || !member[cfg->inst_block[defs[next]]] ||
-        inc->extra_args_len)
+    if ((inc->op != NYIR_ADD_I64 &&
+         !(allow_sub && inc->op == NYIR_SUB_I64)) ||
+        !member[cfg->inst_block[defs[next]]] || inc->extra_args_len)
       continue;
-    int other = inc->a == in->dst ? inc->b : inc->b == in->dst ? inc->a : -2;
     int64_t step = 0;
-    if (other == -2 || other == in->dst || !ivm_const(f, defs, other, &step))
-      continue;
+    if (inc->op == NYIR_ADD_I64) {
+      int other = inc->a == in->dst ? inc->b : inc->b == in->dst ? inc->a : -2;
+      if (other == -2 || other == in->dst || !ivm_const(f, defs, other, &step))
+        continue;
+    } else {
+      if (inc->a != in->dst || inc->b == in->dst ||
+          !ivm_const(f, defs, inc->b, &step) || step == INT64_MIN)
+        continue;
+      step = -step;
+    }
     out[n++] = (ivm_iv_t){.at = i,
                           .phi = in->dst,
                           .init = init,
@@ -211,54 +309,86 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
                          ivs);
   if (n < 2)
     return 0;
+  bool allow_scaled = ivm_scaled_enabled();
   bool merged_any = false;
   bool dead[IVM_MAX_PHIS] = {false};
-  ivm_insert_t ins[IVM_MAX_PHIS * (IVM_MAX_BASES + 3)];
+  ivm_insert_t ins[IVM_MAX_PHIS * (IVM_MAX_BASES * 3 + 8)];
+  const size_t ins_cap = sizeof(ins) / sizeof(ins[0]);
   size_t nins = 0;
   size_t pre_at = ivm_block_tail(f, cfg, pre);
   size_t head_at = ivm_block_head(f, cfg, header);
   for (size_t a = 0; a < n; ++a) {
     if (dead[a])
       continue;
-    for (size_t b = a + 1; b < n; ++b) {
-      if (dead[b] || ivs[b].step != ivs[a].step)
+    for (size_t b = 0; b < n; ++b) {
+      if (a == b || dead[b])
+        continue;
+      int shift = -1;
+      int64_t scale = 1;
+      if (ivs[b].step == ivs[a].step) {
+        if (b < a)
+          continue;
+        shift = 0;
+        scale = 1;
+      } else if (allow_scaled && ivs[a].step != 0) {
+        for (int s = 1; s <= 3; ++s) {
+          int64_t cand_scale = INT64_C(1) << s;
+          if ((ny_i128)ivs[a].step * cand_scale == (ny_i128)ivs[b].step) {
+            shift = s;
+            scale = cand_scale;
+            break;
+          }
+        }
+      }
+      if (shift < 0)
         continue;
       const ivm_iv_t *p1 = &ivs[a], *p2 = &ivs[b];
       /* The increment of p2 must feed only p2. */
       if (ivm_use_count(f, p2->next) != 1)
         continue;
-      if (nins + IVM_MAX_BASES + 3 > sizeof(ins) / sizeof(ins[0]))
+      if (nins + IVM_MAX_BASES * 3 + 8 > ins_cap)
         break;
-      /* D = i2 - i1, folded when both are constants or i1 is zero. */
-      int64_t c1 = 0, c2 = 0;
+      int64_t c1 = 0, const_diff = 0;
       bool k1 = ivm_const(f, defs, p1->init, &c1);
-      bool k2 = ivm_const(f, defs, p2->init, &c2);
-      /* Same start, same step: p2 is p1. */
-      bool same = p1->init == p2->init || (k1 && k2 && c1 == c2);
+      bool has_const_diff =
+          ivm_init_diff(f, defs, p1->init, scale, p2->init, &const_diff);
+      bool zero_diff = (shift == 0 && p1->init == p2->init) ||
+                       (has_const_diff && const_diff == 0);
+      size_t saved_nins = nins;
       int dval = -1;
-      if (same) {
-        /* no difference to materialize */
-      } else if (k1 && k2) {
+      if (zero_diff) {
+        /* p2 == p1 << shift; no preheader offset difference to materialize. */
+      } else if (has_const_diff) {
         dval = f->next_value++;
         nyr_inst_t c = ivm_make(NYIR_CONST_I64, dval, -1, -1);
-        c.imm = (int64_t)((uint64_t)c2 - (uint64_t)c1);
+        c.imm = const_diff;
         ins[nins++] = (ivm_insert_t){pre_at, c};
       } else if (k1 && c1 == 0) {
         dval = p2->init;
-      } else {
+      } else if (shift == 0) {
         dval = f->next_value++;
         ins[nins++] = (ivm_insert_t){
             pre_at, ivm_make(NYIR_SUB_I64, dval, p2->init, p1->init)};
+      } else {
+        int kc = f->next_value++;
+        int sc = f->next_value++;
+        dval = f->next_value++;
+        nyr_inst_t kci = ivm_make(NYIR_CONST_I64, kc, -1, -1);
+        kci.imm = shift;
+        ins[nins++] = (ivm_insert_t){pre_at, kci};
+        ins[nins++] =
+            (ivm_insert_t){pre_at, ivm_make(NYIR_SHL_I64, sc, p1->init, kc)};
+        ins[nins++] =
+            (ivm_insert_t){pre_at, ivm_make(NYIR_SUB_I64, dval, p2->init, sc)};
       }
       /*
-       * A non-constant difference would cost an add per iteration wherever
-       * p2 is read as a value; merge only when every use rebases onto a
-       * preheader base instead.
+       * A scaled IV with nonzero difference (or any non-constant difference)
+       * is only profitable when every use rebases onto an invariant address
+       * base in the preheader so the loop body folds into x86 SIB [B'+i*s].
        */
-      if (!same && !(k1 && k2) &&
+      if (!zero_diff && (shift > 0 || !has_const_diff) &&
           !ivm_all_rebaseable(f, cfg, defs, member, p2)) {
-        if (dval >= 0 && dval != p2->init && nins > 0)
-          --nins; /* drop the unused SUB */
+        nins = saved_nins;
         continue;
       }
       int tval = -1;
@@ -278,45 +408,84 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
           uses = in->phi_incoming[k].value == p2->phi;
         if (!uses)
           continue;
-        /* `B + p2` with an invariant B: rebase onto p1. */
-        if (!same && in->op == NYIR_ADD_I64 && in->a != in->b && !in->extra_args_len &&
+        /* `B + p2` with an invariant B: rebase onto (p1 << shift). */
+        if ((shift > 0 || !zero_diff) && in->op == NYIR_ADD_I64 &&
+            in->a != in->b && !in->extra_args_len &&
             member[cfg->inst_block[i]]) {
           int other = in->a == p2->phi ? in->b : in->a;
           if (ivm_invariant(cfg, defs, member, other)) {
-            size_t k = 0;
-            while (k < nbase && base_of[k] != other)
-              ++k;
-            if (k == nbase) {
-              if (nbase == IVM_MAX_BASES) {
+            int new_base = other;
+            if (!zero_diff) {
+              size_t k = 0;
+              while (k < nbase && base_of[k] != other)
+                ++k;
+              if (k == nbase) {
+                if (nbase == IVM_MAX_BASES || nins + 1 > ins_cap) {
+                  ok = false;
+                  break;
+                }
+                base_of[k] = other;
+                base_new[k] = f->next_value++;
+                nyr_inst_t add =
+                    ivm_make(NYIR_ADD_I64, base_new[k], other, dval);
+                add.scalar_class = in->scalar_class;
+                ins[nins++] = (ivm_insert_t){pre_at, add};
+                ++nbase;
+              }
+              new_base = base_new[k];
+            }
+            int repl_idx = p1->phi;
+            if (shift > 0) {
+              if (nins + 2 > ins_cap) {
                 ok = false;
                 break;
               }
-              base_of[k] = other;
-              base_new[k] = f->next_value++;
-              nyr_inst_t add =
-                  ivm_make(NYIR_ADD_I64, base_new[k], other, dval);
-              add.scalar_class = in->scalar_class;
-              ins[nins++] = (ivm_insert_t){pre_at, add};
-              ++nbase;
+              int kc = f->next_value++;
+              repl_idx = f->next_value++;
+              nyr_inst_t kci = ivm_make(NYIR_CONST_I64, kc, -1, -1);
+              kci.imm = shift;
+              /* Emit const+shl immediately before `in` for x86 SIB folding. */
+              ins[nins++] = (ivm_insert_t){i, kci};
+              ins[nins++] = (ivm_insert_t){
+                  i, ivm_make(NYIR_SHL_I64, repl_idx, p1->phi, kc)};
             }
             if (in->a == p2->phi) {
-              in->a = p1->phi;
-              in->b = base_new[k];
+              in->a = repl_idx;
+              in->b = new_base;
             } else {
-              in->b = p1->phi;
-              in->a = base_new[k];
+              in->b = repl_idx;
+              in->a = new_base;
             }
             nyr_clear_derived_facts(in);
             continue;
           }
         }
-        if (same) {
+        if (zero_diff && shift == 0) {
           tval = p1->phi;
         } else if (tval < 0) {
-          tval = f->next_value++;
-          nyr_inst_t add = ivm_make(NYIR_ADD_I64, tval, p1->phi, dval);
-          add.scalar_class = f->data[p2->at].scalar_class;
-          ins[nins++] = (ivm_insert_t){head_at, add};
+          if (shift > 0) {
+            if (nins + 2 > ins_cap) {
+              ok = false;
+              break;
+            }
+            int kc = f->next_value++;
+            tval = f->next_value++;
+            nyr_inst_t kci = ivm_make(NYIR_CONST_I64, kc, -1, -1);
+            kci.imm = shift;
+            ins[nins++] = (ivm_insert_t){head_at, kci};
+            nyr_inst_t sh = ivm_make(NYIR_SHL_I64, tval, p1->phi, kc);
+            sh.scalar_class = f->data[p2->at].scalar_class;
+            ins[nins++] = (ivm_insert_t){head_at, sh};
+          } else {
+            if (nins + 1 > ins_cap) {
+              ok = false;
+              break;
+            }
+            tval = f->next_value++;
+            nyr_inst_t add = ivm_make(NYIR_ADD_I64, tval, p1->phi, dval);
+            add.scalar_class = f->data[p2->at].scalar_class;
+            ins[nins++] = (ivm_insert_t){head_at, add};
+          }
         }
         int *slots[6] = {&in->a, &in->b, &in->c, &in->d, &in->e, &in->f};
         for (int s = 0; s < 6; ++s)

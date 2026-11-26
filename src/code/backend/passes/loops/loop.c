@@ -2164,6 +2164,981 @@ static void interchange_swap_body_ivs(nyr_func_t *f, const int *defs,
   }
 }
 
+static bool interchange_matmul_enabled(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *e = getenv("NYTRIX_NO_INTERCHANGE_MATMUL");
+    disabled = (e && e[0] && e[0] != '0') ? 1 : 0;
+  }
+  return !disabled;
+}
+
+/* Strip COPY chains to a freshly allocated non-escaping tbuf/alloca root. */
+static int interchange_fresh_alloc_root(const nyr_func_t *f, const int *defs,
+                                        int v, bool *is_tbuf_out) {
+  v = interchange_root_copy(f, defs, v);
+  for (unsigned steps = 0; steps < 16 && v >= 0 && v < f->next_value; ++steps) {
+    if (defs[v] < 0)
+      return -1;
+    const nyr_inst_t *in = &f->data[(size_t)defs[v]];
+    if (in->op == NYIR_COPY) {
+      v = in->a;
+      continue;
+    }
+    if (in->op == NYIR_ADD_I64 && in->a >= 0 && in->b >= 0) {
+      /* Follow whichever side is pointer-class or comes from an allocation. */
+      int ra = interchange_fresh_alloc_root(f, defs, in->a, is_tbuf_out);
+      if (ra >= 0)
+        return ra;
+      return interchange_fresh_alloc_root(f, defs, in->b, is_tbuf_out);
+    }
+    if (in->op == NYIR_ALLOCA) {
+      if (is_tbuf_out)
+        *is_tbuf_out = false;
+      return v;
+    }
+    if (in->op == NYIR_CALL && in->symbol &&
+        strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0) {
+      if (is_tbuf_out)
+        *is_tbuf_out = true;
+      return v;
+    }
+    return -1;
+  }
+  return -1;
+}
+
+/* Verify a fresh root never escapes via calls, PHIs, stores, or non-ptr ops. */
+static bool interchange_fresh_root_non_escaping(const nyr_func_t *f,
+                                                const int *defs, int root) {
+  if (!f || !defs || root < 0 || root >= f->next_value)
+    return false;
+  size_t nv = (size_t)f->next_value;
+  uint8_t *ptr = calloc(nv, 1);
+  if (!ptr)
+    return false;
+  ptr[root] = 1;
+  for (unsigned pass = 0; pass < 12; ++pass) {
+    bool changed = false;
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->dst < 0 || (size_t)in->dst >= nv)
+        continue;
+      bool derived = false;
+      if (in->op == NYIR_COPY && in->a >= 0 && (size_t)in->a < nv &&
+          ptr[in->a]) {
+        derived = true;
+      } else if (in->op == NYIR_ADD_I64 && in->a >= 0 && in->b >= 0 &&
+                 (size_t)in->a < nv && (size_t)in->b < nv) {
+        if (ptr[in->a] && ptr[in->b]) {
+          free(ptr);
+          return false;
+        }
+        derived = ptr[in->a] || ptr[in->b];
+      }
+      if (derived && !ptr[in->dst]) {
+        ptr[in->dst] = 1;
+        changed = true;
+      }
+    }
+    if (!changed)
+      break;
+  }
+  bool ok = true;
+  for (size_t i = 0; i < f->len && ok; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    int slots[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
+    if (in->op == NYIR_PHI) {
+      if (in->dst >= 0 && (size_t)in->dst < nv && ptr[in->dst])
+        ok = false;
+      for (size_t k = 0; k < in->phi_incoming_len && ok; ++k) {
+        int val = in->phi_incoming[k].value;
+        if (val >= 0 && (size_t)val < nv && ptr[val])
+          ok = false;
+      }
+      continue;
+    }
+    for (size_t k = 0; k < in->extra_args_len && ok; ++k) {
+      int val = in->extra_args[k];
+      if (val >= 0 && (size_t)val < nv && ptr[val])
+        ok = false;
+    }
+    for (size_t k = 0; k < 6 && ok; ++k) {
+      int v = slots[k];
+      if (v < 0 || (size_t)v >= nv || !ptr[v])
+        continue;
+      if (in->op == NYIR_COPY && k == 0)
+        continue;
+      if (in->op == NYIR_ADD_I64 && (k == 0 || k == 1))
+        continue;
+      if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) && k == 0)
+        continue;
+      if (in->op == NYIR_BOUNDS_CHECK && k == 0)
+        continue;
+      if (in->op == NYIR_CALL && in->symbol &&
+          strcmp(in->symbol, "rt_memset") == 0 && k == 0)
+        continue;
+      ok = false;
+    }
+  }
+  free(ptr);
+  return ok;
+}
+
+/* Compute affine byte coefficients of (outer_iv, inner_iv) in an expression. */
+static bool interchange_iv_linear_coeffs(const nyr_func_t *f, const int *defs,
+                                         const nyr_cfg_t *cfg,
+                                         const bool *outer_blocks, int val,
+                                         int outer_iv, int inner_iv,
+                                         unsigned depth, int64_t *c_outer,
+                                         int64_t *c_inner) {
+  if (depth > 24 || val < 0 || val >= f->next_value)
+    return false;
+  if (val == outer_iv) {
+    *c_outer = 1;
+    *c_inner = 0;
+    return true;
+  }
+  if (val == inner_iv) {
+    *c_outer = 0;
+    *c_inner = 1;
+    return true;
+  }
+  int di = defs[val];
+  if (di < 0 || (size_t)di >= f->len) {
+    *c_outer = 0;
+    *c_inner = 0;
+    return true;
+  }
+  size_t blk = cfg->inst_block[(size_t)di];
+  if (blk >= cfg->block_count || !outer_blocks[blk]) {
+    *c_outer = 0;
+    *c_inner = 0;
+    return true;
+  }
+  const nyr_inst_t *in = &f->data[(size_t)di];
+  if (in->op == NYIR_CONST_I64) {
+    *c_outer = 0;
+    *c_inner = 0;
+    return true;
+  }
+  if (in->op == NYIR_COPY)
+    return interchange_iv_linear_coeffs(f, defs, cfg, outer_blocks, in->a,
+                                        outer_iv, inner_iv, depth + 1, c_outer,
+                                        c_inner);
+  if (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) {
+    int64_t ao = 0, ai = 0, bo = 0, bi = 0;
+    if (!interchange_iv_linear_coeffs(f, defs, cfg, outer_blocks, in->a,
+                                      outer_iv, inner_iv, depth + 1, &ao, &ai) ||
+        !interchange_iv_linear_coeffs(f, defs, cfg, outer_blocks, in->b,
+                                      outer_iv, inner_iv, depth + 1, &bo, &bi))
+      return false;
+    int64_t s = in->op == NYIR_ADD_I64 ? 1 : -1;
+    ny_i128 co = (ny_i128)ao + s * (ny_i128)bo;
+    ny_i128 ci = (ny_i128)ai + s * (ny_i128)bi;
+    if (co < INT64_MIN || co > INT64_MAX || ci < INT64_MIN || ci > INT64_MAX)
+      return false;
+    *c_outer = (int64_t)co;
+    *c_inner = (int64_t)ci;
+    return true;
+  }
+  if (in->op == NYIR_SHL_I64) {
+    int64_t sh = 0, ao = 0, ai = 0;
+    if (!const_i64_val(f, defs, in->b, &sh) || sh < 0 || sh > 30 ||
+        !interchange_iv_linear_coeffs(f, defs, cfg, outer_blocks, in->a,
+                                      outer_iv, inner_iv, depth + 1, &ao, &ai))
+      return false;
+    int64_t mult = INT64_C(1) << (unsigned)sh;
+    ny_i128 co = (ny_i128)ao * mult;
+    ny_i128 ci = (ny_i128)ai * mult;
+    if (co < INT64_MIN || co > INT64_MAX || ci < INT64_MIN || ci > INT64_MAX)
+      return false;
+    *c_outer = (int64_t)co;
+    *c_inner = (int64_t)ci;
+    return true;
+  }
+  if (in->op == NYIR_MUL_I64) {
+    int64_t c = 0, vo = 0, vi = 0;
+    int var_op = -1;
+    if (const_i64_val(f, defs, in->b, &c))
+      var_op = in->a;
+    else if (const_i64_val(f, defs, in->a, &c))
+      var_op = in->b;
+    else
+      return false;
+    if (!interchange_iv_linear_coeffs(f, defs, cfg, outer_blocks, var_op,
+                                      outer_iv, inner_iv, depth + 1, &vo, &vi))
+      return false;
+    ny_i128 co = (ny_i128)vo * c;
+    ny_i128 ci = (ny_i128)vi * c;
+    if (co < INT64_MIN || co > INT64_MAX || ci < INT64_MIN || ci > INT64_MAX)
+      return false;
+    *c_outer = (int64_t)co;
+    *c_inner = (int64_t)ci;
+    return true;
+  }
+  return false;
+}
+
+static bool interchange_addr_root_coeffs(const nyr_func_t *f, const int *defs,
+                                         const nyr_cfg_t *cfg,
+                                         const bool *outer_blocks, int addr_val,
+                                         int outer_iv, int inner_iv,
+                                         int *root_out, int64_t *c_outer,
+                                         int64_t *c_inner) {
+  int r = interchange_fresh_alloc_root(f, defs, addr_val, NULL);
+  if (r < 0)
+    return false;
+  int64_t co = 0, ci = 0;
+  int cur = addr_val;
+  for (unsigned steps = 0; steps < 16; ++steps) {
+    cur = interchange_root_copy(f, defs, cur);
+    if (cur == r) {
+      *root_out = r;
+      *c_outer = co;
+      *c_inner = ci;
+      return true;
+    }
+    if (cur < 0 || cur >= f->next_value || defs[cur] < 0)
+      return false;
+    const nyr_inst_t *in = &f->data[(size_t)defs[cur]];
+    if (in->op != NYIR_ADD_I64 || in->a < 0 || in->b < 0)
+      return false;
+    int ptr_side = -1, off_side = -1;
+    if (interchange_fresh_alloc_root(f, defs, in->a, NULL) == r) {
+      ptr_side = in->a;
+      off_side = in->b;
+    } else if (interchange_fresh_alloc_root(f, defs, in->b, NULL) == r) {
+      ptr_side = in->b;
+      off_side = in->a;
+    } else {
+      return false;
+    }
+    int64_t oo = 0, oi = 0;
+    if (!interchange_iv_linear_coeffs(f, defs, cfg, outer_blocks, off_side,
+                                      outer_iv, inner_iv, 0, &oo, &oi))
+      return false;
+    ny_i128 so = (ny_i128)co + oo;
+    ny_i128 si = (ny_i128)ci + oi;
+    if (so < INT64_MIN || so > INT64_MAX || si < INT64_MIN || si > INT64_MAX)
+      return false;
+    co = (int64_t)so;
+    ci = (int64_t)si;
+    cur = ptr_side;
+  }
+  return false;
+}
+
+static size_t interchange_count_uses(const nyr_func_t *f, int v) {
+  size_t cnt = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_NOP)
+      continue;
+    int s[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
+    for (int k = 0; k < 6; ++k)
+      cnt += s[k] == v;
+    for (size_t k = 0; k < in->extra_args_len; ++k)
+      cnt += in->extra_args[k] == v;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      cnt += in->phi_incoming[k].value == v;
+  }
+  return cnt;
+}
+
+static nyr_inst_t interchange_make_inst(nyr_op_t op, int dst, int a, int b) {
+  nyr_inst_t in = {0};
+  in.op = op;
+  in.dst = dst;
+  in.a = a;
+  in.b = b;
+  in.c = in.d = in.e = in.f = -1;
+  in.cmp = NYIR_CMP_EQ;
+  in.effects = nyr_inst_effects(&in);
+  return in;
+}
+
+/* Collect pure backward slice inside `outer_blocks` computing `root_val`. */
+static bool interchange_collect_addr_slice(const nyr_func_t *f, const int *defs,
+                                           const nyr_cfg_t *cfg,
+                                           const bool *outer_blocks,
+                                           int outer_iv, int root_val,
+                                           size_t *slice_out,
+                                           size_t *slice_len,
+                                           size_t slice_cap) {
+  bool *visited = calloc(f->next_value > 0 ? (size_t)f->next_value : 1, 1);
+  if (!visited)
+    return false;
+  int stack[128];
+  size_t sp = 0;
+  if (root_val >= 0 && root_val < f->next_value) {
+    visited[root_val] = true;
+    stack[sp++] = root_val;
+  }
+  bool ok = true;
+  *slice_len = 0;
+  while (sp > 0 && ok) {
+    int v = stack[--sp];
+    if (v == outer_iv)
+      continue;
+    int di = defs[v];
+    if (di < 0 || (size_t)di >= f->len)
+      continue;
+    size_t blk = cfg->inst_block[(size_t)di];
+    if (blk >= cfg->block_count || !outer_blocks[blk])
+      continue;
+    const nyr_inst_t *in = &f->data[(size_t)di];
+    if (in->op != NYIR_CONST_I64 && in->op != NYIR_COPY &&
+        in->op != NYIR_ADD_I64 && in->op != NYIR_SUB_I64 &&
+        in->op != NYIR_SHL_I64 && in->op != NYIR_MUL_I64) {
+      ok = false;
+      break;
+    }
+    if (*slice_len >= slice_cap) {
+      ok = false;
+      break;
+    }
+    slice_out[(*slice_len)++] = (size_t)di;
+    int ops[2] = {in->a, in->b};
+    for (int k = 0; k < 2; ++k) {
+      int opv = ops[k];
+      if (opv >= 0 && opv < f->next_value && !visited[opv]) {
+        if (sp >= sizeof(stack) / sizeof(stack[0])) {
+          ok = false;
+          break;
+        }
+        visited[opv] = true;
+        stack[sp++] = opv;
+      }
+    }
+  }
+  free(visited);
+  if (!ok)
+    return false;
+  for (size_t i = 1; i < *slice_len; ++i) {
+    size_t k = slice_out[i];
+    size_t j = i;
+    while (j > 0 && slice_out[j - 1] > k) {
+      slice_out[j] = slice_out[j - 1];
+      --j;
+    }
+    slice_out[j] = k;
+  }
+  return true;
+}
+
+/* Clone `slice` replacing `outer_iv` with `new_iv`, appending into `out_insts`. */
+static bool interchange_clone_slice(nyr_func_t *cand, const nyr_func_t *orig,
+                                    const size_t *slice, size_t slice_len,
+                                    int outer_iv, int new_iv, int orig_addr,
+                                    nyr_inst_t *out_insts, size_t *out_len,
+                                    size_t out_cap, int *new_addr_out) {
+  int *vmap = malloc((size_t)orig->next_value * sizeof(*vmap));
+  if (!vmap)
+    return false;
+  for (int v = 0; v < orig->next_value; ++v)
+    vmap[v] = v;
+  vmap[outer_iv] = new_iv;
+  for (size_t s = 0; s < slice_len; ++s) {
+    if (*out_len >= out_cap) {
+      free(vmap);
+      return false;
+    }
+    nyr_inst_t copy = orig->data[slice[s]];
+    if (copy.a >= 0 && copy.a < orig->next_value)
+      copy.a = vmap[copy.a];
+    if (copy.b >= 0 && copy.b < orig->next_value)
+      copy.b = vmap[copy.b];
+    if (copy.c >= 0 && copy.c < orig->next_value)
+      copy.c = vmap[copy.c];
+    if (copy.dst >= 0 && copy.dst < orig->next_value) {
+      int nv = cand->next_value++;
+      vmap[copy.dst] = nv;
+      copy.dst = nv;
+    }
+    copy.range = (nyr_range_t){0};
+    copy.extra_args = NULL;
+    copy.extra_args_len = 0;
+    copy.phi_incoming = NULL;
+    copy.phi_incoming_len = 0;
+    out_insts[(*out_len)++] = copy;
+  }
+  *new_addr_out =
+      (orig_addr >= 0 && orig_addr < orig->next_value) ? vmap[orig_addr] : -1;
+  free(vmap);
+  return *new_addr_out >= 0;
+}
+
+typedef struct {
+  size_t at;
+  const nyr_inst_t *insts;
+  size_t count;
+} interchange_insert_group_t;
+
+static bool interchange_apply_inserts(nyr_func_t *f,
+                                      interchange_insert_group_t *groups,
+                                      size_t ngroups) {
+  size_t total = 0;
+  for (size_t g = 0; g < ngroups; ++g)
+    total += groups[g].count;
+  if (!total || !nir_ensure_inst_space(f, total))
+    return false;
+  /* Sort descending by insertion index to keep earlier indices intact. */
+  for (size_t i = 1; i < ngroups; ++i) {
+    interchange_insert_group_t key = groups[i];
+    size_t j = i;
+    while (j > 0 && groups[j - 1].at < key.at) {
+      groups[j] = groups[j - 1];
+      --j;
+    }
+    groups[j] = key;
+  }
+  for (size_t g = 0; g < ngroups; ++g) {
+    size_t at = groups[g].at;
+    size_t cnt = groups[g].count;
+    memmove(&f->data[at + cnt], &f->data[at], (f->len - at) * sizeof(*f->data));
+    memcpy(&f->data[at], groups[g].insts, cnt * sizeof(*f->data));
+    f->len += cnt;
+  }
+  return true;
+}
+
+static size_t interchange_single_pred_through_tramp(const nyr_func_t *f,
+                                                    const nyr_cfg_t *cfg,
+                                                    size_t block,
+                                                    size_t *tramp_out) {
+  if (tramp_out)
+    *tramp_out = SIZE_MAX;
+  if (block >= cfg->block_count)
+    return SIZE_MAX;
+  if (cfg->pred_offsets[block + 1] - cfg->pred_offsets[block] != 1)
+    return SIZE_MAX;
+  size_t pred = cfg->pred_blocks[cfg->pred_offsets[block]];
+  if (pred < cfg->block_count &&
+      cfg->pred_offsets[pred + 1] - cfg->pred_offsets[pred] == 1 &&
+      cfg->succ_offsets[pred + 1] - cfg->succ_offsets[pred] == 1 &&
+      cfg->succ_blocks[cfg->succ_offsets[pred]] == block) {
+    bool pure_br = true;
+    for (size_t i = cfg->block_start[pred]; i < cfg->block_end[pred]; ++i) {
+      nyr_op_t op = f->data[i].op;
+      if (op != NYIR_LABEL && op != NYIR_NOP && op != NYIR_BR) {
+        pure_br = false;
+        break;
+      }
+    }
+    if (pure_br) {
+      if (tramp_out)
+        *tramp_out = pred;
+      pred = cfg->pred_blocks[cfg->pred_offsets[pred]];
+    }
+  }
+  return pred;
+}
+
+/*
+ * Support reduction-to-accumulation loop interchange for `outer(j) -> inner(k)`:
+ *
+ *   for j in 0..N:
+ *     sum = 0
+ *     for k in 0..M: sum += f(k, j)
+ *     c[i, j] = sum
+ *
+ * Rewrites on a verified clone to:
+ *
+ *   for z in 0..N: c[i, z] = 0
+ *   for k in 0..M:
+ *     for j in 0..N:
+ *       c[i, j] += f(k, j)
+ *
+ * when `c` is a non-escaping allocation distinct from all loads in `inner` and
+ * swapping eliminates non-unit inner stride (> 8 bytes) in favor of outer
+ * unit-stride / invariant accesses (e.g., `matmul-int` i-j-k -> i-k-j).
+ */
+static bool interchange_try_reduction_nest(
+    nyr_func_t *f, const nyr_cfg_t *cfg,
+    const int *defs, const bool *outer_blocks, const bool *inner_blocks,
+    const nyr_scev_loop_t *outer, const nyr_scev_loop_t *inner) {
+#define RED_REJECT(why)                                                        \
+  do {                                                                         \
+    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))                                   \
+      ny_dbg_heuristic_event("LOOP_INTERCHANGE",                               \
+                             "reduction reject (oh=%zu ih=%zu): %s",           \
+                             outer->header_block, inner->header_block, why);   \
+    return false;                                                              \
+  } while (0)
+  if (!interchange_matmul_enabled() || !outer || !inner)
+    return false;
+  if (!outer->trip_count_known || !inner->trip_count_known ||
+      outer->trip_count == 0 || inner->trip_count == 0 ||
+      !outer->init_is_const || !inner->init_is_const ||
+      outer->init != inner->init || outer->step != inner->step ||
+      outer->predicate != inner->predicate || !outer->limit_is_const ||
+      !inner->limit_is_const || outer->step <= 0)
+    RED_REJECT("bounds");
+  if (outer->preheader_block >= cfg->block_count ||
+      inner->preheader_block >= cfg->block_count ||
+      outer->latch_block >= cfg->block_count ||
+      outer->header_block >= cfg->block_count ||
+      inner->header_block >= cfg->block_count ||
+      outer->preheader_block >= outer->header_block)
+    RED_REJECT("blocks");
+  size_t pre_tramp = SIZE_MAX, exit_tramp = SIZE_MAX;
+  if (interchange_single_pred_through_tramp(f, cfg, inner->preheader_block,
+                                            &pre_tramp) != outer->header_block)
+    RED_REJECT("inner-pre-pred");
+  if (interchange_single_pred_through_tramp(f, cfg, outer->latch_block,
+                                            &exit_tramp) != inner->header_block)
+    RED_REJECT("outer-latch-pred");
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!outer_blocks[b] || inner_blocks[b])
+      continue;
+    if (b != outer->header_block && b != inner->preheader_block &&
+        b != outer->latch_block && b != pre_tramp && b != exit_tramp)
+      RED_REJECT("outer-extra-block");
+  }
+
+  /* Verify outer header has only outer->iv PHI and inner preheader is pure. */
+  nyr_inst_t *outer_cmp = loop_cmp(f, cfg, defs, outer);
+  nyr_inst_t *inner_cmp = loop_cmp(f, cfg, defs, inner);
+  if (!outer_cmp || !inner_cmp)
+    RED_REJECT("no-cmp");
+  size_t outer_cmp_idx = (size_t)(outer_cmp - f->data);
+  size_t inner_cmp_idx = (size_t)(inner_cmp - f->data);
+  for (size_t i = cfg->block_start[outer->header_block];
+       i < cfg->block_end[outer->header_block]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_PHI && in->dst != outer->iv)
+      RED_REJECT("outer-hdr-phi");
+    if (in->op != NYIR_LABEL && in->op != NYIR_NOP && in->op != NYIR_PHI &&
+        in->op != NYIR_BR_IF && in->op != NYIR_BR &&
+        (size_t)i != outer_cmp_idx &&
+        !(in->op == NYIR_CONST_I64 &&
+          interchange_root_copy(f, defs, outer_cmp->b) == in->dst))
+      RED_REJECT("outer-hdr-op");
+  }
+  for (size_t i = cfg->block_start[inner->preheader_block];
+       i < cfg->block_end[inner->preheader_block]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_LABEL && in->op != NYIR_NOP &&
+        in->op != NYIR_CONST_I64 && in->op != NYIR_COPY && in->op != NYIR_BR)
+      RED_REJECT("inner-pre-op");
+  }
+
+  /* Inner header must contain only inner->iv and one zero-init ADD reduction. */
+  size_t red_phi_idx = SIZE_MAX;
+  int red_phi_dst = -1, red_next_val = -1;
+  int64_t inner_latch_lbl = cfg->block_label[inner->latch_block];
+  int64_t inner_pre_lbl = cfg->block_label[inner->preheader_block];
+  for (size_t i = cfg->block_start[inner->header_block];
+       i < cfg->block_end[inner->header_block]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_PHI)
+      continue;
+    if (in->dst == inner->iv)
+      continue;
+    if (red_phi_idx != SIZE_MAX || in->phi_incoming_len != 2 ||
+        !in->phi_incoming || in->scalar_class == NYIR_SCALAR_F64 ||
+        in->scalar_class == NYIR_SCALAR_F32)
+      RED_REJECT("red-phi-shape");
+    int init_v = -1, next_v = -1;
+    for (size_t k = 0; k < 2; ++k) {
+      if (in->phi_incoming[k].predecessor_label == inner_pre_lbl)
+        init_v = in->phi_incoming[k].value;
+      else if (in->phi_incoming[k].predecessor_label == inner_latch_lbl)
+        next_v = in->phi_incoming[k].value;
+    }
+    int64_t init_c = -1;
+    if (!const_i64_val(f, defs, init_v, &init_c) || init_c != 0 ||
+        next_v < 0 || next_v >= f->next_value || defs[next_v] < 0)
+      RED_REJECT("red-phi-init");
+    red_phi_idx = i;
+    red_phi_dst = in->dst;
+    red_next_val = next_v;
+  }
+  if (red_phi_idx == SIZE_MAX || red_next_val < 0)
+    RED_REJECT("no-red-phi");
+  size_t acc_inst_idx = (size_t)defs[red_next_val];
+  if (acc_inst_idx >= f->len ||
+      cfg->inst_block[acc_inst_idx] >= cfg->block_count ||
+      !inner_blocks[cfg->inst_block[acc_inst_idx]])
+    RED_REJECT("acc-loc");
+  const nyr_inst_t *acc_inst = &f->data[acc_inst_idx];
+  if (acc_inst->op != NYIR_ADD_I64 || acc_inst->extra_args_len ||
+      interchange_count_uses(f, acc_inst->dst) != 1 ||
+      interchange_count_uses(f, red_phi_dst) != 2)
+    RED_REJECT("acc-shape");
+  int term_val = -1;
+  if (interchange_root_copy(f, defs, acc_inst->a) == red_phi_dst)
+    term_val = acc_inst->b;
+  else if (interchange_root_copy(f, defs, acc_inst->b) == red_phi_dst)
+    term_val = acc_inst->a;
+  else
+    RED_REJECT("acc-opnd");
+  if (interchange_root_copy(f, defs, term_val) == red_phi_dst)
+    RED_REJECT("acc-self");
+
+  /* Outer latch (inner exit) must contain only ONE reduction store + IV step. */
+  size_t st_c_idx = SIZE_MAX;
+  for (size_t i = cfg->block_start[outer->latch_block];
+       i < cfg->block_end[outer->latch_block]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_STORE_I64) {
+      if (st_c_idx != SIZE_MAX || in->imm != 0 ||
+          (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                        NYIR_INST_F_MEM_I32 | NYIR_INST_F_MEM_VOLATILE |
+                        NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) ||
+          in->scalar_class != NYIR_SCALAR_I64_RAW ||
+          interchange_root_copy(f, defs, in->c) != red_phi_dst)
+        RED_REJECT("st-c-shape");
+      st_c_idx = i;
+    } else if (in->op != NYIR_LABEL && in->op != NYIR_NOP &&
+               in->op != NYIR_BR && in->op != NYIR_CONST_I64 &&
+               in->op != NYIR_COPY && in->op != NYIR_ADD_I64 &&
+               in->op != NYIR_SUB_I64 && in->op != NYIR_SHL_I64 &&
+               in->op != NYIR_MUL_I64) {
+      RED_REJECT("latch-op");
+    }
+  }
+  if (st_c_idx == SIZE_MAX)
+    RED_REJECT("no-st-c");
+
+  int c_addr_val = f->data[st_c_idx].a;
+  int c_root = -1;
+  int64_t c_so = 0, c_si = 0;
+  if (!interchange_addr_root_coeffs(f, defs, cfg, outer_blocks, c_addr_val,
+                                    outer->iv, inner->iv, &c_root, &c_so,
+                                    &c_si) ||
+      c_so == 0 || c_si != 0 ||
+      !interchange_fresh_root_non_escaping(f, defs, c_root))
+    RED_REJECT("c-root");
+
+  /* Check inner body effects, non-escaping defs, and stride profitability. */
+  size_t before_unit = 0, after_unit = 0, before_large = 0, after_large = 0;
+  size_t inv_ld_idx = SIZE_MAX;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!inner_blocks[b])
+      continue;
+    for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_STORE_I64 || in->op == NYIR_STORE_LOCAL ||
+          in->op == NYIR_CALL || in->op == NYIR_COPY_STRUCT ||
+          in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32 ||
+          in->op == NYIR_VEC4_STORE_I64)
+        RED_REJECT("inner-store-call");
+      if (in->op == NYIR_PHI && in->dst != inner->iv && in->dst != red_phi_dst)
+        RED_REJECT("inner-extra-phi");
+      if (in->op == NYIR_LOAD_I64) {
+        if (in->imm != 0 ||
+            (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                          NYIR_INST_F_MEM_I32 | NYIR_INST_F_MEM_VOLATILE |
+                          NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) ||
+            in->scalar_class != NYIR_SCALAR_I64_RAW)
+          RED_REJECT("inner-ld-shape");
+        int ld_root = -1;
+        int64_t l_so = 0, l_si = 0;
+        if (!interchange_addr_root_coeffs(f, defs, cfg, outer_blocks, in->a,
+                                          outer->iv, inner->iv, &ld_root,
+                                          &l_so, &l_si) ||
+            ld_root == c_root ||
+            !interchange_fresh_root_non_escaping(f, defs, ld_root))
+          RED_REJECT("ld-root");
+        if (l_so == 0 && inv_ld_idx == SIZE_MAX && b == inner->latch_block)
+          inv_ld_idx = i;
+        int64_t cur_s = l_si * inner->step;
+        int64_t new_s = l_so * outer->step;
+        if (cur_s < 0)
+          cur_s = -cur_s;
+        if (new_s < 0)
+          new_s = -new_s;
+        if (cur_s == 8)
+          ++before_unit;
+        else if (cur_s > 8)
+          ++before_large;
+        if (new_s == 8)
+          ++after_unit;
+        else if (new_s > 8)
+          ++after_large;
+      } else {
+        nyr_effect_t eff = nyr_effective_effects(in);
+        if (eff & (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+                   NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_LOCAL |
+                   NYIR_EFFECT_VOLATILE | NYIR_EFFECT_IO | NYIR_EFFECT_THREAD |
+                   NYIR_EFFECT_FFI | NYIR_EFFECT_ALLOCATION |
+                   NYIR_EFFECT_UNKNOWN_SIDE_EFFECT))
+          RED_REJECT("inner-eff");
+      }
+      if (in->dst >= 0 && in->dst != red_phi_dst && i != acc_inst_idx) {
+        for (size_t j = 0; j < f->len; ++j) {
+          if (i == j || !interchange_inst_uses_value(&f->data[j], in->dst))
+            continue;
+          size_t ub = cfg->inst_block[j];
+          if (ub >= cfg->block_count || !inner_blocks[ub])
+            RED_REJECT("inner-def-escape");
+        }
+      }
+    }
+  }
+  int64_t c_new_s = c_so * outer->step;
+  if (c_new_s < 0)
+    c_new_s = -c_new_s;
+  if (c_new_s == 8)
+    ++after_unit;
+  else if (c_new_s > 8)
+    ++after_large;
+
+  /* Swap only when elimination of large inner strides strictly pays off. */
+  if (before_large == 0 || after_large > 0 || after_unit <= before_unit)
+    RED_REJECT("stride-profit");
+  if (!interchange_iv_copies_do_not_escape(f, defs, cfg, inner_blocks, outer,
+                                           inner))
+    RED_REJECT("iv-escape");
+
+  /* Collect the pure address slice for `c[i, j]` inside `outer_blocks`. */
+  size_t c_slice[64];
+  size_t c_slice_len = 0;
+  if (!interchange_collect_addr_slice(f, defs, cfg, outer_blocks, outer->iv,
+                                      c_addr_val, c_slice, &c_slice_len,
+                                      sizeof(c_slice) / sizeof(c_slice[0])))
+    RED_REJECT("c-slice");
+#undef RED_REJECT
+
+  nyr_func_t cand = {0};
+  if (!nyr_ir_func_clone(f, &cand))
+    return false;
+
+  int64_t max_lbl = 0;
+  for (size_t i = 0; i < cand.len; ++i)
+    if (cand.data[i].op == NYIR_LABEL && cand.data[i].imm > max_lbl)
+      max_lbl = cand.data[i].imm;
+  int64_t z_hdr_lbl = max_lbl + 1;
+  int64_t z_body_lbl = max_lbl + 2;
+  int64_t z_done_lbl = max_lbl + 3;
+  int64_t outer_pre_lbl = cfg->block_label[outer->preheader_block];
+  int64_t outer_hdr_lbl = cfg->block_label[outer->header_block];
+
+  /* Build zero-init pre-loop blocks to insert right after outer preheader. */
+  nyr_inst_t pre_buf[128];
+  size_t pre_n = 0;
+  size_t pre_end = cfg->block_end[outer->preheader_block];
+  size_t pre_last = nyr_block_last_non_nop(f, cfg, outer->preheader_block);
+  if (pre_last > cfg->block_start[outer->preheader_block] &&
+      cand.data[pre_last - 1].op == NYIR_BR)
+    nyr_inst_discard(&cand.data[pre_last - 1]);
+  int z_init = cand.next_value++;
+  int z_lim = cand.next_value++;
+  int z_iv = cand.next_value++;
+  int z_cmp = cand.next_value++;
+  int z_zero = cand.next_value++;
+  int z_step = cand.next_value++;
+  int z_next = cand.next_value++;
+
+  nyr_inst_t c_init = interchange_make_inst(NYIR_CONST_I64, z_init, -1, -1);
+  c_init.imm = outer->init;
+  c_init.scalar_class = NYIR_SCALAR_I64_RAW;
+  pre_buf[pre_n++] = c_init;
+  nyr_inst_t c_lim = interchange_make_inst(NYIR_CONST_I64, z_lim, -1, -1);
+  c_lim.imm = outer->limit;
+  c_lim.scalar_class = NYIR_SCALAR_I64_RAW;
+  pre_buf[pre_n++] = c_lim;
+  nyr_inst_t br_zh = interchange_make_inst(NYIR_BR, -1, -1, -1);
+  br_zh.imm = z_hdr_lbl;
+  pre_buf[pre_n++] = br_zh;
+  nyr_inst_t lbl_zh = interchange_make_inst(NYIR_LABEL, -1, -1, -1);
+  lbl_zh.imm = z_hdr_lbl;
+  pre_buf[pre_n++] = lbl_zh;
+
+  nyr_inst_t z_phi = interchange_make_inst(NYIR_PHI, z_iv, -1, -1);
+  z_phi.scalar_class = NYIR_SCALAR_I64_RAW;
+  z_phi.phi_incoming_len = 2;
+  z_phi.phi_incoming = malloc(2 * sizeof(*z_phi.phi_incoming));
+  if (!z_phi.phi_incoming) {
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+  z_phi.phi_incoming[0].predecessor_label = outer_pre_lbl;
+  z_phi.phi_incoming[0].value = z_init;
+  z_phi.phi_incoming[1].predecessor_label = z_body_lbl;
+  z_phi.phi_incoming[1].value = z_next;
+  pre_buf[pre_n++] = z_phi;
+
+  nyr_inst_t cmp_z = interchange_make_inst(NYIR_CMP_I64, z_cmp, z_iv, z_lim);
+  cmp_z.cmp = outer->predicate;
+  cmp_z.scalar_class = NYIR_SCALAR_I64_RAW;
+  pre_buf[pre_n++] = cmp_z;
+  nyr_inst_t br_zb = interchange_make_inst(NYIR_BR_IF, -1, z_cmp, -1);
+  br_zb.imm = z_body_lbl;
+  pre_buf[pre_n++] = br_zb;
+  nyr_inst_t br_zd = interchange_make_inst(NYIR_BR, -1, -1, -1);
+  br_zd.imm = z_done_lbl;
+  pre_buf[pre_n++] = br_zd;
+
+  nyr_inst_t lbl_zb = interchange_make_inst(NYIR_LABEL, -1, -1, -1);
+  lbl_zb.imm = z_body_lbl;
+  pre_buf[pre_n++] = lbl_zb;
+  int z_addr = -1;
+  if (!interchange_clone_slice(&cand, f, c_slice, c_slice_len, outer->iv, z_iv,
+                               c_addr_val, pre_buf, &pre_n,
+                               sizeof(pre_buf) / sizeof(pre_buf[0]) - 6,
+                               &z_addr)) {
+    free(z_phi.phi_incoming);
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+  nyr_inst_t c_zero = interchange_make_inst(NYIR_CONST_I64, z_zero, -1, -1);
+  c_zero.imm = 0;
+  c_zero.scalar_class = NYIR_SCALAR_I64_RAW;
+  pre_buf[pre_n++] = c_zero;
+  nyr_inst_t st_z = interchange_make_inst(NYIR_STORE_I64, -1, z_addr, -1);
+  st_z.c = z_zero;
+  st_z.scalar_class = NYIR_SCALAR_I64_RAW;
+  st_z.effects = nyr_inst_effects(&st_z);
+  pre_buf[pre_n++] = st_z;
+  nyr_inst_t c_step = interchange_make_inst(NYIR_CONST_I64, z_step, -1, -1);
+  c_step.imm = outer->step;
+  c_step.scalar_class = NYIR_SCALAR_I64_RAW;
+  pre_buf[pre_n++] = c_step;
+  nyr_inst_t add_zn = interchange_make_inst(NYIR_ADD_I64, z_next, z_iv, z_step);
+  add_zn.scalar_class = NYIR_SCALAR_I64_RAW;
+  pre_buf[pre_n++] = add_zn;
+  nyr_inst_t br_back = interchange_make_inst(NYIR_BR, -1, -1, -1);
+  br_back.imm = z_hdr_lbl;
+  pre_buf[pre_n++] = br_back;
+
+  nyr_inst_t lbl_zd = interchange_make_inst(NYIR_LABEL, -1, -1, -1);
+  lbl_zd.imm = z_done_lbl;
+  pre_buf[pre_n++] = lbl_zd;
+  nyr_inst_t br_hdr = interchange_make_inst(NYIR_BR, -1, -1, -1);
+  br_hdr.imm = outer_hdr_lbl;
+  pre_buf[pre_n++] = br_hdr;
+
+  /* Build accumulation load+add+store replacement inside inner body (j loop). */
+  nyr_inst_t acc_pre_buf[72];
+  size_t acc_pre_n = 0;
+  int j_addr = -1;
+  if (!interchange_clone_slice(&cand, f, c_slice, c_slice_len, outer->iv,
+                               inner->iv, c_addr_val, acc_pre_buf, &acc_pre_n,
+                               sizeof(acc_pre_buf) / sizeof(acc_pre_buf[0]) - 2,
+                               &j_addr)) {
+    free(z_phi.phi_incoming);
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+  int cur_c = cand.next_value++;
+  nyr_inst_t ld_c = interchange_make_inst(NYIR_LOAD_I64, cur_c, j_addr, -1);
+  ld_c.scalar_class = NYIR_SCALAR_I64_RAW;
+  ld_c.effects = nyr_inst_effects(&ld_c);
+  acc_pre_buf[acc_pre_n++] = ld_c;
+
+  nyr_inst_t st_j = interchange_make_inst(NYIR_STORE_I64, -1, j_addr, -1);
+  st_j.c = cand.data[acc_inst_idx].dst;
+  st_j.scalar_class = NYIR_SCALAR_I64_RAW;
+  st_j.effects = nyr_inst_effects(&st_j);
+
+  /* Swap IV uses inside inner loop body and rewrite accumulation + bounds. */
+  interchange_swap_body_ivs(&cand, defs, cfg, inner_blocks, outer, inner,
+                            outer_cmp_idx, inner_cmp_idx);
+  nyr_inst_t *cand_acc = &cand.data[acc_inst_idx];
+  if (interchange_root_copy(f, defs, f->data[acc_inst_idx].a) == red_phi_dst)
+    cand_acc->a = cur_c;
+  else
+    cand_acc->b = cur_c;
+  nyr_clear_derived_facts(cand_acc);
+
+  /* Update outer->iv preheader incoming label to z_done_lbl and swap limits. */
+  for (size_t i = cfg->block_start[outer->header_block];
+       i < cfg->block_end[outer->header_block]; ++i) {
+    nyr_inst_t *in = &cand.data[i];
+    if (in->op == NYIR_PHI && in->dst == outer->iv) {
+      for (size_t k = 0; k < in->phi_incoming_len; ++k)
+        if (in->phi_incoming[k].predecessor_label == outer_pre_lbl)
+          in->phi_incoming[k].predecessor_label = z_done_lbl;
+    }
+  }
+
+  nyr_inst_t o_lim_inst = {0}, i_lim_inst = {0};
+  nyr_inst_t inv_buf[72];
+  size_t inv_n = 0;
+  interchange_insert_group_t groups[8];
+  size_t ng = 0;
+  groups[ng++] = (interchange_insert_group_t){pre_end, pre_buf, pre_n};
+  groups[ng++] =
+      (interchange_insert_group_t){acc_inst_idx, acc_pre_buf, acc_pre_n};
+  groups[ng++] = (interchange_insert_group_t){acc_inst_idx + 1, &st_j, 1};
+
+  if (inv_ld_idx != SIZE_MAX && inner->preheader_block < cfg->block_count &&
+      outer_blocks[inner->preheader_block] &&
+      !inner_blocks[inner->preheader_block] &&
+      (outer->step > 0 ? outer->init < outer->limit
+                       : outer->init > outer->limit)) {
+    size_t inv_slice[64];
+    size_t inv_slice_len = 0;
+    int inv_addr = -1;
+    if (interchange_collect_addr_slice(f, defs, cfg, inner_blocks, inner->iv,
+                                       f->data[inv_ld_idx].a, inv_slice,
+                                       &inv_slice_len, 64) &&
+        interchange_clone_slice(&cand, f, inv_slice, inv_slice_len, inner->iv,
+                                outer->iv, f->data[inv_ld_idx].a, inv_buf,
+                                &inv_n, 70, &inv_addr)) {
+      nyr_inst_t ld_inv = f->data[inv_ld_idx];
+      ld_inv.a = inv_addr;
+      nyr_clear_derived_facts(&ld_inv);
+      inv_buf[inv_n++] = ld_inv;
+      size_t inv_pos = cfg->block_end[inner->preheader_block];
+      size_t ip_last = nyr_block_last_non_nop(f, cfg, inner->preheader_block);
+      if (ip_last > cfg->block_start[inner->preheader_block] &&
+          (f->data[ip_last - 1].op == NYIR_BR ||
+           f->data[ip_last - 1].op == NYIR_BR_IF))
+        inv_pos = ip_last - 1;
+      groups[ng++] = (interchange_insert_group_t){inv_pos, inv_buf, inv_n};
+      nyr_inst_discard(&cand.data[inv_ld_idx]);
+    }
+  }
+
+  if (outer->limit != inner->limit) {
+    int new_olim = cand.next_value++;
+    int new_ilim = cand.next_value++;
+    o_lim_inst = interchange_make_inst(NYIR_CONST_I64, new_olim, -1, -1);
+    o_lim_inst.imm = inner->limit;
+    o_lim_inst.scalar_class = NYIR_SCALAR_I64_RAW;
+    i_lim_inst = interchange_make_inst(NYIR_CONST_I64, new_ilim, -1, -1);
+    i_lim_inst.imm = outer->limit;
+    i_lim_inst.scalar_class = NYIR_SCALAR_I64_RAW;
+    cand.data[outer_cmp_idx].b = new_olim;
+    cand.data[inner_cmp_idx].b = new_ilim;
+    nyr_clear_derived_facts(&cand.data[outer_cmp_idx]);
+    nyr_clear_derived_facts(&cand.data[inner_cmp_idx]);
+    groups[ng++] = (interchange_insert_group_t){outer_cmp_idx, &o_lim_inst, 1};
+    groups[ng++] = (interchange_insert_group_t){inner_cmp_idx, &i_lim_inst, 1};
+  }
+
+  nyr_inst_discard(&cand.data[red_phi_idx]);
+  nyr_inst_discard(&cand.data[st_c_idx]);
+
+  if (!interchange_apply_inserts(&cand, groups, ng)) {
+    free(z_phi.phi_incoming);
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+  /* Note z_phi.phi_incoming ownership was copied into cand->data; do not free. */
+
+  char err[256] = {0};
+  if (!nyr_ir_verify(&cand, err, sizeof(err))) {
+    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+      ny_dbg_heuristic_event("LOOP_INTERCHANGE", "reduction verify failed: %s",
+                             err);
+    nyr_ir_func_free(&cand);
+    return false;
+  }
+  nyr_func_replace(f, &cand);
+  if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+    ny_dbg_heuristic_event(
+        "LOOP_INTERCHANGE",
+        "accepted reduction-to-accumulation interchange "
+        "before_unit=%zu after_unit=%zu before_large=%zu after_large=%zu",
+        before_unit, after_unit, before_large, after_large);
+  return true;
+}
+
 /*
  * Interchange requires equal starts/steps/predicates and invariant bounds,
  * rejects unsupported loop-carried state, and proves each memory access safe
@@ -2233,6 +3208,17 @@ bool nyr_loop_interchange(nyr_func_t *f) {
       if (!nested) {
         ++rejected_nesting;
         continue;
+      }
+      if (interchange_try_reduction_nest(f, &cfg, defs, outer_blocks,
+                                         inner_blocks, outer, inner)) {
+        free(outer_blocks);
+        free(inner_blocks);
+        free(safe_stores);
+        free(read_state);
+        free(defs);
+        nyr_scev_free(&info);
+        nyr_cfg_free(&cfg);
+        return true;
       }
       if (!outer->trip_count_known || !inner->trip_count_known ||
           !outer->init_is_const || !inner->init_is_const ||
