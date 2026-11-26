@@ -320,6 +320,33 @@ impl poly_elem {
          Poly(R, rawpoly.poly_mod_gcd(_poly_coeffs(f), _poly_coeffs(g), p))
       }
    }
+   ;; Exact integer-polynomial operations (ZZ[x]); see core.math.crypto.poly.
+   fn format(poly_elem f) str { rawpoly.poly_format(_poly_coeffs(f), to_str(_poly_ring(f).get("name", "x"))) }
+   fn content(poly_elem f) bigint { rawpoly.poly_content(_poly_coeffs(f)) }
+   fn squarefree(poly_elem f) list {
+      "[signed content, [[factor, multiplicity], ...]] with factors in this ring."
+      def poly_ring R = _poly_ring(f)
+      def raw = rawpoly.poly_squarefree(_poly_coeffs(f))
+      mut parts = []
+      for ent in raw.get(1, []) { parts = parts.append([Poly(R, ent.get(0)), ent.get(1)]) }
+      [raw.get(0), parts]
+   }
+   fn factor_linear(poly_elem f) list {
+      "[signed content, [[num, den, multiplicity], ...], residual polynomial]."
+      def raw = rawpoly.poly_factor_linear(_poly_coeffs(f))
+      [raw.get(0), raw.get(1), Poly(_poly_ring(f), raw.get(2))]
+   }
+   fn roots(poly_elem f) list {
+      "Distinct rational roots as [numerator, denominator, multiplicity]."
+      rawpoly.poly_rational_roots(_poly_coeffs(f))
+   }
+   fn divmod(poly_elem f, poly_elem g) list {
+      "[quotient, remainder] with f = g*q + r."
+      def poly_ring R = _poly_check_same(f, g)
+      def p = _poly_base_modulus(R)
+      def qr = p == nil ? rawpoly.poly_divmod_zz(_poly_coeffs(f), _poly_coeffs(g)) : rawpoly.poly_mod_div(_poly_coeffs(f), _poly_coeffs(g), p)
+      [Poly(R, qr.get(0)), Poly(R, qr.get(1))]
+   }
    fn resultant(poly_elem f, poly_elem g) any {
       def poly_ring R = _poly_check_same(f, g)
       def p = _poly_base_modulus(R)

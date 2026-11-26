@@ -1,0 +1,29 @@
+shape test_polynomial_mixed_exact {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O2; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.crypto.poly
+use core.math.nt
+def p = [-162, 486, -216, 48, -246, -462, -192, -24]
+def sq = poly_squarefree(p)
+assert(bigint_eq(Z(sq.get(0)),Z(-6)))
+def list fs = sq.get(1)
+assert(fs.len == 3)
+mut int i = 0
+while i < fs.len {
+   def list e = fs.get(i)
+   print(poly_format(e.get(0)), int(e.get(1)))
+   i += 1
+}
+def result = poly_factor_linear(p)
+assert(bigint_eq(Z(result.get(0)),Z(-6)))
+assert(poly_format(result.get(2)) == "x^2 + 1")
+assert(result.get(1).len == 2)
+print("POLY_MIXED_OK")
+NY
+}

@@ -1,0 +1,65 @@
+shape test_polynomial_exact {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O2; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.crypto.poly
+use core.math.nt
+fn check_root(list roots, int a, int b, int m) bool {
+   mut int i = 0
+   while i < roots.len {
+      def list r = roots.get(i)
+      if bigint_eq(Z(r.get(0)), Z(a)) && bigint_eq(Z(r.get(1)), Z(b)) && int(r.get(2)) == m { return true }
+      i += 1
+   }
+   false
+}
+fn check_factor(list p, int scalar, int count, str residual) list {
+   def f = poly_factor_linear(p)
+   assert(bigint_eq(Z(f.get(0)), Z(scalar)))
+   def list roots = f.get(1)
+   assert(roots.len == count)
+   assert(poly_format(f.get(2)) == residual)
+   roots
+}
+assert(poly_format([]) == "0")
+assert(poly_format([0,0,0]) == "0")
+assert(poly_degree([]) == -1)
+assert(poly_degree([1,0,0]) == 0)
+assert(poly_format([4,-12,9]) == "9*x^2 - 12*x + 4")
+assert(bigint_eq(poly_content([-12,24]), Z(12)))
+assert(poly_format(poly_primitive_part([-12,24])) == "2*x - 1")
+assert(poly_format(poly_gcd([2,4],[4,8])) == "4*x + 2")
+assert(poly_format(poly_gcd([1,1],[1,2])) == "1")
+assert(poly_format(poly_gcd([0],[0])) == "0")
+assert(poly_format(poly_div_exact([0],[1,2])) == "0")
+assert(!is_list(poly_div_exact([1,1],[1,2])))
+assert(!is_list(poly_div_exact([1],[0])))
+def qr = poly_synthetic_div([-6,11,-6,1],2)
+assert(poly_format(qr.get(0)) == "x^2 - 4*x + 3")
+assert(bigint_eq(Z(qr.get(1)), Z(0)))
+def a = check_factor([-6,11,-6,1],1,3,"1")
+assert(check_root(a,1,1,1) && check_root(a,2,1,1) && check_root(a,3,1,1))
+def b = check_factor([0,0,-12,16,-5],-1,3,"1")
+assert(check_root(b,0,1,2) && check_root(b,2,1,1) && check_root(b,6,5,1))
+def c = check_factor([4,-12,9],1,1,"1")
+assert(check_root(c,2,3,2))
+check_factor([1,0,1],1,0,"x^2 + 1")
+check_factor([-7],-7,0,"1")
+check_factor([0],0,0,"1")
+def sq = poly_squarefree([-8,12,-6,1])
+def list sf = sq.get(1)
+assert(bigint_eq(Z(sq.get(0)),Z(1)) && sf.len == 1)
+def list ent = sf.get(0)
+assert(poly_format(ent.get(0)) == "x - 2" && int(ent.get(1)) == 3)
+assert(poly_squarefree([0]).get(1).len == 0)
+assert(poly_squarefree([4]).get(1).len == 0)
+def large = Z("100000000000000000000000000000000000000001")
+assert(poly_format(poly_div_exact([bigint_neg(large),large],[-1,1])) == bigint_to_str(large))
+print("POLY_EXACT_OK")
+NY
+}

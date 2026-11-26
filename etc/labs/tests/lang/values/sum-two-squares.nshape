@@ -1,0 +1,92 @@
+shape test_sum_two_squares {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native-only --strict-types -O0; --native-only --strict-types -O2; --native-only --strict-types -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.nt
+fn has_pair(list xs, int a, int b) bool {
+   mut int i = 0
+   while i < xs.len {
+      def list z = xs.get(i)
+      if bigint_eq(Z(z.get(0)), Z(a)) && bigint_eq(Z(z.get(1)), Z(b)) { return true }
+      i += 1
+   }
+   false
+}
+fn check_n(int n) int {
+   def r = sum_two_squares(n)
+   mut int count = 0
+   mut int a = 0
+   while 2*a*a <= n {
+      mut int b = a
+      while a*a + b*b <= n {
+         if a*a + b*b == n {
+            assert(has_pair(r, a, b), "missing pair " + to_str(n))
+            count += 1
+         }
+         b += 1
+      }
+      a += 1
+   }
+   assert(r.len == count, "duplicate or extra pair " + to_str(n))
+   count
+}
+assert(sum_two_squares(-1).len == 0, "negative")
+assert(has_pair(sum_two_squares(0),0,0), "zero")
+assert(has_pair(sum_two_squares(1),0,1), "unit")
+assert(sum_two_squares(25, true).len == 1, "nonzero filter")
+assert(sum_two_squares(3).len == 0, "obstruction")
+assert(sum_two_squares(325).len == 3, "325 count")
+assert(sum_two_squares(1105).len == 4, "1105 count")
+assert((325).sum_two_squares().len == 3, "int method")
+assert(Z(325).sum_two_squares().len == 3, "bigint method")
+assert(bigint_eq(gaussian_norm(gaussian_gcd([5,0],[2,1])),Z(5)), "gaussian gcd")
+assert(bigint_eq(gaussian_norm(gaussian_gcd([0,-5],[0,0])),Z(25)), "gaussian gcd axis")
+fn check_div(int a, int b) {
+   def z = [a,b]
+   def list qr = gaussian_divmod(z,[2,-3])
+   def list r = qr.get(1)
+   def t = gaussian_mul(qr.get(0),[2,-3])
+   assert(bigint_to_str(bigint_add(t.get(0),r.get(0))) == to_str(a), "div real")
+   assert(bigint_to_str(bigint_add(t.get(1),r.get(1))) == to_str(b), "div imag " + to_str(a) + "," + to_str(b) + " actual " + bigint_to_str(bigint_add(t.get(1),r.get(1))))
+   assert(bigint_lt(gaussian_norm(r),Z(13)), "div norm")
+}
+mut int a = -5
+while a <= 5 {
+   mut int b = -5
+   while b <= 5 { check_div(a,b) b += 1 }
+   a += 1
+}
+assert(is_list(cornacchia(2, 17, 7)), "cornacchia root")
+assert(!is_list(cornacchia(2,17,2)), "cornacchia invalid root")
+def f6 = factor(6)
+assert(f6.len == 2 && bigint_eq(_factor_product(f6), Z(6)), "factor 6 regression")
+assert(bigint_eq(_factor_product(factor(60)), Z(60)), "factor 60")
+def f8051 = factor(8051)
+assert(f8051.len == 2 && bigint_eq(_factor_product(f8051), Z(8051)), "factor 8051")
+assert(bigint_eq(_factor_product(factor(100160063)), Z(100160063)), "factor 100160063")
+mut int n = 0
+while n <= 600 { check_n(n) n += 1 }
+def bigint large = bigint_pow(Z(5),Z(80))
+def rs = sum_two_squares_from_factors(large,[[5,80]])
+assert(rs.len == 41, "large power count")
+mut int i = 0
+while i < rs.len { assert(bigint_eq(gaussian_norm(rs.get(i)),large)) i += 1 }
+def bigint bigp = Z("100000000000000000000000000000000000000000000000577")
+assert(is_prime(bigp), "large prime")
+def pp = prime_sum_two_squares(bigp)
+assert(is_list(pp), "large prime decomposition")
+assert(bigint_eq(gaussian_norm(pp),bigp), "large prime norm")
+def bigint composite = bigint_mul(large,Z(13))
+def mixed = sum_two_squares_from_factors(composite,[[5,80],[13,1]])
+assert(mixed.len == 81, "mixed prime power count")
+i = 0
+while i < mixed.len { assert(bigint_eq(gaussian_norm(mixed[i]),composite), "mixed norm") i += 1 }
+assert(sum_two_squares(large).len == 41, "large local factorization")
+print("SUM_TWO_SQUARES_OK")
+NY
+}

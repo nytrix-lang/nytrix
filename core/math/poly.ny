@@ -1,5 +1,5 @@
 ;; Keywords: poly polynomial math crypto
-;; Polynomial arithmetic, evaluation, modular reduction, interpolation, and roots.
+;; Polynomial arithmetic, exact linear factorization, modular reduction, interpolation, and roots.
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
@@ -12,8 +12,12 @@ module core.math.crypto.poly(poly_add, poly_mod_add, poly_mul, poly_eval, poly_s
    poly_mod_gcd_fast, poly_sylvester_matrix, poly_resultant, poly_resultant_mod,
    poly_resultant_quadratic_xn_minus_const_mod, poly_mod_roots,
    poly2_new, poly2_add, poly2_mul, poly2_eval,
-   poly2_to_univariate_x, poly2_to_univariate_y, poly2_resultant_x)
+   poly2_to_univariate_x, poly2_to_univariate_y, poly2_resultant_x,
+   poly_trim, poly_degree, poly_content, poly_scale, poly_primitive_part, poly_synthetic_div,
+   poly_divmod_zz, poly_div_exact, poly_pseudo_remainder, poly_gcd_primitive, poly_squarefree,
+   poly_factor_linear, poly_rational_roots, poly_integer_roots, poly_format, poly_derivative)
 use core.math.nt
+use core.math.nt as ntm
 use core.math.crypto.ntt as ntt
 use core.math.matrix
 
@@ -141,33 +145,12 @@ fn poly_derivative_mod(list poly, any modulus) list {
 }
 
 fn poly_modulus(list a, list b) list {
-   "Polynomial remainder a mod b over the ambient coefficient ring."
-   if b.len == 0 { return clone(a) }
-   mut r = clone(a)
-   def db = b.len - 1
-   def lead = b[db]
-   if lead == 0 { return r }
-   while r.len >= b.len && r.len > 0 {
-      def dr = r.len - 1
-      def factor = r[dr] / lead
-      mut i = 0
-      while i < b.len {
-         def idx = dr - db + i
-         r[idx] = r[idx] - factor * b[i]
-         i += 1
-      }
-      while r.len > 0 && r[r.len - 1] == 0 { r.pop() }
-   }
-   r
+   poly_divmod_zz(a, b).get(1)
 }
 
 fn poly_gcd(list a, list b) list {
-   "Compute GCD of two polynomials using Euclidean algorithm. Returns the GCD polynomial."
-   while b.len > 0 {
-      mut r = poly_modulus(a, b)
-      a, b = b, r
-   }
-   a
+   "GCD over ZZ, including common content and positive leading coefficient."
+   poly_scale(poly_gcd_primitive(a, b), ntm.gcd(poly_content(a), poly_content(b)))
 }
 
 fn poly_mod_gcd(list a, list b, any p) list {
@@ -760,4 +743,332 @@ fn poly2_resultant_x(list p1, list p2) list {
       y_val += 1
    }
    poly_interpolate(points, res_vals, 1000000007)
+}
+
+fn poly_trim(list a) list {
+   "Remove trailing zeros; represent zero canonically as [0]."
+   mut int n = a.len
+   while n > 0 && bigint_eq(Z(a[n - 1]), Z(0)) { n -= 1 }
+   n == 0 ? [Z(0)] : a.slice(0, n)
+}
+
+fn _poly_zz(list a) list {
+   mut out = []
+   mut int i = 0
+   while i < a.len {
+      def c = a[i]
+      if !is_int(c) && !is_bigint(c) { panic("poly: expected integer coefficients") }
+      out = out.append(Z(c))
+      i += 1
+   }
+   poly_trim(out)
+}
+
+fn poly_degree(list a) int {
+   "Return the degree, or -1 for the zero polynomial."
+   mut int i = a.len - 1
+   while i >= 0 && bigint_eq(Z(a[i]), Z(0)) { i -= 1 }
+   i
+}
+
+fn poly_content(list a) bigint {
+   "Nonnegative GCD of integer coefficients."
+   mut bigint g = Z(0)
+   def p = _poly_zz(a)
+   mut int i = 0
+   while i < p.len {
+      g = ntm.gcd(g, p.get(i))
+      if bigint_eq(g, Z(1)) { break }
+      i += 1
+   }
+   g
+}
+
+fn poly_scale(list a, any k) list {
+   "Multiply every integer coefficient by a scalar exactly."
+   mut out = []
+   def p = _poly_zz(a)
+   mut int i = 0
+   while i < p.len { out = out.append(bigint_mul(p.get(i), Z(k))) i += 1 }
+   poly_trim(out)
+}
+
+fn poly_primitive_part(list a) list {
+   "Primitive part with positive leading coefficient; zero stays zero."
+   def p = _poly_zz(a)
+   if poly_degree(p) < 0 { return p }
+   mut bigint g = poly_content(p)
+   if bigint_lt(Z(p.get(p.len - 1)), Z(0)) { g = bigint_neg(g) }
+   mut out = []
+   mut int i = 0
+   while i < p.len { out = out.append(bigint_div(p.get(i), g)) i += 1 }
+   out
+}
+
+fn poly_synthetic_div(list a, any root) list {
+   "Return [quotient, remainder] for division by x - root over ZZ."
+   def p = _poly_zz(a)
+   def bigint x = Z(root)
+   mut q = []
+   mut int i = p.len - 1
+   mut bigint r = Z(p.get(i))
+   while i > 0 {
+      q = q.append(r)
+      i -= 1
+      r = bigint_add(bigint_mul(r, x), p.get(i))
+   }
+   mut out = []
+   i = q.len - 1
+   while i >= 0 { out = out.append(q.get(i)) i -= 1 }
+   [poly_trim(out), r]
+}
+
+fn poly_divmod_zz(list a, list b) list {
+   "Return [q, r] with a = b*q + r; stop if the leading quotient is not integral."
+   mut r = _poly_zz(a)
+   def d = _poly_zz(b)
+   def int db = poly_degree(d)
+   if db < 0 { panic("poly_divmod_zz: division by zero") }
+   def bigint lc = Z(d.get(db))
+   mut rev = []
+   mut int k = poly_degree(r) - db
+   mut bool blocked = false
+   while k >= 0 {
+      mut bigint t = Z(0)
+      if !blocked && poly_degree(r) == k + db {
+         def bigint top = Z(r.get(r.len - 1))
+         if !bigint_eq(bigint_mod(top, lc), Z(0)) { blocked = true }
+         else {
+            t = bigint_div(top, lc)
+            mut next = []
+            mut int j = 0
+            while j < r.len - 1 {
+               def bigint v = Z(r.get(j))
+               next = next.append(j >= k ? bigint_sub(v, bigint_mul(t, d.get(j - k))) : v)
+               j += 1
+            }
+            r = poly_trim(next)
+         }
+      }
+      rev = rev.append(t)
+      k -= 1
+   }
+   mut q = []
+   k = rev.len - 1
+   while k >= 0 { q = q.append(rev.get(k)) k -= 1 }
+   [poly_trim(q), r]
+}
+
+fn poly_div_exact(list a, list b) any {
+   "Exact quotient over ZZ, or nil when division is impossible."
+   if poly_degree(b) < 0 { return nil }
+   def qr = poly_divmod_zz(a, b)
+   def list r = qr.get(1)
+   poly_degree(r) < 0 ? qr.get(0) : nil
+}
+
+fn poly_pseudo_remainder(list a, list b) list {
+   "Content-normalized pseudo-remainder over ZZ, for primitive GCD."
+   mut r = poly_primitive_part(a)
+   def d = poly_primitive_part(b)
+   def int db = poly_degree(d)
+   if db < 0 { panic("poly_pseudo_remainder: division by zero") }
+   if db == 0 { return [Z(0)] }
+   def bigint lc = Z(d.get(db))
+   while poly_degree(r) >= db {
+      def int shift = r.len - d.len
+      def bigint top = Z(r.get(r.len - 1))
+      mut next = []
+      mut int i = 0
+      while i < r.len {
+         def bigint v = bigint_mul(r.get(i), lc)
+         next = next.append(i >= shift ? bigint_sub(v, bigint_mul(top, d.get(i - shift))) : v)
+         i += 1
+      }
+      r = poly_primitive_part(next)
+   }
+   r
+}
+
+fn poly_gcd_primitive(list a, list b) list {
+   "Primitive polynomial GCD with positive leading coefficient."
+   mut u = poly_primitive_part(a)
+   mut v = poly_primitive_part(b)
+   while poly_degree(v) >= 0 {
+      def r = poly_pseudo_remainder(u, v)
+      u, v = v, r
+   }
+   u
+}
+
+fn _poly_div_required(list a, list b) list {
+   def q = poly_div_exact(a, b)
+   if !is_list(q) { panic("poly: non-exact division") }
+   q
+}
+
+fn _poly_signed_content(list p) bigint {
+   def bigint g = poly_content(p)
+   bigint_lt(Z(p.get(p.len - 1)), Z(0)) ? bigint_neg(g) : g
+}
+
+fn poly_squarefree(list a) list {
+   "Return [signed content, [[squarefree factor, multiplicity], ...]]."
+   def p = _poly_zz(a)
+   if poly_degree(p) < 0 { return [Z(0), []] }
+   def bigint unit = _poly_signed_content(p)
+   def f = poly_primitive_part(p)
+   mut derivative = []
+   mut int i = 1
+   while i < f.len { derivative = derivative.append(bigint_mul(f.get(i), Z(i))) i += 1 }
+   mut g = poly_gcd_primitive(f, derivative)
+   mut w = _poly_div_required(f, g)
+   mut factors = []
+   mut int m = 1
+   while poly_degree(w) > 0 {
+      def y = poly_gcd_primitive(w, g)
+      def z = _poly_div_required(w, y)
+      if poly_degree(z) > 0 { factors = factors.append([z, m]) }
+      w = y
+      g = _poly_div_required(g, y)
+      m += 1
+   }
+   [unit, factors]
+}
+
+fn _poly_divisors(any n, int max_trial) list {
+   mut bigint v = bigint_clone(bigint_abs(Z(n)))
+   if bigint_eq(v, Z(0)) { panic("poly: zero has infinitely many divisors") }
+   mut ds = [Z(1)]
+   mut int k = 2
+   mut bool prime_tail = is_prime(v)
+   while bigint_gt(v, Z(1)) {
+      mut bigint p = Z(k)
+      if prime_tail || bigint_gt(bigint_mul(p, p), v) { p = bigint_clone(v) }
+      elif k > max_trial { panic("poly: divisor search budget exhausted") }
+      if bigint_eq(bigint_mod(v, p), Z(0)) {
+         mut bigint power = Z(1)
+         mut next = clone(ds)
+         while bigint_eq(bigint_mod(v, p), Z(0)) {
+            v = bigint_div(v, p)
+            power = bigint_mul(power, p)
+            mut int j = 0
+            while j < ds.len { next = next.append(bigint_mul(ds.get(j), power)) j += 1 }
+         }
+         ds = next
+         prime_tail = is_prime(v)
+      }
+      k = k == 2 ? 3 : k + 2
+   }
+   ds
+}
+
+fn _poly_rational_eval_num(list p, bigint a, bigint b) bigint {
+   mut int i = p.len - 1
+   mut bigint v = Z(p.get(i))
+   mut bigint scale = Z(1)
+   while i > 0 {
+      i -= 1
+      scale = bigint_mul(scale, b)
+      v = bigint_add(bigint_mul(v, a), bigint_mul(p.get(i), scale))
+   }
+   v
+}
+
+fn _poly_extract_root(list f, bigint n, bigint d) list {
+   mut p = f
+   mut int m = 0
+   if !bigint_eq(ntm.gcd(n, d), Z(1)) { return [p, m] }
+   def factor = [bigint_neg(n), d]
+   while poly_degree(p) > 0 && bigint_eq(_poly_rational_eval_num(p, n, d), Z(0)) {
+      p = _poly_div_required(p, factor)
+      m += 1
+   }
+   [p, m]
+}
+
+fn poly_factor_linear(list a, int max_trial=1000000) list {
+   "Return [signed content, [[numerator, denominator, multiplicity], ...], residual]."
+   def p = _poly_zz(a)
+   if poly_degree(p) < 0 { return [Z(0), [], [Z(1)]] }
+   def bigint unit = _poly_signed_content(p)
+   mut f = poly_primitive_part(p)
+   mut roots = []
+   mut int m = 0
+   while poly_degree(f) > 0 && bigint_eq(Z(f.get(0)), Z(0)) {
+      mut next = []
+      mut int z = 1
+      while z < f.len { next = next.append(Z(f.get(z))) z += 1 }
+      f = next
+      m += 1
+   }
+   if m > 0 { roots = roots.append([Z(0), Z(1), m]) }
+   if poly_degree(f) > 1 {
+      def nums = _poly_divisors(f.get(0), max_trial)
+      def dens = _poly_divisors(f.get(f.len - 1), max_trial)
+      mut int k = 0
+      def int total = nums.len * dens.len * 2
+      while k < total && poly_degree(f) > 1 {
+         def int pair = k / 2
+         def bigint num = Z(nums.get(pair / dens.len))
+         def bigint b = Z(dens.get(pair % dens.len))
+         def bigint n = k % 2 == 0 ? num : bigint_neg(num)
+         k += 1
+         def hit = _poly_extract_root(f, n, b)
+         m = int(hit.get(1))
+         if m > 0 {
+            f = hit.get(0)
+            roots = roots.append([n, b, m])
+         }
+      }
+   }
+   if poly_degree(f) == 1 {
+      def bigint g = poly_content(f)
+      roots = roots.append([bigint_div(bigint_neg(Z(f.get(0))), g), bigint_div(f.get(1), g), 1])
+      f = [g]
+   }
+   [unit, roots, f]
+}
+
+fn poly_rational_roots(list a, int max_trial=1000000) list {
+   "Distinct rational roots as [numerator, positive denominator, multiplicity]."
+   if poly_degree(_poly_zz(a)) < 0 { panic("poly: zero polynomial has infinitely many roots") }
+   poly_factor_linear(a, max_trial).get(1)
+}
+
+fn poly_integer_roots(list a, int max_trial=1000000) list {
+   "Distinct integer roots as [root, multiplicity]."
+   mut roots = []
+   def rr = poly_rational_roots(a, max_trial)
+   mut int i = 0
+   while i < rr.len {
+      def list r = rr.get(i)
+      if bigint_eq(Z(r.get(1)), Z(1)) { roots = roots.append([r.get(0), r.get(2)]) }
+      i += 1
+   }
+   roots
+}
+
+fn poly_format(list a, str variable="x") str {
+   "Format an integer polynomial in descending powers."
+   def p = _poly_zz(a)
+   mut str out = ""
+   mut int i = p.len - 1
+   while i >= 0 {
+      def bigint c = Z(p.get(i))
+      if !bigint_eq(c, Z(0)) {
+         def bool neg = bigint_lt(c, Z(0))
+         def bigint mag = bigint_abs(c)
+         if out.len > 0 { out += neg ? " - " : " + " }
+         elif neg { out += "-" }
+         if i == 0 || !bigint_eq(mag, Z(1)) { out += bigint_to_str(mag) }
+         if i > 0 {
+            if !bigint_eq(mag, Z(1)) { out += "*" }
+            out += variable
+            if i > 1 { out += "^" + to_str(i) }
+         }
+      }
+      i -= 1
+   }
+   out.len == 0 ? "0" : out
 }

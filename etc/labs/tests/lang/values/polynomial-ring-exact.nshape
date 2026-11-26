@@ -1,0 +1,26 @@
+shape test_polynomial_ring_exact {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O2; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.ring (PolynomialRing, Poly, poly_elem)
+use core.math.nt (Z, bigint_eq)
+def R = PolynomialRing(nil, "t")
+def f = R.elem([4,-12,9])
+assert(f.format() == "9*t^2 - 12*t + 4")
+assert(bigint_eq(f.content(),Z(1)))
+assert(f.roots().len == 1)
+assert(f.factor_linear().get(1).len == 1)
+assert(f.squarefree().get(1).len == 1)
+def qr = f.divmod(R.elem([-2,3]))
+def poly_elem q = qr.get(0)
+def poly_elem r = qr.get(1)
+assert(q.format() == "3*t - 2" && r.format() == "0")
+assert(f.gcd(R.elem([-2,3])).format() == "3*t - 2")
+print("POLY_RING_OK")
+NY
+}

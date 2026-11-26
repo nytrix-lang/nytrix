@@ -17,6 +17,8 @@ module core.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_fr
    extended_gcd, bezout_coefficients,
    solve_linear_congruence,
    tonelli_shanks, cipolla, mod_nth_roots_prime, nthroot_mod,
+   gaussian_norm, gaussian_mul, gaussian_divmod, gaussian_gcd, cornacchia,
+   prime_sum_two_squares, sum_two_squares, sum_two_squares_from_factors,
    mod_quadratic_roots_prime,
    continued_fraction, cf_convergents,
    rational_reconstruction, mqrr_rational_reconstruction,
@@ -528,16 +530,17 @@ fn _factor_pack(list flat) list {
    mut out = []
    mut i = 0
    while i < flat.len {
-      def p = Z(flat.get(i))
+      def bigint p = Z(flat[i])
       mut e, j = 1, i + 1
       while j < flat.len {
-         if Z(flat.get(j)) == p { e += 1 }
+         if bigint_eq(Z(flat[j]), p) { e += 1 }
          j += 1
       }
       mut seen = false
       j = 0
       while j < out.len {
-         if out.get(j).get(0) == p { seen = true }
+         def list ent = out[j]
+         if bigint_eq(Z(ent[0]), p) { seen = true }
          j += 1
       }
       if !seen { out = out.append([p, e]) }
@@ -547,16 +550,13 @@ fn _factor_pack(list flat) list {
 }
 
 fn _factor_product(list facs) bigint {
-   mut prod = Z(1)
-   mut i = 0
+   mut bigint prod = Z(1)
+   mut int i = 0
    while i < facs.len {
-      def ent = facs.get(i)
-      def p = Z(ent.get(0))
-      mut e = ent.get(1)
-      while e > 0 {
-         prod = prod * p
-         e = e - 1
-      }
+      def list ent = facs[i]
+      def bigint p = Z(ent[0])
+      def int e = int(ent[1])
+      prod = bigint_mul(prod, bigint_pow(p, Z(e)))
       i += 1
    }
    prod
@@ -653,76 +653,78 @@ fn _factor_local(any n) list {
    "Factorization with small-prime trial division and recursive Pollard rho.
    Uses small-prime trial division + recursive Pollard rho.
    Implemented without nested functions to avoid runtime/JIT instability."
-   mut nn = Z(n)
-   if nn < Z(0) { nn = -nn }
-   if nn < Z(2) { return [] }
+   def bigint nn = bigint_abs(Z(n))
+   if bigint_lt(nn, Z(2)) { return [] }
    def flat = _factor_flat_rec(nn, [])
    _factor_pack(flat)
 }
 
-fn _factor_mul_mod(any a, any b, any m) any { (a % m) * (b % m) % m }
-
-fn _factor_rho_f(any n, any x, any c) any { (_factor_mul_mod(x, x, n) + c) % n }
+fn _factor_rho_f(bigint n, bigint x, bigint c) bigint {
+   bigint_mod(bigint_add(bigint_mul(x, x), c), n)
+}
 
 fn _factor_pollard_rho(any n) bigint {
-   if n % Z(2) == Z(0) { return Z(2) }
-   if n % Z(3) == Z(0) { return Z(3) }
-   mut c = Z(1)
-   while c <= Z(256) {
-      mut x, y = Z(2) + c, x
-      mut d = Z(1)
-      mut it = 0
-      while d == Z(1) && it < 2000000 {
-         x, y = _factor_rho_f(n, x, c), _factor_rho_f(n, _factor_rho_f(n, y, c), c)
-         def diff = (x > y) ? (x - y) : (y - x)
-         d = gcd(diff, n)
+   def bigint nn = Z(n)
+   if bigint_eq(bigint_mod(nn, Z(2)), Z(0)) { return Z(2) }
+   if bigint_eq(bigint_mod(nn, Z(3)), Z(0)) { return Z(3) }
+   mut int c = 1
+   while c <= 256 {
+      def bigint cc = Z(c)
+      mut bigint x = Z(2 + c)
+      mut bigint y = bigint_clone(x)
+      mut bigint d = Z(1)
+      mut int it = 0
+      while bigint_eq(d, Z(1)) && it < 2000000 {
+         x = _factor_rho_f(nn, x, cc)
+         y = _factor_rho_f(nn, _factor_rho_f(nn, y, cc), cc)
+         d = gcd(bigint_abs(bigint_sub(x, y)), nn)
          it += 1
       }
-      if d > Z(1) && d < n { return d }
-      c = c + Z(1)
+      if bigint_gt(d, Z(1)) && bigint_lt(d, nn) { return d }
+      c += 1
    }
    Z(0)
 }
 
 fn _factor_flat_rec(any n, list flat) list {
-   if n == Z(1) { return flat }
-   if is_prime(n) { return flat.append(n) }
+   mut bigint nn = bigint_clone(Z(n))
+   if bigint_eq(nn, Z(1)) { return flat }
+   if is_prime(nn) { return flat.append(nn) }
    def small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]
-   mut nn = n
    mut out = flat
-   mut i = 0
+   mut int i = 0
    while i < small_primes.len {
-      def p = Z(small_primes.get(i))
-      while nn % p == Z(0) {
-         nn = nn / p
+      def bigint p = Z(small_primes.get(i))
+      while bigint_eq(bigint_mod(nn, p), Z(0)) {
+         nn = bigint_div(nn, p)
          out = out.append(p)
       }
       i += 1
    }
-   if nn == Z(1) { return out }
+   if bigint_eq(nn, Z(1)) { return out }
    if is_prime(nn) { return out.append(nn) }
-   def f = _factor_pollard_rho(nn)
-   if f == Z(0) || f == nn {
-      mut k = Z(53)
-      while k * k <= nn && k <= Z(200000) {
-         if nn % k == Z(0) {
-            out = _factor_flat_rec(k, out)
-            return _factor_flat_rec(nn / k, out)
+   def bigint f = _factor_pollard_rho(nn)
+   if bigint_eq(f, Z(0)) || bigint_eq(f, nn) {
+      mut int k = 53
+      while k <= 200000 && bigint_le(bigint_mul(Z(k), Z(k)), nn) {
+         if bigint_eq(bigint_mod(nn, Z(k)), Z(0)) {
+            out = _factor_flat_rec(Z(k), out)
+            return _factor_flat_rec(bigint_div(nn, Z(k)), out)
          }
-         k = k + Z(2)
+         k += 2
       }
       return out.append(nn)
    }
    out = _factor_flat_rec(f, out)
-   _factor_flat_rec(nn / f, out)
+   _factor_flat_rec(bigint_div(nn, f), out)
 }
 
 fn factor(any n, bool fdb=false, bool reserved=false) list {
    "Factor n into prime powers: [[p1, e1], [p2, e2], ...].
-   Uses the built-in schedule ; fdb is accepted for compatibility and does not add a network dependency."
-   mut nn = Z(n)
-   if nn < Z(0) { nn = -nn }
-   if nn < Z(2) { return [] }
+   Uses the built-in schedule by default; fdb=true enables a FactorDB lookup.
+   A residual composite may be returned when the local schedule is exhausted."
+   def bigint nn = bigint_abs(Z(n))
+   if bigint_lt(nn, Z(2)) { return [] }
    if is_prime(nn) { return [[nn, 1]] }
    if fdb {
       def fd = factordb_factor(nn, false)
@@ -1086,6 +1088,226 @@ fn cipolla(any n, any p) bigint {
    r0
 }
 
+fn gaussian_norm(list z) bigint {
+   "Exact squared norm of a Gaussian integer [real, imag]."
+   if z.len != 2 { panic("gaussian: expected [real, imag]") }
+   def bigint a = Z(z[0])
+   def bigint b = Z(z[1])
+   bigint_add(bigint_mul(a, a), bigint_mul(b, b))
+}
+
+fn gaussian_mul(list z, list w) list {
+   "Multiply Gaussian integers without floating-point rounding."
+   if z.len != 2 || w.len != 2 { panic("gaussian: expected [real, imag]") }
+   def bigint a = Z(z[0])
+   def bigint b = Z(z[1])
+   def bigint c = Z(w[0])
+   def bigint d = Z(w[1])
+   [bigint_sub(bigint_mul(a, c), bigint_mul(b, d)), bigint_add(bigint_mul(a, d), bigint_mul(b, c))]
+}
+
+fn _gaussian_round(bigint n, bigint d) bigint {
+   def bigint q = bigint_div(bigint_add(bigint_abs(n), bigint_div(d, Z(2))), d)
+   bigint_lt(n, Z(0)) ? bigint_neg(q) : q
+}
+
+fn gaussian_divmod(list z, list w) list {
+   "Euclidean Gaussian division: [quotient, remainder], with norm(r) < norm(w)."
+   if z.len != 2 || w.len != 2 { panic("gaussian: expected [real, imag]") }
+   def bigint a = Z(z[0])
+   def bigint b = Z(z[1])
+   def bigint c = Z(w[0])
+   def bigint d = Z(w[1])
+   def bigint n = gaussian_norm(w)
+   if bigint_eq(n, Z(0)) { panic("gaussian_divmod: division by zero") }
+   def q = [_gaussian_round(bigint_add(bigint_mul(a, c), bigint_mul(b, d)), n), _gaussian_round(bigint_sub(bigint_mul(b, c), bigint_mul(a, d)), n)]
+   def t = gaussian_mul(q, w)
+   [q, [bigint_sub(a, t[0]), bigint_sub(b, t[1])]]
+}
+
+fn gaussian_gcd(list z, list w) list {
+   "Gaussian GCD, normalized to its first-quadrant associate."
+   if z.len != 2 || w.len != 2 { panic("gaussian: expected [real, imag]") }
+   mut a = z
+   mut b = w
+   while !bigint_eq(gaussian_norm(b), Z(0)) {
+      def list r = gaussian_divmod(a, b).get(1)
+      a = b
+      b = r
+   }
+   def bigint x = Z(a[0])
+   def bigint y = Z(a[1])
+   if bigint_eq(x, Z(0)) && bigint_eq(y, Z(0)) { return [x, y] }
+   if bigint_gt(x, Z(0)) && bigint_ge(y, Z(0)) { return [x, y] }
+   if bigint_gt(y, Z(0)) && bigint_le(x, Z(0)) { return [y, bigint_neg(x)] }
+   if bigint_lt(x, Z(0)) && bigint_le(y, Z(0)) { return [bigint_neg(x), bigint_neg(y)] }
+   [bigint_neg(y), x]
+}
+
+fn _ss_pair(bigint a, bigint b) list {
+   def bigint x = bigint_clone(bigint_abs(a))
+   def bigint y = bigint_clone(bigint_abs(b))
+   bigint_le(x, y) ? [x, y] : [y, x]
+}
+
+fn cornacchia(any d, any m, any root) any {
+   "Try a modular root of -d to solve x^2 + d*y^2 = m; returns [x,y] or nil."
+   def bigint n = Z(m)
+   def bigint k = Z(d)
+   if bigint_le(n, Z(0)) || bigint_le(k, Z(0)) { return nil }
+   mut bigint b = mod(root, n)
+   if !bigint_eq(mod(bigint_add(bigint_mul(b, b), k), n), Z(0)) { return nil }
+   def bigint other = bigint_sub(n, b)
+   if bigint_gt(b, other) { b = other }
+   mut bigint a = bigint_clone(n)
+   def bigint lim = isqrt(n)
+   while bigint_gt(b, lim) {
+      def bigint r = bigint_mod(a, b)
+      a = b
+      b = r
+   }
+   def bigint rem = bigint_sub(n, bigint_mul(b, b))
+   if !bigint_eq(bigint_mod(rem, k), Z(0)) { return nil }
+   def bigint yy = bigint_div(rem, k)
+   def bigint y = isqrt(yy)
+   bigint_eq(bigint_mul(y, y), yy) ? [b, y] : nil
+}
+
+fn prime_sum_two_squares(any p) any {
+   "One canonical representation of a prime as two squares, or nil."
+   def bigint n = Z(p)
+   if bigint_eq(n, Z(2)) { return [Z(1), Z(1)] }
+   if !bigint_eq(bigint_mod(n, Z(4)), Z(1)) || !is_prime(n) { return nil }
+   def bigint nm = bigint_sub(n, Z(1))
+   def bigint e = bigint_div(nm, Z(2))
+   def bigint q = bigint_div(nm, Z(4))
+   mut bigint a = Z(2)
+   while bigint_lt(a, n) {
+      if bigint_eq(power_mod(a, e, n), nm) {
+         def r = cornacchia(1, n, power_mod(a, q, n))
+         if is_list(r) { return _ss_pair(Z(r[0]), Z(r[1])) }
+         return nil
+      }
+      a = bigint_add(a, Z(1))
+   }
+   nil
+}
+
+fn _gaussian_pow(list z, int e) list {
+   mut r = [Z(1), Z(0)]
+   mut b = z
+   while e > 0 {
+      if (e & 1) != 0 { r = gaussian_mul(r, b) }
+      e = e >> 1
+      if e > 0 { b = gaussian_mul(b, b) }
+   }
+   r
+}
+
+fn _ss_scale(list z, bigint s) list {
+   [bigint_mul(z[0], s), bigint_mul(z[1], s)]
+}
+
+fn _ss_add(list out, dict seen, list z, int limit) list {
+   def p = _ss_pair(Z(z[0]), Z(z[1]))
+   def str key = bigint_to_str(Z(p[0])) + ":" + bigint_to_str(Z(p[1]))
+   if seen.contains(key) { return out }
+   if out.len >= limit { panic("sum_two_squares: representation budget exceeded") }
+   seen.set(key, true)
+   out.append(p)
+}
+
+fn _ss_combine(list a, list b, int limit) list {
+   if a.len == 1 && bigint_eq(gaussian_norm(a[0]), Z(1)) { return b }
+   if b.len == 1 && bigint_eq(gaussian_norm(b[0]), Z(1)) { return a }
+   mut out = []
+   def seen = dict()
+   mut int i = 0
+   while i < a.len {
+      def list u = a[i]
+      mut int j = 0
+      while j < b.len {
+         def list v = b[j]
+         out = _ss_add(out, seen, gaussian_mul(u, v), limit)
+         out = _ss_add(out, seen, gaussian_mul(u, [v[0], bigint_neg(Z(v[1]))]), limit)
+         j += 1
+      }
+      i += 1
+   }
+   out
+}
+
+fn sum_two_squares_from_factors(any n, list factors, bool nonzero=false, int max_pairs=100000) list {
+   "All unique 0 <= a <= b with a^2+b^2=n from distinct prime-power pairs; rejects incomplete factors."
+   def bigint nn = Z(n)
+   if max_pairs < 1 { panic("sum_two_squares: invalid representation budget") }
+   if bigint_lt(nn, Z(0)) { return [] }
+   if bigint_eq(nn, Z(0)) { return nonzero ? [] : [[Z(0), Z(0)]] }
+   mut bigint remain = bigint_clone(nn)
+   def seen = dict()
+   mut bool impossible = false
+   mut int i = 0
+   while i < factors.len {
+      if !is_list(factors[i]) { panic("sum_two_squares: invalid prime-power factor") }
+      def list f = factors[i]
+      if f.len != 2 || !is_int(f[1]) { panic("sum_two_squares: invalid prime-power factor") }
+      def bigint p = Z(f[0])
+      def int e = int(f[1])
+      def str key = bigint_to_str(p)
+      if e < 1 || e > bigint_bit_length(nn) || seen.contains(key) || !is_prime(p) { panic("sum_two_squares: invalid prime-power factor") }
+      seen.set(key, true)
+      def bigint pe = bigint_pow(p, Z(e))
+      if !bigint_eq(bigint_mod(remain, pe), Z(0)) { panic("sum_two_squares: invalid factor product") }
+      remain = bigint_div(remain, pe)
+      if bigint_eq(bigint_mod(p, Z(4)), Z(3)) && (e & 1) != 0 { impossible = true }
+      i += 1
+   }
+   if !bigint_eq(remain, Z(1)) { panic("sum_two_squares: incomplete factorization") }
+   if impossible { return [] }
+   mut pairs = [[Z(0), Z(1)]]
+   mut bigint scale = Z(1)
+   i = 0
+   while i < factors.len {
+      def list f = factors[i]
+      def bigint p = Z(f[0])
+      def int e = int(f[1])
+      if bigint_eq(p, Z(2)) || bigint_eq(bigint_mod(p, Z(4)), Z(3)) {
+         scale = bigint_mul(scale, bigint_pow(p, Z(e / 2)))
+         if bigint_eq(p, Z(2)) && (e & 1) != 0 { pairs = _ss_combine(pairs, [[Z(1), Z(1)]], max_pairs) }
+      } else {
+         def z = prime_sum_two_squares(p)
+         if !is_list(z) { panic("sum_two_squares: prime decomposition failed") }
+         mut parts = []
+         def unique = dict()
+         mut int j = 0
+         mut bigint s = Z(1)
+         while j <= e / 2 {
+            parts = _ss_add(parts, unique, _ss_scale(_gaussian_pow(z, e - 2*j), s), max_pairs)
+            s = bigint_mul(s, p)
+            j += 1
+         }
+         pairs = _ss_combine(pairs, parts, max_pairs)
+      }
+      i += 1
+   }
+   mut out = []
+   i = 0
+   while i < pairs.len {
+      def list z = _ss_scale(pairs[i], scale)
+      if !bigint_eq(gaussian_norm(z), nn) { panic("sum_two_squares: invalid decomposition") }
+      if !nonzero || !bigint_eq(Z(z[0]), Z(0)) { out = out.append(z) }
+      i += 1
+   }
+   out
+}
+
+fn sum_two_squares(any n, bool nonzero=false, int max_pairs=100000) list {
+   "All canonical sum-of-two-squares decompositions using local factorization."
+   def bigint nn = Z(n)
+   if bigint_le(nn, Z(1)) { return sum_two_squares_from_factors(nn, [], nonzero, max_pairs) }
+   sum_two_squares_from_factors(nn, factor(nn), nonzero, max_pairs)
+}
+
 fn continued_fraction(any p, any q) list {
    "Continued fraction expansion of p/q. Returns list of partial quotients [a0, a1, ...]."
    mut num = Z(p)
@@ -1287,6 +1509,7 @@ impl bigint {
    fn prev_prime(bigint a) bigint { prev_prime(a) }
    @inline
    fn factor(bigint a) list { factor(a) }
+   fn sum_two_squares(bigint a, bool nonzero=false, int max_pairs=100000) list { sum_two_squares(a, nonzero, max_pairs) }
    @inline
    fn phi(bigint a) bigint { euler_phi(a) }
    @inline
@@ -1334,6 +1557,7 @@ impl int {
    fn prev_prime(int a) bigint { prev_prime(a) }
    @inline
    fn factor(int a) list { factor(a) }
+   fn sum_two_squares(int a, bool nonzero=false, int max_pairs=100000) list { sum_two_squares(a, nonzero, max_pairs) }
    @inline
    fn phi(int a) bigint { euler_phi(a) }
    @inline
