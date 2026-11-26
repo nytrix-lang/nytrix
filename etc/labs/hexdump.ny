@@ -88,5 +88,3 @@ match file_read(path) {
       }
    }
 }
-
-0

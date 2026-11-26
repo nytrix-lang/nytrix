@@ -85,9 +85,9 @@ checks under `etc/labs/tests/`.
 
 | Area | Projects |
 | --- | --- |
-| Terminal | [conway.ny](../../../etc/labs/conway.ny), [matrix.ny](../../../etc/labs/matrix.ny), [ant.ny](../../../etc/labs/ant.ny) |
+| Terminal | [matrix.ny](../../../etc/labs/matrix.ny), [ant.ny](../../../etc/labs/ant.ny) |
 | OS | [args.ny](../../../etc/labs/args.ny), [server.ny](../../../etc/labs/server.ny), [ffi.ny](../../../etc/labs/ffi.ny), [sound.ny](../../../etc/labs/sound.ny) |
-| UI | [term.ny](../../../etc/labs/term.ny), [input.ny](../../../etc/labs/input.ny), [monitor.ny](../../../etc/labs/monitor.ny), [engine.ny](../../../etc/labs/engine.ny), [editor.ny](../../../etc/labs/editor.ny) |
+| UI | [conway.ny](../../../etc/labs/conway.ny), [term.ny](../../../etc/labs/term.ny), [input.ny](../../../etc/labs/input.ny), [monitor.ny](../../../etc/labs/monitor.ny), [engine.ny](../../../etc/labs/engine.ny), [editor.ny](../../../etc/labs/editor.ny) |
 
 Run a project directly, build it as a native executable, or build the browser
 demo runner:

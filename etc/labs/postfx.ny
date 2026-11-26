@@ -12,6 +12,7 @@
 
 use core
 use core.common as common
+use core.os (exit)
 use core.math (sin, cos, max, min)
 use core.os.ui.window as window
 use core.os.ui.window.consts as keyc
@@ -95,55 +96,51 @@ fn on_key(int k) any {
    0
 }
 
-fn main() int {
-   if common.env_truthy("NY_UI_HEADLESS") { gfx.set_backend_type(gfx.BACKEND_MOCK) }
-   else {
-      gfx.apply_backend_env()
-      gfx.apply_backend_argv()
-   }
-   _win = gfx.init_window(1100, 680, "postfx", keyc.WINDOW_CENTER | keyc.WINDOW_FOCUS_ON_SHOW, false, true, 1)
-   if !_win {
-      print("postfx: no window: " + gfx.window_error())
-      return 1
-   }
-   def int mask = common.env_int_clamped("NY_POSTFX_MASK", 64, 0, 255)
-   fx.set_mask(mask)
-   gui.set_enabled(true)
-   def int font = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 16)
-   def int font_small = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 13)
-   gui.set_fonts(font, font, font_small)
-   def int backend = gfx.get_backend_type()
-   def int mock = gfx.BACKEND_MOCK
-   def bool headless = backend == mock && !common.env_truthy("NYTRIX_UI_REPLAY")
-   mut int frames = 0
-   while !gfx.window_should_close(_win) {
-      if headless && frames >= 2 { break }
-      mut any e = window.check_event(_win)
-      while !is_nil(e) && !(is_int(e) && int(e) == 0) {
-         def int typ = window.event_type(e)
-         def any data = window.event_data(e)
-         if typ == keyc.EVENT_KEY_PRESSED { on_key(int(data.get("key", 0))) }
-         gui.feed_event(typ, data)
-         e = window.check_event(_win)
-      }
-      def fb = gfx.framebuffer_size_f64(1100, 680)
-      def f64 w = max(320.0, float(fb.get(0, 1100)))
-      def f64 h = max(240.0, float(fb.get(1, 680)))
-      if !gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]) { continue }
-      gfx.set_ortho_2d(0.0, w, h, 0.0)
-      scene(w, h, gfx.get_time())
-      fx.apply(w, h, gfx.get_time())
-      gui.prepare_input(_win, w, h)
-      gfx.set_ortho_2d(0.0, w, h, 0.0)
-      gui.begin_frame(0, font, w, h)
-      panel(w, h)
-      gui.end_frame()
-      gfx.end_frame()
-      if common.env_truthy("NYTRIX_UI_REPLAY") { print("NYTRIX_UI_STATE frame=" + to_str(frames) + " postfx mask=" + to_str(fx.enabled_mask()) + " passes=" + to_str(fx.last_passes())) }
-      frames += 1
-   }
-   gfx.close_window()
-   0
+if common.env_truthy("NY_UI_HEADLESS") { gfx.set_backend_type(gfx.BACKEND_MOCK) }
+else {
+   gfx.apply_backend_env()
+   gfx.apply_backend_argv()
 }
-
-;; The runtime calls main(); calling it here as well ran the app twice.
+_win = gfx.init_window(1100, 680, "postfx", keyc.WINDOW_CENTER | keyc.WINDOW_FOCUS_ON_SHOW, false, true, 1)
+if !_win {
+   eprint("postfx: no window: " + gfx.window_error())
+   exit(1)
+}
+def int mask = common.env_int_clamped("NY_POSTFX_MASK", 64, 0, 255)
+fx.set_mask(mask)
+gui.set_enabled(true)
+def int font = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 16)
+def int font_small = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 13)
+gui.set_fonts(font, font, font_small)
+def int backend = gfx.get_backend_type()
+def int mock = gfx.BACKEND_MOCK
+def bool headless = backend == mock && !common.env_truthy("NYTRIX_UI_REPLAY")
+mut int frames = 0
+while !gfx.window_should_close(_win) {
+   if headless && frames >= 2 { break }
+   mut any e = window.check_event(_win)
+   while !is_nil(e) && !(is_int(e) && int(e) == 0) {
+      def int typ = window.event_type(e)
+      def any data = window.event_data(e)
+      if typ == keyc.EVENT_KEY_PRESSED { on_key(int(data.get("key", 0))) }
+      gui.feed_event(typ, data)
+      e = window.check_event(_win)
+   }
+   def fb = gfx.framebuffer_size_f64(1100, 680)
+   def f64 w = max(320.0, float(fb.get(0, 1100)))
+   def f64 h = max(240.0, float(fb.get(1, 680)))
+   if !gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]) { continue }
+   gfx.set_ortho_2d(0.0, w, h, 0.0)
+   scene(w, h, gfx.get_time())
+   fx.apply(w, h, gfx.get_time())
+   gui.prepare_input(_win, w, h)
+   gfx.set_ortho_2d(0.0, w, h, 0.0)
+   gui.begin_frame(0, font, w, h)
+   panel(w, h)
+   gui.end_frame()
+   gfx.end_frame()
+   if common.env_truthy("NYTRIX_UI_REPLAY") { print("NYTRIX_UI_STATE frame=" + to_str(frames) + " postfx mask=" + to_str(fx.enabled_mask()) + " passes=" + to_str(fx.last_passes())) }
+   frames += 1
+}
+gfx.close_window()
+exit(0)
