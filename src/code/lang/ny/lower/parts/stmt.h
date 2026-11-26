@@ -7,15 +7,54 @@ static bool ny_native_stmt_is_stdlib(const stmt_t *s) {
   return s && ny_is_stdlib_tok(s->tok);
 }
 
+static bool nyr_stmt_llvm_avx2_vec_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *env = getenv("NYTRIX_NO_LLVM_AVX2_VEC");
+    enabled = !(env && *env && strcmp(env, "0") != 0);
+  }
+  return enabled != 0;
+}
+
+static bool nyr_stmt_triple_is_x86_64(const char *triple) {
+  if (!triple || !*triple)
+    return false;
+  return strncmp(triple, "x86_64", 6) == 0 ||
+         strncmp(triple, "amd64", 5) == 0;
+}
+
 /* Optimizer options for a native compilation: AVX2 targets enable the
  * vector passes (loop/SLP/outer widening) that key off this flag. */
 static unsigned nyr_stmt_ir_opt_options(const ny_options *opt) {
-  if (!opt || opt->native_backend != NY_NATIVE_BACKEND_X86_64)
+  if (!opt)
     return 0;
   nyr_target_request_t request = {0};
   ny_native_target_info_t target = {0};
-  if (!ny_options_target_request(opt, &request) ||
-      !nyr_target_info_init(&target, &request) ||
+  if (opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
+    if (!nyr_stmt_llvm_avx2_vec_enabled())
+      return 0;
+    if (!ny_options_target_request(opt, &request))
+      return 0;
+    const char *triple = request.target_triple;
+    if (!triple || !*triple)
+      triple = getenv("NYTRIX_HOST_TRIPLE");
+    bool is_x86_64 = false;
+    if (triple && *triple) {
+      is_x86_64 = nyr_stmt_triple_is_x86_64(triple);
+    } else {
+#if defined(__x86_64__) || defined(_M_X64)
+      is_x86_64 = true;
+#endif
+    }
+    if (!is_x86_64)
+      return 0;
+    request.backend = NY_NATIVE_BACKEND_X86_64;
+  } else if (opt->native_backend != NY_NATIVE_BACKEND_X86_64) {
+    return 0;
+  } else if (!ny_options_target_request(opt, &request)) {
+    return 0;
+  }
+  if (!nyr_target_info_init(&target, &request) ||
       !(target.caps & NY_NATIVE_CAP_MACH_AVX2))
     return 0;
   return NYR_IR_OPT_AVX2_VECTORIZE;

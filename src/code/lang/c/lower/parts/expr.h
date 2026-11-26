@@ -2855,6 +2855,7 @@ static c_value_t parse_indirect_call(c_parser_t *p, c_value_t target) {
       .dst = -1,
       .imm = (int64_t)argc,
       .flags = NYIR_INST_F_INDIRECT | (sret ? NYIR_INST_F_SRET : 0u) |
+               (p->abi != NYC_ABI_I386 ? NYIR_INST_F_VARIADIC : 0u) |
                (c_function_regparm(p, NULL) << NYIR_INST_F_I386_REGPARM_SHIFT),
       .effects = NYIR_EFFECT_CALL,
       .scalar_class =

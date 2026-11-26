@@ -409,6 +409,12 @@ static LLVMValueRef ny_llvm_vector_splat(ny_llvm_context_t *cg,
   LLVMValueRef value = scalar;
   if (!value || LLVMTypeOf(value) != scalar_type)
     value = LLVMGetUndef(scalar_type);
+  if (LLVMIsConstant(value) && lanes > 0 && lanes <= 16) {
+    LLVMValueRef elems[16];
+    for (unsigned i = 0; i < lanes; ++i)
+      elems[i] = value;
+    return LLVMConstVector(elems, lanes);
+  }
   LLVMValueRef result = LLVMGetUndef(vector_type);
   LLVMTypeRef index_type = LLVMInt32TypeInContext(cg->context);
   for (unsigned i = 0; i < lanes; ++i) {
@@ -695,9 +701,145 @@ static void ny_llvm_record_edge(ny_llvm_nyir_edge_t **edges, size_t *len,
   (*edges)[(*len)++] = (ny_llvm_nyir_edge_t){source, owner, target};
 }
 
-bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
-                            const char *name, bool tag_return, char *err,
-                            size_t err_len) {
+typedef struct {
+  char **slots;
+  size_t len;
+  size_t cap;
+} ny_llvm_addr_set_t;
+
+static uint64_t ny_llvm_fnv1a(const char *s) {
+  uint64_t h = 14695981039346656037ULL;
+  for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+    h ^= *p;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static bool ny_llvm_addr_set_contains(const ny_llvm_addr_set_t *set,
+                                      const char *name) {
+  if (!set || !set->slots || !set->cap || !name || !*name)
+    return false;
+  size_t mask = set->cap - 1;
+  size_t idx = (size_t)ny_llvm_fnv1a(name) & mask;
+  while (set->slots[idx]) {
+    if (strcmp(set->slots[idx], name) == 0)
+      return true;
+    idx = (idx + 1) & mask;
+  }
+  return false;
+}
+
+static bool ny_llvm_addr_set_grow(ny_llvm_addr_set_t *set) {
+  size_t next_cap = set->cap ? set->cap * 2 : 64;
+  char **next_slots = calloc(next_cap, sizeof(*next_slots));
+  if (!next_slots)
+    return false;
+  size_t mask = next_cap - 1;
+  for (size_t i = 0; i < set->cap; ++i) {
+    char *entry = set->slots[i];
+    if (!entry)
+      continue;
+    size_t idx = (size_t)ny_llvm_fnv1a(entry) & mask;
+    while (next_slots[idx])
+      idx = (idx + 1) & mask;
+    next_slots[idx] = entry;
+  }
+  free(set->slots);
+  set->slots = next_slots;
+  set->cap = next_cap;
+  return true;
+}
+
+static void ny_llvm_addr_set_insert(ny_llvm_addr_set_t *set, const char *name) {
+  if (!set || !name || !*name)
+    return;
+  if ((set->len + 1) * 2 >= set->cap && !ny_llvm_addr_set_grow(set))
+    return;
+  size_t mask = set->cap - 1;
+  size_t idx = (size_t)ny_llvm_fnv1a(name) & mask;
+  while (set->slots[idx]) {
+    if (strcmp(set->slots[idx], name) == 0)
+      return;
+    idx = (idx + 1) & mask;
+  }
+  size_t slen = strlen(name);
+  char *copy = malloc(slen + 1);
+  if (!copy)
+    return;
+  memcpy(copy, name, slen + 1);
+  set->slots[idx] = copy;
+  set->len++;
+}
+
+static void ny_llvm_addr_set_collect_func(ny_llvm_addr_set_t *set,
+                                          const nyr_func_t *f) {
+  if (!set || !f || !f->data)
+    return;
+  for (size_t i = 0; i < f->len; ++i) {
+    if (f->data[i].op == NYIR_ADDR_SYMBOL && f->data[i].symbol)
+      ny_llvm_addr_set_insert(set, f->data[i].symbol);
+  }
+}
+
+static void ny_llvm_addr_set_free(ny_llvm_addr_set_t *set) {
+  if (!set)
+    return;
+  for (size_t i = 0; i < set->cap; ++i)
+    free(set->slots[i]);
+  free(set->slots);
+  set->slots = NULL;
+  set->len = 0;
+  set->cap = 0;
+}
+
+static bool ny_llvm_internal_linkage_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *env = getenv("NYTRIX_NO_LLVM_INTERNAL_LINKAGE");
+    enabled = !(env && *env && strcmp(env, "0") != 0);
+  }
+  return enabled != 0;
+}
+
+static bool ny_llvm_should_internalize_func(const ny_llvm_context_t *cg,
+                                            const char *name,
+                                            const char *llvm_name,
+                                            const char *origin_section,
+                                            const ny_llvm_addr_set_t *addr_taken) {
+  if (!ny_llvm_internal_linkage_enabled())
+    return false;
+  if (!cg || !cg->emit_entry || cg->module_declarations_only)
+    return false;
+  /* Interactive REPL evaluates chunks in separate JIT modules and resolves
+   * earlier user functions across chunks via LLVMGetFunctionAddress. */
+  if (cg->default_filename && strncmp(cg->default_filename, "<repl", 5) == 0)
+    return false;
+  /* Restrict to user code; stdlib functions feed std.bc cache linking. */
+  if (!origin_section || (strcmp(origin_section, "ny.user.text") != 0 &&
+                          strcmp(origin_section, "__TEXT,ny_user") != 0))
+    return false;
+  if (!name || !*name || !llvm_name || !*llvm_name)
+    return false;
+  if (strcmp(name, "main") == 0 || strcmp(llvm_name, "main") == 0)
+    return false;
+  if (strncmp(name, "_ny_top", 7) == 0 || strncmp(name, "__ny_top", 8) == 0)
+    return false;
+  if (strncmp(name, "rt_", 3) == 0 || strncmp(name, "ny_rt_", 6) == 0 ||
+      strncmp(llvm_name, "rt_", 3) == 0)
+    return false;
+  if (strncmp(name, "__ny_", 5) == 0 || strncmp(llvm_name, "__ny_", 5) == 0)
+    return false;
+  if (addr_taken && (ny_llvm_addr_set_contains(addr_taken, name) ||
+                     ny_llvm_addr_set_contains(addr_taken, llvm_name)))
+    return false;
+  return true;
+}
+
+static bool ny_llvm_emit_nyir_func_impl(ny_llvm_context_t *cg, nyr_func_t *f,
+                                        const char *name, bool tag_return,
+                                        const ny_llvm_addr_set_t *addr_taken,
+                                        char *err, size_t err_len) {
   (void)tag_return;
   if (!cg || !f || !name || !*name) {
     if (err && err_len > 0)
@@ -790,6 +932,10 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       LLVMFunctionType(ret_ty, param_tys, (unsigned)param_count, false);
   free(param_tys);
 
+  const char *origin_section = ny_llvm_nyir_origin_section(cg, name, false);
+  bool internalize = ny_llvm_should_internalize_func(
+      cg, name, llvm_name, origin_section, addr_taken);
+  LLVMLinkage linkage = internalize ? LLVMInternalLinkage : LLVMExternalLinkage;
   if (fn) {
     if (LLVMGlobalGetValueType(fn) != fn_ty) {
       LLVMValueRef new_fn = LLVMAddFunction(cg->module, "", fn_ty);
@@ -802,9 +948,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     }
   } else {
     fn = LLVMAddFunction(cg->module, llvm_name, fn_ty);
-    LLVMSetLinkage(fn, LLVMExternalLinkage);
   }
-  const char *origin_section = ny_llvm_nyir_origin_section(cg, name, false);
+  LLVMSetLinkage(fn, linkage);
   if (origin_section)
     LLVMSetSection(fn, origin_section);
 
@@ -1869,10 +2014,19 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       if (in->op == NYIR_VEC8_DIV_CONST_I64) {
         LLVMValueRef lhs =
             ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
-        LLVMValueRef denom = ny_llvm_vector_splat(
-            cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, true),
-            vector_type);
-        vals[in->dst] = LLVMBuildSDiv(cg->builder, lhs, denom, "");
+        LLVMValueRef out = NULL;
+        if (in->imm == 1) {
+          out = lhs;
+        } else if (in->imm == -1) {
+          out = LLVMBuildNeg(cg->builder, lhs, "");
+        } else {
+          LLVMValueRef denom = ny_llvm_vector_splat(
+              cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, true),
+              vector_type);
+          out = LLVMBuildSDiv(cg->builder, lhs, denom, "");
+        }
+        if (in->dst >= 0 && (size_t)in->dst < val_count)
+          vals[in->dst] = out;
         break;
       }
       if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64 ||
@@ -1882,11 +2036,14 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         LLVMValueRef count = ny_llvm_vector_splat(
             cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false),
             vector_type);
-        vals[in->dst] = in->op == NYIR_VEC8_SHR_I64
-                            ? LLVMBuildLShr(cg->builder, lhs, count, "")
-                            : (in->op == NYIR_VEC8_SHL_I64
-                                   ? LLVMBuildShl(cg->builder, lhs, count, "")
-                                   : LLVMBuildAShr(cg->builder, lhs, count, ""));
+        LLVMValueRef out =
+            in->op == NYIR_VEC8_SHR_I64
+                ? LLVMBuildLShr(cg->builder, lhs, count, "")
+                : (in->op == NYIR_VEC8_SHL_I64
+                       ? LLVMBuildShl(cg->builder, lhs, count, "")
+                       : LLVMBuildAShr(cg->builder, lhs, count, ""));
+        if (in->dst >= 0 && (size_t)in->dst < val_count)
+          vals[in->dst] = out;
         break;
       }
       if (in->op == NYIR_VEC8_CMP_I64) {
@@ -1901,7 +2058,9 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
                                 : in->cmp == NYIR_CMP_GT ? LLVMIntSGT
                                                          : LLVMIntSGE;
         LLVMValueRef cmpv = LLVMBuildICmp(cg->builder, pred, lhs, rhs, "");
-        vals[in->dst] = LLVMBuildSExt(cg->builder, cmpv, vector_type, "");
+        LLVMValueRef out = LLVMBuildSExt(cg->builder, cmpv, vector_type, "");
+        if (in->dst >= 0 && (size_t)in->dst < val_count)
+          vals[in->dst] = out;
         break;
       }
       if (in->op == NYIR_VEC8_SELECT_I64) {
@@ -1914,8 +2073,10 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         LLVMValueRef zero = LLVMConstNull(vector_type);
         LLVMValueRef cond =
             LLVMBuildICmp(cg->builder, LLVMIntSLT, mask, zero, "");
-        vals[in->dst] =
+        LLVMValueRef out =
             LLVMBuildSelect(cg->builder, cond, tval, fval, "");
+        if (in->dst >= 0 && (size_t)in->dst < val_count)
+          vals[in->dst] = out;
         break;
       }
       if (in->op == NYIR_VEC4_SET1_F64 || in->op == NYIR_VEC8_SET1_F32 ||
@@ -2004,7 +2165,22 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         result = LLVMBuildXor(cg->builder, lhs, rhs, "");
         break;
       case NYIR_VEC8_MUL_I64:
-        result = LLVMBuildMul(cg->builder, lhs, rhs, "");
+        if (in->imm == 1) {
+          /* NYIR mul_u32 proves operands fit in [0, UINT32_MAX], letting
+           * x86 AVX2 lower to a single vpmuludq instead of 64-bit mul. */
+          LLVMTypeRef vec_i32 =
+              LLVMVectorType(LLVMInt32TypeInContext(cg->context), lanes);
+          LLVMValueRef lhs32 = LLVMBuildTrunc(cg->builder, lhs, vec_i32, "");
+          LLVMValueRef rhs32 = LLVMBuildTrunc(cg->builder, rhs, vec_i32, "");
+          LLVMValueRef lhs64 =
+              LLVMBuildZExt(cg->builder, lhs32, vector_type, "");
+          LLVMValueRef rhs64 =
+              LLVMBuildZExt(cg->builder, rhs32, vector_type, "");
+          result = LLVMBuildMul(cg->builder, lhs64, rhs64, "");
+          LLVMSetNUW(result, 1);
+        } else {
+          result = LLVMBuildMul(cg->builder, lhs, rhs, "");
+        }
         break;
       case NYIR_VEC4_SHL_I64:
         result = LLVMBuildShl(cg->builder, lhs, rhs, "");
@@ -2851,11 +3027,30 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
   return true;
 }
 
+bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
+                            const char *name, bool tag_return, char *err,
+                            size_t err_len) {
+  return ny_llvm_emit_nyir_func_impl(cg, f, name, tag_return, NULL, err,
+                                     err_len);
+}
+
 bool ny_llvm_emit_nyir_module(ny_llvm_context_t *cg,
                               nyr_backend_module_t *module, char *err,
                               size_t err_len) {
   if (!cg || !module)
     return false;
+
+  ny_llvm_addr_set_t addr_taken = {0};
+  bool collect_addr_taken =
+      ny_llvm_internal_linkage_enabled() && cg->emit_entry &&
+      !cg->module_declarations_only &&
+      !(cg->default_filename && strncmp(cg->default_filename, "<repl", 5) == 0);
+  if (collect_addr_taken) {
+    for (size_t i = 0; i < module->function_count; ++i)
+      ny_llvm_addr_set_collect_func(&addr_taken, &module->functions[i]);
+    if (module->entry)
+      ny_llvm_addr_set_collect_func(&addr_taken, module->entry);
+  }
 
   /*
    * Stream the borrowed neutral module into LLVM and check a bounded RSS cap
@@ -2881,8 +3076,9 @@ bool ny_llvm_emit_nyir_module(ny_llvm_context_t *cg,
               i + 1, module->function_count, name, func->len);
       fflush(stderr);
     }
-    if (!ny_llvm_emit_nyir_func(cg, (nyr_func_t *)func, name, false, err,
-                                err_len)) {
+    if (!ny_llvm_emit_nyir_func_impl(cg, (nyr_func_t *)func, name, false,
+                                     collect_addr_taken ? &addr_taken : NULL,
+                                     err, err_len)) {
       ok = false;
       break;
     }
@@ -2921,9 +3117,12 @@ bool ny_llvm_emit_nyir_module(ny_llvm_context_t *cg,
       !cg->module_declarations_only && cg->emit_entry) {
     if (getenv("NY_DUMP_LLVM"))
       nyr_dump(stderr, module->entry, "rt_main_pre_emit");
-    ok = ny_llvm_emit_nyir_func(cg, (nyr_func_t *)module->entry,
-                                "_ny_top_entry", false, err, err_len);
+    ok = ny_llvm_emit_nyir_func_impl(cg, (nyr_func_t *)module->entry,
+                                     "_ny_top_entry", false,
+                                     collect_addr_taken ? &addr_taken : NULL,
+                                     err, err_len);
   }
+  ny_llvm_addr_set_free(&addr_taken);
   if (module->entry)
     nyr_ir_func_free(module->entry);
   if (ok && getenv("NY_DUMP_LLVM"))

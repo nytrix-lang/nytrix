@@ -1147,10 +1147,20 @@ bool nyr_mach_regalloc_verify(const nyr_mach_func_t *mach,
  * encoder move it directly into its argument register instead of staging it
  * through a canonical home and reloading it immediately.
  */
+static bool no_caller_save_loop_gpr(void) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_CALLER_SAVE_LOOP_GPR");
+    disabled = env && *env && strcmp(env, "0") != 0;
+  }
+  return disabled != 0;
+}
+
 static bool segment_uses_call_arg(const nyr_mach_func_t *mach,
                                   const nyr_mach_live_segment_t *seg) {
   if (!mach || !seg || seg->start > seg->end || seg->start >= mach->inst_len)
     return false;
+  const bool elide_dead_call_arg = !no_caller_save_loop_gpr();
   size_t end = seg->end < mach->inst_len ? seg->end : mach->inst_len - 1;
   for (size_t pc = seg->start; pc <= end; ++pc) {
     const nyr_mach_inst_t *in = &mach->insts[pc];
@@ -1159,12 +1169,51 @@ static bool segment_uses_call_arg(const nyr_mach_func_t *mach,
     if (in->src0.kind == NYR_MACH_OPERAND_VREG &&
         in->src0.as.reg == seg->vreg)
       return true;
+    /*
+     * A direct-call argument that dies at the call site can stay in a
+     * caller-saved register via call_arg_resident without pushing a
+     * callee-saved register in the prologue.
+     */
+    if (elide_dead_call_arg && pc == seg->end &&
+        seg->spill_reason != NYR_MACH_SPILL_LIVE_OUT &&
+        in->src0.kind == NYR_MACH_OPERAND_SYMBOL)
+      continue;
     for (size_t ai = 0; ai < in->args_len; ++ai)
       if (in->args[ai].kind == NYR_MACH_OPERAND_VREG &&
           in->args[ai].as.reg == seg->vreg)
         return true;
   }
   return false;
+}
+
+static int x64_call_arg_hint_color(const nyr_mach_func_t *mach,
+                                   const nyr_mach_live_segment_t *seg) {
+  static const int gp_arg_color[6] = {6, 5, 11, 10, 8, 9};
+  if (no_caller_save_loop_gpr() || !mach || !seg || !mach->vreg_types ||
+      seg->end >= mach->inst_len || seg->spill_reason == NYR_MACH_SPILL_LIVE_OUT)
+    return -1;
+  const nyr_mach_inst_t *in = &mach->insts[seg->end];
+  if (in->opcode != NYR_MACH_CALL ||
+      in->src0.kind != NYR_MACH_OPERAND_SYMBOL || !in->args)
+    return -1;
+  size_t gp_idx = 0;
+  for (size_t ai = 0; ai < in->args_len; ++ai) {
+    if (in->arg_sizes && in->arg_sizes[ai] > 0)
+      return -1;
+    bool is_fp = false;
+    if (in->args[ai].kind == NYR_MACH_OPERAND_VREG &&
+        in->args[ai].as.reg < mach->vreg_len) {
+      nyr_mach_type_t vt = mach->vreg_types[in->args[ai].as.reg];
+      is_fp = vt == NYR_MACH_TYPE_F32 || vt == NYR_MACH_TYPE_F64;
+    }
+    if (is_fp)
+      continue;
+    if (in->args[ai].kind == NYR_MACH_OPERAND_VREG &&
+        in->args[ai].as.reg == seg->vreg)
+      return gp_idx < 6 ? gp_arg_color[gp_idx] : -1;
+    ++gp_idx;
+  }
+  return -1;
 }
 
 /*
@@ -1868,6 +1917,14 @@ static bool color_segments(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
      */
     if (prefer_callee && color >= 5)
       color = -1;
+    if (color < 0 && !prefer_callee && preserve_gpr_calls &&
+        reg_class == NYR_MACH_REGCLASS_GPR && color_limit > 5) {
+      int arg_hint = x64_call_arg_hint_color(mach, s);
+      if (arg_hint >= 5 && (size_t)arg_hint < color_limit &&
+          !(use_color_mask ? (used_mask & (UINT64_C(1) << arg_hint)) != 0
+                           : used[arg_hint]))
+        color = arg_hint;
+    }
     const char *choice = "lowest-free";
     bool hinted_color_used =
         color >= 0 && (size_t)color < a->color_count &&
@@ -4970,7 +5027,28 @@ size_t nyr_mach_regalloc_recolor_locals(
       if (!candidate[idx] || s->color >= 0 || s->start > s->end ||
           s->end >= mach->inst_len)
         continue;
-      for (int c = 0; (size_t)c < nc; ++c) {
+      bool prefer_callee =
+          reg_class == NYR_MACH_REGCLASS_GPR &&
+          segment_uses_call_arg(mach, s);
+      bool caller_order = !no_caller_save_loop_gpr() &&
+                          reg_class == NYR_MACH_REGCLASS_GPR && nc > 5;
+      int arg_hint =
+          caller_order && !prefer_callee ? x64_call_arg_hint_color(mach, s) : -1;
+      for (size_t rank = 0; rank <= nc; ++rank) {
+        int c;
+        if (rank == 0) {
+          if (arg_hint < 5 || (size_t)arg_hint >= nc)
+            continue;
+          c = arg_hint;
+        } else {
+          size_t r = rank - 1;
+          c = caller_order
+                  ? (int)segment_color_at_rank(r, nc, reg_class, true,
+                                               prefer_callee)
+                  : (int)r;
+          if (c == arg_hint)
+            continue;
+        }
         if (!segment_accepts_color(mach, s, nc, c) ||
             !segment_color_survives_clobbers(mach, s, reg_class, c, false))
           continue;
