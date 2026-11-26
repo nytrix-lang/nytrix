@@ -151,7 +151,10 @@ fn _set_mask_zero_fast() any {
 
 @inline
 fn _ensure_ui_vertex_material_mode_fast(int vc_mode) any {
-   if _current_base_color_u32 == 0xffffffff && _current_base_tex_id == -1 && _current_vc_mode == vc_mode { return 0 }
+   ;; The alpha mode is part of the material: text batches leave alpha mode 2
+   ;; (glyph coverage), and an image drawn under it shows only its tint, so a
+   ;; white-tinted screenshot came out solid white.
+   if _current_base_color_u32 == 0xffffffff && _current_base_tex_id == -1 && _current_vc_mode == vc_mode && _current_alpha_u32 == 0 { return 0 }
    set_ui_material(-1, 0, vc_mode)
    0
 }
