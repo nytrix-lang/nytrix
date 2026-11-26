@@ -455,8 +455,8 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
    def bv_list = g.get("bufferViews", [])
    def buffers_data = g.get("_ny_buffer_data", 0)
    def bv_idx = acc.get("bufferView", -1)
-   mut ptr = 0
-   mut stride = 0
+   mut any ptr = 0
+   mut int stride = 0
    mut owned = false
    if bv_idx >= 0 && bv_idx < bv_list.len {
       def bv = bv_list[bv_idx]
@@ -464,22 +464,41 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
       def meshopt_ext = is_dict(bv_ext) ? bv_ext.get("EXT_meshopt_compression", bv_ext.get("KHR_meshopt_compression", 0)) : 0
       if is_dict(meshopt_ext) && !common.env_truthy("NY_GLTF_UNSAFE_UNDECODED_MESHOPT") { return 0 }
       def buf_idx = int(bv.get("buffer", 0))
-      mut base_ptr = data
+      mut any base_ptr = data
       if is_list(buffers_data) && buf_idx >= 0 && buf_idx < buffers_data.len {
          def b = buffers_data[buf_idx]
          def bp = shr._gltf_blob_ptr(b)
          if bp { base_ptr = bp }
       }
       if base_ptr {
-         ptr = ptr_add(ptr_add(base_ptr, int(bv.get("byteOffset", 0))), int(acc.get("byteOffset", 0)))
-         stride = bv.get("byteStride", 0)
-         if stride == 0 { stride = elem_size }
+         def int total_off = int(bv.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
+         stride = int(bv.get("byteStride", 0))
+         if stride == 0 { stride = int(elem_size) }
+         if (total_off & 1) != 0 {
+            def int raw_len = (int(count) > 0 && stride > 0) ? ((int(count) - 1) * stride + int(elem_size)) : 0
+            if raw_len > 0 {
+               def any aligned = malloc(raw_len)
+               if !aligned { return 0 }
+               mut int bi = 0
+               while bi < raw_len {
+                  store8(aligned, load8(base_ptr, total_off + bi), bi)
+                  bi += 1
+               }
+               ptr = aligned
+               owned = true
+            }
+         } else {
+            ptr = ptr_add(base_ptr, total_off)
+         }
       }
    }
    if is_dict(sparse) {
+      def any prev_ptr = ptr
+      def prev_owned = owned
       ptr = _gltf_sparse_materialize(sparse, bv_list, buffers_data, data, count, elem_size, ptr, stride)
+      if prev_owned && prev_ptr { free(prev_ptr) }
       if !ptr { return 0 }
-      stride = elem_size
+      stride = int(elem_size)
       owned = true
    }
    def cols = shr._gltf_type_cols(type_str)

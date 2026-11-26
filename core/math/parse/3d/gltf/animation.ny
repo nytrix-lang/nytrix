@@ -58,7 +58,7 @@ fn _gltf_pack_skin_sidecars(dict g, any data, int joints_acc_idx, int weights_ac
    def joints_stride = int(joints_res.get("stride", 0))
    def weights_stride = int(weights_res.get("stride", 0))
    def weights_norm = weights_res.get("normalized", false)
-   def use_count = min(count, source_limit)
+   def int use_count = int(min(count, source_limit))
    if !joints_ptr || !weights_ptr || use_count <= 0 || source_limit <= 0 {
       ld._gltf_release_accessor_data(joints_res)
       ld._gltf_release_accessor_data(weights_res)
@@ -215,7 +215,7 @@ fn _gltf_write_skin_mat_slab(any skin_mats, any slab) bool {
    mut i = 0
    while i < count {
       def m = skin_mats[i]
-      def base = slab + i * 64
+      def any base = ptr_add(slab, i * 64)
       if is_list(m) {
          mut j = 0
          while j < 16 {

@@ -515,34 +515,48 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
    mut mi = 0
    while mi < morph_targets_n {
       def mt = morph_targets[mi]
-      mt_weight[mi] = float(mt.get("weight", 0.0))
+      mt_weight = append(mt_weight, float(mt.get("weight", 0.0)))
       def rr = mt.get("pos_res", 0)
       if is_dict(rr) {
-         mt_pos_ptr[mi] = rr.get("ptr", 0)
-         mt_pos_cnt[mi] = int(rr.get("count", 0))
-         mt_pos_comp[mi] = int(rr.get("comp", shr.GLTF_COMP_FLOAT))
-         mt_pos_norm[mi] = rr.get("normalized", false)
-         mt_pos_stride[mi] = int(rr.get("stride", 0))
+         mt_pos_ptr = append(mt_pos_ptr, rr.get("ptr", 0))
+         mt_pos_cnt = append(mt_pos_cnt, int(rr.get("count", 0)))
+         mt_pos_comp = append(mt_pos_comp, int(rr.get("comp", shr.GLTF_COMP_FLOAT)))
+         mt_pos_norm = append(mt_pos_norm, rr.get("normalized", false))
+         mt_pos_stride = append(mt_pos_stride, int(rr.get("stride", 0)))
+      } else {
+         mt_pos_ptr = append(mt_pos_ptr, 0)
+         mt_pos_cnt = append(mt_pos_cnt, 0)
+         mt_pos_comp = append(mt_pos_comp, shr.GLTF_COMP_FLOAT)
+         mt_pos_norm = append(mt_pos_norm, false)
+         mt_pos_stride = append(mt_pos_stride, 0)
       }
-      if morph_has_norm {
-         def nr = mt.get("norm_res", 0)
-         if is_dict(nr) {
-            mt_norm_ptr[mi] = nr.get("ptr", 0)
-            mt_norm_cnt[mi] = int(nr.get("count", 0))
-            mt_norm_comp[mi] = int(nr.get("comp", shr.GLTF_COMP_FLOAT))
-            mt_norm_norm[mi] = nr.get("normalized", false)
-            mt_norm_stride[mi] = int(nr.get("stride", 0))
-         }
+      def nr = morph_has_norm ? mt.get("norm_res", 0) : 0
+      if is_dict(nr) {
+         mt_norm_ptr = append(mt_norm_ptr, nr.get("ptr", 0))
+         mt_norm_cnt = append(mt_norm_cnt, int(nr.get("count", 0)))
+         mt_norm_comp = append(mt_norm_comp, int(nr.get("comp", shr.GLTF_COMP_FLOAT)))
+         mt_norm_norm = append(mt_norm_norm, nr.get("normalized", false))
+         mt_norm_stride = append(mt_norm_stride, int(nr.get("stride", 0)))
+      } else {
+         mt_norm_ptr = append(mt_norm_ptr, 0)
+         mt_norm_cnt = append(mt_norm_cnt, 0)
+         mt_norm_comp = append(mt_norm_comp, shr.GLTF_COMP_FLOAT)
+         mt_norm_norm = append(mt_norm_norm, false)
+         mt_norm_stride = append(mt_norm_stride, 0)
       }
-      if morph_has_tan {
-         def tr = mt.get("tan_res", 0)
-         if is_dict(tr) {
-            mt_tan_ptr[mi] = tr.get("ptr", 0)
-            mt_tan_cnt[mi] = int(tr.get("count", 0))
-            mt_tan_comp[mi] = int(tr.get("comp", shr.GLTF_COMP_FLOAT))
-            mt_tan_norm[mi] = tr.get("normalized", false)
-            mt_tan_stride[mi] = int(tr.get("stride", 0))
-         }
+      def tr = morph_has_tan ? mt.get("tan_res", 0) : 0
+      if is_dict(tr) {
+         mt_tan_ptr = append(mt_tan_ptr, tr.get("ptr", 0))
+         mt_tan_cnt = append(mt_tan_cnt, int(tr.get("count", 0)))
+         mt_tan_comp = append(mt_tan_comp, int(tr.get("comp", shr.GLTF_COMP_FLOAT)))
+         mt_tan_norm = append(mt_tan_norm, tr.get("normalized", false))
+         mt_tan_stride = append(mt_tan_stride, int(tr.get("stride", 0)))
+      } else {
+         mt_tan_ptr = append(mt_tan_ptr, 0)
+         mt_tan_cnt = append(mt_tan_cnt, 0)
+         mt_tan_comp = append(mt_tan_comp, shr.GLTF_COMP_FLOAT)
+         mt_tan_norm = append(mt_tan_norm, false)
+         mt_tan_stride = append(mt_tan_stride, 0)
       }
       mi += 1
    }
