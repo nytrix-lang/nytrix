@@ -376,8 +376,10 @@ typedef struct {
 static bool mach_no_caller_save_loop_gpr(void) {
   static int disabled = -1;
   if (disabled < 0) {
-    const char *env = getenv("NYTRIX_NO_CALLER_SAVE_LOOP_GPR");
-    disabled = env && *env && strcmp(env, "0") != 0;
+    /* Opt-in: NYTRIX_CALLER_SAVE_LOOP_GPR=1. It miscompiles crc32 and
+     * dict-set through NYC, so it stays off until that is fixed. */
+    const char *env = getenv("NYTRIX_CALLER_SAVE_LOOP_GPR");
+    disabled = !(env && *env && strcmp(env, "0") != 0);
   }
   return disabled != 0;
 }
