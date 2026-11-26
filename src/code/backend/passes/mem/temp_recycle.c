@@ -29,6 +29,15 @@ static inline bool tr_trace_enabled(void) {
   return g_tr_trace != 0;
 }
 
+static bool tr_into_ext_disabled(void) {
+  static int disabled = -1;
+  if (__builtin_expect(disabled < 0, 0)) {
+    const char *e = getenv("NYTRIX_NO_BIGINT_INTO_EXT");
+    disabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return disabled != 0;
+}
+
 static bool tr_is_fresh_producer(const nyr_inst_t *in) {
   if (!in || in->op != NYIR_CALL || in->dst < 0 || !in->symbol)
     return false;
@@ -678,7 +687,8 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
         if (in->op == NYIR_CALL &&
             ((in->flags & NYIR_INST_F_INDIRECT) ||
              !(in->flags & NYIR_INST_F_EXTERN) ||
-             !tr_is_safe_rt_symbol(in->symbol))) {
+             !(tr_is_safe_rt_symbol(in->symbol) ||
+               (!tr_into_ext_disabled() && tr_is_alias_forwarder(in))))) {
           loop_calls_safe = false;
           break;
         }
@@ -916,6 +926,7 @@ static size_t tr_alias_set(const nyr_func_t *f, int p, int *set, size_t cap) {
 static size_t tr_fuse_into(nyr_func_t *f) {
   if (tr_into_disabled())
     return 0;
+  bool ext = !tr_into_ext_disabled();
   int *defs = nyr_build_defs(f);
   if (!defs)
     return 0;
@@ -938,15 +949,26 @@ static size_t tr_fuse_into(nyr_func_t *f) {
       continue;
     size_t k = (size_t)defs[root];
     nyr_inst_t *pr = &f->data[k];
-    if (pr->op != NYIR_CALL || !pr->symbol || pr->imm != 2 || pr->extra_args ||
-        pr->arg_sizes || (pr->flags & NYIR_INST_F_INDIRECT) || pr->a < 0 ||
-        pr->b < 0 || pr->a == p || pr->b == p)
+    if (pr->op != NYIR_CALL || !pr->symbol || pr->extra_args || pr->arg_sizes ||
+        (pr->flags & NYIR_INST_F_INDIRECT))
+      continue;
+    bool unary = pr->imm == 1;
+    bool binary = pr->imm == 2;
+    if ((!binary && !(ext && unary)) || pr->a < 0 || (binary && pr->b < 0))
+      continue;
+    bool self_alias = pr->a == p || (binary && pr->b == p);
+    if (self_alias && !(loop && ext))
       continue;
     const char *into = NULL;
-    if (strcmp(pr->symbol, "rt_bigint_add") == 0)
+    if (unary) {
+      if (strcmp(pr->symbol, "rt_bigfloat_sqrt") == 0)
+        into = loop ? "rt_bigfloat_sqrt_into_loop" : "rt_bigfloat_sqrt_into";
+    } else if (strcmp(pr->symbol, "rt_bigint_add") == 0)
       into = loop ? "rt_bigint_add_into_loop" : "rt_bigint_add_into";
     else if (strcmp(pr->symbol, "rt_bigint_sub") == 0)
       into = loop ? "rt_bigint_sub_into_loop" : "rt_bigint_sub_into";
+    else if (ext && strcmp(pr->symbol, "rt_bigint_mul") == 0)
+      into = loop ? "rt_bigint_mul_into_loop" : "rt_bigint_mul_into";
     else if (strcmp(pr->symbol, "rt_bigint_div") == 0)
       into = loop ? "rt_bigint_div_into_loop" : "rt_bigint_div_into";
     else if (strcmp(pr->symbol, "rt_bigfloat_add") == 0)
@@ -957,13 +979,19 @@ static size_t tr_fuse_into(nyr_func_t *f) {
       into = loop ? "rt_bigfloat_mul_into_loop" : "rt_bigfloat_mul_into";
     else if (strcmp(pr->symbol, "rt_bigfloat_div") == 0)
       into = loop ? "rt_bigfloat_div_into_loop" : "rt_bigfloat_div_into";
+    else if (ext && strcmp(pr->symbol, "rt_bigfloat_pow_int") == 0)
+      into =
+          loop ? "rt_bigfloat_pow_int_into_loop" : "rt_bigfloat_pow_int_into";
+    else if (ext && strcmp(pr->symbol, "rt_bigfloat_pow_int_raw") == 0)
+      into = loop ? "rt_bigfloat_pow_int_raw_into_loop"
+                  : "rt_bigfloat_pow_int_raw_into";
     if (!into)
       continue;
     if (!loop) {
-      /* The guards must be exactly {n, a, b}. */
+      /* The guards must be exactly {n, a[, b]}. */
       int g[3] = {fr->b, fr->imm >= 3 ? fr->c : fr->b,
                   fr->imm >= 4 ? fr->d : fr->b};
-      int want[3] = {n, pr->a, pr->b};
+      int want[3] = {n, pr->a, binary ? pr->b : pr->a};
       bool same = true;
       for (int x = 0; x < 3 && same; ++x) {
         bool hit = false;
@@ -972,7 +1000,7 @@ static size_t tr_fuse_into(nyr_func_t *f) {
         same = hit;
       }
       for (int y = 0; y < 3 && same; ++y)
-        same = g[y] == n || g[y] == pr->a || g[y] == pr->b;
+        same = g[y] == n || g[y] == pr->a || (binary && g[y] == pr->b);
       if (!same)
         continue;
     } else if (fr->b < 0 || fr->d < 0) {
@@ -1014,10 +1042,11 @@ static size_t tr_fuse_into(nyr_func_t *f) {
     const char *sym = nyr_func_own_symbol_copy(f, into);
     if (!sym)
       continue;
-    int a = pr->a, b = pr->b;
+    int a = pr->a, b = binary ? pr->b : -1;
     nyr_scalar_class_t pc = nyr_call_arg_class_get(fr, 0);
     nyr_scalar_class_t ac = nyr_call_arg_class_get(pr, 0);
-    nyr_scalar_class_t bc = nyr_call_arg_class_get(pr, 1);
+    nyr_scalar_class_t bc =
+        binary ? nyr_call_arg_class_get(pr, 1) : NYIR_SCALAR_UNKNOWN;
     if (loop) {
       nyr_scalar_class_t oc = nyr_call_arg_class_get(fr, 3);
       nyr_scalar_class_t ic = nyr_call_arg_class_get(fr, 1);
@@ -1025,8 +1054,9 @@ static size_t tr_fuse_into(nyr_func_t *f) {
       nyr_call_arg_class_set(pr->arg_scalar_classes, 1, oc);
       nyr_call_arg_class_set(pr->arg_scalar_classes, 2, ic);
       nyr_call_arg_class_set(pr->arg_scalar_classes, 3, ac);
-      nyr_call_arg_class_set(pr->arg_scalar_classes, 4, bc);
-      pr->imm = 5;
+      if (binary)
+        nyr_call_arg_class_set(pr->arg_scalar_classes, 4, bc);
+      pr->imm = binary ? 5 : 4;
       pr->a = p;
       pr->b = fr->d;
       pr->c = fr->b;
@@ -1035,8 +1065,9 @@ static size_t tr_fuse_into(nyr_func_t *f) {
     } else {
       nyr_call_arg_class_set(pr->arg_scalar_classes, 0, pc);
       nyr_call_arg_class_set(pr->arg_scalar_classes, 1, ac);
-      nyr_call_arg_class_set(pr->arg_scalar_classes, 2, bc);
-      pr->imm = 3;
+      if (binary)
+        nyr_call_arg_class_set(pr->arg_scalar_classes, 2, bc);
+      pr->imm = binary ? 3 : 2;
       pr->a = p;
       pr->b = a;
       pr->c = b;

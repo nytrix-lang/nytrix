@@ -794,9 +794,21 @@ div_allocation_failed:
 #endif
 }
 
-static int64_t bf_alloc_zero(uint32_t precision) {
+/*
+ * Result storage: `dst` when it is a dead BigFloat temporary with room (the
+ * rt_bigfloat_*_into entries), else a fresh allocation.
+ */
+static inline int64_t bf_out_alloc(size_t bytes, int64_t dst,
+                                   size_t dst_bytes) {
+  if (dst && bytes <= dst_bytes)
+    return dst;
+  return rt_malloc_uninit((int64_t)bytes);
+}
+
+static int64_t bf_alloc_zero_dst(uint32_t precision, int64_t dst,
+                                 size_t dst_bytes) {
   size_t bytes = sizeof(ny_bigfloat_t) + sizeof(uint64_t);
-  int64_t p = rt_malloc_uninit((int64_t)bytes);
+  int64_t p = bf_out_alloc(bytes, dst, dst_bytes);
   if (!p)
     return 0;
   *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_BIGFLOAT;
@@ -806,6 +818,10 @@ static int64_t bf_alloc_zero(uint32_t precision) {
   z->precision = precision;
   z->words = 0;
   return p;
+}
+
+static int64_t bf_alloc_zero(uint32_t precision) {
+  return bf_alloc_zero_dst(precision, 0, 0);
 }
 
 static bool bf_mag_round_norm(bf_mag_t *m, int64_t *exp2, uint32_t precision) {
@@ -838,18 +854,19 @@ static bool bf_mag_round_norm(bf_mag_t *m, int64_t *exp2, uint32_t precision) {
   return true;
 }
 
-static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
-                                 uint32_t precision) {
+static int64_t bf_alloc_from_mag_dst(int sign, int64_t exp2, bf_mag_t *m,
+                                     uint32_t precision, int64_t dst,
+                                     size_t dst_bytes) {
   mag_trim(m);
   if (!m->n || sign == 0)
-    return bf_alloc_zero(precision);
+    return bf_alloc_zero_dst(precision, dst, dst_bytes);
   if (!bf_mag_round_norm(m, &exp2, precision))
     return 0;
   size_t bytes = sizeof(ny_bigfloat_t) + m->n * sizeof(uint64_t);
   /*
    * All object fields and live limbs are written before publishing it.
    */
-  int64_t p = rt_malloc_uninit((int64_t)bytes);
+  int64_t p = bf_out_alloc(bytes, dst, dst_bytes);
   if (!p)
     return 0;
   *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_BIGFLOAT;
@@ -862,22 +879,16 @@ static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
   return p;
 }
 
-/*
- * Result storage: `dst` when it is a dead BigFloat temporary with room (the
- * rt_bigfloat_*_into entries), else a fresh allocation.
- */
-static inline int64_t bf_out_alloc(size_t bytes, int64_t dst,
-                                   size_t dst_bytes) {
-  if (dst && bytes <= dst_bytes)
-    return dst;
-  return rt_malloc_uninit((int64_t)bytes);
+static int64_t bf_alloc_from_mag(int sign, int64_t exp2, bf_mag_t *m,
+                                 uint32_t precision) {
+  return bf_alloc_from_mag_dst(sign, exp2, m, precision, 0, 0);
 }
 
 static inline __attribute__((always_inline)) int64_t
 bf_from_u64_raw_dst(uint64_t mag, int sign, int64_t exp2, uint32_t precision,
                     int64_t dst, size_t dst_bytes) {
   if (!mag || sign == 0)
-    return bf_alloc_zero(precision);
+    return bf_alloc_zero_dst(precision, dst, dst_bytes);
 
   unsigned lz = bf_clz64(mag);
   size_t bits = 64u - lz;
@@ -919,7 +930,7 @@ bf_from_u64_raw_dst(uint64_t mag, int sign, int64_t exp2, uint32_t precision,
     return 0;
   m.d[0] = mag;
   m.n = 1;
-  int64_t out = bf_alloc_from_mag(sign, exp2, &m, precision);
+  int64_t out = bf_alloc_from_mag_dst(sign, exp2, &m, precision, dst, dst_bytes);
   mag_free(&m);
   return out;
 }
@@ -929,15 +940,21 @@ static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
   return bf_from_u64_raw_dst(mag, sign, exp2, precision, 0, 0);
 }
 
-static int64_t bf_clone_prec_shift(const ny_bigfloat_t *x, uint32_t precision,
-                                   int64_t exp2_shift) {
+static int64_t bf_clone_prec_shift_dst(const ny_bigfloat_t *x, uint32_t precision,
+                                       int64_t exp2_shift, int64_t dst,
+                                       size_t dst_bytes) {
   bf_mag_t m = {0};
   if (!mag_copy(&m, x->limb, x->words))
     return 0;
-  int64_t out =
-      bf_alloc_from_mag((int)x->sign, x->exp2 + exp2_shift, &m, precision);
+  int64_t out = bf_alloc_from_mag_dst((int)x->sign, x->exp2 + exp2_shift, &m,
+                                      precision, dst, dst_bytes);
   mag_free(&m);
   return out;
+}
+
+static int64_t bf_clone_prec_shift(const ny_bigfloat_t *x, uint32_t precision,
+                                   int64_t exp2_shift) {
+  return bf_clone_prec_shift_dst(x, precision, exp2_shift, 0, 0);
 }
 
 static int64_t bf_clone_prec(const ny_bigfloat_t *x, uint32_t precision) {
@@ -1092,8 +1109,9 @@ static inline bool bf_exact_i64(const ny_bigfloat_t *x, int64_t *out) {
 }
 
 static __attribute__((noinline)) int64_t
-bf_addsub_slow(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
-               int64_t exp2_shift, uint32_t p) {
+bf_addsub_slow_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
+                   int64_t exp2_shift, uint32_t p, int64_t dst,
+                   size_t dst_bytes) {
   int bs = subtract ? -(int)b->sign : (int)b->sign;
   uint32_t qprec = p + 8;
   bf_mag_t am = {0}, bm = {0}, out = {0};
@@ -1121,7 +1139,7 @@ bf_addsub_slow(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
       mag_free(&am);
       mag_free(&bm);
       mag_free(&out);
-      return bf_from_u64_raw(0, 0, exp2_shift, p);
+      return bf_from_u64_raw_dst(0, 0, exp2_shift, p, dst, dst_bytes);
     }
     if (c > 0) {
       if (!mag_sub(&out, &am, &bm))
@@ -1134,7 +1152,8 @@ bf_addsub_slow(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
     }
   }
   {
-    int64_t result = bf_alloc_from_mag(sign, common + exp2_shift, &out, p);
+    int64_t result = bf_alloc_from_mag_dst(sign, common + exp2_shift, &out, p,
+                                           dst, dst_bytes);
     mag_free(&am);
     mag_free(&bm);
     mag_free(&out);
@@ -1152,9 +1171,9 @@ bf_addsub_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
                   int64_t dst, size_t dst_bytes) {
   uint32_t p = a->precision > b->precision ? a->precision : b->precision;
   if (!a->sign)
-    return bf_clone_prec_shift(b, p, 0);
+    return bf_clone_prec_shift_dst(b, p, 0, dst, dst_bytes);
   if (!b->sign)
-    return bf_clone_prec_shift(a, p, 0);
+    return bf_clone_prec_shift_dst(a, p, 0, dst, dst_bytes);
   int64_t ai = 0, bi = 0, ri = 0;
   if (bf_exact_i64(a, &ai) && bf_exact_i64(b, &bi) &&
       !(subtract ? __builtin_sub_overflow(ai, bi, &ri)
@@ -1163,7 +1182,7 @@ bf_addsub_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, bool subtract,
     return bf_from_u64_raw_dst(magnitude, ri < 0 ? -1 : ri > 0, 0, p, dst,
                                dst_bytes);
   }
-  return bf_addsub_slow(a, b, subtract, 0, p);
+  return bf_addsub_slow_dst(a, b, subtract, 0, p, dst, dst_bytes);
 }
 
 static inline int64_t bf_addsub_obj(const ny_bigfloat_t *a,
@@ -1176,7 +1195,7 @@ bf_mul_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
                size_t dst_bytes) {
   uint32_t p = a->precision > b->precision ? a->precision : b->precision;
   if (!a->sign || !b->sign)
-    return bf_from_u64_raw(0, 0, 0, p);
+    return bf_from_u64_raw_dst(0, 0, 0, p, dst, dst_bytes);
   /*
    * Normalization pads exact values with low zero limbs. Multiplication
    * reads its inputs, so borrow the significant limbs and carry the removed
@@ -1226,7 +1245,7 @@ bf_mul_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
     mag_free(&out);
     return 0;
   }
-  int64_t result = bf_alloc_from_mag(sign, exponent, &out, p);
+  int64_t result = bf_alloc_from_mag_dst(sign, exponent, &out, p, dst, dst_bytes);
   mag_free(&out);
   return result;
 }
@@ -1240,9 +1259,10 @@ bf_div_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
                size_t dst_bytes) {
   uint32_t p = a->precision > b->precision ? a->precision : b->precision;
   if (!b->sign)
-    return bf_from_u64_raw(0, 0, 0, p);
+    return bf_from_u64_raw_dst(0, 0, 0, p, dst, dst_bytes);
   if (!a->sign)
-    return bf_from_u64_raw(0, 0, 0, p);
+    return bf_from_u64_raw_dst(0, 0, 0, p, dst, dst_bytes);
+  int sign = (int)(a->sign * b->sign) < 0 ? -1 : 1;
   size_t az = 0, bz = 0;
   while (az < a->words && a->limb[az] == 0)
     ++az;
@@ -1282,7 +1302,7 @@ bf_div_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
         return 0;
       *(int64_t *)((char *)(uintptr_t)out_p - 8) = TAG_BIGFLOAT;
       ny_bigfloat_t *x = (ny_bigfloat_t *)(uintptr_t)out_p;
-      x->sign = (int)(a->sign * b->sign) < 0 ? -1 : 1;
+      x->sign = sign;
       x->exp2 = out_exp;
       x->precision = 256u;
       x->words = 4u;
@@ -1321,7 +1341,7 @@ bf_div_obj_dst(const ny_bigfloat_t *a, const ny_bigfloat_t *b, int64_t dst,
   }
   int64_t exponent = a->exp2 - b->exp2 - extra + removed_exp;
   int64_t result =
-      bf_alloc_from_mag((int)(a->sign * b->sign), exponent, &quo, p);
+      bf_alloc_from_mag_dst(sign, exponent, &quo, p, dst, dst_bytes);
   mag_free(&num);
   mag_free(&quo);
   return result;
@@ -1412,8 +1432,8 @@ static int64_t bf_op_into(int64_t old, int64_t av, int64_t bv, int op,
                           bool loop, int64_t owned, int64_t init) {
   ny_bigfloat_t *a = bf_ptr(av), *b = bf_ptr(bv);
   size_t dst_bytes = 0;
-  if (a && b && old && old != av && old != bv &&
-      (!loop || (owned && old != init)))
+  if (a && b && old &&
+      (loop ? (owned && old != init) : (old != av && old != bv)))
     dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
   int64_t dst = dst_bytes ? old : 0;
   int64_t r = 0;
@@ -1571,10 +1591,11 @@ static uint64_t mag_extract_top_u64(const bf_mag_t *a, size_t drop) {
   return v;
 }
 
-int64_t rt_bigfloat_sqrt(int64_t av) {
+static int64_t bf_sqrt_impl(int64_t av, int64_t dst, size_t dst_bytes) {
   ny_bigfloat_t *a = bf_ptr(av);
   if (!a || a->sign <= 0)
-    return bf_from_u64_raw(0, 0, 0, a ? a->precision : bf_default_precision());
+    return bf_from_u64_raw_dst(0, 0, 0, a ? a->precision : bf_default_precision(),
+                               dst, dst_bytes);
   uint32_t p = a->precision;
   /*
    * Scale M by 2^shift so (exp2 - shift) is even and S = M << shift has
@@ -1585,7 +1606,7 @@ int64_t rt_bigfloat_sqrt(int64_t av) {
   if (((uint64_t)a->exp2 ^ (uint64_t)shift) & 1u)
     shift += 1u;
   if (a->exp2 < INT64_MIN + (int64_t)shift + 2)
-    return bf_from_u64_raw(0, 0, 0, p);
+    return bf_from_u64_raw_dst(0, 0, 0, p, dst, dst_bytes);
   int64_t e_out = (a->exp2 - (int64_t)shift) / 2;
 
   bf_mag_t s = {0}, x = {0}, q = {0}, next = {0};
@@ -1630,7 +1651,7 @@ int64_t rt_bigfloat_sqrt(int64_t av) {
         goto sqrt_fail;
       if (!exact)
         x.d[0] |= 1u;
-      int64_t out = bf_alloc_from_mag(1, e_out - 1, &x, p);
+      int64_t out = bf_alloc_from_mag_dst(1, e_out - 1, &x, p, dst, dst_bytes);
       mag_free(&s);
       mag_free(&x);
       mag_free(&q);
@@ -1649,18 +1670,41 @@ sqrt_fail:
   return 0;
 }
 
-int64_t rt_bigfloat_pow_int(int64_t av, int64_t ev) {
+int64_t rt_bigfloat_sqrt(int64_t av) { return bf_sqrt_impl(av, 0, 0); }
+
+int64_t rt_bigfloat_sqrt_into(int64_t old, int64_t av) {
+  size_t dst_bytes = 0;
+  if (old && old != av)
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t r = bf_sqrt_impl(av, dst_bytes ? old : 0, dst_bytes);
+  if (r != old)
+    (void)rt_free_temp_guard2(old, r, av);
+  return r;
+}
+
+int64_t rt_bigfloat_sqrt_into_loop(int64_t old, int64_t owned, int64_t init,
+                                   int64_t av) {
+  size_t dst_bytes = 0;
+  if (owned && old && old != init)
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t r = bf_sqrt_impl(av, dst_bytes ? old : 0, dst_bytes);
+  if (r != old)
+    (void)rt_free_temp_loop(old, init, r, owned);
+  return r;
+}
+
+static int64_t bf_pow_int_impl(int64_t av, int64_t e, int64_t dst,
+                               size_t dst_bytes) {
   ny_bigfloat_t *a = bf_ptr(av);
   if (!a)
     return 0;
   uint32_t p = a->precision;
-  int64_t e = is_int(ev) ? rt_untag_v(ev) : ev;
   bool negative = e < 0;
   uint64_t n = negative ? (uint64_t)(-(e + 1)) + 1 : (uint64_t)e;
   if (n == 0)
-    return bf_from_u64_raw(1, 1, 0, p);
+    return bf_from_u64_raw_dst(1, 1, 0, p, dst, dst_bytes);
   if (!a->sign)
-    return bf_from_u64_raw(0, 0, 0, p);
+    return bf_from_u64_raw_dst(0, 0, 0, p, dst, dst_bytes);
 
   /*
    * Exact int64 fast path when |a|^|e| fits uint64_t without overflow.
@@ -1688,7 +1732,7 @@ int64_t rt_bigfloat_pow_int(int64_t av, int64_t ev) {
     }
     if (!overflow) {
       int res_sign = (ai < 0 && (n & 1u)) ? -1 : 1;
-      return bf_from_u64_raw(acc, res_sign, 0, p);
+      return bf_from_u64_raw_dst(acc, res_sign, 0, p, dst, dst_bytes);
     }
   }
 
@@ -1740,17 +1784,29 @@ int64_t rt_bigfloat_pow_int(int64_t av, int64_t ev) {
         goto pow_fail;
     }
   }
+  if (!negative) {
+    int64_t result =
+        bf_alloc_from_mag_dst(res_sign, res_exp, &res, p, dst, dst_bytes);
+    mag_free(&res);
+    mag_free(&base);
+    mag_free(&tmp);
+    return result;
+  }
   int64_t result = bf_alloc_from_mag(res_sign, res_exp, &res, p);
   mag_free(&res);
   mag_free(&base);
   mag_free(&tmp);
   if (!result)
     return 0;
-  if (negative) {
-    int64_t one = bf_from_u64_raw(1, 1, 0, p);
-    return bf_div_obj(bf_ptr(one), bf_ptr(result));
-  }
-  return result;
+  int64_t one = bf_from_u64_raw(1, 1, 0, p);
+  if (!one)
+    return 0;
+  int64_t quot = bf_div_obj_dst(bf_ptr(one), bf_ptr(result), dst, dst_bytes);
+  if (one != quot)
+    (void)rt_free_temp(one);
+  if (result != quot)
+    (void)rt_free_temp(result);
+  return quot;
 
 pow_fail:
   mag_free(&res);
@@ -1759,8 +1815,58 @@ pow_fail:
   return 0;
 }
 
+int64_t rt_bigfloat_pow_int(int64_t av, int64_t ev) {
+  int64_t e = is_int(ev) ? rt_untag_v(ev) : ev;
+  return bf_pow_int_impl(av, e, 0, 0);
+}
+
 int64_t rt_bigfloat_pow_int_raw(int64_t a, int64_t exponent) {
-  return rt_bigfloat_pow_int(a, rt_tag_v(exponent));
+  return bf_pow_int_impl(a, exponent, 0, 0);
+}
+
+int64_t rt_bigfloat_pow_int_into(int64_t old, int64_t av, int64_t ev) {
+  size_t dst_bytes = 0;
+  if (old && old != av && old != ev)
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t e = is_int(ev) ? rt_untag_v(ev) : ev;
+  int64_t r = bf_pow_int_impl(av, e, dst_bytes ? old : 0, dst_bytes);
+  if (r != old)
+    (void)rt_free_temp_guard3(old, r, av, ev);
+  return r;
+}
+
+int64_t rt_bigfloat_pow_int_into_loop(int64_t old, int64_t owned, int64_t init,
+                                      int64_t av, int64_t ev) {
+  size_t dst_bytes = 0;
+  if (owned && old && old != init)
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t e = is_int(ev) ? rt_untag_v(ev) : ev;
+  int64_t r = bf_pow_int_impl(av, e, dst_bytes ? old : 0, dst_bytes);
+  if (r != old)
+    (void)rt_free_temp_loop(old, init, r, owned);
+  return r;
+}
+
+int64_t rt_bigfloat_pow_int_raw_into(int64_t old, int64_t av, int64_t exponent) {
+  size_t dst_bytes = 0;
+  if (old && old != av && old != exponent)
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t r = bf_pow_int_impl(av, exponent, dst_bytes ? old : 0, dst_bytes);
+  if (r != old)
+    (void)rt_free_temp_guard3(old, r, av, exponent);
+  return r;
+}
+
+int64_t rt_bigfloat_pow_int_raw_into_loop(int64_t old, int64_t owned,
+                                          int64_t init, int64_t av,
+                                          int64_t exponent) {
+  size_t dst_bytes = 0;
+  if (owned && old && old != init)
+    dst_bytes = rt_temp_reuse_bytes(old, TAG_BIGFLOAT);
+  int64_t r = bf_pow_int_impl(av, exponent, dst_bytes ? old : 0, dst_bytes);
+  if (r != old)
+    (void)rt_free_temp_loop(old, init, r, owned);
+  return r;
 }
 
 int64_t rt_bigfloat_to_str(int64_t av) {

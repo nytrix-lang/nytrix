@@ -369,6 +369,9 @@ RT_DEF("__bigint_add_into", rt_bigint_add_into, 3,
 RT_DEF("__bigint_sub_into", rt_bigint_sub_into, 3,
        "fn __bigint_sub_into(old, a, b)",
        "Subtracts BigInts, reusing the dead temporary old for the result.")
+RT_DEF("__bigint_mul_into", rt_bigint_mul_into, 3,
+       "fn __bigint_mul_into(old, a, b)",
+       "Multiplies BigInts, reusing the dead temporary old for the result.")
 RT_DEF("__bigint_div_into", rt_bigint_div_into, 3,
        "fn __bigint_div_into(old, a, b)",
        "Divides BigInts, reusing the dead temporary old for the quotient.")
@@ -378,6 +381,9 @@ RT_DEF("__bigint_add_into_loop", rt_bigint_add_into_loop, 5,
 RT_DEF("__bigint_sub_into_loop", rt_bigint_sub_into_loop, 5,
        "fn __bigint_sub_into_loop(old, owned, init, a, b)",
        "Loop-carried BigInt sub reusing the dead previous accumulator.")
+RT_DEF("__bigint_mul_into_loop", rt_bigint_mul_into_loop, 5,
+       "fn __bigint_mul_into_loop(old, owned, init, a, b)",
+       "Loop-carried BigInt mul reusing the dead previous accumulator.")
 RT_DEF("__bigint_div_into_loop", rt_bigint_div_into_loop, 5,
        "fn __bigint_div_into_loop(old, owned, init, a, b)",
        "Loop-carried BigInt div reusing the dead previous accumulator.")
@@ -393,6 +399,15 @@ RT_DEF("__bigfloat_mul_into", rt_bigfloat_mul_into, 3,
 RT_DEF("__bigfloat_div_into", rt_bigfloat_div_into, 3,
        "fn __bigfloat_div_into(old, a, b)",
        "BigFloat div reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_sqrt_into", rt_bigfloat_sqrt_into, 2,
+       "fn __bigfloat_sqrt_into(old, a)",
+       "BigFloat sqrt reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_pow_int_into", rt_bigfloat_pow_int_into, 3,
+       "fn __bigfloat_pow_int_into(old, a, exponent)",
+       "BigFloat pow_int reusing the dead temporary old for the result.")
+RT_DEF("__bigfloat_pow_int_raw_into", rt_bigfloat_pow_int_raw_into, 3,
+       "fn __bigfloat_pow_int_raw_into(old, a, exponent)",
+       "Raw BigFloat pow_int reusing the dead temporary old for the result.")
 RT_DEF("__bigfloat_add_into_loop", rt_bigfloat_add_into_loop, 5,
        "fn __bigfloat_add_into_loop(old, owned, init, a, b)",
        "Loop-carried BigFloat add reusing the dead previous accumulator.")
@@ -405,6 +420,15 @@ RT_DEF("__bigfloat_mul_into_loop", rt_bigfloat_mul_into_loop, 5,
 RT_DEF("__bigfloat_div_into_loop", rt_bigfloat_div_into_loop, 5,
        "fn __bigfloat_div_into_loop(old, owned, init, a, b)",
        "Loop-carried BigFloat div reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_sqrt_into_loop", rt_bigfloat_sqrt_into_loop, 4,
+       "fn __bigfloat_sqrt_into_loop(old, owned, init, a)",
+       "Loop-carried BigFloat sqrt reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_pow_int_into_loop", rt_bigfloat_pow_int_into_loop, 5,
+       "fn __bigfloat_pow_int_into_loop(old, owned, init, a, exponent)",
+       "Loop-carried BigFloat pow_int reusing the dead previous accumulator.")
+RT_DEF("__bigfloat_pow_int_raw_into_loop", rt_bigfloat_pow_int_raw_into_loop,
+       5, "fn __bigfloat_pow_int_raw_into_loop(old, owned, init, a, exponent)",
+       "Loop-carried raw BigFloat pow_int reusing the dead previous accumulator.")
 RT_DEF("__bigint_mul", rt_bigint_mul, 2, "fn __bigint_mul(a, b)",
        "Multiplies two BigInt values using the runtime bigint implementation.")
 RT_DEF(

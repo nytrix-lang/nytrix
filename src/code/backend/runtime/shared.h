@@ -1310,10 +1310,13 @@ size_t rt_temp_reuse_bytes(int64_t ptr, int64_t tag);
 uint64_t rt_alloc_count_total(void);
 int64_t rt_bigint_add_into(int64_t old, int64_t a, int64_t b);
 int64_t rt_bigint_sub_into(int64_t old, int64_t a, int64_t b);
+int64_t rt_bigint_mul_into(int64_t old, int64_t a, int64_t b);
 int64_t rt_bigint_div_into(int64_t old, int64_t a, int64_t b);
 int64_t rt_bigint_add_into_loop(int64_t old, int64_t owned, int64_t init,
                                 int64_t a, int64_t b);
 int64_t rt_bigint_sub_into_loop(int64_t old, int64_t owned, int64_t init,
+                                int64_t a, int64_t b);
+int64_t rt_bigint_mul_into_loop(int64_t old, int64_t owned, int64_t init,
                                 int64_t a, int64_t b);
 int64_t rt_bigint_div_into_loop(int64_t old, int64_t owned, int64_t init,
                                 int64_t a, int64_t b);
@@ -1321,6 +1324,9 @@ int64_t rt_bigfloat_add_into(int64_t old, int64_t a, int64_t b);
 int64_t rt_bigfloat_sub_into(int64_t old, int64_t a, int64_t b);
 int64_t rt_bigfloat_mul_into(int64_t old, int64_t a, int64_t b);
 int64_t rt_bigfloat_div_into(int64_t old, int64_t a, int64_t b);
+int64_t rt_bigfloat_sqrt_into(int64_t old, int64_t a);
+int64_t rt_bigfloat_pow_int_into(int64_t old, int64_t a, int64_t exponent);
+int64_t rt_bigfloat_pow_int_raw_into(int64_t old, int64_t a, int64_t exponent);
 int64_t rt_bigfloat_add_into_loop(int64_t old, int64_t owned, int64_t init,
                                   int64_t a, int64_t b);
 int64_t rt_bigfloat_sub_into_loop(int64_t old, int64_t owned, int64_t init,
@@ -1329,6 +1335,13 @@ int64_t rt_bigfloat_mul_into_loop(int64_t old, int64_t owned, int64_t init,
                                   int64_t a, int64_t b);
 int64_t rt_bigfloat_div_into_loop(int64_t old, int64_t owned, int64_t init,
                                   int64_t a, int64_t b);
+int64_t rt_bigfloat_sqrt_into_loop(int64_t old, int64_t owned, int64_t init,
+                                   int64_t a);
+int64_t rt_bigfloat_pow_int_into_loop(int64_t old, int64_t owned, int64_t init,
+                                      int64_t a, int64_t exponent);
+int64_t rt_bigfloat_pow_int_raw_into_loop(int64_t old, int64_t owned,
+                                          int64_t init, int64_t a,
+                                          int64_t exponent);
 int64_t rt_free_temp_loop(int64_t old_v, int64_t init_v, int64_t next_v,
                            int64_t owned);
 int64_t rt_ptr_add(int64_t ptr, int64_t offset);

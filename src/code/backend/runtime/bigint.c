@@ -144,6 +144,15 @@ static inline int64_t _bi_alloc(size_t word_count) {
   return p;
 }
 
+static inline int64_t _bi_alloc_dst(size_t words, int64_t dst,
+                                    size_t dst_words) {
+  if (dst && words <= dst_words) {
+    *(int64_t *)(uintptr_t)(dst + 8) = rt_tag_v((int64_t)words);
+    return dst;
+  }
+  return _bi_alloc(words);
+}
+
 static int64_t _bi_from_i64(int64_t v);
 /* Forced inline: every arithmetic entry decodes one or two operands, and an
  * out-of-line call keeps sign/limbs/words in memory across six saved
@@ -3016,18 +3025,34 @@ static inline int _bi_cmp_mag(const uint64_t *a, size_t aw, const uint64_t *b,
   return 0;
 }
 
-static int64_t _bi_from_limbs(int sign, const uint64_t *limbs, size_t words) {
+static inline int64_t _bi_from_limbs_dst(int sign, const uint64_t *limbs,
+                                         size_t words, int64_t dst,
+                                         size_t dst_words) {
   words = _bi_norm_words_const(limbs, words);
   if (words == 0)
     sign = 0;
-  int64_t p = _bi_alloc(words);
+  int64_t p = _bi_alloc_dst(words, dst, dst_words);
   if (!p)
     return 0;
   *(int64_t *)(uintptr_t)((char *)p + 0) =
       rt_tag_v((int64_t)(sign < 0 ? -1 : (sign > 0 ? 1 : 0)));
-  if (words > 0)
-    memcpy((void *)((char *)p + 16), limbs, words * sizeof(uint64_t));
+  if (words > 0) {
+    void *dp = (void *)((char *)p + 16);
+    if (dp != limbs)
+      memcpy(dp, limbs, words * sizeof(uint64_t));
+  }
   return p;
+}
+
+static int64_t _bi_from_limbs(int sign, const uint64_t *limbs, size_t words) {
+  return _bi_from_limbs_dst(sign, limbs, words, 0, 0);
+}
+
+static inline int64_t _bi_from_i64_dst(int64_t v, int64_t dst,
+                                       size_t dst_words) {
+  int sign = v < 0 ? -1 : (v > 0 ? 1 : 0);
+  uint64_t mag = v < 0 ? (uint64_t)(-(v + 1)) + 1u : (uint64_t)v;
+  return _bi_from_limbs_dst(sign, &mag, sign == 0 ? 0u : 1u, dst, dst_words);
 }
 
 static inline int64_t
@@ -3377,12 +3402,12 @@ _bi_try_add_heap_dst(int64_t a, int64_t b, int sub_b, int64_t dst,
   if (as == 0) {
     rs = bs;
     rw = bw;
-    if (bw)
+    if (bw && rl != bl)
       memcpy(rl, bl, bw * sizeof(*bl));
   } else if (bs == 0) {
     rs = as;
     rw = aw;
-    if (aw)
+    if (aw && rl != al)
       memcpy(rl, al, aw * sizeof(*al));
   } else if (as == bs) {
     uint64_t carry = 0;
@@ -3436,26 +3461,29 @@ static inline bool _bi_try_add_heap(int64_t a, int64_t b, int sub_b,
   return _bi_try_add_heap_dst(a, b, sub_b, 0, 0, out);
 }
 
-static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
-                                         size_t aw, int64_t b, int bs,
-                                         const uint64_t *bl, size_t bw,
-                                         int64_t *out) {
+static inline bool _bi_try_mul_decoded_dst(
+    int64_t a, int as, const uint64_t *al, size_t aw, int64_t b, int bs,
+    const uint64_t *bl, size_t bw, int64_t dst, size_t dst_words,
+    bool allow_operand_alias, int64_t *out) {
   if (aw == 0 || bw == 0) {
     uint64_t z = 0;
-    *out = _bi_from_limbs(0, &z, 0);
+    *out = _bi_from_limbs_dst(0, &z, 0, dst, dst_words);
     return *out != 0;
   }
   /*
    * BigInts are immutable; multiplication by positive one can retain
-   * an existing heap object without changing its representation.
+   * an existing heap object without changing its representation (unless
+   * the caller requires an owned/dst object for loop-carried reuse).
    */
-  if (bw == 1 && bl[0] == 1 && bs > 0 && is_ptr(a)) {
-    *out = a;
-    return true;
-  }
-  if (aw == 1 && al[0] == 1 && as > 0 && is_ptr(b)) {
-    *out = b;
-    return true;
+  if (allow_operand_alias) {
+    if (bw == 1 && bl[0] == 1 && bs > 0 && is_ptr(a)) {
+      *out = a;
+      return true;
+    }
+    if (aw == 1 && al[0] == 1 && as > 0 && is_ptr(b)) {
+      *out = b;
+      return true;
+    }
   }
   const uint64_t *wide = NULL;
   size_t ww = 0;
@@ -3473,9 +3501,34 @@ static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
       return false;
     /*
      * Both magnitudes fit bounded native limbs: multiply directly into
-     * scratch instead of copying each input into a general bigint. The
-     * final carry word is untouched by earlier rows.
+     * `dst` when distinct and roomy, or via stack scratch when `dst`
+     * aliases an operand or tight-fits normalized words.
      */
+    if (dst && dst != a && dst != b && aw + bw <= dst_words) {
+      int64_t result = dst;
+      uint64_t *product = (uint64_t *)(uintptr_t)(result + 16);
+      _bn_words_mul(product, al, aw, bl, bw, NULL);
+      size_t words = _bi_norm_words(product, aw + bw);
+      *(int64_t *)(uintptr_t)result = rt_tag_v(as == bs ? 1 : -1);
+      *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
+      *out = result;
+      return true;
+    }
+    if (dst) {
+      uint64_t scratch[2u * NY_BI_SHORT_LIMBS];
+      _bn_words_mul(scratch, al, aw, bl, bw, NULL);
+      size_t words = _bi_norm_words(scratch, aw + bw);
+      int64_t result = _bi_alloc_dst(words, dst, dst_words);
+      if (!result)
+        return false;
+      if (words > 0)
+        memcpy((void *)(uintptr_t)(result + 16), scratch,
+               words * sizeof(uint64_t));
+      *(int64_t *)(uintptr_t)result = rt_tag_v(as == bs ? 1 : -1);
+      *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
+      *out = result;
+      return true;
+    }
     int64_t result = _bi_alloc(aw + bw);
     if (!result)
       return false;
@@ -3484,6 +3537,46 @@ static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
     size_t words = _bi_norm_words(product, aw + bw);
     *(int64_t *)(uintptr_t)result = rt_tag_v(as == bs ? 1 : -1);
     *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
+    *out = result;
+    return true;
+  }
+  if (dst && dst != a && dst != b && ww + 1 <= dst_words) {
+    int64_t result = dst;
+    uint64_t *rl = (uint64_t *)(uintptr_t)(result + 16);
+    uint64_t carry = 0;
+    for (size_t i = 0; i < ww; ++i) {
+      __uint128_t prod = (__uint128_t)wide[i] * factor + carry;
+      rl[i] = (uint64_t)prod;
+      carry = (uint64_t)(prod >> 64);
+    }
+    size_t rw = ww;
+    if (carry)
+      rl[rw++] = carry;
+    *(int64_t *)(uintptr_t)result = rt_tag_v(as == bs ? 1 : -1);
+    *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)rw);
+    *out = result;
+    return true;
+  }
+  if (dst && ww <= NY_BI_SHORT_LIMBS) {
+    uint64_t scratch[NY_BI_SHORT_LIMBS + 1u];
+    uint64_t carry = 0;
+    for (size_t i = 0; i < ww; ++i) {
+      __uint128_t prod = (__uint128_t)wide[i] * factor + carry;
+      scratch[i] = (uint64_t)prod;
+      carry = (uint64_t)(prod >> 64);
+    }
+    size_t rw = ww;
+    if (carry)
+      scratch[rw++] = carry;
+    rw = _bi_norm_words(scratch, rw);
+    int64_t result = _bi_alloc_dst(rw, dst, dst_words);
+    if (!result)
+      return false;
+    if (rw > 0)
+      memcpy((void *)(uintptr_t)(result + 16), scratch,
+             rw * sizeof(uint64_t));
+    *(int64_t *)(uintptr_t)result = rt_tag_v(rw ? (as == bs ? 1 : -1) : 0);
+    *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)rw);
     *out = result;
     return true;
   }
@@ -3504,6 +3597,13 @@ static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
   *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)rw);
   *out = result;
   return true;
+}
+
+static inline bool _bi_try_mul_decoded(int64_t a, int as, const uint64_t *al,
+                                         size_t aw, int64_t b, int bs,
+                                         const uint64_t *bl, size_t bw,
+                                         int64_t *out) {
+  return _bi_try_mul_decoded_dst(a, as, al, aw, b, bs, bl, bw, 0, 0, true, out);
 }
 
 static inline bool _bi_try_cmp_heap(int64_t a, int64_t b, int *out) {
@@ -3617,20 +3717,6 @@ static inline bool _bi_small_cache_enabled(void) {
   return g_bi_small_cache_disabled == 0;
 }
 
-/*
- * Result storage for a quotient: `dst` when it is a dead temporary with room
- * (the _into entries), else a fresh object. Like _bi_alloc, it records the
- * word count; the caller fills sign and limbs.
- */
-static inline int64_t _bi_alloc_dst(size_t words, int64_t dst,
-                                    size_t dst_words) {
-  if (dst && words <= dst_words) {
-    *(int64_t *)(uintptr_t)(dst + 8) = rt_tag_v((int64_t)words);
-    return dst;
-  }
-  return _bi_alloc(words);
-}
-
 static inline __attribute__((always_inline)) bool
 _bi_try_div_small_limbs_dst(int64_t a, int bs, const uint64_t *bl, size_t bw,
                             int want_remainder, int64_t *out, int64_t dst,
@@ -3644,12 +3730,12 @@ _bi_try_div_small_limbs_dst(int64_t a, int bs, const uint64_t *bl, size_t bw,
   if (!_bi_read_heap_limbs(a, &as, &al, &aw, asmall))
     return false;
   if (aw == 0) {
-    *out = _bi_from_limbs(0, asmall, 0);
-    return true;
+    *out = _bi_from_limbs_dst(0, asmall, 0, dst, dst_words);
+    return *out != 0;
   }
   uint64_t rem = 0;
   uint64_t d = bl[0];
-  if (__builtin_expect((d & (d - 1u)) == 0u, 0) && _bi_div_pow2_enabled()) {
+  if ((d & (d - 1u)) == 0u && _bi_div_pow2_enabled()) {
     unsigned shift = (unsigned)__builtin_ctzll(d);
     if (want_remainder) {
       rem = shift ? (al[0] & (d - 1u)) : 0ULL;
@@ -3667,7 +3753,7 @@ _bi_try_div_small_limbs_dst(int64_t a, int bs, const uint64_t *bl, size_t bw,
       int64_t result = _bi_alloc_dst(aw, dst, dst_words);
       if (!result)
         return false;
-      if (aw > 0)
+      if (aw > 0 && (const void *)(uintptr_t)(result + 16) != (const void *)al)
         memcpy((void *)(uintptr_t)(result + 16), al, aw * sizeof(uint64_t));
       int sign = aw == 0 || as == 0 ? 0 : (as == bs ? 1 : -1);
       *(int64_t *)(uintptr_t)result = rt_tag_v(sign);
@@ -3754,9 +3840,10 @@ static inline bool _bi_try_div_small_heap(int64_t a, int64_t b,
  * limb arrays used by the general compact path.  Values outside the tagged
  * range fall through and are promoted by the existing limb implementation.
  */
-static inline int64_t _bi_alloc_small_result(int64_t raw) {
+static inline int64_t _bi_alloc_small_result_dst(int64_t raw, int64_t dst,
+                                                 size_t dst_words) {
   size_t words = raw == 0 ? 0 : 1;
-  int64_t p = _bi_alloc(words);
+  int64_t p = _bi_alloc_dst(words, dst, dst_words);
   if (!p)
     return 0;
   *(int64_t *)(uintptr_t)((char *)p + 0) = rt_tag_v(raw == 0  ? 0
@@ -3767,6 +3854,10 @@ static inline int64_t _bi_alloc_small_result(int64_t raw) {
     *(uint64_t *)((char *)p + 16) = mag;
   }
   return p;
+}
+
+static inline int64_t _bi_alloc_small_result(int64_t raw) {
+  return _bi_alloc_small_result_dst(raw, 0, 0);
 }
 
 static inline bool _bi_try_small_add_alloc(int64_t a, int64_t b, int sub_b,
@@ -3784,15 +3875,21 @@ static inline bool _bi_try_small_add_alloc(int64_t a, int64_t b, int sub_b,
   return true;
 }
 
-static inline bool _bi_try_small_mul_alloc(int64_t a, int64_t b, int64_t *out) {
+static inline bool _bi_try_small_mul_alloc_dst(int64_t a, int64_t b,
+                                               int64_t dst, size_t dst_words,
+                                               int64_t *out) {
   if (!is_int(a) || !is_int(b))
     return false;
   int64_t raw = 0;
   if (__builtin_mul_overflow(rt_untag_v(a), rt_untag_v(b), &raw) ||
       !ny_small_int_fits_i64(raw))
     return false;
-  *out = _bi_alloc_small_result(raw);
-  return true;
+  *out = _bi_alloc_small_result_dst(raw, dst, dst_words);
+  return *out != 0;
+}
+
+static inline bool _bi_try_small_mul_alloc(int64_t a, int64_t b, int64_t *out) {
+  return _bi_try_small_mul_alloc_dst(a, b, 0, 0, out);
 }
 
 static inline bool _bi_try_submul_limb2(int64_t a, int64_t q, int64_t b,
@@ -4055,15 +4152,13 @@ int64_t rt_bigint_sub_into(int64_t old, int64_t a, int64_t b) {
  */
 static int64_t _bi_addsub_into_loop(int64_t old, int64_t owned, int64_t init,
                                     int64_t a, int64_t b, int sub_b) {
-  if (owned && old != init) {
-    if (old && old != a && old != b && (!is_int(a) || !is_int(b))) {
-      size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
-      int64_t fast = 0;
-      if (body >= 16u &&
-          _bi_try_add_heap_dst(a, b, sub_b, old,
-                               (body - 16u) / sizeof(uint64_t), &fast))
-        return fast;
-    }
+  if (owned && old && old != init && (!is_int(a) || !is_int(b))) {
+    size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+    int64_t fast = 0;
+    if (body >= 16u &&
+        _bi_try_add_heap_dst(a, b, sub_b, old, (body - 16u) / sizeof(uint64_t),
+                             &fast))
+      return fast;
   }
   int64_t r = sub_b ? rt_bigint_sub(a, b) : rt_bigint_add(a, b);
   (void)rt_free_temp_loop(old, init, r, owned);
@@ -4081,12 +4176,15 @@ int64_t rt_bigint_sub_into_loop(int64_t old, int64_t owned, int64_t init,
 }
 
 static __attribute__((noinline)) int64_t
-_bi_mul_large_limbs(int as, const uint64_t *al, size_t aw, int bs,
-                    const uint64_t *bl, size_t bw) {
+_bi_mul_large_limbs_dst(int64_t a, int as, const uint64_t *al, size_t aw,
+                        int64_t b, int bs, const uint64_t *bl, size_t bw,
+                        int64_t dst, size_t dst_words) {
   size_t words = aw + bw;
   if (words < aw || words > (SIZE_MAX / sizeof(uint64_t) - 64) / 8)
     return 0;
-  int64_t result = _bi_alloc(words);
+  int64_t result = (dst && dst != a && dst != b && words <= dst_words)
+                       ? dst
+                       : _bi_alloc(words);
   if (!result)
     return 0;
   size_t scratch_words = 8 * words + 64;
@@ -4106,9 +4204,10 @@ _bi_mul_large_limbs(int as, const uint64_t *al, size_t aw, int bs,
   return result;
 }
 
-int64_t rt_bigint_mul(int64_t a, int64_t b) {
+static inline int64_t _bi_mul_impl(int64_t a, int64_t b, int64_t dst,
+                                   size_t dst_words, bool allow_operand_alias) {
   int64_t fast = 0;
-  if (_bi_try_small_mul_alloc(a, b, &fast))
+  if (_bi_try_small_mul_alloc_dst(a, b, dst, dst_words, &fast))
     return fast;
   int as = 0, bs = 0;
   size_t aw = 0, bw = 0;
@@ -4122,9 +4221,41 @@ int64_t rt_bigint_mul(int64_t a, int64_t b) {
     b = _bi_coerce_fallback(b);
     (void)_bi_read_heap_limbs(b, &bs, &bl, &bw, bsmall);
   }
-  if (_bi_try_mul_decoded(a, as, al, aw, b, bs, bl, bw, &fast))
+  if (_bi_try_mul_decoded_dst(a, as, al, aw, b, bs, bl, bw, dst, dst_words,
+                              allow_operand_alias, &fast))
     return fast;
-  return _bi_mul_large_limbs(as, al, aw, bs, bl, bw);
+  return _bi_mul_large_limbs_dst(a, as, al, aw, b, bs, bl, bw, dst, dst_words);
+}
+
+int64_t rt_bigint_mul(int64_t a, int64_t b) {
+  return _bi_mul_impl(a, b, 0, 0, true);
+}
+
+int64_t rt_bigint_mul_into(int64_t old, int64_t a, int64_t b) {
+  size_t words = 0;
+  if (old && old != a && old != b) {
+    size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+    if (body >= 16u)
+      words = (body - 16u) / sizeof(uint64_t);
+  }
+  int64_t r = _bi_mul_impl(a, b, words ? old : 0, words, true);
+  if (r != old)
+    (void)rt_free_temp_guard3(old, r, a, b);
+  return r;
+}
+
+int64_t rt_bigint_mul_into_loop(int64_t old, int64_t owned, int64_t init,
+                                int64_t a, int64_t b) {
+  size_t words = 0;
+  if (owned && old && old != init) {
+    size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
+    if (body >= 16u)
+      words = (body - 16u) / sizeof(uint64_t);
+  }
+  int64_t r = _bi_mul_impl(a, b, words ? old : 0, words, false);
+  if (r != old)
+    (void)rt_free_temp_loop(old, init, r, owned);
+  return r;
 }
 
 static int64_t _bi_submul_owned_result(int64_t value) {
@@ -4286,11 +4417,19 @@ static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
     un[an] = carry;
   }
 
-  /* `dst`: a dead temporary distinct from both operands (div_into). */
-  int64_t result = dst && m + 1 <= dst_words ? dst : _bi_alloc(m + 1);
-  if (!result)
-    return 0;
-  uint64_t *qd = (uint64_t *)(uintptr_t)(result + 16);
+  /* `dst`: a dead temporary (`div_into` / `div_into_loop`). */
+  bool use_stack_q = dst && m + 1 > dst_words && m <= dst_words;
+  uint64_t qstack[17];
+  int64_t result = 0;
+  uint64_t *qd = NULL;
+  if (use_stack_q) {
+    qd = qstack;
+  } else {
+    result = dst && m + 1 <= dst_words ? dst : _bi_alloc(m + 1);
+    if (!result)
+      return 0;
+    qd = (uint64_t *)(uintptr_t)(result + 16);
+  }
   uint64_t divisor = vn[n - 1];
   bool use_preinv = m >= 2u;
   uint64_t inverse = 0;
@@ -4354,6 +4493,14 @@ static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
     qd[j] = qhat;
   }
   size_t words = _bi_norm_words(qd, m + 1);
+  if (use_stack_q) {
+    result = _bi_alloc_dst(words, dst, dst_words);
+    if (!result)
+      return 0;
+    if (words > 0)
+      memcpy((void *)(uintptr_t)(result + 16), qstack,
+             words * sizeof(uint64_t));
+  }
   *(int64_t *)(uintptr_t)result =
       rt_tag_v(words ? (as == bs ? 1 : -1) : 0);
   *(int64_t *)(uintptr_t)(result + 8) = rt_tag_v((int64_t)words);
@@ -4387,7 +4534,7 @@ _bi_div_dst(int64_t a, int64_t b, int64_t dst, size_t dst_words) {
     return rt_division_by_zero();
   int magnitude_cmp = _bi_cmp_mag(limbs_a, na_count, limbs_b, nb_count);
   if (magnitude_cmp < 0)
-    return _bi_from_i64(0);
+    return _bi_from_i64_dst(0, dst, dst_words);
   /*
    * A quotient of magnitude one needs no normalized division or remainder.
    */
@@ -4406,7 +4553,7 @@ _bi_div_dst(int64_t a, int64_t b, int64_t dst, size_t dst_words) {
     }
   }
   if (half_cmp < 0)
-    return _bi_from_i64(na_sign == nb_sign ? 1 : -1);
+    return _bi_from_i64_dst(na_sign == nb_sign ? 1 : -1, dst, dst_words);
   if (__builtin_expect(nb_count >= 2 && nb_count <= 8 && na_count <= 16, 1))
     return _bi_div_short_heap(na_sign, limbs_a, na_count, nb_sign, limbs_b,
                               nb_count, dst, dst_words);
@@ -4439,7 +4586,7 @@ int64_t rt_bigint_div_into(int64_t old, int64_t a, int64_t b) {
 int64_t rt_bigint_div_into_loop(int64_t old, int64_t owned, int64_t init,
                                 int64_t a, int64_t b) {
   size_t words = 0;
-  if (owned && old && old != init && old != a && old != b) {
+  if (owned && old && old != init) {
     size_t body = rt_temp_reuse_bytes(old, TAG_BIGINT);
     if (body >= 16u)
       words = (body - 16u) / sizeof(uint64_t);
