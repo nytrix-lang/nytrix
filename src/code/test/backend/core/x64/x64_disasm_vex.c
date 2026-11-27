@@ -75,6 +75,28 @@ int main(void) {
             listing);
     return 1;
   }
+  static const unsigned char scalar_shuffle_forms[] = {
+      0xc4, 0x41, 0x00, 0x12, 0xfe, /* vmovhlps xmm15,xmm0,xmm14 */
+      0xc5, 0xf8, 0x15, 0xc0,       /* vunpckhps xmm0,xmm0,xmm0 */
+      0xc5, 0xf9, 0x15, 0xc0,       /* vunpckhpd xmm0,xmm0,xmm0 */
+      0xc5, 0xfa, 0x12, 0xda,       /* vmovsldup xmm3,xmm2 */
+      0xc5, 0xfb, 0x12, 0xda,       /* vmovddup xmm3,xmm2 */
+      0xc5, 0xf9, 0xc6, 0xc3, 0x02, /* vshufpd xmm0,xmm0,xmm3,2 */
+  };
+  listing = nyr_internal_x64_disasm(scalar_shuffle_forms,
+                                    (int64_t)sizeof(scalar_shuffle_forms),
+                                    0x1700);
+  if (!strstr(listing, "vmovhlps\t") ||
+      !strstr(listing, "vunpckhps\t") ||
+      !strstr(listing, "vunpckhpd\t") ||
+      !strstr(listing, "vmovsldup\t") ||
+      !strstr(listing, "vmovddup\t") ||
+      !strstr(listing, "vshufpd\txmm0, xmm0, xmm3, 0x2") ||
+      strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr, "[x64-disasm-vex] packed shuffle decode mismatch:\n%s",
+            listing);
+    return 1;
+  }
   static const unsigned char unsupported[] = {0xc4, 0xe1, 0x7d, 0x77, 0xc0};
   listing = nyr_internal_x64_disasm(unsupported, (int64_t)sizeof(unsupported),
                                     0x2000);

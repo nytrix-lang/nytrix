@@ -988,6 +988,34 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         int store = opcode == 0x11 || opcode == 0x29;
         snprintf(args, sizeof(args), "%s, %s", store ? rm_name : reg_name,
                  store ? reg_name : rm_name);
+      } else if (map == 1 && opcode == 0x12 && pp == 0 &&
+                 vector_width == 128 && (mr >> 6) == 3) {
+        char vvvv_name[16];
+        snprintf(vvvv_name, sizeof(vvvv_name), "xmm%u", vector_vvvv);
+        DIS_SET(m, "vmovhlps");
+        snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                 rm_name);
+      } else if (map == 1 && opcode == 0x12 && (pp == 2 || pp == 3) &&
+                 vector_width == 128 && !(vex3 & 0x80) &&
+                 (vex3 & 0x7c) == 0x78) {
+        DIS_SET(m, pp == 2 ? "vmovsldup" : "vmovddup");
+        snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+      } else if (map == 1 && opcode == 0x15 && (pp == 0 || pp == 1) &&
+                 !(vex3 & 0x80)) {
+        char vvvv_name[16];
+        snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
+                 vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
+        DIS_SET(m, pp == 0 ? "vunpckhps" : "vunpckhpd");
+        snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                 rm_name);
+      } else if (map == 1 && opcode == 0xc6 && (pp == 0 || pp == 1) &&
+                 !(vex3 & 0x80) && i < n) {
+        char vvvv_name[16];
+        snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
+                 vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
+        DIS_SET(m, pp == 0 ? "vshufps" : "vshufpd");
+        snprintf(args, sizeof(args), "%s, %s, %s, 0x%x", reg_name,
+                 vvvv_name, rm_name, b[i++]);
       } else if (map == 1 && (opcode == 0x2e || opcode == 0x2f) &&
                  (pp == 0 || pp == 1) && vector_width == 128 &&
                  !(vex3 & 0x80) && (vex3 & 0x78) == 0x78) {

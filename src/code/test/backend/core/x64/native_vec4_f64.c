@@ -264,9 +264,12 @@ static bool check_x64_machine_form(const nyr_func_t *f,
         fputc('\n', stderr);
         ok = false;
       }
-      if (ok && (!strstr(listing, "\tmovdqu\txmm0, xmmword ptr") ||
-                 !strstr(listing, "\tmovq\txmm0, rax") ||
-                 !strstr(listing, "\tmovhlps\txmm15, xmm14") ||
+      if (ok && ((!strstr(listing, "\tmovdqu\txmm0, xmmword ptr") &&
+                  !strstr(listing, "\tvmovdqu\txmm0, xmmword ptr")) ||
+                 (!strstr(listing, "\tmovq\txmm0, rax") &&
+                  !strstr(listing, "\tvmovq\txmm0, rax")) ||
+                 (!strstr(listing, "\tmovhlps\txmm15, xmm14") &&
+                  !strstr(listing, "\tvmovhlps\txmm15, xmm15, xmm14")) ||
                  !strstr(listing, "\tvbroadcastsd\tymm0, qword ptr") ||
                  !strstr(listing, "\tvextractf128\txmm14, ymm15, 0") ||
                  !strstr(listing, "\tvfmadd213pd\tymm14, ymm15,") ||
