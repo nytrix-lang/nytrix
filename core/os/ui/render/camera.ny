@@ -229,7 +229,7 @@ fn _auto_bounds_shape(f64 span_x, f64 span_y, f64 span_z) dict {
    if thin_y {
       sy = max(0.001, max_span * 0.015)
       yaw = 0.0
-      pitch = 0.0
+      pitch = -35.0
       margin = 1.55
       fov_mul = 1.12
       branch = "auto-flat-xz"

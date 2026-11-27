@@ -1283,15 +1283,17 @@ fn _scene_list_has_bad_float(any xs, int limit=-1) bool {
 
 fn _scene_bounds_ok(any pmin, any pmax) bool {
    if !is_list(pmin)|| !is_list(pmax) || pmin.len < 3 || pmax.len < 3 { return false }
-   def mnx, mny = _num_or(pmin.get(0, 0.0), 0.0), _num_or(pmin.get(1, 0.0), 0.0)
-   def mnz = _num_or(pmin.get(2, 0.0), 0.0)
-   def mxx = _num_or(pmax.get(0, 0.0), 0.0)
-   def mxy = _num_or(pmax.get(1, 0.0), 0.0)
-   def mxz = _num_or(pmax.get(2, 0.0), 0.0)
+   def f64 mnx = float(_num_or(pmin.get(0, 0.0), 0.0))
+   def f64 mny = float(_num_or(pmin.get(1, 0.0), 0.0))
+   def f64 mnz = float(_num_or(pmin.get(2, 0.0), 0.0))
+   def f64 mxx = float(_num_or(pmax.get(0, 0.0), 0.0))
+   def f64 mxy = float(_num_or(pmax.get(1, 0.0), 0.0))
+   def f64 mxz = float(_num_or(pmax.get(2, 0.0), 0.0))
    if _scene_float6_bad(mnx, mny, mnz, mxx, mxy, mxz) { return false }
    if mnx > mxx || mny > mxy || mnz > mxz { return false }
-   def dx, dy = abs(mxx - mnx), abs(mxy - mny)
-   def dz = abs(mxz - mnz)
+   def f64 dx = abs(mxx - mnx)
+   def f64 dy = abs(mxy - mny)
+   def f64 dz = abs(mxz - mnz)
    if max(dx, max(dy, dz)) < 0.000000001 { return false }
    true
 }
@@ -1896,6 +1898,7 @@ fn _scene_refresh_orbit_from_parts(any mesh, bool has_motion) any {
    def orbit_raw_min = min(raw_sx, min(raw_sy, raw_sz))
    def orbit_sheet_like = orbit_raw_max > 0.0001 && orbit_raw_min < orbit_raw_max * 0.30
    def orbit_horiz_max = max(raw_sx, raw_sz)
+   def orbit_horiz_sheet = orbit_horiz_max > 0.0001 && raw_sy < orbit_horiz_max * 0.30 && raw_sy <= min(raw_sx, raw_sz)
    def orbit_column_like = orbit_horiz_max > 0.0001 && raw_sy > orbit_horiz_max * 1.8
    def orbit_tall_flat_motion = has_motion && orbit_column_like && orbit_raw_max > 0.0001 && orbit_raw_min < orbit_raw_max * 0.55
    def orbit_grid_like = orbit_part_count >= 5 &&
@@ -1903,7 +1906,7 @@ fn _scene_refresh_orbit_from_parts(any mesh, bool has_motion) any {
    raw_sz < min(raw_sx, raw_sy) * 0.55 &&
    abs(raw_sx - raw_sy) < orbit_raw_max * 0.22
    if (orbit_has_backdrop
-      || orbit_sheet_like
+      || (orbit_sheet_like && !orbit_horiz_sheet)
       || orbit_grid_like
       || orbit_tall_flat_motion)
    && !(orbit_column_like
@@ -1919,7 +1922,9 @@ fn _scene_refresh_orbit_from_parts(any mesh, bool has_motion) any {
          }
       }
    }
-   if (orbit_has_blend
+   if orbit_horiz_sheet {
+      fit_cam_pitch = -35.0
+   } elif (orbit_has_blend
       || orbit_has_backdrop
       || orbit_sheet_like
       || orbit_grid_like
@@ -3830,6 +3835,8 @@ fn _load_ogeom_cache(any gltf_path, any mat_records) any {
 
 fn _save_ogeom_cache(any gltf_path, any mesh) int {
    if !is_str(gltf_path)|| gltf_path.len == 0 || !is_dict(mesh) { return 0 }
+   def parts_check = mesh.get("parts", 0)
+   if is_list(parts_check) && parts_check.len > 1024 { return 0 }
    _scene_ensure_runtime_caches()
    mut cached = _clone_cached_mesh_dict(mesh)
    cached["cached"] = true
@@ -4150,12 +4157,21 @@ fn _mat_pack_ext2_tex_word(int ext2_kind, int ext2_id, int ext2_uv_set, dict spe
 fn _mat_apply_diffuse_transmission_color_fallback(dict spec, f64 diffuse_transmission_factor_live) dict {
    if !is_dict(spec) { return spec }
    if float(diffuse_transmission_factor_live) <= 0.000001 { return spec }
-   if float(spec.get("subsurface_factor", 0.0)) <= 0.000001 { return spec }
+   def vsc_live = spec.get("volume_scatter_color_factor", [1.0,1.0,1.0])
+   def vsc_white = abs(float(vsc_live.get(0, 1.0)) - 1.0) < 0.0001 &&
+   abs(float(vsc_live.get(1, 1.0)) - 1.0) < 0.0001 &&
+   abs(float(vsc_live.get(2, 1.0)) - 1.0) < 0.0001
    def dtc_live = spec.get("diffuse_transmission_color_factor", [1.0,1.0,1.0])
    def dtc_white = abs(float(dtc_live.get(0, 1.0)) - 1.0) < 0.0001 &&
    abs(float(dtc_live.get(1, 1.0)) - 1.0) < 0.0001 &&
    abs(float(dtc_live.get(2, 1.0)) - 1.0) < 0.0001
    if !dtc_white { return spec }
+   if !vsc_white {
+      mut out_vsc = spec
+      out_vsc["diffuse_transmission_color_factor"] = vsc_live
+      return out_vsc
+   }
+   if float(spec.get("subsurface_factor", 0.0)) <= 0.000001 { return spec }
    mut out = spec
    def ssc_live = spec.get("subsurface_color_factor", [1.0,1.0,1.0])
    def ssc_white = abs(float(ssc_live.get(0, 1.0)) - 1.0) < 0.0001 &&
@@ -4987,7 +5003,7 @@ fn build_material_records(list material_infos, str base_path) list {
    ;; Fast-core PBR is a load-time optimization.  Keep it opt-in for now because
    ;; some glTF sample models (Avocado-style texture sets) need the full material
    ;; path to keep base/normal/MR texture bindings identical across GL and VK.
-   if common.env_truthy("NY_SCENE_FAST_CORE_PBR") && _mat_infos_fast_core_pbr_ok(material_infos) {
+   if (mat_count >= 64 || common.env_truthy("NY_SCENE_FAST_CORE_PBR")) && _mat_infos_fast_core_pbr_ok(material_infos) {
       def fast_records = _build_material_records_fast_core_pbr(material_infos, base_path, diag_on, stage_trace)
       _scene_stage(stage_trace, "materials.end count=" + to_str(fast_records.len) + " fast=core_pbr")
       return fast_records
@@ -6809,7 +6825,7 @@ fn _scene_attach_mesh_metadata(any mesh_in, any part_in, bool include_bounds=fal
 }
 
 fn _scene_finalize_cpu_mesh_part(any mesh, any part, bool baked_ok=false) list {
-   if mesh == 0 { return [mesh, part] }
+   if !is_dict(mesh) { return [mesh, part] }
    def tagged = _scene_attach_mesh_metadata(mesh, part, true)
    mesh, part = tagged.get(0, mesh), tagged.get(1, part)
    part["mesh"] = mesh
@@ -7055,15 +7071,15 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
          if iptr && icnt > 0 { total_i += icnt }
          if vptr && vcnt > 0 && iptr && icnt > 0 {
             opts["storage"] = "cpu"
-            mut mesh = 0
+            mut any mesh = nil
             mut baked_ok = false
             if bake_cpu_model {
                def idx_u32 = opts.get("index_type_u32", false)
                def exp_ptr = render_utils.gltf_expand_indexed_vertices(vptr, vcnt, iptr, icnt, idx_u32)
                if exp_ptr { expanded_indexed += 1 } else { expanded_failed += 1 }
                baked_ok = (exp_ptr != 0) ? _bake_vertex_buffer_model(exp_ptr, icnt, model_m) : false
-               mesh = exp_ptr ? mesh_create_cpu(exp_ptr, icnt, is_lines, opts) : 0
-               if mesh == 0 && exp_ptr { free(exp_ptr) }
+               mesh = exp_ptr ? mesh_create_cpu(exp_ptr, icnt, is_lines, opts) : nil
+               if !is_dict(mesh) && exp_ptr { free(exp_ptr) }
             } else {
                if skinned_indexed {
                   if group_trace { terminal.log("[cpu_parts] part=" + to_str(pi) + " mesh_indexed_cpu") }
@@ -7074,12 +7090,12 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
                   def exp_ptr = render_utils.gltf_expand_indexed_vertices(vptr, vcnt, iptr, icnt, idx_u32)
                   if exp_ptr { expanded_indexed += 1 } else { expanded_failed += 1 }
                   if group_trace { terminal.log("[cpu_parts] part=" + to_str(pi) + " mesh_cpu exp=" + to_str(bool(exp_ptr)) + " icnt=" + to_str(icnt)) }
-                  mesh = exp_ptr ? mesh_create_cpu(exp_ptr, icnt, is_lines, opts) : 0
-                  if mesh == 0 && exp_ptr { free(exp_ptr) }
+                  mesh = exp_ptr ? mesh_create_cpu(exp_ptr, icnt, is_lines, opts) : nil
+                  if !is_dict(mesh) && exp_ptr { free(exp_ptr) }
                }
             }
-            if group_trace { terminal.log("[cpu_parts] part=" + to_str(pi) + " mesh_done ok=" + to_str(mesh != 0)) }
-            if mesh != 0 {
+            if group_trace { terminal.log("[cpu_parts] part=" + to_str(pi) + " mesh_done ok=" + to_str(is_dict(mesh))) }
+            if is_dict(mesh) {
                if skinned_indexed { mesh["dynamic_vertices"] = true }
                built_meshes += 1
                if group_trace { terminal.log("[cpu_parts] part=" + to_str(pi) + " finalize") }
@@ -7093,8 +7109,8 @@ fn _build_scene_cpu_parts(any parts, bool fallback_unlit=false) list {
             opts["storage"] = "cpu"
             def lin_ptr = _clone_vertices(vptr, vcnt)
             def baked_ok = (bake_cpu_model && lin_ptr) ? _bake_vertex_buffer_model(lin_ptr, vcnt, model_m) : false
-            mut mesh = lin_ptr ? mesh_create_cpu(lin_ptr, vcnt, is_lines, opts) : 0
-            if mesh != 0 {
+            mut any mesh = lin_ptr ? mesh_create_cpu(lin_ptr, vcnt, is_lines, opts) : nil
+            if is_dict(mesh) {
                built_meshes += 1
                def finalized = _scene_finalize_cpu_mesh_part(mesh, part, baked_ok)
                mesh, part = finalized.get(0, mesh), finalized.get(1, part)
@@ -7539,13 +7555,14 @@ fn _scene_fit_orbit_camera(any src_parts, f64 raw_sx, f64 raw_sy, f64 raw_sz, f6
    def orbit_raw_min = min(raw_sx, min(raw_sy, raw_sz))
    def orbit_sheet_like = orbit_raw_max > 0.0001 && orbit_raw_min < orbit_raw_max * 0.30
    def orbit_horiz_max = max(raw_sx, raw_sz)
+   def orbit_horiz_sheet = orbit_horiz_max > 0.0001 && raw_sy < orbit_horiz_max * 0.30 && raw_sy <= min(raw_sx, raw_sz)
    def orbit_column_like = orbit_horiz_max > 0.0001 && raw_sy > orbit_horiz_max * 1.8
    def orbit_grid_like = orbit_part_count >= 5 &&
    min(raw_sx, raw_sy) > 0.0001 &&
    raw_sz < min(raw_sx, raw_sy) * 0.55 &&
    abs(raw_sx - raw_sy) < orbit_raw_max * 0.22
    def many_part_orbit_quick = _scene_many_part_orbit_quick(orbit_part_count)
-   if (orbit_has_backdrop || orbit_sheet_like || orbit_grid_like) && !orbit_column_like && !many_part_orbit_quick {
+   if (orbit_has_backdrop || (orbit_sheet_like && !orbit_horiz_sheet) || orbit_grid_like) && !orbit_column_like && !many_part_orbit_quick {
       def orbit_use_z = raw_sz <= raw_sx
       def orbit_fg_sign = _scene_sheet_foreground_axis_sign(src_parts, scene_area_like, orbit_use_z)
       if orbit_fg_sign != 0 {
@@ -7556,7 +7573,8 @@ fn _scene_fit_orbit_camera(any src_parts, f64 raw_sx, f64 raw_sy, f64 raw_sz, f6
          }
       }
    }
-   if (orbit_has_blend || orbit_has_backdrop || orbit_sheet_like || orbit_grid_like)&& !orbit_column_like { fit_cam_pitch = 0.0 }
+   if orbit_horiz_sheet { fit_cam_pitch = -35.0 }
+   elif (orbit_has_blend || orbit_has_backdrop || orbit_sheet_like || orbit_grid_like)&& !orbit_column_like { fit_cam_pitch = 0.0 }
    return [fit_cam_yaw, fit_cam_pitch]
 }
 

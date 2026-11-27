@@ -245,21 +245,32 @@ fn _gltf_name_good_for_slot(str slot, str name) bool {
 }
 
 fn _gltf_find_image_uri_by_slot(any gltf_data, str slot) str {
-   def g = gltf_data.get("gltf", 0)
+   mut g = gltf_data.get("gltf", 0)
    if !is_dict(g) { return "" }
+   mut slot_cache = g.get("_ny_slot_img_cache", 0)
+   if is_dict(slot_cache) && slot_cache.contains(slot) {
+      return to_str(slot_cache.get(slot, ""))
+   }
    def images = g.get("images")
    if !is_list(images) { return "" }
+   mut found = ""
    mut i = 0
    while i < images.len {
       def img = images.get(i, 0)
       if is_dict(img) {
          def resolved = _gltf_extract_embedded_image(gltf_data, i)
          def name = _gltf_image_name_lower(img, resolved)
-         if _gltf_name_good_for_slot(slot, name) { return resolved }
+         if _gltf_name_good_for_slot(slot, name) {
+            found = resolved
+            break
+         }
       }
       i += 1
    }
-   ""
+   if !is_dict(slot_cache) { slot_cache = dict(8) }
+   slot_cache[slot] = found
+   g["_ny_slot_img_cache"] = slot_cache
+   found
 }
 
 fn _gltf_resolve_image_uri(any gltf_data, any tex_info, str slot="") str {
@@ -295,9 +306,9 @@ fn _gltf_resolve_image_uri(any gltf_data, any tex_info, str slot="") str {
    if slot.len > 0 && resolved.len > 0 {
       def img = images.get(src_idx, 0)
       def name = is_dict(img) ? _gltf_image_name_lower(img, resolved) : str.lower(ospath.basename(resolved))
-      def alt = _gltf_find_image_uri_by_slot(gltf_data, slot)
-      if alt.len > 0 && (_gltf_name_is_bad_for_slot(slot, name) || !_gltf_name_good_for_slot(slot, name)) {
-         return alt
+      if _gltf_name_is_bad_for_slot(slot, name) || !_gltf_name_good_for_slot(slot, name) {
+         def alt = _gltf_find_image_uri_by_slot(gltf_data, slot)
+         if alt.len > 0 { return alt }
       }
    }
    resolved
@@ -477,7 +488,11 @@ fn _gltf_material_apply_extensions(dict out, any ext, any ext_sg, bool use_spec_
    }
    def ext_vsc = _gltf_ext_dict(ext, "KHR_materials_volume_scatter")
    if is_dict(ext_vsc) {
-      out = _gltf_ext_vec3(out, ext_vsc, "volume_scatter_color_factor", "multiscatterColor", 1.0, 1.0, 1.0)
+      if ext_vsc.contains("multiscatterColorFactor") {
+         out = _gltf_ext_vec3(out, ext_vsc, "volume_scatter_color_factor", "multiscatterColorFactor", 1.0, 1.0, 1.0)
+      } else {
+         out = _gltf_ext_vec3(out, ext_vsc, "volume_scatter_color_factor", "multiscatterColor", 1.0, 1.0, 1.0)
+      }
    }
    def ext_ac = _gltf_ext_dict(ext, "KHR_materials_alpha_coverage")
    if is_dict(ext_ac) { out = _gltf_ext_float(out, ext_ac, "alpha_coverage", "alphaCoverage", 1.0) }

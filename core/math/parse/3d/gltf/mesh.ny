@@ -113,12 +113,26 @@ fn gltf_get_mesh(any gltf_data, int mesh_idx) any {
    meshes.get(mesh_idx)
 }
 
+fn _gltf_norm_bound_val(f64 v, int comp) f64 {
+   if comp == shr.GLTF_COMP_BYTE { return max(-1.0, v / 127.0) }
+   if comp == shr.GLTF_COMP_UBYTE { return v / 255.0 }
+   if comp == shr.GLTF_COMP_SHORT { return max(-1.0, v / 32767.0) }
+   if comp == shr.GLTF_COMP_USHORT { return v / 65535.0 }
+   if comp == shr.GLTF_COMP_UINT { return v / 4294967295.0 }
+   v
+}
+
 fn _gltf_accessor_local_bounds(any acc) any {
    if !is_dict(acc) { return 0 }
    def mn, mx = acc.get("min", 0), acc.get("max", 0)
    if is_list(mn) && is_list(mx) && mn.len >= 3 && mx.len >= 3 {
-      def x1 = shr._gltf_num_or(mn.get(0, 0.0), 0.0) def y1 = shr._gltf_num_or(mn.get(1, 0.0), 0.0) def z1 = shr._gltf_num_or(mn.get(2, 0.0), 0.0)
-      def x2 = shr._gltf_num_or(mx.get(0, 0.0), 0.0) def y2 = shr._gltf_num_or(mx.get(1, 0.0), 0.0) def z2 = shr._gltf_num_or(mx.get(2, 0.0), 0.0)
+      mut x1 = shr._gltf_num_or(mn.get(0, 0.0), 0.0) mut y1 = shr._gltf_num_or(mn.get(1, 0.0), 0.0) mut z1 = shr._gltf_num_or(mn.get(2, 0.0), 0.0)
+      mut x2 = shr._gltf_num_or(mx.get(0, 0.0), 0.0) mut y2 = shr._gltf_num_or(mx.get(1, 0.0), 0.0) mut z2 = shr._gltf_num_or(mx.get(2, 0.0), 0.0)
+      if acc.get("normalized", false) ? true : false {
+         def comp = int(acc.get("componentType", 0))
+         x1 = _gltf_norm_bound_val(x1, comp) y1 = _gltf_norm_bound_val(y1, comp) z1 = _gltf_norm_bound_val(z1, comp)
+         x2 = _gltf_norm_bound_val(x2, comp) y2 = _gltf_norm_bound_val(y2, comp) z2 = _gltf_norm_bound_val(z2, comp)
+      }
       if shr._gltf_float6_bad(x1, y1, z1, x2, y2, z2) { return 0 }
       if x1 > x2 || y1 > y2 || z1 > z2 { return 0 }
       return [[x1, y1, z1], [x2, y2, z2]]

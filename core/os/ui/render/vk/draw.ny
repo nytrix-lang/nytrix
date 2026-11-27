@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
+module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use core
 use core.mem
 use core.math
@@ -730,6 +730,33 @@ fn draw_vertices(any p, int count, int tex_id) bool {
    def dst = _local_vertex_map + _vertex_offset
    __copy_mem(dst, p, bytes)
    _vertex_offset += bytes
+   true
+}
+
+fn draw_vertices_raw(any p, int count, int tex_id=-1, ?handle pipe_override=0) bool {
+   "Streams dynamic 3D triangle vertices preserving current PBR material, unlit flag, and pipeline override."
+   if !vk_state.frame_open() || !_current_frame_cb || count <= 0 || !p { return false }
+   if _vertex_offset != _last_flush_offset {
+      _flush_reason = 3
+      _flush()
+   }
+   def bytes = count * _VKR_VERT_STRIDE
+   if !_check_flush(bytes) { return false }
+   if is_int(tex_id) && tex_id >= 0 { bind_texture(tex_id) }
+   def cb = _current_frame_cb
+   if !_select_static_draw_pipeline(cb, false, 1.0, pipe_override, false) { return false }
+   _bind_descriptors(cb)
+   _sync_pc()
+   def first_vert = _vertex_offset / _VKR_VERT_STRIDE
+   def dst = _local_vertex_map + _vertex_offset
+   simmd.prefetch_read(p, 3)
+   simmd.prefetch_write(dst, 3)
+   __copy_mem(dst, p, bytes)
+   _vkr_bind_dynamic_vertex_buffer(cb)
+   cmd_draw(cb, count, 1, first_vert, 0)
+   _vertex_offset += bytes
+   _last_flush_offset = _vertex_offset
+   vk_state.record_draw_call(true, true)
    true
 }
 

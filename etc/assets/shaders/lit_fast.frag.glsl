@@ -59,7 +59,7 @@ vec2 mapUv(uint packedIndex, uint xf0, uint xf1){ return applyUvXf(((packedIndex
 vec3 geometricNormal(){
   vec3 dp1 = dFdx(vWorldPos) ;
   vec3 dp2 = dFdy(vWorldPos) ;
-  vec3 g = cross(dp1, dp2) ;
+  vec3 g = cross(dp2, dp1) ;
   float gl = length(g) ;
   if(gl < 1e-5){ return vec3(0.0, 0.0, 1.0) ; }
   return g / gl ;
@@ -169,7 +169,7 @@ void main(){
   }
 
 	  vec3 N = getNormal() ;
-	  if(logicalBackface){ N = -N ; }
+	  if(logicalBackface && length(vNormal) >= 1e-5){ N = -N ; }
   N = applyNormalMap(N, vTangent, pc.normalTexIndex, pc.normalUvXf0, pc.normalUvXf1) ;
 
   vec3 V = normalize(pc.camPos - vWorldPos + vec3(0.00001)) ;

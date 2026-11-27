@@ -4436,6 +4436,8 @@ ordinary_call:
                -1;
       }
     }
+    unsigned saved_f64_depth = b->f64_context_depth;
+    b->f64_context_depth = 0;
     int addr = nyr_lower_expr(b, e->as.call.args.data[0].val);
     /* An address read back from a dict or list arrives as a tagged `any`
      * integer.  Decode it as the integer load/store helpers do; otherwise
@@ -4446,6 +4448,7 @@ ordinary_call:
     int idx = e->as.call.args.len == (store ? 3u : 2u)
                   ? nyr_lower_expr(b, e->as.call.args.data[store ? 2 : 1].val)
                   : nyr_emit_const(b, 0);
+    b->f64_context_depth = saved_f64_depth;
     if (addr < 0 || idx < 0)
       return -1;
     /* The f32 runtime bridge consumes the tagged indexed-memory ABI; the

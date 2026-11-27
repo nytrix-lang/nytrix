@@ -589,6 +589,7 @@ fn gltf_sync_drawable_part_from_raw(any part, any raw_part, bool update_part_tex
       mesh["idx_ptr"] = iptr
       mesh["index_count"] = icnt
       mesh["draw_index_count"] = icnt
+      mesh["index_type_u32"] = raw_part.get("index_type_u32", false) ? true : false
    }
    mesh["tex_id"] = int(raw_part.get("tex_id", mesh.get("tex_id", -1)))
    if raw_part.contains("material_slab") { mesh["material_slab"] = raw_part.get("material_slab", 0) }
@@ -599,6 +600,7 @@ fn gltf_sync_drawable_part_from_raw(any part, any raw_part, bool update_part_tex
    if iptr && icnt > 0 {
       part["iptr"] = iptr
       part["icnt"] = icnt
+      part["index_type_u32"] = raw_part.get("index_type_u32", false) ? true : false
    }
    if raw_part.contains("model") {
       ;; Keep raw glTF node transforms in sync too.  The previous helper only

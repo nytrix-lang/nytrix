@@ -5273,7 +5273,7 @@ fn _app_simulate_camera_frame(dt, bool prep_gui, bool gui_nav_blocking) {
 
 fn _app_update_fast_path(dt) bool {
    if _batch_dump_enabled() && ui_profile.batch_fast_env_enabled() {
-      _cam_fov = camthreed.get(16)
+      _cam_fov = float(camthreed.get(16, _cam_fov))
       _batch_dump_update_fast(dt)
       return true
    }

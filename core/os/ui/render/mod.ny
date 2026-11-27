@@ -457,9 +457,9 @@ fn mesh_create_cpu_part_from_raw(any part, any opts=0) list {
    mut part_opts = is_dict(opts) ? opts : (is_dict(part.get("opts", 0)) ? part.get("opts", 0) : dict(4))
    def is_lines = part_opts.get("is_lines", false)
    part_opts["storage"] = "cpu"
-   mut mesh = 0
+   mut any mesh = nil
    if iptr && icnt > 0 { mesh = mesh_create_indexed(vptr, vcnt, iptr, icnt, part_opts, is_lines) } else { mesh = mesh_create_cpu(vptr, vcnt, is_lines, part_opts) }
-   if mesh != 0 { part["mesh"] = mesh }
+   if is_dict(mesh) { part["mesh"] = mesh }
    [part, mesh]
 }
 
@@ -474,8 +474,8 @@ fn _rebuild_drawable_parts_from_raw(any parts) list {
          mut opts = is_dict(part.get("opts", 0)) ? part.get("opts", 0) : dict(4)
          def built = mesh_create_cpu_part_from_raw(part, opts)
          part = built.get(0, part)
-         mut mesh = built.get(1, 0)
-         if mesh != 0 {
+         mut any mesh = built.get(1, nil)
+         if is_dict(mesh) {
             mesh["tex_id"] = int(part.get("tex_id", -1))
             mesh["vc_mode"] = int(part.get("vc_mode", 0))
             def part_mat_slab = render_utils.pack_material_slab(part)
@@ -10460,7 +10460,7 @@ fn _mesh_draw_dispatch(?ptr p, int count, int tex_id, bool lines, bool points, f
       lib_vkr.draw_lines_raw(p, count / 2, width)
    } else {
       _mesh_diag("dispatch vertices")
-      lib_vkr.draw_vertices(p, count, tex_id)
+      lib_vkr.draw_vertices_raw(p, count, tex_id, pipe_override)
       _mesh_diag("dispatch vertices done")
    }
    if pipe_override {

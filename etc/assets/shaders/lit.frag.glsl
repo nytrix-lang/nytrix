@@ -92,7 +92,7 @@ float modelThicknessScale(){
 vec3 geometricNormal(){
   vec3 dp1 = dFdx(vWorldPos) ;
   vec3 dp2 = dFdy(vWorldPos) ;
-  vec3 g = cross(dp1, dp2) ;
+  vec3 g = cross(dp2, dp1) ;
   float gl = length(g) ;
   if(gl < 1e-5){ return vec3(0.0, 0.0, 1.0) ; }
   return g / gl ;
@@ -454,7 +454,7 @@ void main(){
 	  if(gltfCullMaterial && !doubleSidedMaterial && !gl_FrontFacing){ discard ; }
 	  vec3 N = getNormal() ;
 	  vec3 V = normalize(pc.camPos - vWorldPos + vec3(0.00001)) ;
-	  if(logicalBackface){ N = -N ; }
+	  if(logicalBackface && length(vNormal) >= 1e-5){ N = -N ; }
   bool clearcoatOnlyNormal = (pc.normalTexIndex & 0x80000000u) != 0u ;
   float normalScale = decodeNormalScale7(pc.normalTexIndex) ;
   if(normalScale <= 0.0001){ normalScale = 1.0 ; }
@@ -671,10 +671,10 @@ void main(){
       finalEmissiveOnlySurface = emissiveOnlySurface ;
       bool specularOnlySurface = dot(baseColor, baseColor) <= 0.0006 && metallic <= 0.01 && (specularFactor > 0.01 || extSpecularMap || extSpecularColorMap) ;
       bool darkReflectiveSurface = dot(baseColor, baseColor) <= 0.0006 && !emissiveOnlySurface ;
-      bool extensionSurface = clearcoat > 0.0 || anisotropyStrength > 0.0 || iridescence > 0.0 || transmission > 0.0 || diffuseTransmission > 0.0 || subsurfaceFactor > 0.0 || dot(sheenColor, sheenColor) > 0.0005 ;
+      bool extensionSurface = clearcoat > 0.0 || anisotropyStrength > 0.0 || iridescence > 0.0 || transmission > 0.05 || diffuseTransmission > 0.0 || subsurfaceFactor > 0.0 || dot(sheenColor, sheenColor) > 0.0005 ;
       float safeIor = max(ior, 1.001) ;
       float dielectricF0Scalar = pow((safeIor - 1.0) / (safeIor + 1.0), 2.0) ;
-      bool glossyMaterial = sourceSpecGlossWorkflow || specGlossWorkflow || extSpecularMap || extSpecularColorMap || metallic > 0.05 || clearcoat > 0.0 || transmission > 0.0 || iridescence > 0.0 ;
+      bool glossyMaterial = sourceSpecGlossWorkflow || specGlossWorkflow || extSpecularMap || extSpecularColorMap || metallic > 0.05 || clearcoat > 0.0 || transmission > 0.05 || iridescence > 0.0 ;
       float defaultSpecScale = glossyMaterial ? 0.82 : 0.06 ;
       float defaultDiffuseScale = glossyMaterial ? 0.05 : 0.24 ;
       float directSpecScale = glossyMaterial ? max(defaultSpecScale, mix(1.10, 0.34, roughness)) : mix(1.10, 0.24, roughness) ;
@@ -682,10 +682,42 @@ void main(){
       float dielectricF90 = clamp(specularFactor, 0.0, 1.0) ;
       vec3 F0 = specGlossWorkflow ? clamp(specularColor, vec3(0.0), vec3(1.0)) : mix(dielectricF0, baseColor, metallic) ;
       vec3 envF90 = specGlossWorkflow ? vec3(1.0) : mix(vec3(dielectricF90), vec3(1.0), metallic) ;
+      vec3 tangent ;
+      float tangentHand = 1.0 ;
+      if(length(vTangent.xyz) > 1e-5){
+         tangent = normalize(vTangent.xyz - N * dot(N, vTangent.xyz)) ;
+         tangentHand = vTangent.w < 0.0 ? -1.0 : 1.0 ;
+      } else {
+         vec3 dPdx = dFdx(vWorldPos) ;
+         vec3 dPdy = dFdy(vWorldPos) ;
+         vec2 anisoUV = anisotropyStrength > 0.001 ? anisotropyBasisUV : baseUV ;
+         vec2 dUVdx = dFdx(anisoUV) ;
+         vec2 dUVdy = dFdy(anisoUV) ;
+         tangent = dPdx * dUVdy.y - dPdy * dUVdx.y ;
+         if(length(tangent) < 1e-5){ tangent = normalize(abs(N.z) < 0.999 ? cross(vec3(0.0, 0.0, 1.0), N) : cross(vec3(0.0, 1.0, 0.0), N)) ; }
+         else { tangent = normalize(tangent - N * dot(N, tangent)) ; }
+      }
+      vec3 bitangent = normalize(cross(N, tangent)) * tangentHand ;
+      vec3 anisoTangent = tangent ;
+      vec3 anisoBitangent = bitangent ;
+      if(anisotropyStrength > 0.001 && dot(anisotropyDir, anisotropyDir) > 1e-5){
+         vec2 dir = normalize(anisotropyDir) ;
+         anisoTangent = normalize(tangent * dir.x + bitangent * dir.y) ;
+         anisoBitangent = normalize(cross(N, anisoTangent)) * tangentHand ;
+      }
       vec3 R = reflect(-V, N) ;
+      vec3 envR = R ;
+      if(anisotropyStrength > 0.001){
+         vec3 bentT = cross(anisoBitangent, V) ;
+         if(length(bentT) > 1e-5){
+            vec3 bentN = normalize(cross(bentT, anisoBitangent)) ;
+            float bendFactor = clamp(anisotropyStrength * (1.0 - roughness * roughness), 0.0, 0.85) ;
+            envR = reflect(-V, normalize(mix(N, bentN, bendFactor))) ;
+         }
+      }
       vec3 envDiffuse = sampleEnvDiffuse(N) ;
       vec3 envDiffuseBack = sampleEnvDiffuse(-N) ;
-      vec3 envSpec = sampleEnvSpec(normalize(mix(R, N, roughness * roughness * 0.35)), roughness) ;
+      vec3 envSpec = sampleEnvSpec(normalize(mix(envR, N, roughness * roughness * 0.35)), roughness) ;
       float opticalVolumeSurface = smoothstep(0.0001, 0.012, thickness) ;
       float opticalIriSurface = clamp(iridescence * max(transmission, diffuseTransmission) * opticalVolumeSurface, 0.0, 1.0) ;
       if(opticalIriSurface > 0.001){
@@ -698,29 +730,12 @@ void main(){
       }
       float fresnelMaxV = max(max(fresnelV.r, fresnelV.g), fresnelV.b) ;
       float diffuseRemain = mix(1.0, 0.82, diffuseTransmission) ;
-      float roughDiffuse = glossyMaterial ? mix(0.16, 1.0, roughness) : 1.0 ;
+      float roughDiffuse = glossyMaterial ? mix(mix(0.16, 0.65, smoothstep(0.05, 0.5, metallic)), 1.0, roughness) : 1.0 ;
       bool diffuseBoostExtension = transmission <= 0.001 && diffuseTransmission <= 0.001 && (clearcoat > 0.0 || iridescence > 0.0 || extSpecularMap || extSpecularColorMap) ;
       float extensionDiffuseBoost = diffuseBoostExtension ? 1.18 : 1.0 ;
       vec3 diffuseEnergy = diffuseColor * (1.0 - transmission) * diffuseRemain * (1.0 - fresnelMaxV) * extensionDiffuseBoost ;
       vec3 Lo = vec3(0.0) ;
-      float envAniso = 1.0 ;
-      vec3 dPdx = dFdx(vWorldPos) ;
-      vec3 dPdy = dFdy(vWorldPos) ;
-      vec2 anisoUV = anisotropyStrength > 0.001 ? anisotropyBasisUV : baseUV ;
-      vec2 dUVdx = dFdx(anisoUV) ;
-      vec2 dUVdy = dFdy(anisoUV) ;
-      vec3 tangent = dPdx * dUVdy.y - dPdy * dUVdx.y ;
-      if(length(tangent) < 1e-5){ tangent = normalize(abs(N.z) < 0.999 ? cross(vec3(0.0, 0.0, 1.0), N) : cross(vec3(0.0, 1.0, 0.0), N)) ; }
-      else { tangent = normalize(tangent - N * dot(N, tangent)) ; }
-      vec3 bitangent = normalize(cross(N, tangent)) ;
-      vec3 anisoTangent = tangent ;
-      vec3 anisoBitangent = bitangent ;
-      if(anisotropyStrength > 0.001 && dot(anisotropyDir, anisotropyDir) > 1e-5){
-         vec2 dir = normalize(anisotropyDir) ;
-         anisoTangent = normalize(tangent * dir.x + bitangent * dir.y) ;
-         anisoBitangent = normalize(cross(N, anisoTangent)) ;
-      }
-      envAniso = mix(1.0, clamp(abs(dot(R, anisoTangent)) * 1.9 + abs(dot(R, anisoBitangent)) * 0.30, 0.30, 2.10), anisotropyStrength) ;
+      float envAniso = mix(1.0, clamp(abs(dot(R, anisoTangent)) * 1.9 + abs(dot(R, anisoBitangent)) * 0.30, 0.30, 2.10), anisotropyStrength) ;
       float anisoEnvLobe = pow(clamp(abs(dot(normalize(R + anisoTangent * 0.6), anisoTangent)), 0.0, 1.0), mix(3.0, 28.0, 1.0 - roughness)) ;
       float darkSurfaceScale = 1.0 ;
       float emissiveOnlySpecScale = 1.0 ;
@@ -875,8 +890,9 @@ void main(){
          float iblDiffuseScale = glossyMaterial ? mix(0.18, 0.62, roughness) : 0.90 ;
          float iblSpecScale = glossyMaterial ? mix(5.10, 1.45, roughness) : mix(2.80, 1.08, roughness) ;
          float metalness = clamp(metallic, 0.0, 1.0) ;
-         iblDiffuseScale *= mix(1.0, 0.10, metalness) ;
-         iblSpecScale = mix(iblSpecScale, mix(1.85, 0.92, roughness), metalness) ;
+         float metalBlend = smoothstep(0.05, 0.35, metalness) ;
+         iblDiffuseScale *= mix(1.0, 0.35, metalness) ;
+         iblSpecScale = mix(iblSpecScale, mix(1.55, 0.90, roughness), metalBlend) ;
          iblSpecScale *= sourceSpecGlossWorkflow ? mix(1.24, 1.08, roughness) : 1.0 ;
          iblSpecScale *= mix(1.0, 2.35, iridescence * (1.0 - max(transmission, diffuseTransmission) * 0.55) * (1.0 - metalness * 0.72)) ;
          vec3 envTerm = envDiffuseTerm * iblDiffuseScale + envSpecTerm * iblSpecScale ;
@@ -1063,7 +1079,7 @@ void main(){
 	         float pathLenScale = mix(1.0, 0.46, neutralDispersionGlass) ;
          float rawPathLen = max((opticalThickness * mix(1.0, 1.08, refractionFactor) + diffuseTransmission * 0.05) * pathLenScale, 0.0001) ;
          float shortNeutralVolume = smoothstep(0.70, 0.96, attenuationLum) * (1.0 - clamp(attenuationChroma * 8.0, 0.0, 1.0)) * (1.0 - smoothstep(0.06, 0.22, transDist)) ;
-         float transmissionVolumeGate = clamp(transmission * opticalVolumeGate * (1.0 - metallic), 0.0, 1.0) ;
+         float transmissionVolumeGate = clamp(max(transmission, diffuseTransmission) * opticalVolumeGate * (1.0 - metallic), 0.0, 1.0) ;
          float volumePathCap = max(transDist * mix(3.25, 4.95, max(tintChromaWeight, neutralDispersionGlass * 0.75)), 0.018) ;
          float cappedPathLen = min(rawPathLen, volumePathCap) ;
          float pathLen = mix(rawPathLen, cappedPathLen, transmissionVolumeGate) ;
@@ -1247,10 +1263,11 @@ void main(){
             if(diffuseTransmissionAlphaCard){
                opticalLo += diffuseTransmissionCardFill * dtMix * (0.60 + 0.55 * viewWrap) * (1.0 - metallic) ;
             }
-            float dtOpaqueLoss = mix(0.015 + 0.025 * viewWrap, 0.82 + 0.12 * viewWrap, dtColoredVolume) ;
+            float dtOpaqueLoss = mix(0.015 + 0.025 * viewWrap, 0.55 + 0.12 * viewWrap, dtColoredVolume) ;
             vec3 dtBodyTint = mix(opticalTintBase, diffuseTransmissionColor, clamp(0.72 + 0.18 * volumeScatter, 0.0, 0.96)) ;
-            remainLo *= 1.0 - clamp(dtMix * dtOpaqueLoss, 0.0, 0.94) ;
+            remainLo *= 1.0 - clamp(dtMix * dtOpaqueLoss, 0.0, 0.72) ;
             remainLo *= mix(vec3(1.0), dtBodyTint, clamp(dtColoredVolume * 0.82, 0.0, 0.94)) ;
+            opticalLo += (envDiffuse + envDiffuseBack * 0.65) * diffuseTransmissionColor * dtMix * volumeScatter * (1.0 - metallic) * (0.28 + 0.32 * viewWrap) ;
          }
          if(subsurfaceFactor > 0.001){
             float sssColoredVolume = clamp(attenuationPresence * volumeScatter * max(diffuseTransmission, transmission), 0.0, 1.0) ;
@@ -1287,7 +1304,7 @@ void main(){
          if(transmission <= 0.001 && diffuseTransmission > 0.001){
             edgeReflect *= 0.18 ;
          }
-         opticalLo += edgeReflect ;
+         opticalLo += edgeReflect * clamp(max(transmission, diffuseTransmission) * 4.0, 0.0, 1.0) ;
          if(transmission > 0.001){
             float silhouette = pow(sat1(1.0 - NdotV), 1.35) ;
 	            vec3 bodyTint = mix(opticalTintBase, attenuationColor, clamp((0.24 + volumeScatter * 0.46) * attenuationPresence, 0.0, 1.0)) ;
@@ -1529,7 +1546,7 @@ void main(){
                // sampling. Keeping framebuffer alpha too low washes out glass,
                // iridescent covers, and other volume assets against the gallery.
                float opticalAlpha = min(authoredAlpha, max(0.40, transAlpha * mix(1.02, 0.74, transStrength))) ;
-               baseAlpha = clamp(opticalAlpha, 0.38, 0.96) ;
+               baseAlpha = mix(authoredAlpha, clamp(opticalAlpha, 0.38, 0.96), smoothstep(0.02, 0.15, transmission)) ;
 		            } else {
 		               baseAlpha = min(authoredAlpha, clamp(transAlpha, 0.02, 0.92)) ;
 		            }

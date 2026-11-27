@@ -15,15 +15,13 @@ use core.math.parse.3d.gltf.load as ld
 use core.math.parse.3d.gltf.material as mat
 use core.math.parse.3d.gltf.animation as anim
 
-fn _gltf_build_node_world_mats(any g, int node_idx, list parent_m, dict node_world_mats) dict {
-   def nodes = g.get("nodes")
-   if !is_list(nodes) || node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
-   def visit_key = shr._gltf_node_visit_key(node_idx)
-   if node_world_mats.get(visit_key, false) { return node_world_mats }
+fn _gltf_build_node_world_mats_rec(list nodes, int node_idx, list parent_m, dict node_world_mats, dict visiting) dict {
+   if node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
+   if visiting.get(node_idx, false) { return node_world_mats }
    if is_list(node_world_mats.get(node_idx, 0)) { return node_world_mats }
    def node = nodes[node_idx]
    if !is_dict(node) { return node_world_mats }
-   node_world_mats[visit_key] = true
+   visiting[node_idx] = true
    def local_m = gltf_math.node_local_matrix(node)
    def world_m = gltf_math.mat4_mul(parent_m, local_m)
    node_world_mats[node_idx] = world_m
@@ -33,12 +31,19 @@ fn _gltf_build_node_world_mats(any g, int node_idx, list parent_m, dict node_wor
       mut i = 0
       while i < children_n {
          def child_idx = int(children[i])
-         if child_idx >= 0 && child_idx != node_idx { node_world_mats = _gltf_build_node_world_mats(g, child_idx, world_m, node_world_mats) }
+         if child_idx >= 0 && child_idx != node_idx { node_world_mats = _gltf_build_node_world_mats_rec(nodes, child_idx, world_m, node_world_mats, visiting) }
          i += 1
       }
    }
-   node_world_mats = node_world_mats.delete(visit_key)
+   visiting[node_idx] = false
    node_world_mats
+}
+
+fn _gltf_build_node_world_mats(any g, int node_idx, list parent_m, dict node_world_mats) dict {
+   def nodes = g.get("nodes")
+   if !is_list(nodes) || node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
+   mut visiting = dict(16)
+   _gltf_build_node_world_mats_rec(nodes, node_idx, parent_m, node_world_mats, visiting)
 }
 
 fn _gltf_root_relevant_for_mesh_limit(any g, int node_idx, int mesh_limit) bool {
@@ -259,6 +264,7 @@ fn gltf_has_node_visibility(any gltf_data, any overrides=0) bool {
 
 fn gltf_resolve_node_visibility(any gltf_data, any overrides=0) dict {
    "Returns {node_idx: bool} effective visibility map for active scene roots."
+   if !gltf_has_node_visibility(gltf_data, overrides) { return dict(0) }
    def g = gltf_data.get("gltf", 0)
    if !is_dict(g) { return dict(0) }
    def nodes = g.get("nodes", 0)

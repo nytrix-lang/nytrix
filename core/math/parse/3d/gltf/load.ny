@@ -437,14 +437,10 @@ fn _gltf_sparse_materialize(
 }
 
 fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
-   shr._gltf_ensure_caches()
    def accs = g.get("accessors", [])
    if acc_idx < 0 || acc_idx >= accs.len { return 0 }
    def acc = accs[acc_idx]
    def sparse = acc.get("sparse", 0)
-   def cacheable = !is_dict(sparse)
-   def cache_key = cacheable ? (shr._gltf_cache_key_from_g(g) + ":data:" + to_str(to_int(data)) + ":acc:" + to_str(int(acc_idx))) : ""
-   if cacheable && _gltf_acc_res_cache.contains(cache_key) { return _gltf_acc_res_cache.get(cache_key, 0) }
    def count = acc.get("count", 0)
    def comp = acc.get("componentType", 0)
    def type_str = acc.get("type", "")
@@ -462,14 +458,18 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
       def bv = bv_list[bv_idx]
       def bv_ext = is_dict(bv) ? bv.get("extensions", 0) : 0
       def meshopt_ext = is_dict(bv_ext) ? bv_ext.get("EXT_meshopt_compression", bv_ext.get("KHR_meshopt_compression", 0)) : 0
-      if is_dict(meshopt_ext) && !common.env_truthy("NY_GLTF_UNSAFE_UNDECODED_MESHOPT") { return 0 }
       def buf_idx = int(bv.get("buffer", 0))
       mut any base_ptr = data
+      mut bool has_fallback_buf = false
       if is_list(buffers_data) && buf_idx >= 0 && buf_idx < buffers_data.len {
          def b = buffers_data[buf_idx]
          def bp = shr._gltf_blob_ptr(b)
-         if bp { base_ptr = bp }
+         if bp {
+            base_ptr = bp
+            has_fallback_buf = true
+         }
       }
+      if is_dict(meshopt_ext) && !has_fallback_buf && !common.env_truthy("NY_GLTF_UNSAFE_UNDECODED_MESHOPT") { return 0 }
       if base_ptr {
          def int total_off = int(bv.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
          stride = int(bv.get("byteStride", 0))
@@ -509,7 +509,6 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
       "cols": cols, "rows": rows,
       "elem_size": elem_size, "owned": owned
    }
-   if cacheable && !owned { _gltf_acc_res_cache = cache.cache_put_reset(shr._gltf_acc_res_cache, cache_key, out, shr._GLTF_CACHE_LIMIT_BIG, 256) }
    out
 }
 
