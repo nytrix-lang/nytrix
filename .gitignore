@@ -4,13 +4,13 @@
 !.github/
 !.githooks/
 !etc/
-!lib/
 !src/
+!core/
 !.github/**
 !.githooks/**
 !etc/**
-!lib/**
 !src/**
+!core/**
 !.clangd
 !CMakeLists.txt
 !LICENSE

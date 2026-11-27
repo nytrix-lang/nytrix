@@ -76,11 +76,52 @@ static void hm_args_push(ny_hm_state_t *hm, ny_hm_type_t *type,
     vec_push(&type->args, arg);
 }
 
+/*
+ * Forward declarations
+ */
+static ny_hm_type_t *hm_prune(ny_hm_type_t *t);
+static const ny_tp_origin_t *tp_origin_root(const ny_tp_origin_t *o);
+
+/*
+ * Origin propagation helpers
+ */
+static const ny_tp_origin_t *hm_type_origin_of(ny_hm_type_t *t) {
+  t = hm_prune(t);
+  return t ? t->origin : NULL;
+}
+
+static void hm_type_annotate_origin(ny_hm_type_t *t, const ny_tp_origin_t *o) {
+  if (!t)
+    return;
+  t = hm_prune(t);
+  if (t && !t->origin && o)
+    t->origin = o;
+}
+
+static const ny_tp_origin_t *hm_type_merge_origins(const ny_tp_origin_t *a,
+                                                   const ny_tp_origin_t *b) {
+  if (!a) return b;
+  if (!b) return a;
+  /*
+   * Prefer the root origin; if both have roots, prefer a's root
+   */
+  const ny_tp_origin_t *ra = tp_origin_root(a);
+  const ny_tp_origin_t *rb = tp_origin_root(b);
+  if (ra && rb) return ra;
+  if (ra) return ra;
+  return rb;
+}
+
 static ny_hm_type_t *hm_prune(ny_hm_type_t *t) {
   if (!t)
     return NULL;
   if (t->kind == NY_HM_VAR && t->instance) {
     t->instance = hm_prune(t->instance);
+    /*
+     * Propagate origin from instance to variable
+     */
+    if (t->instance && t->instance->origin && !t->origin)
+      t->origin = t->instance->origin;
     return t->instance;
   }
   return t;
@@ -151,17 +192,52 @@ static void hm_strict_diag(ny_hm_state_t *hm, token_t tok, const char *code,
       "%s", message ? message : "strict type validation failed");
 }
 
-static ny_hm_type_t *hm_any_fallback(ny_hm_state_t *hm, expr_t *e,
-                                     const char *code, const char *fmt, ...) {
+/*
+ * Create an origin record from HM state
+ */
+static const ny_tp_origin_t *hm_make_origin(ny_hm_state_t *hm, token_t tok,
+                                            ny_tp_origin_kind_t kind,
+                                            const char *reason,
+                                            const char *binding_name,
+                                            const char *expected_type) {
+  if (!hm || !hm->ctx)
+    return NULL;
+  return tp_origin_new(hm->ctx, tok, kind, reason, binding_name, expected_type);
+}
+
+/*
+ * Create an any type with origin attached
+ */
+static ny_hm_type_t *hm_any_with_origin(ny_hm_state_t *hm,
+                                        const ny_tp_origin_t *origin) {
+  ny_hm_type_t *t = hm_any(hm);
+  if (t && origin)
+    t->origin = origin;
+  return t;
+}
+
+/*
+ * Extended version with origin information
+ */
+static ny_hm_type_t *hm_any_fallback_ex(ny_hm_state_t *hm, expr_t *e,
+                                         const char *code,
+                                         ny_tp_origin_kind_t origin_kind,
+                                         const char *binding_name,
+                                         const char *expected_type,
+                                         const char *fmt, ...) {
+  const ny_tp_origin_t *origin = NULL;
   if (hm && hm->ctx && fmt) {
     va_list ap;
     va_start(ap, fmt);
     char *msg = tp_vformat(fmt, ap);
     va_end(ap);
-    tp_add_fallback(hm->ctx, e ? e->tok : (token_t){0}, "hm",
-                    code ? code : "hm-any-fallback",
-                    e ? tp_expr_kind_name(e->kind) : "expr", "%s",
-                    msg ? msg : "any fallback");
+    token_t tok = e ? e->tok : (token_t){0};
+    origin = hm_make_origin(hm, tok, origin_kind, msg ? msg : "any fallback",
+                            binding_name, expected_type);
+    tp_add_fallback_ex(hm->ctx, tok, "hm", code ? code : "hm-any-fallback",
+                       e ? tp_expr_kind_name(e->kind) : "expr",
+                       origin, origin, expected_type, binding_name, "%s",
+                       msg ? msg : "any fallback");
     const char *strict_code = hm_strict_code_for_fallback(code);
     if (strict_code && e) {
       hm_strict_diag(hm, e->tok, strict_code, code, "typed expression",
@@ -171,7 +247,7 @@ static ny_hm_type_t *hm_any_fallback(ny_hm_state_t *hm, expr_t *e,
     }
     free(msg);
   }
-  return hm_any(hm);
+  return hm_any_with_origin(hm, origin);
 }
 
 static bool hm_occurs(ny_hm_type_t *needle, ny_hm_type_t *haystack) {
@@ -1006,8 +1082,18 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
   free(rhs_s);
   want = hm_prune(want);
   got = hm_prune(got);
-  if (!want || !got || want == got || hm_is_any(want) || hm_is_any(got))
+  /*
+   * Merge origins early when either side is any or types are identical
+   */
+  const ny_tp_origin_t *merged_origin = hm_type_merge_origins(
+      want ? want->origin : NULL, got ? got->origin : NULL);
+  if (!want || !got || want == got || hm_is_any(want) || hm_is_any(got)) {
+    if (merged_origin) {
+      if (want) want->origin = merged_origin;
+      if (got) got->origin = merged_origin;
+    }
     return true;
+  }
   if (want->kind == NY_HM_VAR) {
     if (hm_occurs(want, got)) {
       hm_unify_diag(hm, tok, "hm-occurs-check", context, want, got);
@@ -1022,6 +1108,13 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
       free(rhs);
     }
     want->instance = got;
+    /*
+     * Propagate origin from got to want
+     */
+    if (got && got->origin && !want->origin)
+      want->origin = got->origin;
+    else if (merged_origin && !want->origin)
+      want->origin = merged_origin;
     return true;
   }
   if (got->kind == NY_HM_VAR)
@@ -1226,18 +1319,34 @@ static ny_hm_type_t *hm_merge(ny_hm_state_t *hm, ny_hm_type_t *a,
     return b ? b : hm_any(hm);
   if (!b)
     return a;
-  if (hm_type_is_dynamic(a))
+  /*
+   * Merge origins from both branches
+   */
+  const ny_tp_origin_t *merged_origin = hm_type_merge_origins(
+      a ? a->origin : NULL, b ? b->origin : NULL);
+  if (hm_type_is_dynamic(a)) {
+    if (b && merged_origin && !b->origin)
+      b->origin = merged_origin;
     return b;
-  if (hm_type_is_dynamic(b))
+  }
+  if (hm_type_is_dynamic(b)) {
+    if (a && merged_origin && !a->origin)
+      a->origin = merged_origin;
     return a;
+  }
   if (hm_is_name(a, "nil"))
     return hm_unary(hm, NY_HM_NULLABLE, b);
   if (hm_is_name(b, "nil"))
     return hm_unary(hm, NY_HM_NULLABLE, a);
   if (hm_unify_silent(hm, a, b, (token_t){0}, "branch merge")) {
+    if (a && merged_origin && !a->origin)
+      a->origin = merged_origin;
     return a;
   }
-  return hm_binary(hm, NY_HM_UNION, a, b);
+  ny_hm_type_t *union_t = hm_binary(hm, NY_HM_UNION, a, b);
+  if (union_t && merged_origin)
+    union_t->origin = merged_origin;
+  return union_t;
 }
 
 static ny_hm_type_t *hm_type_clone_inst(ny_hm_state_t *hm, ny_hm_type_t *t,
@@ -1262,6 +1371,7 @@ static ny_hm_type_t *hm_type_clone_inst(ny_hm_state_t *hm, ny_hm_type_t *t,
   ny_hm_type_t *out = hm_type_new(hm, t->kind);
   out->id = t->id;
   out->name = t->name ? hm_arena_strdup(hm, t->name) : NULL;
+  out->origin = t->origin;  /* Propagate origin */
   out->a = hm_type_clone_inst(hm, t->a, ids, fresh, len, cap);
   out->b = hm_type_clone_inst(hm, t->b, ids, fresh, len, cap);
   out->parameters = t->parameters;
@@ -5186,9 +5296,13 @@ static void hm_strict_result_payload_check(ny_hm_state_t *hm, token_t tok,
   if (hm_type_is_result_type(result_t) && !hm_type_is_dynamic(payload_t))
     return;
   char *got = hm_type_string(result_t);
-  tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm", "hm-result-payload-dynamic",
-                  "result", "%s has no statically known Result payload",
-                  context ? context : "result payload");
+  char msg[512];
+  snprintf(msg, sizeof(msg), "%s has no statically known Result payload",
+           context ? context : "result payload");
+  const ny_tp_origin_t *origin = hm_make_origin(hm, tok,
+                        NY_TP_ORIGIN_CONTAINER_ACCESS, msg, NULL, "Result<any, any>");
+  tp_add_fallback_ex(hm ? hm->ctx : NULL, tok, "hm", "hm-result-payload-dynamic",
+                     "result", origin, origin, "Result<any, any>", NULL, "%s", msg);
   if (!hm_strict_types_enabled(hm, tok)) {
     free(got);
     return;
@@ -6897,9 +7011,13 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
                       token_t tok, const char *self_name, const char *context) {
   callee_t = hm_prune(callee_t);
   if (!callee_t || hm_is_any(callee_t)) {
-    tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm", "hm-dynamic-call", "call",
-                    "%s uses a callee inferred as any",
-                    context ? context : "call expression");
+    char msg[512];
+    snprintf(msg, sizeof(msg), "%s uses a callee inferred as any",
+             context ? context : "call expression");
+    const ny_tp_origin_t *origin = hm_make_origin(hm, tok,
+                          NY_TP_ORIGIN_CALL_RETURN, msg, NULL, "any");
+    tp_add_fallback_ex(hm ? hm->ctx : NULL, tok, "hm", "hm-dynamic-call", "call",
+                       origin, origin, "any", NULL, "%s", msg);
     hm_strict_diag(
         hm, tok, "hm-strict-dynamic-call",
         context ? context : "call expression", "known callable signature",
@@ -6907,7 +7025,7 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
         "strict type checks reject calls through values inferred as any");
     for (size_t i = 0; args && i < args->len; ++i)
       (void)hm_infer_expr(hm, env, args->data[i].val, self_name);
-    return hm_any(hm);
+    return hm_any_with_origin(hm, origin);
   }
   if (hm_type_is_unbound_var(callee_t)) {
     ny_hm_type_t *fn = hm_fn_type(hm);
@@ -6918,10 +7036,14 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_call_function_type(hm, env, fn, args, tok, self_name, context);
   }
   if (callee_t->kind == NY_HM_NAME && hm_is_callable_name(callee_t->name)) {
-    tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm", "hm-callable-return-any",
-                    "call", "%s calls %s without a known return payload",
-                    context ? context : "call expression",
-                    callee_t->name ? callee_t->name : "callable");
+    char msg[512];
+    snprintf(msg, sizeof(msg), "%s calls %s without a known return payload",
+             context ? context : "call expression",
+             callee_t->name ? callee_t->name : "callable");
+    const ny_tp_origin_t *origin = hm_make_origin(hm, tok,
+                          NY_TP_ORIGIN_CALL_RETURN, msg, callee_t->name, "any");
+    tp_add_fallback_ex(hm ? hm->ctx : NULL, tok, "hm", "hm-callable-return-any",
+                       "call", origin, origin, "any", callee_t->name, "%s", msg);
     hm_strict_diag(
         hm, tok, "hm-strict-dynamic-call",
         context ? context : "call expression", "fn(...) -> T signature",
@@ -6929,7 +7051,7 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
         "strict type checks reject calls whose return payload is unknown");
     for (size_t i = 0; args && i < args->len; ++i)
       (void)hm_infer_expr(hm, env, args->data[i].val, self_name);
-    return hm_any(hm);
+    return hm_any_with_origin(hm, origin);
   }
   if (callee_t->kind != NY_HM_FN) {
     char *got = hm_type_string(callee_t);
@@ -8000,21 +8122,29 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
       for (size_t i = 0; args && i < args->len; ++i)
         (void)hm_infer_expr_dynamic_literal_ok(
             hm, env, args->data[i].val, self_name, allow_dynamic_literal_args);
-      tp_add_fallback(hm ? hm->ctx : NULL, tok, "hm", "hm-unknown-call", "call",
-                      "unresolved call '%s' returns any",
-                      name ? name : "<anonymous>");
+      char msg[512];
+      snprintf(msg, sizeof(msg), "unresolved call '%s' returns any",
+               name ? name : "<anonymous>");
+      const ny_tp_origin_t *origin = hm_make_origin(hm, tok,
+                            NY_TP_ORIGIN_CALL_RETURN, msg, name, "any");
+      tp_add_fallback_ex(hm ? hm->ctx : NULL, tok, "hm", "hm-unknown-call", "call",
+                         origin, origin, "any", name, "%s", msg);
       hm_strict_diag(hm, tok, "hm-strict-dynamic-call", "function call",
                      "known callable", name ? name : "<anonymous>", "call",
                      "strict type checks reject unresolved member or qualified "
                      "calls that would return any");
-      return hm_any(hm);
+      return hm_any_with_origin(hm, origin);
     }
     hm_strict_diag(
         hm, tok, "hm-strict-dynamic-call", "function call", "known callable",
         name ? name : "<anonymous>", "call",
         "strict type checks reject unknown calls that would return any");
-    return hm_any_fallback(hm, NULL, "hm-unknown-call", "unknown callable '%s'",
-                           name ? name : "<anonymous>");
+    {
+      char msg[512];
+      snprintf(msg, sizeof(msg), "unknown callable '%s'", name ? name : "<anonymous>");
+      return hm_any_fallback_ex(hm, NULL, "hm-unknown-call",
+                                NY_TP_ORIGIN_CALL_RETURN, name, "any", "%s", msg);
+    }
   }
   if (!target && scheme->stmt)
     hm_fill_implicit_binders(hm, env, scheme->stmt, args, tok, self_name);
@@ -8253,9 +8383,19 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
       char got[512];
       snprintf(got, sizeof(got), "%s %s %s", ls ? ls : "any", op ? op : "cmp",
                rs ? rs : "any");
-      tp_add_fallback(hm ? hm->ctx : NULL, e->tok, "hm",
-                      "hm-dynamic-comparison", "binary",
-                      "comparison operands inferred as %s", got);
+      /*
+       * Determine root origin from operands
+       */
+      const ny_tp_origin_t *lt_origin = hm_type_origin_of(lt);
+      const ny_tp_origin_t *rt_origin = hm_type_origin_of(rt);
+      const ny_tp_origin_t *root = lt_origin ? tp_origin_root(lt_origin) :
+                          (rt_origin ? tp_origin_root(rt_origin) : NULL);
+      const ny_tp_origin_t *origin = hm_make_origin(hm, e->tok,
+                            NY_TP_ORIGIN_CONTAINER_ACCESS, got, NULL, "bool");
+      tp_add_fallback_ex(hm ? hm->ctx : NULL, e->tok, "hm",
+                         "hm-dynamic-comparison", "binary",
+                         origin, root, "bool", NULL,
+                         "comparison operands inferred as %s", got);
       hm_strict_diag(hm, e->tok, "hm-strict-dynamic-arithmetic",
                      "comparison expression", "statically typed operands", got,
                      "binary",
@@ -8290,15 +8430,26 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
     char got[512];
     snprintf(got, sizeof(got), "%s %s %s", ls ? ls : "any", op ? op : "op",
              rs ? rs : "any");
-    tp_add_fallback(hm ? hm->ctx : NULL, e->tok, "hm", "hm-dynamic-arithmetic",
-                    "binary", "arithmetic operands inferred as %s", got);
+    /*
+     * Determine root origin from operands
+     */
+    const ny_tp_origin_t *lt_origin = hm_type_origin_of(lt);
+    const ny_tp_origin_t *rt_origin = hm_type_origin_of(rt);
+    const ny_tp_origin_t *root = lt_origin ? tp_origin_root(lt_origin) :
+                        (rt_origin ? tp_origin_root(rt_origin) : NULL);
+    const ny_tp_origin_t *origin = hm_make_origin(hm, e->tok,
+                          NY_TP_ORIGIN_CONTAINER_ACCESS, got, NULL, "number");
+    tp_add_fallback_ex(hm ? hm->ctx : NULL, e->tok, "hm",
+                       "hm-dynamic-arithmetic", "binary",
+                       origin, root, "number", NULL,
+                       "arithmetic operands inferred as %s", got);
     hm_strict_diag(hm, e->tok, "hm-strict-dynamic-arithmetic",
                    "arithmetic expression",
                    "numeric/string/collection operands", got, "binary",
                    "strict type checks reject dynamic arithmetic operands");
     free(ls);
     free(rs);
-    return hm_any(hm);
+    return hm_any_with_origin(hm, origin);
   }
   /*
    * BigInt operators keep the opaque handle representation on every route.
@@ -8627,12 +8778,17 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
       }
     }
     if (dynamic_key || dynamic_val) {
-      tp_add_fallback(hm ? hm->ctx : NULL, e->tok, "hm",
-                      "hm-dict-heterogeneous-literal", "dict",
-                      "heterogeneous dict literal widened %s%s%s to any",
-                      dynamic_key ? "keys" : "",
-                      (dynamic_key && dynamic_val) ? " and " : "",
-                      dynamic_val ? "values" : "");
+      char msg[512];
+      snprintf(msg, sizeof(msg),
+               "heterogeneous dict literal widened %s%s%s to any",
+               dynamic_key ? "keys" : "",
+               (dynamic_key && dynamic_val) ? " and " : "",
+               dynamic_val ? "values" : "");
+      const ny_tp_origin_t *origin = hm_make_origin(hm, e->tok,
+                            NY_TP_ORIGIN_LITERAL, msg, NULL, "dict<any, any>");
+      tp_add_fallback_ex(hm ? hm->ctx : NULL, e->tok, "hm",
+                         "hm-dict-heterogeneous-literal", "dict",
+                         origin, origin, "dict<any, any>", NULL, "%s", msg);
       if (hm && hm->allow_dynamic_literal_depth <= 0) {
         hm_strict_diag(hm, e->tok, "hm-strict-heterogeneous-dict",
                        "dict literal",
@@ -8819,7 +8975,8 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
       return hm_call_function_type(hm, env, callee_t, &e->as.call.args, e->tok,
                                    self_name, "call expression");
     }
-    return hm_any_fallback(hm, e, "hm-call-missing-callee",
+    return hm_any_fallback_ex(hm, e, "hm-call-missing-callee",
+                           NY_TP_ORIGIN_CALL_RETURN, NULL, "any",
                            "call has no callee");
   case NY_E_MEMCALL: {
     if (hm && hm->ctx && hm->ctx->cg && e->as.memcall.name) {
@@ -9182,9 +9339,11 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
           return hm_name(hm, "bigint");
         }
         ny_hm_type_t *out =
-            hm_any_fallback(hm, e, "hm-unknown-member",
-                            "unknown member '%s' for inferred type %s",
-                            e->as.member.name, target_s ? target_s : "any");
+            hm_any_fallback_ex(hm, e, "hm-unknown-member",
+                               NY_TP_ORIGIN_CONTAINER_ACCESS,
+                               e->as.member.name, target_s ? target_s : "any",
+                               "unknown member '%s' for inferred type %s",
+                               e->as.member.name, target_s ? target_s : "any");
         free(owner);
         free(target_s);
         return out;
@@ -9207,8 +9366,10 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     }
     if (e->as.member.name && strcmp(e->as.member.name, "long") == 0)
       return hm_name(hm, "bigint");
-    return hm_any_fallback(hm, e, "hm-dynamic-member",
-                           "member target is dynamic");
+    return hm_any_fallback_ex(hm, e, "hm-dynamic-member",
+                               NY_TP_ORIGIN_CONTAINER_ACCESS,
+                               e->as.member.name, "any",
+                               "member target is dynamic");
   case NY_E_INDEX: {
     /*
      * Projection from a dependent pair.  Component 0 has the index type;
@@ -9330,8 +9491,10 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (!hm_is_any(target))
       hm_unify_indexable(hm, hm_unary(hm, NY_HM_INDEXABLE, hm_any(hm)), target,
                          e->tok, "index target");
-    return hm_any_fallback(hm, e, "hm-index-dynamic-result",
-                           "index result is dynamic");
+    return hm_any_fallback_ex(hm, e, "hm-index-dynamic-result",
+                               NY_TP_ORIGIN_CONTAINER_ACCESS,
+                               NULL, "any",
+                               "index result is dynamic");
   }
   case NY_E_BINARY:
     return hm_infer_binary(hm, env, e, self_name);
@@ -9549,8 +9712,9 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_name(hm, "str");
   case NY_E_INFERRED_MEMBER:
   default:
-    return hm_any_fallback(hm, e, "hm-unsupported-expr",
-                           "unsupported expression form");
+    return hm_any_fallback_ex(hm, e, "hm-unsupported-expr",
+                               NY_TP_ORIGIN_UNSUPPORTED, NULL, "any",
+                               "unsupported expression form");
   }
 }
 
@@ -10949,6 +11113,20 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                       : hm_var(hm));
       ny_hm_type_t *final_t =
           decl && *decl ? hm_parse_type_name(hm, decl, self_name) : it;
+      /*
+       * Track assignment origin when value becomes dynamically typed
+       */
+      if (!decl || !*decl) {
+        /*
+         * No explicit type annotation - check if inferred type is dynamic
+         */
+        if (hm_is_any(it) && !explicit_dynamic && init) {
+          const ny_tp_origin_t *origin = hm_make_origin(hm, init->tok,
+                                NY_TP_ORIGIN_ASSIGNMENT,
+                                "assignment from dynamic value", name, "any");
+          hm_type_annotate_origin(final_t, origin);
+        }
+      }
       ny_hm_type_t *preserved_refined_type = NULL;
       if (!s->as.var.is_decl && init && !preserved_append_fact) {
         ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, s->syntax_ctx);
@@ -11146,6 +11324,17 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       if (s->as.ret.value)
         hm_check_refinement_return(hm, ret, vt, s->as.ret.value,
                                    s->as.ret.value->tok);
+      /*
+       * Track return origin when function has no explicit return type
+       */
+      if (ret->kind == NY_HM_VAR && hm_is_any(vt) && s->as.ret.value) {
+        const ny_tp_origin_t *origin = hm_make_origin(hm, s->as.ret.value->tok,
+                              NY_TP_ORIGIN_RETURN,
+                              "return of dynamic value",
+                              hm->active_fn ? hm->active_fn->as.fn.name : NULL,
+                              "any");
+        hm_type_annotate_origin(vt, origin);
+      }
       hm_unify(hm, ret, vt, s->as.ret.value ? s->as.ret.value->tok : s->tok,
                "return value");
     }
@@ -11434,10 +11623,19 @@ static ny_hm_type_t *hm_make_func_type(ny_hm_state_t *hm, stmt_t *fn,
       }
     }
     char *qualified = type ? hm_qualify_owner_type(hm, owner, type) : NULL;
-    hm_args_push(hm, ft,
-                 type ? hm_parse_type_name(hm, qualified ? qualified : type,
+    ny_hm_type_t *param_type = type ? hm_parse_type_name(hm, qualified ? qualified : type,
                                            owner)
-                      : hm_var(hm));
+                      : hm_var(hm);
+    /*
+     * Track parameter origin for unannotated parameters
+     */
+    if (!type && p->name) {
+      const ny_tp_origin_t *origin = hm_make_origin(hm, p->tok,
+                            NY_TP_ORIGIN_PARAMETER,
+                            "unannotated parameter", p->name, "any");
+      hm_type_annotate_origin(param_type, origin);
+    }
+    hm_args_push(hm, ft, param_type);
     free(qualified);
   }
   const char *return_type =
@@ -11693,6 +11891,16 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
     ny_hm_type_t *value_t = hm_infer_expr(hm, &env, value, scheme->owner);
     if (value)
       hm_check_refinement_return(hm, ft->a, value_t, value, value->tok);
+    /*
+     * Track return origin when function has no explicit return type
+     */
+    if (!fn->as.fn.return_type && hm_is_any(value_t)) {
+      const ny_tp_origin_t *origin = hm_make_origin(hm, value ? value->tok : fn->as.fn.body->tok,
+                            NY_TP_ORIGIN_RETURN,
+                            "implicit return of dynamic value",
+                            fn->as.fn.name, "any");
+      hm_type_annotate_origin(value_t, origin);
+    }
     hm_unify(hm, ft->a, value_t, value ? value->tok : fn->as.fn.body->tok,
              "implicit return value");
   } else {

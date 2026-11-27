@@ -63,12 +63,46 @@ typedef struct ny_tp_diag_t {
 } ny_tp_diag_t;
 typedef VEC(ny_tp_diag_t) ny_tp_diag_list;
 
+/*
+ * Type-origin/provenance tracking for dynamic fallbacks (W2101).
+ * Records where a value became dynamically typed and propagates through
+ * HM inference to enable cascading deduplication and context-aware fixes.
+ */
+typedef enum ny_tp_origin_kind_e {
+  NY_TP_ORIGIN_NONE = 0,
+  NY_TP_ORIGIN_ASSIGNMENT,      /* var = expr where expr is any */
+  NY_TP_ORIGIN_RETURN,          /* return expr where expr is any */
+  NY_TP_ORIGIN_PARAMETER,       /* unannotated function parameter */
+  NY_TP_ORIGIN_CONTAINER_ACCESS,/* dict/list index, member access */
+  NY_TP_ORIGIN_BRANCH_MERGE,    /* if/while/for merge of dynamic branches */
+  NY_TP_ORIGIN_CALL_RETURN,     /* call to fn returning any */
+  NY_TP_ORIGIN_LITERAL,         /* heterogeneous list/dict literal */
+  NY_TP_ORIGIN_UNSUPPORTED,     /* unsupported expression form */
+} ny_tp_origin_kind_t;
+
+typedef struct ny_tp_origin_t ny_tp_origin_t;
+struct ny_tp_origin_t {
+  token_t tok;                   /* Token where dynamic type originated */
+  ny_tp_origin_kind_t kind;      /* Kind of origin */
+  const char *reason;            /* Human-readable reason */
+  const char *binding_name;      /* Variable/parameter name if applicable */
+  char *expected_type;           /* Expected type at origin (for fix generation) */
+  const ny_tp_origin_t *root;    /* Canonical root origin (for grouping) */
+  const ny_tp_origin_t *next;    /* Alternative leaf origins (linked list) */
+};
+
+typedef VEC(const ny_tp_origin_t *) ny_tp_origin_list;
+
 typedef struct ny_tp_fallback_t {
   const char *stage;
   const char *code;
   const char *expr_kind;
   char *reason;
   token_t tok;
+  const ny_tp_origin_t *origin;        /* Immediate origin (assignment/return/etc) */
+  const ny_tp_origin_t *root_origin;   /* Canonical root for grouping */
+  char *expected_type;                 /* Expected type at fallback site */
+  const char *binding_name;            /* Binding name if applicable */
 } ny_tp_fallback_t;
 typedef VEC(ny_tp_fallback_t) ny_tp_fallback_list;
 
@@ -102,6 +136,7 @@ typedef struct ny_tp_ctx_t {
   ny_tp_fallback_list fallbacks;
   ny_tp_solver_info_t solver;
   size_t mono_candidates;
+  arena_t origin_arena;          /* Arena for ny_tp_origin_t records */
 } ny_tp_ctx_t;
 
 static bool tp_reserve(ny_tp_json_t *j, size_t add) {
@@ -365,6 +400,35 @@ static const char *tp_expr_kind_name(expr_kind_t kind) {
              : "expr";
 }
 
+/*
+ * Origin helper functions
+ */
+static ny_tp_origin_t *tp_origin_new(ny_tp_ctx_t *ctx, token_t tok,
+                                     ny_tp_origin_kind_t kind,
+                                     const char *reason,
+                                     const char *binding_name,
+                                     const char *expected_type) {
+  if (!ctx)
+    return NULL;
+  ny_tp_origin_t *o = (ny_tp_origin_t *)arena_alloc(&ctx->origin_arena, sizeof(*o));
+  if (!o)
+    return NULL;
+  o->tok = tok;
+  o->kind = kind;
+  o->reason = reason ? ny_intern_get(ny_intern_cstr(reason)) : NULL;
+  o->binding_name = binding_name ? ny_intern_get(ny_intern_cstr(binding_name)) : NULL;
+  o->expected_type = expected_type ? arena_strndup(&ctx->origin_arena, expected_type, strlen(expected_type)) : NULL;
+  o->root = o;  /* Self-root initially */
+  o->next = NULL;
+  return o;
+}
+
+static const ny_tp_origin_t *tp_origin_root(const ny_tp_origin_t *o) {
+  if (!o)
+    return NULL;
+  return o->root ? o->root : o;
+}
+
 static void tp_add_fallback(ny_tp_ctx_t *ctx, token_t tok, const char *stage,
                             const char *code, const char *expr_kind,
                             const char *fmt, ...) {
@@ -378,12 +442,52 @@ static void tp_add_fallback(ny_tp_ctx_t *ctx, token_t tok, const char *stage,
                          .code = code ? code : "type-fallback",
                          .expr_kind = expr_kind ? expr_kind : "expr",
                          .reason = msg ? msg : ny_strdup("type fallback"),
-                         .tok = tok};
+                         .tok = tok,
+                         .origin = NULL,
+                         .root_origin = NULL,
+                         .expected_type = NULL,
+                         .binding_name = NULL};
   vec_push(&ctx->fallbacks, fb);
   if (stage && strcmp(stage, "hm") == 0) {
     tp_hm_debug_loc(tok, "fallback code=%s expr=%s reason=%s",
                     code ? code : "hm-any-fallback",
                     expr_kind ? expr_kind : "expr", fb.reason ? fb.reason : "");
+  }
+}
+
+/*
+ * Extended version with origin information
+ */
+static void tp_add_fallback_ex(ny_tp_ctx_t *ctx, token_t tok,
+                               const char *stage, const char *code,
+                               const char *expr_kind,
+                               const ny_tp_origin_t *origin,
+                               const ny_tp_origin_t *root_origin,
+                               const char *expected_type,
+                               const char *binding_name,
+                               const char *fmt, ...) {
+  if (!ctx || !fmt)
+    return;
+  va_list ap;
+  va_start(ap, fmt);
+  char *msg = tp_vformat(fmt, ap);
+  va_end(ap);
+  ny_tp_fallback_t fb = {.stage = stage ? stage : "type",
+                         .code = code ? code : "type-fallback",
+                         .expr_kind = expr_kind ? expr_kind : "expr",
+                         .reason = msg ? msg : ny_strdup("type fallback"),
+                         .tok = tok,
+                         .origin = origin,
+                         .root_origin = root_origin ? root_origin : (origin ? tp_origin_root(origin) : NULL),
+                         .expected_type = expected_type ? ny_strdup(expected_type) : NULL,
+                         .binding_name = binding_name ? ny_intern_get(ny_intern_cstr(binding_name)) : NULL};
+  vec_push(&ctx->fallbacks, fb);
+  if (stage && strcmp(stage, "hm") == 0) {
+    tp_hm_debug_loc(tok, "fallback code=%s expr=%s reason=%s origin_kind=%d",
+                    code ? code : "hm-any-fallback",
+                    expr_kind ? expr_kind : "expr",
+                    fb.reason ? fb.reason : "",
+                    origin ? origin->kind : -1);
   }
 }
 
@@ -474,33 +578,245 @@ static const char *tp_fallback_fix(const ny_tp_fallback_t *fb) {
          "class into an error";
 }
 
+/*
+ * Group key for cascading deduplication: root_origin pointer + fallback code
+ */
+typedef struct tp_fallback_group_key_t {
+  const ny_tp_origin_t *root;
+  const char *code;
+} tp_fallback_group_key_t;
+
+/*
+ * Emit a single grouped warning with context-aware messaging
+ */
+static void tp_emit_grouped_fallback(const ny_tp_ctx_t *ctx,
+                                     const ny_tp_fallback_t *primary,
+                                     const ny_tp_fallback_t **group,
+                                     size_t group_count,
+                                     size_t *warning_count,
+                                     size_t *skipped,
+                                     token_t *skipped_tok,
+                                     int limit) {
+  (void)ctx;
+  (void)group;
+  if (*warning_count >= (size_t)limit) {
+    (*skipped)++;
+    if (skipped_tok->line <= 0)
+      *skipped_tok = primary->tok;
+    return;
+  }
+
+  const ny_tp_origin_t *root = primary->root_origin;
+  const ny_tp_origin_t *imm = primary->origin;
+
+  /*
+   * Build detailed message with origin information
+   */
+  char msg[1024];
+  if (root && root->reason) {
+    if (imm && imm != root && imm->reason) {
+      snprintf(msg, sizeof(msg), "%s (origin: %s)", primary->reason, root->reason);
+    } else {
+      snprintf(msg, sizeof(msg), "%s", primary->reason);
+    }
+  } else {
+    snprintf(msg, sizeof(msg), "%s", primary->reason ? primary->reason : "dynamic type fallback");
+  }
+
+  ny_diag_warning_code(primary->tok, 2101, "dynamic type fallback: %s", msg);
+
+  /*
+   * Origin note pointing to root cause
+   */
+  if (root && root->tok.line > 0) {
+    char note_msg[1024];
+    const char *kind_str = "unknown";
+    switch (root->kind) {
+      case NY_TP_ORIGIN_ASSIGNMENT: kind_str = "assignment"; break;
+      case NY_TP_ORIGIN_RETURN: kind_str = "return"; break;
+      case NY_TP_ORIGIN_PARAMETER: kind_str = "parameter"; break;
+      case NY_TP_ORIGIN_CONTAINER_ACCESS: kind_str = "container access"; break;
+      case NY_TP_ORIGIN_BRANCH_MERGE: kind_str = "branch merge"; break;
+      case NY_TP_ORIGIN_CALL_RETURN: kind_str = "function call"; break;
+      case NY_TP_ORIGIN_LITERAL: kind_str = "literal"; break;
+      case NY_TP_ORIGIN_UNSUPPORTED: kind_str = "unsupported expression"; break;
+      default: kind_str = "unknown"; break;
+    }
+    if (root->binding_name) {
+      snprintf(note_msg, sizeof(note_msg),
+               "dynamic type originated from %s of '%s' at %s:%d:%d",
+               kind_str, root->binding_name,
+               root->tok.filename ? root->tok.filename : "unknown",
+               root->tok.line, root->tok.col);
+    } else {
+      snprintf(note_msg, sizeof(note_msg),
+               "dynamic type originated from %s at %s:%d:%d",
+               kind_str,
+               root->tok.filename ? root->tok.filename : "unknown",
+               root->tok.line, root->tok.col);
+    }
+    ny_diag_note_tok(root->tok, "%s", note_msg);
+  }
+
+  /*
+   * Additional affected locations note for cascading
+   */
+  if (group_count > 1) {
+    char loc_msg[1024];
+    snprintf(loc_msg, sizeof(loc_msg),
+             "affects %zu operation(s); first at %s:%d:%d",
+             group_count,
+             primary->tok.filename ? primary->tok.filename : "unknown",
+             primary->tok.line, primary->tok.col);
+    ny_diag_note_tok(primary->tok, "%s", loc_msg);
+  }
+
+  /*
+   * Context-aware hint with expected type
+   */
+  char hint_msg[1024];
+  const char *base_hint = tp_fallback_hint(primary);
+  if (primary->expected_type && *primary->expected_type) {
+    snprintf(hint_msg, sizeof(hint_msg),
+             "%s (expected: %s)", base_hint, primary->expected_type);
+  } else {
+    snprintf(hint_msg, sizeof(hint_msg), "%s", base_hint);
+  }
+  ny_diag_hint("%s", hint_msg);
+
+  /*
+   * Context-aware fix with binding name and expected type
+   */
+  char fix_msg[1024];
+  const char *base_fix = tp_fallback_fix(primary);
+  if (primary->binding_name && primary->expected_type && *primary->expected_type) {
+    snprintf(fix_msg, sizeof(fix_msg),
+             "annotate '%s' as %s, or %s",
+             primary->binding_name, primary->expected_type, base_fix);
+  } else if (primary->expected_type && *primary->expected_type) {
+    snprintf(fix_msg, sizeof(fix_msg),
+             "convert or annotate to %s, or %s",
+             primary->expected_type, base_fix);
+  } else if (primary->binding_name) {
+    snprintf(fix_msg, sizeof(fix_msg),
+             "annotate '%s' with a concrete type, or %s",
+             primary->binding_name, base_fix);
+  } else {
+    snprintf(fix_msg, sizeof(fix_msg), "%s", base_fix);
+  }
+  ny_diag_fix("%s", fix_msg);
+
+  (*warning_count)++;
+}
+
 static size_t tp_emit_fallback_warnings(const ny_tp_ctx_t *ctx) {
   if (!tp_fallback_warning_enabled(ctx))
     return 0;
   int limit = ny_env_int_range("NYTRIX_TYPE_FALLBACK_WARN_LIMIT", 5, 0, 100);
   if (limit <= 0)
     return 0;
-  size_t warning_count = 0;
-  size_t skipped = 0;
-  token_t skipped_tok = {0};
+
+  /*
+   * First pass: group fallbacks by root_origin + code
+   */
+  typedef struct {
+    const ny_tp_origin_t *root;
+    const char *code;
+    const ny_tp_fallback_t *primary;  /* First fallback in group */
+    const ny_tp_fallback_t **members;
+    size_t count;
+    size_t capacity;
+  } fallback_group_t;
+
+  fallback_group_t *groups = NULL;
+  size_t group_count = 0;
+  size_t group_cap = 0;
+
   for (size_t i = 0; i < ctx->fallbacks.len; ++i) {
     const ny_tp_fallback_t *fb = &ctx->fallbacks.data[i];
     if (!tp_fallback_warning_interesting(fb))
       continue;
-    if (warning_count >= (size_t)limit) {
-      skipped++;
-      if (skipped_tok.line <= 0)
-        skipped_tok = fb->tok;
+
+    const ny_tp_origin_t *root = fb->root_origin;
+    const char *code = fb->code ? fb->code : "unknown";
+
+    /*
+     * No-origin fallbacks are never grouped (each is independent)
+     */
+    if (!root) {
+      /*
+       * Create a unique group for each no-origin fallback
+       */
+      if (group_count >= group_cap) {
+        group_cap = group_cap ? group_cap * 2 : 16;
+        groups = realloc(groups, group_cap * sizeof(fallback_group_t));
+      }
+      fallback_group_t *g = &groups[group_count++];
+      g->root = NULL;
+      g->code = code;
+      g->primary = fb;
+      g->members = malloc(sizeof(ny_tp_fallback_t *));
+      g->members[0] = fb;
+      g->count = 1;
+      g->capacity = 1;
       continue;
     }
-    ny_diag_warning_code(fb->tok, 2101, "dynamic type fallback: %s",
-                         fb->reason && *fb->reason
-                             ? fb->reason
-                             : (fb->code ? fb->code : "inferred any"));
-    ny_diag_hint("%s", tp_fallback_hint(fb));
-    ny_diag_fix("%s", tp_fallback_fix(fb));
-    warning_count++;
+
+    /*
+     * Find existing group
+     */
+    fallback_group_t *found = NULL;
+    for (size_t j = 0; j < group_count; ++j) {
+      if (groups[j].root == root && strcmp(groups[j].code, code) == 0) {
+        found = &groups[j];
+        break;
+      }
+    }
+
+    if (found) {
+      /*
+       * Add to existing group
+       */
+      if (found->count >= found->capacity) {
+        found->capacity *= 2;
+        found->members = realloc(found->members, found->capacity * sizeof(ny_tp_fallback_t *));
+      }
+      found->members[found->count++] = fb;
+    } else {
+      /*
+       * Create new group
+       */
+      if (group_count >= group_cap) {
+        group_cap = group_cap ? group_cap * 2 : 16;
+        groups = realloc(groups, group_cap * sizeof(fallback_group_t));
+      }
+      fallback_group_t *g = &groups[group_count++];
+      g->root = root;
+      g->code = code;
+      g->primary = fb;
+      g->members = malloc(sizeof(ny_tp_fallback_t *));
+      g->members[0] = fb;
+      g->count = 1;
+      g->capacity = 1;
+    }
   }
+
+  /*
+   * Emit grouped warnings
+   */
+  size_t warning_count = 0;
+  size_t skipped = 0;
+  token_t skipped_tok = {0};
+
+  for (size_t i = 0; i < group_count; ++i) {
+    fallback_group_t *g = &groups[i];
+    tp_emit_grouped_fallback(ctx, g->primary, g->members, g->count,
+                             &warning_count, &skipped, &skipped_tok, limit);
+    free(g->members);
+  }
+
+  free(groups);
+
   if (skipped > 0) {
     ny_diag_warning_code(
         skipped_tok.line > 0 ? skipped_tok : (token_t){0}, 2102,
@@ -546,6 +862,40 @@ static void tp_emit_diagnostics_json(ny_tp_json_t *j, const ny_tp_ctx_t *ctx) {
   tp_append(j, "]");
 }
 
+static const char *tp_origin_kind_str(ny_tp_origin_kind_t kind) {
+  switch (kind) {
+    case NY_TP_ORIGIN_ASSIGNMENT: return "assignment";
+    case NY_TP_ORIGIN_RETURN: return "return";
+    case NY_TP_ORIGIN_PARAMETER: return "parameter";
+    case NY_TP_ORIGIN_CONTAINER_ACCESS: return "container_access";
+    case NY_TP_ORIGIN_BRANCH_MERGE: return "branch_merge";
+    case NY_TP_ORIGIN_CALL_RETURN: return "call_return";
+    case NY_TP_ORIGIN_LITERAL: return "literal";
+    case NY_TP_ORIGIN_UNSUPPORTED: return "unsupported";
+    default: return "none";
+  }
+}
+
+static void tp_emit_origin_json(ny_tp_json_t *j, const ny_tp_origin_t *o) {
+  if (!o) {
+    tp_append(j, "null");
+    return;
+  }
+  tp_append(j, "{");
+  tp_append(j, "\"kind\":");
+  tp_json_str(j, tp_origin_kind_str(o->kind));
+  tp_append(j, ",\"reason\":");
+  tp_json_str(j, o->reason ? o->reason : "");
+  tp_append(j, ",\"binding\":");
+  tp_json_str(j, o->binding_name ? o->binding_name : "");
+  tp_append(j, ",\"expected\":");
+  tp_json_str(j, o->expected_type ? o->expected_type : "");
+  tp_append(j, ",\"file\":");
+  tp_json_str(j, o->tok.filename ? o->tok.filename : "");
+  tp_append(j, ",\"line\":%d,\"col\":%d", o->tok.line, o->tok.col);
+  tp_append(j, "}");
+}
+
 static void tp_emit_fallbacks_json(ny_tp_json_t *j, const ny_tp_ctx_t *ctx) {
   tp_append(j, "[");
   for (size_t i = 0; ctx && i < ctx->fallbacks.len; ++i) {
@@ -562,7 +912,16 @@ static void tp_emit_fallbacks_json(ny_tp_json_t *j, const ny_tp_ctx_t *ctx) {
     tp_json_str(j, fb->reason ? fb->reason : "");
     tp_append(j, ",\"file\":");
     tp_json_str(j, fb->tok.filename ? fb->tok.filename : "");
-    tp_append(j, ",\"line\":%d,\"col\":%d}", fb->tok.line, fb->tok.col);
+    tp_append(j, ",\"line\":%d,\"col\":%d", fb->tok.line, fb->tok.col);
+    tp_append(j, ",\"origin\":");
+    tp_emit_origin_json(j, fb->origin);
+    tp_append(j, ",\"root_origin\":");
+    tp_emit_origin_json(j, fb->root_origin);
+    tp_append(j, ",\"expected_type\":");
+    tp_json_str(j, fb->expected_type ? fb->expected_type : "");
+    tp_append(j, ",\"binding_name\":");
+    tp_json_str(j, fb->binding_name ? fb->binding_name : "");
+    tp_append(j, "}");
   }
   tp_append(j, "]");
 }
@@ -1369,11 +1728,13 @@ static void tp_use_alias_index_collect_stmt(stmt_t *s) {
   }
 }
 
-/* `use M as alias` for an expression in `file`: that file's own `use` when
+/*
+ * `use M as alias` for an expression in `file`: that file's own `use` when
  * it has one, else the program's first. Two modules may bind the same alias
  * to different modules (`use core.str as s` in a program, `use ...gl.state
  * as s` in the GL renderer); one flat table resolved both to whichever was
- * collected first. */
+ * collected first.
+ */
 static const char *tp_lookup_use_alias_impl(codegen_t *cg, const char *alias,
                                             const char *file, bool file_only) {
   if (!cg || !alias || !*alias)
@@ -2163,6 +2524,7 @@ static void tp_ctx_build(ny_tp_ctx_t *ctx, program_t *prog, codegen_t *cg,
   vec_init(&ctx->funcs);
   vec_init(&ctx->diagnostics);
   vec_init(&ctx->fallbacks);
+  ctx->origin_arena = (arena_t){0};
   tp_solver_init(ctx);
   if (prog) {
     for (size_t i = 0; i < prog->body.len; ++i)
@@ -2187,9 +2549,12 @@ static void tp_ctx_dispose(ny_tp_ctx_t *ctx) {
   for (size_t i = 0; i < ctx->diagnostics.len; ++i)
     tp_diag_dispose(&ctx->diagnostics.data[i]);
   vec_free(&ctx->diagnostics);
-  for (size_t i = 0; i < ctx->fallbacks.len; ++i)
+  for (size_t i = 0; i < ctx->fallbacks.len; ++i) {
     free(ctx->fallbacks.data[i].reason);
+    free(ctx->fallbacks.data[i].expected_type);
+  }
   vec_free(&ctx->fallbacks);
+  arena_free(&ctx->origin_arena);
 }
 
 typedef struct ny_tp_scan_fn_t {
@@ -3048,6 +3413,7 @@ struct ny_hm_type_t {
   ny_hm_type_list args;
   ny_hm_type_t *instance;
   const ny_param_list *parameters;
+  const ny_tp_origin_t *origin;  /* Provenance: where this type became dynamic */
 };
 
 typedef struct ny_hm_env_entry_t {

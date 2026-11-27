@@ -2,7 +2,7 @@
 ;; Async task operations for futures, scheduling, sleeping, waiting, and detaching work.
 ;; References:
 ;; - core.os
-module core.os.async(Task, Future, future, async, await, await_all, detach, future_wait, yield_now, sleep_ms, run, backend, state)
+module core.os.async(Task, Future, future, async, await, await_all, detach, future_wait, yield_now, sleep_ms, run, backend, state, pump)
 
 ;; Native async uses the stackless cooperative scheduler; browser builds use
 ;; Asyncify.  The public API reports this backend explicitly so callers do not
@@ -96,6 +96,12 @@ fn sleep_ms(int ms) any {
 fn state(any h) int {
    "Returns the internal task state for diagnostics."
    __async_state_of(h)
+}
+
+fn pump() int {
+   "Runs one nonblocking cooperative scheduler turn. Use from event loops to advance ready I/O/tasks without awaiting a particular task."
+   await(yield_now())
+   0
 }
 
 #main {

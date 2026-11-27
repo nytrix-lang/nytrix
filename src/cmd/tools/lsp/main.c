@@ -170,18 +170,66 @@ static char *json_extract_string_near(const char *json, const char *needle,
   return json_extract_string(json, key);
 }
 
+/*
+ * Locate a member of the outer object, ignoring strings and nested objects.
+ * JSON-RPC fields may appear after params, which can itself contain keys or
+ * string values named "method" and "id".
+ */
+static const char *json_top_level_value(const char *json, const char *key) {
+  if (!json || !key)
+    return NULL;
+  int depth = 0;
+  for (const char *p = json; *p;) {
+    if (*p == '"') {
+      const char *start = ++p;
+      while (*p && *p != '"') {
+        if (*p == '\\' && p[1])
+          p++;
+        p++;
+      }
+      if (!*p)
+        return NULL;
+      const char *end = p++;
+      const char *after = p;
+      while (isspace((unsigned char)*after))
+        after++;
+      if (depth == 1 && *after == ':' &&
+          (size_t)(end - start) == strlen(key) &&
+          memcmp(start, key, (size_t)(end - start)) == 0) {
+        after++;
+        while (isspace((unsigned char)*after))
+          after++;
+        return after;
+      }
+    } else {
+      if (*p == '{' || *p == '[')
+        depth++;
+      else if (*p == '}' || *p == ']')
+        depth--;
+      p++;
+    }
+  }
+  return NULL;
+}
+
+static bool client_supports_utf8_positions(const char *json) {
+  const char *key = strstr(json, "\"positionEncodings\"");
+  if (!key)
+    return false;
+  const char *start = strchr(key, '[');
+  if (!start)
+    return false;
+  const char *end = strchr(start, ']');
+  const char *utf8 = strstr(start, "\"utf-8\"");
+  return end && utf8 && utf8 < end;
+}
+
 static char *json_extract_id(const char *json) {
   if (!json)
     return NULL;
-  const char *pos = strstr(json, "\"id\"");
-  if (!pos)
+  const char *p = json_top_level_value(json, "id");
+  if (!p)
     return NULL;
-  const char *colon = strchr(pos, ':');
-  if (!colon)
-    return NULL;
-  const char *p = colon + 1;
-  while (*p && isspace((unsigned char)*p))
-    p++;
   if (*p == '"') {
     const char *start = p++;
     while (*p && *p != '"') {
@@ -2775,6 +2823,11 @@ static const char *literal_type_hint(const char *expr) {
 static void handle_inlay_hints(const char *id, const char *body) {
   char *uri = json_extract_string_near(body, "\"textDocument\"", "uri");
   lsp_doc_t *doc = doc_find(uri);
+  int start_line = 0, start_col = 0, end_line = INT_MAX, range_end_col = INT_MAX;
+  json_extract_int_near(body, "\"start\"", "line", &start_line);
+  json_extract_int_near(body, "\"start\"", "character", &start_col);
+  json_extract_int_near(body, "\"end\"", "line", &end_line);
+  json_extract_int_near(body, "\"end\"", "character", &range_end_col);
   sbuf_t result = {0};
   sb_append(&result, "[");
   bool first = true;
@@ -2808,7 +2861,11 @@ static void handle_inlay_hints(const char *id, const char *body) {
         s++;
       if (*s != ':' && *s == '=') {
         const char *hint = literal_type_hint(s + 1);
-        if (hint && name != s) {
+        bool in_range = (line_no > start_line ||
+                         (line_no == start_line && end_col >= start_col)) &&
+                        (line_no < end_line ||
+                         (line_no == end_line && end_col < range_end_col));
+        if (hint && name != s && in_range) {
           if (!first)
             sb_append(&result, ",");
           sb_appendf(&result,
@@ -2985,7 +3042,19 @@ static void handle_prepare_rename(const char *id, const char *body) {
 static void handle_request(const char *body) {
   if (!body)
     return;
-  char *method = json_extract_string(body, "method");
+  const char *method_value = json_top_level_value(body, "method");
+  char *method = NULL;
+  if (method_value && *method_value == '"') {
+    const char *end = method_value + 1;
+    while (*end && *end != '"') {
+      if (*end == '\\' && end[1])
+        end++;
+      end++;
+    }
+    if (*end == '"')
+      method = json_decode_string(method_value + 1,
+                                  (size_t)(end - method_value - 1));
+  }
   char *id = json_extract_id(body);
   if (!method) {
     free(id);
@@ -2997,7 +3066,7 @@ static void handle_request(const char *body) {
     lsp_append_command_ids(&ids);
     sbuf_t caps = {0};
     sb_appendf(&caps,
-        "{\"capabilities\":{"
+        "{\"capabilities\":{%s"
         "\"textDocumentSync\":{\"openClose\":true,\"change\":1,"
         "\"save\":{\"includeText\":true}},"
         "\"hoverProvider\":true,\"definitionProvider\":true,"
@@ -3021,6 +3090,7 @@ static void handle_request(const char *body) {
         "\"completionProvider\":{\"resolveProvider\":false,"
         "\"triggerCharacters\":[\".\"]},"
         "\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]}}}",
+        client_supports_utf8_positions(body) ? "\"positionEncoding\":\"utf-8\"," : "",
         ids.data ? ids.data : "");
     send_result(id, caps.data);
     free(caps.data);
