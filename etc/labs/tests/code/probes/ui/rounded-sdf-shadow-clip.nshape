@@ -1,0 +1,34 @@
+shape rounded_sdf_shadow_clip {
+  family "runtime/ui"
+  generator "regression"
+  features [ui sdf shadow clip framebuffer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_stdout "ROUNDED-SHADOW-CLIP-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+
+assert(gfx.apply_backend_name("mock"), "select software backend")
+assert(gfx.init_window(64, 64, "rounded shadow clip probe", 0, false, false, 1), "open mock window")
+assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin frame")
+gfx.set_ortho_2d(0.0, 64.0, 64.0, 0.0)
+assert(gfx.draw_rect_rounded_shadow_sdf_clipped(
+   20.0, 20.0, 24.0, 24.0, 6.0, 6.0, 0.0, 0.0,
+   [1.0, 0.0, 0.0, 1.0], [10.0, 20.0, 10.0, 24.0]), "submit clipped shadow")
+assert(gfx.end_frame(), "present frame")
+def fb = gfx.read_framebuffer()
+def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+assert(pixels, "read pixels")
+def int shadow_r = load8(pixels, (32 * 64 + 15) * 4) & 255
+def int shadow_g = load8(pixels, (32 * 64 + 15) * 4 + 1) & 255
+def int clipped_r = load8(pixels, (32 * 64 + 24) * 4) & 255
+def int clipped_g = load8(pixels, (32 * 64 + 24) * 4 + 1) & 255
+free(pixels)
+assert(shadow_r > shadow_g + 30, "blurred shadow is visible inside clip")
+assert(clipped_r > 245 && clipped_g > 245, "shadow pixels outside clip remain clear")
+gfx.close_window()
+print("ROUNDED-SHADOW-CLIP-OK")
+NY
+}

@@ -37,7 +37,7 @@ module core.os.ui.render(
    draw_line_fast, draw_circle, draw_circle_lines, draw_ring, draw_polygon,
    draw_circle_v, draw_circle_lines_v, draw_circle_sector, draw_circle_sector_lines,
    draw_ellipse, draw_ellipse_v, draw_ellipse_lines, draw_ellipse_lines_v,
-   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf, draw_rect_rounded_sdf_outline, draw_rect_rounded_sdf_outline_clipped, draw_rect_rounded_sdf_clipped, draw_rect_rounded_shadow_sdf,
+   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf, draw_rect_rounded_sdf_outline, draw_rect_rounded_sdf_outline_clipped, draw_rect_rounded_sdf_clipped, draw_rect_rounded_shadow_sdf, draw_rect_rounded_shadow_sdf_clipped,
    draw_triangle_lines, draw_triangle_fan, draw_triangle_strip,
    draw_poly, draw_poly_lines, draw_poly_lines_ex,
    check_collision_recs, check_collision_circles, check_collision_circle_rec,
@@ -6492,6 +6492,31 @@ fn draw_rect_rounded_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur
    def f64 hw = w * 0.5
    def f64 hh = h * 0.5
    _draw_shadow_mesh(x + hw + offset_x, y + hh + offset_y, hw, hh, float(clamp(radius, 0.0, min(hw, hh))), blur, r, g, b, a)
+}
+
+fn draw_rect_rounded_shadow_sdf_clipped(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, any color, any clip) bool {
+   "Draws a rounded shadow and clips its blurred pixels to `clip` [x, y, w, h]."
+   if !is_list(clip) || clip.len < 4 || w <= 0.0 || h <= 0.0 || blur <= 0.0 { return false }
+   def pad_x = blur * 2.0 + abs(offset_x)
+   def pad_y = blur * 2.0 + abs(offset_y)
+   def x0, y0 = x - pad_x + offset_x, y - pad_y + offset_y
+   def x1, y1 = x + w + pad_x + offset_x, y + h + pad_y + offset_y
+   def cx = max(x0, float(clip.get(0, 0.0)))
+   def cy = max(y0, float(clip.get(1, 0.0)))
+   def cx1 = min(x1, float(clip.get(0, 0.0)) + max(0.0, float(clip.get(2, 0.0))))
+   def cy1 = min(y1, float(clip.get(1, 0.0)) + max(0.0, float(clip.get(3, 0.0))))
+   if cx1 <= cx || cy1 <= cy { return false }
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
+   if a <= 0.0 { return false }
+   if _backend == BACKEND_VK {
+      return lib_vkr.draw_rounded_rect_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, r, g, b, a, [cx, cy, cx1 - cx, cy1 - cy])
+   }
+   if _backend != BACKEND_GL && _backend != BACKEND_MOCK { return false }
+   scissor_push(cx, cy, cx1 - cx, cy1 - cy)
+   def ok = draw_rect_rounded_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, color)
+   scissor_pop()
+   ok
 }
 
 fn draw_rect_rounded_lines_ex(any rec, f64 radius, int segments, f64 thickness, any color) bool {

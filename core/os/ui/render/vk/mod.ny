@@ -342,9 +342,9 @@ fn draw_rounded_rect_outline_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 thi
    vk_draw.draw_rounded_rect_outline_sdf(x, y, w, h, radius, thickness, r, g, b, a)
 }
 
-fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, f64 r, f64 g, f64 b, f64 a) bool {
+fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, f64 r, f64 g, f64 b, f64 a, any clip=nil) bool {
    "Draws a smooth rounded-rectangle SDF drop shadow."
-   vk_draw.draw_rounded_rect_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, r, g, b, a)
+   vk_draw.draw_rounded_rect_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, r, g, b, a, clip)
 }
 
 fn draw_fan_2d(f64 cx,

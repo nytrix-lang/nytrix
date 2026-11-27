@@ -1811,7 +1811,7 @@ fn draw_rounded_rect_outline_sdf_clipped(f64 x, f64 y, f64 w, f64 h, f64 radius,
    true
 }
 
-fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, f64 r, f64 g, f64 b, f64 a) bool {
+fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, f64 r, f64 g, f64 b, f64 a, any clip=nil) bool {
    "Draws one soft rounded-rectangle drop shadow with an SDF coverage falloff. `blur` is the outside feather radius; offsets move the shadow without changing its source shape."
    if w <= 0.0 || h <= 0.0 || blur <= 0.0 || a <= 0.0 { return false }
    blur = min(blur, 2048.0)
@@ -1824,6 +1824,17 @@ fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur
    def y0 = y - pad_y + offset_y
    def x1 = x + w + pad_x + offset_x
    def y1 = y + h + pad_y + offset_y
+   mut clip_x, clip_y, clip_w, clip_h = 0.0, 0.0, 0.0, 0.0
+   if !is_nil(clip) {
+      if !is_list(clip) || clip.len < 4 { return false }
+      def cx = max(x0, float(clip.get(0, 0.0)))
+      def cy = max(y0, float(clip.get(1, 0.0)))
+      def cx1 = min(x1, float(clip.get(0, 0.0)) + max(0.0, float(clip.get(2, 0.0))))
+      def cy1 = min(y1, float(clip.get(1, 0.0)) + max(0.0, float(clip.get(3, 0.0))))
+      if cx1 <= cx || cy1 <= cy { return false }
+      ;; Shadow vUV coordinates are relative to the offset source shape.
+      clip_x, clip_y, clip_w, clip_h = cx - (x + offset_x), cy - (y + offset_y), cx1 - cx, cy1 - cy
+   }
    ;; The SDF origin follows the requested shadow offset. Local coordinates
    ;; stay anchored to the source bounds so adding an offset doesn't cancel
    ;; itself through the quad's interpolated UVs.
@@ -1841,15 +1852,15 @@ fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur
    _vkr_store_vertex(base, 3, x1, y1, 0.0, u1, v1, c, tag, w, h, rr)
    _vkr_store_vertex(base, 4, x1, y0, 0.0, u1, v0, c, tag, w, h, rr)
    _vkr_store_vertex(base, 5, x0, y0, 0.0, u0, v0, c, tag, w, h, rr)
-   ;; Shadows use the rounded-rect shader too; clear the per-instance clip so
-   ;; template tangent data cannot clip the soft edge.
+   ;; The same per-instance local clip used by fills and strokes applies to
+   ;; the shadow quad, including its blur feather and offset.
    mut si = 0
    while si < 6 {
       def sv = base + si * _VKR_VERT_STRIDE
-      store32_f32(sv, 0.0, vk_state._VKR_OFF_TX)
-      store32_f32(sv, 0.0, vk_state._VKR_OFF_TY)
-      store32_f32(sv, 0.0, vk_state._VKR_OFF_TZ)
-      store32_f32(sv, 0.0, vk_state._VKR_OFF_TW)
+      store32_f32(sv, clip_x, vk_state._VKR_OFF_TX)
+      store32_f32(sv, clip_y, vk_state._VKR_OFF_TY)
+      store32_f32(sv, clip_w, vk_state._VKR_OFF_TZ)
+      store32_f32(sv, clip_h, vk_state._VKR_OFF_TW)
       si += 1
    }
    _vertex_offset += _VKR_VERT_STRIDE * 6
