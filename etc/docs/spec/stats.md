@@ -2699,7 +2699,7 @@ Reviewed `https://github.com/maxnut/scbe` before porting anything: 32,218 lines 
 | --- | --- |
 | `codegen/spiller.cpp`: replace one operand per instruction with a reserved register | `passes/value/regalloc.c` spills live segments with homes, rematerializes constants and recolors local evictions |
 | `graph_color_regalloc.cpp`: Chaitin simplify/select/spill over a color graph, no coalescing | profile heat, loop depth, next-use and use-count eviction, tied-input affinity, dead-input coalescing, callee-save preference |
-| `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `passes/cfg/ssa.c`, run by DCE |
+| `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `passes/flow/ssa.c`, run by DCE |
 | `IR/split_critical_edge.cpp`: split only when the target has phis | phi lowering via edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass |
 | `ISel/pattern.hpp`: pattern table with cost, covered operands, minimum opt level | `isle.c` and `machine.c` already fuse addressing modes and immediates; porting is a rewrite with no measured target |
 | mem2reg, dominator tree, DCE, constant folder, inlining, loop/call heuristics | all present |
@@ -2839,7 +2839,7 @@ empty bridge block (`br` to the join only) and whose join merges two loop-carrie
 PHIs (`ax` and `ay` both live out of the join); `if_convert` refused both because
 `ifc_parse_arm` required at least one instruction and `ifc_join_phi` required
 exactly one join PHI. All changes are in
-`src/code/backend/passes/cfg/if_convert.c`: an arm that only branches to the join
+`src/code/backend/passes/flow/if_convert.c`: an arm that only branches to the join
 is now legal and its value is the PHI input for that edge, already available
 before the branch (`ifc_arm_value_ok`); join detection works from arm successors,
 so when the resolved false block is the true arm's successor it is the join and
@@ -4446,7 +4446,7 @@ element in NYC with two conditional branches; Clang emits `cmp`/`setb`/`and`
 plus `add` for two elements, so the gap is the un-converted condition, not
 memory traffic.
 
-Experiment on `src/code/backend/passes/cfg/if_convert.c`: add `SELECT_I64` to the
+Experiment on `src/code/backend/passes/flow/if_convert.c`: add `SELECT_I64` to the
 speculation whitelist (checking the third operand's availability), accept a
 header block that ends `BR_IF target; BR fallthrough` and erase that trailing
 branch on rewrite, and add `NYTRIX_IFCONV_TRACE` reject tracing. `cd` and a
@@ -5021,7 +5021,7 @@ at load 40-55.
   single-definition frame LEAs fold from any block, `frame + c` folds with an
   addend, and a folded frame address is a memory operand `[rbp + disp]`.
   records NYC's compound-literal fill loop went 80 -> 71 instructions.
-- **Branch split** (`passes/cfg/and_branch_split.c`,
+- **Branch split** (`passes/flow/and_branch_split.c`,
   `NYTRIX_NO_AND_BRANCH_SPLIT=1`): loop tests `c1 && c2` (including
   if-conversion's `(cmp ^ 1) & c2`) become two compare-and-branch pairs.
 - **`1 & cmp`** (`peephole.c`, `NYTRIX_NO_CMP_AND1=1`) folds only when the
@@ -5100,7 +5100,7 @@ passed `394/394`.
 
 ### Sinking the second compare across split loop branches (`and_branch_split`)
 
-`nyr_and_branch_split` in `src/code/backend/passes/cfg/and_branch_split.c` now
+`nyr_and_branch_split` in `src/code/backend/passes/flow/and_branch_split.c` now
 sinks the single-use `c2` compare (along with any single-use pure
 `ADD_I64`/`SUB_I64`/`MUL_I64` feeding instructions in the header that do not
 feed `c1`) into the new fallthrough block immediately before `br.if c2 -> body`,
