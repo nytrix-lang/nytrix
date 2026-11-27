@@ -201,6 +201,11 @@ build and runtime evidence and its limits.
 
 ### Runtime and standard library
 
+- Declarative flex text honors `letter_spacing` in pixels. Pass
+  `{"styled": gui.measure_flex_text}` to `flex.solve` to use the same spacing
+  and font metrics for intrinsic widths and wrapping as the GUI uses to draw.
+- GUI accessibility nodes defer dictionary construction until queried. The
+  editor's docked layout now finishes warming up so idle frame reuse can resume.
 - Large runtime allocations (`>= 2 MiB`) request `MADV_HUGEPAGE` on Linux and
   `rt_str_repeat_copy` uses a 32 KiB pattern buffer (`repeat` drops to 0.23–0.37×
   vs C, 0.95× vs LLVM); BigInt/BigFloat arithmetic and `core/math/big.ny`

@@ -1,0 +1,84 @@
+shape gui_flex_text_spacing {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui gui flex xml framebuffer text]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect_stdout "GUI-FLEX-TEXT-SPACING-OK"
+  source ny <<'NY'
+use core
+use core.os.path as ospath
+use core.os.ui.flex as flex
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+
+fn red_bounds(ptr pixels, int top, int bottom) list {
+   mut left, right = 240, -1
+   mut y = top
+   while y < bottom {
+      mut x = 16
+      while x < 200 {
+         def off = (y * 240 + x) * 4
+         def red = load8(pixels, off) & 255
+         if red - (load8(pixels, off + 1) & 255) > 24 && red - (load8(pixels, off + 2) & 255) > 24 {
+            if x < left { left = x }
+            if x > right { right = x }
+         }
+         x += 1
+      }
+      y += 1
+   }
+   [left, right]
+}
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK) && gfx.init_window(240, 160, "flex text spacing"), "offscreen framebuffer")
+gui.reset_state()
+gui.set_headless_input(true)
+def font = gfx.font_load(ospath.resolve_repo_asset("etc/assets/fonts/maplemono.ttf"), 16)
+assert(font > 0, "bundled test font")
+gui.set_fonts(font)
+def measure = {"styled": gui.measure_flex_text}
+def markup = "<text id='label' font_size='16'"
+def dict plain = flex.from_xml(markup + ">HH</text>")
+def dict spaced = flex.from_xml(markup + " letter_spacing='16'>HH</text>")
+def dict tight = flex.from_xml(markup + " letter_spacing='-2'>HH</text>")
+plain["color"] = [255, 0, 0, 255]
+spaced["color"] = [255, 0, 0, 255]
+def word = "\xc4\x80H"
+def base = float(gui.measure_flex_text(word, plain).get(0))
+assert(float(gui.measure_flex_text(word, spaced).get(0)) == base + 16.0, "one gap per glyph pair, not per UTF-8 byte")
+assert(float(gui.measure_flex_text(word, tight).get(0)) == base - 2.0, "negative spacing tightens text")
+assert(gui.measure_flex_text("H\nH", plain).get(0) == gui.measure_flex_text("H\nH", spaced).get(0), "no gap after the final glyph or across lines")
+
+def dict wrap_plain = flex.from_xml(markup + " w='grow' wrap='true'>HH HH</text>")
+def dict wrap_spaced = flex.from_xml(markup + " w='grow' wrap='true' letter_spacing='16'>HH HH</text>")
+def width = float(gui.measure_flex_text("HH HH", plain).get(0)) + 1.0
+def normal_lines = flex.render_commands(flex.solve(wrap_plain, width, 80.0, measure))
+def spaced_lines = flex.render_commands(flex.solve(wrap_spaced, width, 80.0, measure))
+assert(normal_lines.len == 1 && spaced_lines.len == 2 &&
+   spaced_lines.get(0).get("data").get("text") == "HH" &&
+   spaced_lines.get(1).get("data").get("text") == "HH", "letter spacing changes how words wrap")
+
+gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+gfx.set_ortho_2d(0.0, 240.0, 160.0, 0.0)
+gui.begin_frame(0, 0, 240.0, 160.0)
+assert(gui.begin_window("sample", "", 0.0, 0.0, 240.0, 160.0, {"titlebar": false, "resizable": false}), "sample window")
+gui.draw_flex_commands(flex.render_commands(flex.solve(plain, 100.0, 30.0, measure)), 24.0, 36.0)
+gui.draw_flex_commands(flex.render_commands(flex.solve(spaced, 100.0, 30.0, measure)), 24.0, 86.0)
+gui.end_window()
+gui.end_frame()
+gfx.end_frame()
+def fb = gfx.read_framebuffer()
+def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+assert(pixels, "framebuffer pixels")
+def normal_ink = red_bounds(pixels, 24, 76)
+def spaced_ink = red_bounds(pixels, 76, 128)
+free(pixels)
+assert(int(normal_ink.get(1)) > int(normal_ink.get(0)), "unspaced text is visible: " + to_str(normal_ink) + " -> " + to_str(spaced_ink))
+assert(spaced_ink.get(0) == normal_ink.get(0) && int(spaced_ink.get(1)) == int(normal_ink.get(1)) + 16,
+   "the first glyph stays put and the second is drawn 16 px farther right: " + to_str(normal_ink) + " -> " + to_str(spaced_ink))
+gfx.close_window()
+print("GUI-FLEX-TEXT-SPACING-OK")
+NY
+}

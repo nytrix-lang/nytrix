@@ -666,6 +666,8 @@ fn _gui_dock_begin_frame() bool {
          }
       }
    }
+   if _gui_layout_warm_frames > 0 { _gui_layout_warm_frames -= 1 }
+   else { _gui_layout_dirty = false }
    true
 }
 

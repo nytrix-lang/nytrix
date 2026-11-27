@@ -1,0 +1,67 @@
+shape vk_ascii_text_run {
+  family "runtime/ui"
+  generator "regression"
+  features [ui vulkan font framebuffer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_stdout "VK-ASCII-TEXT-RUN"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.vk as vk
+
+fn ink_columns(ptr pixels, int width, int height, int channel) list {
+   mut columns = []
+   mut x = 0
+   while x < width {
+      mut found = false
+      mut y = 0
+      while y < height && !found {
+         def at = (y * width + x) * 4
+         def value = load8(pixels, at + channel) & 255
+         found = value > 64 && value > (load8(pixels, at + (1 - channel)) & 255) + 24
+         y += 1
+      }
+      if found { columns = columns.append(x) }
+      x += 1
+   }
+   columns
+}
+
+assert(gfx.apply_backend_name("vk"), "select Vulkan renderer")
+def win = gfx.init_window(128, 80, "Vulkan text probe", 0, false, false, 1)
+if !win || !vk._get_device() {
+   if win { gfx.close_window() }
+   print("VK-ASCII-TEXT-RUN-SKIP: " + gfx.window_error())
+} else {
+   def font = gfx.font_load("etc/assets/fonts/maplemono.ttf", 18)
+   assert(font > 0, "bundled test font")
+   def red = gfx.color_pack(1.0, 0.0, 0.0, 1.0)
+   def green = gfx.color_pack(0.0, 1.0, 0.0, 1.0)
+   mut frame = 0
+   while frame < 3 {
+      if frame == 2 { assert(gfx.request_frame_capture(), "request Vulkan readback") }
+      assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin Vulkan frame")
+      gfx.set_ortho_2d(0.0, 128.0, 80.0, 0.0)
+      ;; A newline forces the otherwise identical second run through the
+      ;; generic glyph loop. Compare ink columns independent of capture Y.
+      assert(gfx.draw_text_runs_flat_colors(font, ["HH", 16.0, 8.0, red, "HH\n", 16.0, 40.0, green]), "submit both runs")
+      assert(gfx.end_frame(), "present Vulkan frame")
+      frame += 1
+   }
+   def fb = gfx.read_framebuffer()
+   def width = int(fb.get("width", 0))
+   def height = int(fb.get("height", 0))
+   assert(width > 0 && height > 0, "read the captured Vulkan frame")
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   assert(pixels, "Vulkan capture pixels")
+   def fast = ink_columns(pixels, width, height, 0)
+   def generic = ink_columns(pixels, width, height, 1)
+   free(pixels)
+   assert(generic.len >= 8 && to_str(fast) == to_str(generic), "ASCII and generic runs draw identical glyph columns")
+   gfx.close_window()
+   print("VK-ASCII-TEXT-RUN-OK")
+}
+NY
+}

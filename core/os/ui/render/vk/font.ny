@@ -134,7 +134,7 @@ fn _store_text_glyph_vertex_full(any v, f64 x, f64 y, f64 u, f64 uv, int color_u
 
 @inline
 @jit
-fn _push_text_glyph_rect_unchecked(f64 x,
+fn _store_text_glyph_rect(any p, any tpl, int tex_id, f64 x,
    f64 y,
    f64 w,
    f64 h,
@@ -142,13 +142,11 @@ fn _push_text_glyph_rect_unchecked(f64 x,
    f64 v1,
    f64 u2,
    f64 v2,
-   int c) bool {
-   def p = _local_vertex_map + _vertex_offset
+   int c) any {
    def x2 = x + w
    def y2 = y + h
-   def tex_id = _current_tex_index
-   if _quad_template {
-      __copy_mem(p, _quad_template, _VKR_VERT_STRIDE * 6)
+   if tpl {
+      __copy_mem(p, tpl, _VKR_VERT_STRIDE * 6)
       mut bv = p
       store32_f32(bv, x, _VKR_OFF_X)
       store32_f32(bv, y, _VKR_OFF_Y)
@@ -199,6 +197,14 @@ fn _push_text_glyph_rect_unchecked(f64 x,
       _store_text_glyph_vertex_full(p + 4 * _VKR_VERT_STRIDE, x2, y, u2, v1, c, tex_id)
       _store_text_glyph_vertex_full(p + 5 * _VKR_VERT_STRIDE, x, y, u1, v1, c, tex_id)
    }
+}
+
+@inline
+@jit
+fn _push_text_glyph_rect_unchecked(f64 x, f64 y, f64 w, f64 h,
+   f64 u1, f64 v1, f64 u2, f64 v2, int c) bool {
+   _store_text_glyph_rect(_local_vertex_map + _vertex_offset, _quad_template, _current_tex_index,
+      x, y, w, h, u1, v1, u2, v2, c)
    _vertex_offset += _VKR_VERT_STRIDE * 6
    _prim_rect_quads += 1
    true
@@ -314,6 +320,10 @@ fn _vkr_ascii_run_tid(str text, int n, any page0) int {
 fn _vkr_draw_text_ascii_run(str text, int n, f64 pen_x, f64 pen_y, int color_u32, any page0, int tex_id) int {
    if tex_id < 0 || !_check_flush(n * (_VKR_VERT_STRIDE * 6)) { return -1 }
    if _current_tex_index != tex_id { _ensure_glyph_text_page(tex_id) }
+   def quad_bytes = _VKR_VERT_STRIDE * 6
+   def tpl = _quad_template
+   def tid = _current_tex_index
+   mut p = _local_vertex_map + _vertex_offset
    mut glyph_count = 0
    mut i = 0
    while i < n {
@@ -325,22 +335,16 @@ fn _vkr_draw_text_ascii_run(str text, int n, f64 pen_x, f64 pen_y, int color_u32
          def bh = load32_f32(g_off, 16)
          def gy = floor(pen_y - load32_f32(g_off, 8) + 0.5)
          def c = load32(g_off, 44) != 0 ? 0xFFFFFFFF : color_u32
-         _push_text_glyph_rect_unchecked(
-            gx,
-            gy,
-            bw,
-            bh,
-            load32_f32(g_off, 20),
-            load32_f32(g_off, 24),
-            load32_f32(g_off, 28),
-            load32_f32(g_off, 32),
-            c
-         )
+         _store_text_glyph_rect(p, tpl, tid, float(gx), float(gy), bw, bh,
+            load32_f32(g_off, 20), load32_f32(g_off, 24), load32_f32(g_off, 28), load32_f32(g_off, 32), c)
+         p += quad_bytes
          glyph_count += 1
       }
       pen_x += load32_f32(g_off, 0)
       i += 1
    }
+   _vertex_offset += glyph_count * quad_bytes
+   _prim_rect_quads += glyph_count
    glyph_count
 }
 

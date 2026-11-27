@@ -62,7 +62,7 @@ module core.os.ui.render(
    texture_destroy, texture_bind, texture_bind_default,
    texture_last_created_id, texture_count,
    texture_size, draw_texture, create_cubemap, FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST,
-   FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_first, font_destroy,
+   FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_first, font_at_size, font_destroy,
    font_allow_color_fallback, _font_get, font_prepare, draw_text, draw_text_3d, measure_text,
    font_line_height, font_ascent, mesh_load, mesh_create, mesh_create_cpu,
    draw_text_centered, draw_text_centered_x, draw_text_pair,
@@ -2703,10 +2703,12 @@ fn _draw_glyph_bitmap_runs(
    f64 b,
    f64 a,
    int bpp=4,
-   bool is_color=false
+   bool is_color=false,
+   int pitch=0
 )  bool {
    "Internal helper to draw a glyph bitmap on the active backend."
    if !data || bw <= 0 || bh <= 0 || a <= 0.0 { return false }
+   def stride = pitch > 0 ? pitch : bw * bpp
    if _backend == BACKEND_GL || _backend == BACKEND_VK {
       ;; Vulkan safe text also comes through this path when the atlas renderer is
       ;; disabled.  It must still submit real glyph coverage to the GPU instead
@@ -2715,7 +2717,7 @@ fn _draw_glyph_bitmap_runs(
       mut drew_gl = false
       mut yy_gl = 0
       while yy_gl < bh {
-         def row_off_gl = yy_gl * bw * bpp
+         def row_off_gl = yy_gl * stride
          mut xx_gl = 0
          while xx_gl < bw {
             def px_off_gl = row_off_gl + xx_gl * bpp
@@ -2752,7 +2754,7 @@ fn _draw_glyph_bitmap_runs(
    mut drew = false
    mut yy = 0
    while yy < bh {
-      def row_off = yy * bw * bpp
+      def row_off = yy * stride
       mut xx = 0
       while xx < bw {
          def px_off = row_off + xx * bpp
@@ -2786,15 +2788,17 @@ fn _draw_glyph_bitmap_scaled_runs(
    f64 b,
    f64 a,
    int bpp=4,
-   bool is_color=false
+   bool is_color=false,
+   int pitch=0
 ) bool {
    if !data || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 || a <= 0.0 { return false }
    if dst_w == src_w && dst_h == src_h {
-      return _draw_glyph_bitmap_runs(data, src_w, src_h, ox, oy, r, g, b, a, bpp, is_color)
+      return _draw_glyph_bitmap_runs(data, src_w, src_h, ox, oy, r, g, b, a, bpp, is_color, pitch)
    }
    if _backend == BACKEND_GL && lib_glr.capabilities().get("software_upload", false) {
       return lib_glr.draw_glyph_bitmap_scaled(data, src_w, src_h, dst_w, dst_h, ox, oy, r, g, b, a, bpp, is_color)
    }
+   def stride = pitch > 0 ? pitch : src_w * bpp
    mut drew = false
    mut yy = 0
    while yy < dst_h {
@@ -2817,9 +2821,10 @@ fn _draw_glyph_bitmap_scaled_runs(
          mut samples = 0
          mut sy = sy0
          while sy < sy1 {
+            def row_off = sy * stride
             mut sx = sx0
             while sx < sx1 {
-               def px_off = (sy * src_w + sx) * bpp
+               def px_off = row_off + sx * bpp
                def alpha_sample = load8(data, px_off + (bpp >= 4 ? 3 : 0)) & 255
                sum_a += alpha_sample
                if is_color && bpp >= 4 {
@@ -2943,9 +2948,9 @@ fn _ttf_draw_bitmap_glyph(
    def is_color = bm.get("is_color", 0)
    def xoff = float(bm.get("draw_xoff", bm.get("xoff", 0)))
    def yoff = float(bm.get("draw_yoff", bm.get("yoff", 0)))
-   def bpp = int(bm.get("bpp", 4))
-   def ptr bdata = __ffi_untag_ptr(bm.get("data", 0))
-   if _backend == BACKEND_MOCK && !bdata { return [g_adv, false] }
+   mut bpp = int(bm.get("bpp", 4))
+   mut ptr bdata = __ffi_untag_ptr(bm.get("data", 0))
+   mut pitch = 0
    def gl_soft_text = _backend == BACKEND_GL && bdata && (
       lib_glr.capabilities().get("software_upload", false) ||
       !ui_profile.env_truthy_cached("NY_GL_TEXTURE_TEXT")
@@ -2954,6 +2959,21 @@ fn _ttf_draw_bitmap_glyph(
    if bw <= 0.0 || bh <= 0.0 { return [g_adv, drew] }
    def vk_cpu_text = _font_vk_safe_cpu_text()
    def atlas_ref = _font_bitmap_atlas_ref(font_obj, bm)
+   if _backend == BACKEND_MOCK && !bdata {
+      ;; Packed glyphs may drop their standalone bitmap; sample the atlas
+      ;; region directly rather than copying a glyph out for software draws.
+      if !is_dict(atlas_ref) || !is_list(uv) || uv.len < 4 { return [g_adv, false] }
+      def ptr pixels = __ffi_untag_ptr(atlas_ref.get("cpu_buf", 0))
+      if !pixels { return [g_adv, false] }
+      def aw = int(atlas_ref.get("width", 0))
+      def ah = int(atlas_ref.get("height", 0))
+      def ax = int(float(uv.get(0)) * float(aw) + 0.5)
+      def ay = int(float(uv.get(1)) * float(ah) + 0.5)
+      if ax < 0 || ay < 0 || ax + int(bm.get("width", 0)) > aw || ay + int(bm.get("height", 0)) > ah { return [g_adv, false] }
+      bpp = 4
+      pitch = aw * bpp
+      bdata = ptr_add(pixels, ay * pitch + ax * bpp)
+   }
    if is_dict(atlas_ref) {
       if _backend == BACKEND_GL || _backend == BACKEND_VK {
          tex_id = int(lib_atlas.atlas_ensure_texture(atlas_ref))
@@ -2968,10 +2988,11 @@ fn _ttf_draw_bitmap_glyph(
       gcr, gcg, gcb = 1.0, 1.0, 1.0
       def fit = _fit_color_glyph_metrics(font_obj, g_adv, xoff, yoff, bw, bh)
       g_adv = _list_num_safe(fit, 0, g_adv)
-      mut gx, gy = pen_x + _list_num_safe(fit, 1, 0.0), pen_y - _list_num_safe(fit, 2, 0.0)
+      mut f64 gx = pen_x + _list_num_safe(fit, 1, 0.0)
+      mut f64 gy = pen_y - _list_num_safe(fit, 2, 0.0)
       if _backend == BACKEND_GL || _backend == BACKEND_VK {
-         gx = floor(gx + 0.5)
-         gy = floor(gy + 0.5)
+         gx = float(floor(gx + 0.5))
+         gy = float(floor(gy + 0.5))
       }
       bw, bh = _list_num_safe(fit, 3, bw), _list_num_safe(fit, 4, bh)
       if (gl_soft_text || vk_cpu_text) && bdata {
@@ -2995,16 +3016,17 @@ fn _ttf_draw_bitmap_glyph(
                int(bm.get("height", int(bh))),
                int(max(1.0, bw)),
                int(max(1.0, bh)),
-               gx, gy, gcr, gcg, gcb, ca, bpp, !!is_color
+               gx, gy, gcr, gcg, gcb, ca, bpp, !!is_color, pitch
             ) || drew
          }
       }
       return [g_adv, drew]
    }
-   mut gx, gy = pen_x + xoff * gs, pen_y - yoff * gs
+   mut f64 gx = pen_x + xoff * gs
+   mut f64 gy = pen_y - yoff * gs
    if _backend == BACKEND_GL || _backend == BACKEND_VK {
-      gx = floor(gx + 0.5)
-      gy = floor(gy + 0.5)
+      gx = float(floor(gx + 0.5))
+      gy = float(floor(gy + 0.5))
    }
    if (gl_soft_text || vk_cpu_text) && bdata {
       drew = _draw_glyph_bitmap_scaled_runs(
@@ -3028,7 +3050,7 @@ fn _ttf_draw_bitmap_glyph(
             int(bm.get("height", int(bh))),
             int(max(1.0, bw * gs)),
             int(max(1.0, bh * gs)),
-            gx, gy, gcr, gcg, gcb, ca, bpp, !!is_color
+            gx, gy, gcr, gcg, gcb, ca, bpp, !!is_color, pitch
          ) || drew
       }
    }
@@ -3036,7 +3058,7 @@ fn _ttf_draw_bitmap_glyph(
    [g_adv, drew]
 }
 
-fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
+fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color, f64 letter_spacing=0.0) bool {
    if _backend == BACKEND_GL {
       _font_maybe_prime_string(font_id, text)
       _font_sync_and_ensure_gpu(font_id)
@@ -3049,14 +3071,15 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
    def info = font_obj.get("info", 0)
    if !info { return false }
    def font_size = int(font_obj.get("size", 16))
-   def ascent = font_obj.get("ascent", 0.0)
-   def line_h = font_obj.get("line_height", float(font_obj.get("size", 16)))
+   def ascent = float(font_obj.get("ascent", 0.0))
+   def line_h = float(font_obj.get("line_height", float(font_size)))
    def rgba = _ttf_color_rgba(color)
    def cr = _list_num_safe(rgba, 0, 1.0)
    def cg = _list_num_safe(rgba, 1, 1.0)
    def cb = _list_num_safe(rgba, 2, 1.0)
    def ca = _list_num_safe(rgba, 3, 1.0)
-   mut pen_x, pen_y = x, y + ascent
+   mut f64 pen_x = x
+   mut f64 pen_y = y + ascent
    mut prev_gi = -1
    mut drew = false
    mut i = 0
@@ -3069,16 +3092,21 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
       if cp < 0 { cp = 63 }
       def ctrl = _ttf_apply_control_cp(font_id, cp, line_h, x, pen_x, pen_y, prev_gi, space_adv)
       if _list_any_safe(ctrl, 0, false) {
-         pen_x, pen_y = _list_num_safe(ctrl, 1, pen_x), _list_num_safe(ctrl, 2, pen_y)
+         pen_x = _list_num_safe(ctrl, 1, pen_x)
+         pen_y = _list_num_safe(ctrl, 2, pen_y)
          prev_gi = int(_list_any_safe(ctrl, 3, prev_gi))
+         if cp == 13 && letter_spacing != 0.0 { prev_gi = -1 }
          space_adv = _list_num_safe(ctrl, 4, space_adv)
          continue
       }
       def glyph = _font_resolve_glyph(font_id, cp)
       if !glyph { continue }
       def gi = glyph.get("gi", 0)
-      if prev_gi >= 0 && gi > 0 { pen_x += float(lib_ttf.get_kern(info, prev_gi, gi, font_size)) }
-      mut g_adv = glyph.get("advance", 0.0)
+      if prev_gi >= 0 {
+         if letter_spacing != 0.0 { pen_x += letter_spacing }
+         if gi > 0 { pen_x += float(lib_ttf.get_kern(info, prev_gi, gi, font_size)) }
+      }
+      mut f64 g_adv = float(glyph.get("advance", 0.0))
       def bm = glyph.get("bitmap", 0)
       if bm {
          def draw_res = _ttf_draw_bitmap_glyph(font_obj, bm, pen_x, pen_y, g_adv, cr, cg, cb, ca)
@@ -3353,11 +3381,9 @@ fn _font_builtin_create(int size) int {
    id
 }
 
-fn _draw_text_builtin(str text, f64 x, f64 y, any color) bool {
+fn _draw_text_builtin(str text, f64 x, f64 y, any color, f64 letter_spacing=0.0, f64 px=1.45, f64 line_height=13.6) bool {
    mut cx, cy = x, y
-   def px = 1.45
    def cw = px * 6.0
-   def ch = px * 8.0
    def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
    mut verts = 0
    mut quad_count = 0
@@ -3366,14 +3392,30 @@ fn _draw_text_builtin(str text, f64 x, f64 y, any color) bool {
       verts = _shape_scratch_alloc(max_runs * VERTEX_STRIDE * 6)
    }
    mut i = 0
+   mut previous = false
    while i < text.len {
-      def c = load8(text, i)
-      i += 1
-      if c == 13 { continue }
+      mut c = load8(text, i)
+      if letter_spacing != 0.0 && (c & 255) >= 128 {
+         def next = _utf8_next_cp(text, i, text.len)
+         c = 63
+         i = int(next.get(1, i + 1))
+      } else { i += 1 }
+      if c == 13 { previous = false continue }
       if c == 10 {
          cx = x
-         cy += ch + 2.0
+         cy += line_height
+         previous = false
          continue
+      }
+      if c == 9 && letter_spacing != 0.0 {
+         def tab_width = cw * 4.0
+         cx = x + float(int(max(0.0, cx - x) / tab_width) + 1) * tab_width
+         previous = false
+         continue
+      }
+      if letter_spacing != 0.0 {
+         if previous { cx += letter_spacing }
+         previous = true
       }
       if c == 32 {
          cx += cw
@@ -5518,6 +5560,9 @@ fn draw_line_2d(f64 x1, f64 y1, f64 x2, f64 y2, any color, f64 thickness=0.02) b
             _color_at(color, 2, 1.0), _color_at(color, 3, 1.0))
       }
       return true
+   }
+   if _backend == BACKEND_MOCK && _mvp_matrix {
+      return _cpu_line_world_xyz(x1, y1, 0.0, x2, y2, 0.0, _cpu_pack_color_from(color), max(thickness, 1.0))
    }
    _draw_line_impl([x1, y1, 0.0], [x2, y2, 0.0], color, thickness)
 }
@@ -8275,6 +8320,18 @@ fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil)
    id
 }
 
+fn font_at_size(int font, int size) int {
+   "Returns a cached size variant of a loaded face, or the default face when font is zero."
+   if size <= 0 { return font }
+   if font <= 0 { return _ensure_default_font(size) }
+   def face = _font_get(font)
+   if !face { return _ensure_default_font(size) }
+   if int(face.get("size", 0)) == size { return font }
+   if face.get("_kind", "") == "builtin" { return _font_builtin_create(size) }
+   def variant = _font_load_impl(to_str(face.get("path", "")), size, int(face.get("filter", FONT_FILTER_DEFAULT)))
+   variant > 0 ? variant : font
+}
+
 fn font_load_first(list paths, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
    "Loads the first available font from `paths`, resolving repo-relative paths when needed."
    if !is_list(paths) || paths.len == 0 { return 0 }
@@ -8326,13 +8383,22 @@ fn font_destroy(int font) bool {
 }
 
 @jit
-fn draw_text(int font, any text, f64 x, f64 y, any color=WHITE) bool {
-   "Draws text at the given screen coordinates. Automatically uses the fastest path."
-   _draw_text_impl(font, text, x, y, color)
+fn draw_text(int font, any text, f64 x, f64 y, any color=WHITE, f64 letter_spacing=0.0) bool {
+   "Draws text at screen coordinates. Optional letter_spacing adjusts the gap between successive glyphs, in pixels."
+   if letter_spacing == 0.0 { return _draw_text_impl(font, text, x, y, color) }
+   def s = is_str(text) ? text : to_str(text)
+   def font_id = _resolve_text_font(font)
+   def face = _font_get(font_id)
+   if face && face.get("info", 0) {
+      return _draw_text_ttf(font_id, s, x, y, color, letter_spacing)
+   }
+   def px = face ? float(face.get("scale", 1.45)) : 1.45
+   def line_height = face ? float(face.get("line_height", 13.6)) : 13.6
+   _draw_text_builtin(s, x, y, color, letter_spacing, px, line_height)
 }
 
-fn measure_text(int font, any text) list {
-   "Returns [width, height] of the string `text` when rendered with `font`."
+fn measure_text(int font, any text, f64 letter_spacing=0.0) list {
+   "Returns [width, height] of text in pixels, with the same optional glyph spacing as draw_text."
    if !is_str(text) { text = to_str(text) }
    def font_id = _resolve_text_font(font)
    _font_prime_string(font_id, text)
@@ -8365,10 +8431,12 @@ fn measure_text(int font, any text) list {
          def sp_tab = lib_vkr._vkr_glyph_get_off(glyphs_ptr, 32)
          def tab_cell = (sp_tab && load32(sp_tab, 40) != 0) ? load32_f32(sp_tab, 0) : line_h * 0.5
          def tab_w = max(1.0, tab_cell * 4.0)
-         pen_x = float(int(pen_x / tab_w) + 1) * tab_w
+         def rel_x = letter_spacing != 0.0 ? max(0.0, pen_x) : pen_x
+         pen_x = float(int(rel_x / tab_w) + 1) * tab_w
          prev_gi = -1
          continue
       }
+      if prev_gi >= 0 && letter_spacing != 0.0 { pen_x += letter_spacing }
       mut gi = 0
       if info {
          gi = lib_ttf.get_glyph_index(info, cp)
@@ -8381,7 +8449,8 @@ fn measure_text(int font, any text) list {
          pen_x += adv
       } else {
          def sp_off = lib_vkr._vkr_glyph_get_off(glyphs_ptr, 32)
-         if sp_off && load32(sp_off, 40) != 0 { pen_x += load32_f32(sp_off, 0) * (cp > 255 ? 2.0 : 1.0) } else { pen_x += line_h * 0.5 * (cp > 255 ? 2.0 : 1.0) }
+         def cells = cp > 255 && (info || letter_spacing == 0.0) ? 2.0 : 1.0
+         if sp_off && load32(sp_off, 40) != 0 { pen_x += load32_f32(sp_off, 0) * cells } else { pen_x += line_h * 0.5 * cells }
       }
       prev_gi = gi
    }
@@ -9015,11 +9084,17 @@ fn _prime_text_runs_flat_list(int font_id, list runs) bool {
 
 @jit
 fn _prime_text_runs_flat_color_list(int font_id, list runs) bool {
+   def f = _font_get(font_id)
+   def ascii_ready = f && f.get("ascii_preprimed", false) && _font_prime_mode() != 2
    mut i = 0
    def n = runs.len
    while i + 3 < n {
       def text = runs[i]
-      if is_str(text) { _font_maybe_prime_string(font_id, text) }
+      if is_str(text) {
+         if !(ascii_ready && _font_ascii_preprimed(text)) {
+            _font_prime_string(font_id, text)
+         }
+      }
       i += 4
    }
    true

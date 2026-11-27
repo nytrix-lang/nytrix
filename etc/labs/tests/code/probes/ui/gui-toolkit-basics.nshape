@@ -157,9 +157,10 @@ frame()
 chk(cb, "accessibility activation updates a choice control")
 cb = false
 frame()
+chk(gui.accessibility_action("w::sl", "set_value", 0.5), "slider accepts an initial queued value")
 chk(gui.accessibility_action("w::sl", "set_value", 0.75), "accessibility tree accepts a slider value action")
 frame()
-chk(sl > 0.74 && sl < 0.76, "accessibility value action updates the slider")
+chk(sl > 0.74 && sl < 0.76, "only the latest queued value updates the slider")
 sl = 0.25
 chk(gui.accessibility_action("w2::amount", "set_value", 0.8), "accessibility tree accepts a spin button value action")
 frame()

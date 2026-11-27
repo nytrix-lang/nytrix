@@ -176,7 +176,6 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, any opts=0)
    gui.begin_scroll_area(scroll_id, 0.0, list_h)
    t_prof = ui_profile.mark_next(prof, "asset_grid_begin_scroll", t_prof)
    def range = asset_catalog.virtual_row_range(total_rows, row_step, gui.scroll_area_visible_h(), gui.scroll_area_scroll_y(), 2)
-   if prof { eprint("TMPGRID list_h=" + to_str(list_h) + " vis=" + to_str(gui.scroll_area_visible_h()) + " step=" + to_str(row_step) + " tile_h=" + to_str(tile_h)) }
    def first_row = min(total_rows, max(0, int(range[0])))
    def last_row = min(total_rows, max(first_row + 1, int(range[1])))
    if first_row > 0 { gui.spacer_px(float(first_row) * row_step) }

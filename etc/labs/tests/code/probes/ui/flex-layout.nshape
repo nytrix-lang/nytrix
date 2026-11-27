@@ -10,7 +10,13 @@ shape ui_flex_layout {
 use core
 use core.os.ui.flex as flex
 use core.os.ui.anim as anim
+use core.os as os
+use core.os.path as ospath
 fn _near(any a, f64 b) bool { def f64 d = float(a) - b d < 0.01 && d > -0.01 }
+fn _styled_measure(str text, dict node) list {
+   def size = float(node.get("font_size", 16))
+   [float(text.len) * size * 0.5, size + 4.0]
+}
 ;; App shell: header, sidebar + main, footer.
 def ui = flex.node({"id": "root", "dir": "col", "w": "grow", "h": "grow", "pad": 10, "gap": 10}, [
    flex.node({"id": "head", "w": "grow", "h": 40}),
@@ -126,6 +132,38 @@ def xml_layout = flex.solve(xml_tree, 110.0, 80.0)
 def xml_box = flex.rect_of(xml_layout, "xml-box")
 assert(_near(xml_box.get(0), 5.0) && _near(xml_box.get(1), 24.0) && _near(xml_box.get(2), 50.0), "XML layouts resolve text, padding, gap and percentage sizes")
 assert(is_nil(flex.from_xml("<column><unknown/></column>")), "unsupported elements fail the whole layout")
+assert(is_dict(flex.from_xml("<!-- x > y --><box/>")), "comments can contain greater-than signs")
+def styled_xml = flex.from_xml("<column id='xml-card' class='flex-row bg-accent text-muted text-lg p-3' pad='5'><text id='xml-caption'>Styled</text></column>")
+def dict xml_button = flex.from_xml("<button id='xml-go' action='save' w='90' h='26'>Save</button>")
+def button_commands = flex.render_commands(flex.solve(xml_button, 90.0, 26.0))
+def button_command = button_commands.get(0)
+assert(button_commands.len == 1 && button_command.get("type") == "button" && button_command.get("data").get("action") == "save", "XML buttons emit a named action with solved geometry")
+def dict xml_checkbox = flex.from_xml("<checkbox id='opt' action='toggle' checked='true'>Option</checkbox>")
+def checkbox_command = flex.render_commands(flex.solve(xml_checkbox, 150.0, 30.0)).get(0)
+assert(checkbox_command.get("type") == "checkbox" && checkbox_command.get("data").get("checked", false), "XML checkboxes carry their initial value")
+def caption = styled_xml.get("children").get(0)
+assert(styled_xml.get("dir") == "col" && _near(styled_xml.get("pad"), 5.0) && int(styled_xml.get("background").get(0)) == 112, "XML elements combine utility styles and explicit overrides")
+assert(int(caption.get("font_size")) == 18 && int(caption.get("color").get(0)) == 160, "XML text inherits parent styles")
+def dict wrapping_xml = flex.from_xml("<text id='styled-wrap' w='40' wrap='true' font_size='20'>one two</text>")
+def wrap_result = flex.solve(wrapping_xml, 40.0, 80.0, {"styled": _styled_measure})
+def wrap_commands = flex.render_commands(wrap_result)
+assert(_near(flex.rect_of(wrap_result, "styled-wrap").get(3), 48.0) && wrap_commands.len == 2 && _near(wrap_commands.get(1).get("data").get("y"), 24.0), "styled measurement drives wrapping and painted line spacing")
+for invalid_xml in ["<column><box/></row>", "<column><box/>", "<box/><box/>", "<box w='2' w='3'/>", "<box w=2/>", "<box =2/>"] {
+   assert(is_nil(flex.from_xml(invalid_xml)), "malformed markup fails the whole layout")
+}
+def xml_path = ospath.join(ospath.temp_dir(), "ny-flex-watch-" + to_str(os.pid()) + ".xml")
+defer { os.file_remove(xml_path) }
+assert(is_ok(os.file_write(xml_path, "<box id='watched' w='12'/>")), "write watched XML")
+def watch = flex.watch_xml(xml_path)
+assert(watch.get("status") == "updated" && flex.poll_xml(watch) == "unchanged", "watch loads once and ignores identical content")
+mut dict watched = watch.get("tree")
+watched["state"] = {"counter": 3}
+os.file_write(xml_path, "<box")
+assert(flex.poll_xml(watch) == "invalid" && float(watch.get("tree").get("w")) == 12.0, "invalid edits preserve the previous layout")
+os.file_write(xml_path, "<box id='watched' w='24'/>")
+assert(flex.poll_xml(watch) == "updated" && float(watch.get("tree").get("w")) == 24.0 && int(watch.get("tree").get("state").get("counter")) == 3, "valid edits replace geometry and preserve state by ID")
+os.file_remove(xml_path)
+assert(flex.poll_xml(watch) == "unreadable" && float(watch.get("tree").get("w")) == 24.0, "a missing file preserves the last layout")
 def grid_tree = flex.grid("grid", ["1fr", "2fr"], [
    flex.styled_node("grid-a", "bg-accent", [flex.text("grid-label", "A")]),
    flex.node({"id": "grid-b", "background": [20, 30, 40, 255]}),

@@ -5632,4 +5632,16 @@ Report `bench-20261126-194547-1097194` (full `./make bench`, 109 comparable work
 - **Private non-escaping buffer store-range VRP** (`src/code/backend/passes/verify/vrp.c`, `NYTRIX_NO_ARRAY_STORE_VRP=1`): propagates proven store value ranges from private buffers to loads, eliminating the remaining bounds check in `string/knucleotide` (`ck=849988`, -28.7% insns; NYR/C 2.19x to 1.23x).
 - **Extended BigInt/BigFloat `_into` / `_into_loop` reuse** (`src/code/backend/passes/mem/temp_recycle.c`, `runtime/{bigint,bigfloat}.c`, `NYTRIX_NO_BIGINT_INTO_EXT=1`): adds `_into[_loop]` entry points and fusion for `rt_bigint_mul`, `rt_bigfloat_sqrt`, `rt_bigfloat_pow_int`, and `rt_bigfloat_pow_int_raw`, plus alias-safe loop reuse (`bigint-oracle` `ck=1968365`: +2 fusions, -227k insns, NYR/C 1.80x, LLVM/C 1.75x).
 
+### DamagedHelmet editor GUI investigation
+
+On the x86-64 Linux host, a pre-landing Vulkan run under headless Weston
+reported 346 frames in 2.008 s with the editor (172 FPS), 350 frames in
+2.008 s with forced redraw (174 FPS), and 6810 frames in 2.000 s with the GUI
+disabled (3404 FPS). These are single exploratory samples of different
+rendering modes, without matched frame checksums, not an A/B speedup or proof
+that idle reuse fired. The changes defer accessibility dictionaries, skip
+unchanged theme work, finish the dock layout warmup and update Vulkan's
+vertex offset once per compatible ASCII text run. The GUI remains the
+dominant cost in those samples.
+
 </details>

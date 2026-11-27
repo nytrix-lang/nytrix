@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.batch
 ;; - core.os.ui.window
-module core.os.ui.render.viewer.gui(paint_rect, paint_text, item_hovered, mouse_xy, remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, generate_palette, apply_palette, button_style_map, export_theme, save_theme_file, load_theme_file, watch_theme_file, unwatch_theme_file, poll_theme_file, theme_editor, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, accessibility_tree, accessibility_action, animate_value, animation_busy, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
+module core.os.ui.render.viewer.gui(paint_rect, paint_text, item_hovered, mouse_xy, remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, generate_palette, apply_palette, button_style_map, export_theme, save_theme_file, load_theme_file, watch_theme_file, unwatch_theme_file, poll_theme_file, theme_editor, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, accessibility_tree, accessibility_action, animate_value, animation_busy, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, text, label, text_colored, property_row, title_input_text, button, button_at, draw_flex_commands, measure_flex_text, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
 use core
 use core.os.ui.anim as ui_anim
 use core.math
@@ -110,6 +110,8 @@ mut _scroll_area_capture_rect = [0.0, 0.0, 0.0, 0.0]
 mut _text_fit_cache = dict(512)
 mut _accessibility_nodes = []
 mut _accessibility_requests = dict(16)
+mut int _accessibility_request_count = 0
+def _A11Y_EMPTY = dict(0)
 mut _ui_animator = ui_anim.animator()
 
 ;; Toolkit layer state: overlay command list, popups, layout scopes, drag and drop.
@@ -821,6 +823,7 @@ fn reset_state() any {
    "Clears transient widget, focus, and scroll-area state."
    _accessibility_nodes = []
    _accessibility_requests = dict(16)
+   _accessibility_request_count = 0
    _ui_animator = ui_anim.animator()
    _widget_state = dict(64)
    _hot_id, _active_widget_id = "", ""
@@ -880,6 +883,12 @@ fn set_accent(list c) any {
    "Sets the accent color from an RGBA list."
    _ensure_theme_colors()
    if !is_list(c) { return 0 }
+   if is_list(_accent_rgba) && _accent_rgba.len == 4 && c.len == 4 {
+      if c.get(0) == _accent_rgba.get(0) && c.get(1) == _accent_rgba.get(1) &&
+         c.get(2) == _accent_rgba.get(2) && c.get(3) == _accent_rgba.get(3) {
+         return 0
+      }
+   }
    _accent_rgba = clone(c)
    _theme_dirty = true
 }
@@ -1859,10 +1868,15 @@ fn begin_frame(any win=0, int font=0, f64 ww=0.0, f64 wh=0.0, f64 dt=0.016666667
    _gui_frame_id += 1
    _theme_hot_reload_tick()
    ui_anim.step(_ui_animator, dt)
-   _accessibility_nodes = []
-   for request_id in _accessibility_requests.keys() {
-      def request = _accessibility_requests.get(request_id, nil)
-      if is_dict(request) && float(request.get("expires", -1.0)) < float(_gui_frame_id) { _accessibility_requests[request_id] = nil }
+   if is_list(_accessibility_nodes) { clear(_accessibility_nodes) } else { _accessibility_nodes = [] }
+   if _accessibility_request_count > 0 {
+      for request_id in _accessibility_requests.keys() {
+         def request = _accessibility_requests.get(request_id)
+         if float(request.get("expires", -1.0)) < float(_gui_frame_id) {
+            _accessibility_requests = _accessibility_requests.delete(request_id)
+            _accessibility_request_count -= 1
+         }
+      }
    }
    if !_text_caches_ready { _ensure_text_caches() }
    if win { prepare_input(win, ww, wh) }
@@ -2244,11 +2258,12 @@ fn _key_event_present(int key) bool {
 fn _widget_key_activate(any full_id) bool { _disabled_on == 0 && (_kbd_focus_id == full_id) && (_key_event_present(KEY_ENTER) || _key_event_present(KEY_SPACE)) }
 
 fn _accessibility_take(any full_id, str action) dict {
-   if _disabled_on > 0 { return dict(0) }
+   if _accessibility_request_count <= 0 || _disabled_on > 0 { return _A11Y_EMPTY }
    def key = to_str(full_id)
    def request = _accessibility_requests.get(key, nil)
-   if !is_dict(request) || to_str(request.get("action", "")) != action { return dict(0) }
-   _accessibility_requests[key] = nil
+   if !is_dict(request) || to_str(request.get("action", "")) != action { return _A11Y_EMPTY }
+   _accessibility_requests = _accessibility_requests.delete(key)
+   _accessibility_request_count -= 1
    request
 }
 
@@ -2306,8 +2321,23 @@ fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=
    0
 }
 
-fn _accessibility_record(any full_id, str role, str name, any value, any bounds, bool checked=false, bool selected=false, bool expanded=false, bool disabled=false, any extra=dict(0)) any {
+fn _accessibility_record(any full_id, str role, str name, any value, any bounds, bool checked=false, bool selected=false, bool expanded=false, bool disabled=false, any extra=nil) any {
    if !_iw_visible { return 0 }
+   ;; Store a compact raw tuple on the hot widget path; materialize dicts and
+   ;; action lists lazily only when accessibility_tree() / accessibility_action()
+   ;; is actually queried.
+   _accessibility_nodes = _accessibility_nodes.append([
+      full_id, _current_window_id_cache, role, name, value, bounds,
+      disabled || _disabled_on > 0, _kbd_focus_id == full_id, _iw_hovered,
+      _iw_held, checked, selected, expanded, extra
+   ])
+   0
+}
+
+fn _accessibility_materialize(any raw) dict {
+   if is_dict(raw) { return raw }
+   if !is_list(raw) || raw.len < 14 { return dict(0) }
+   def role = to_str(raw.get(2, ""))
    mut actions = []
    if role == "button" || role == "checkbox" || role == "radio" || role == "switch" || role == "option" || role == "tab" || role == "combobox" || role == "menuitem" || role == "treeitem" || role == "slider" || role == "spinbutton" || role == "textbox" {
       actions = actions.append("focus")
@@ -2318,11 +2348,25 @@ fn _accessibility_record(any full_id, str role, str name, any value, any bounds,
    if role == "slider" || role == "spinbutton" {
       actions = actions.append("set_value").append("increment").append("decrement")
    }
-   mut dict node = {"id": to_str(full_id), "parent": "window:" + _current_window_id_cache, "role": role, "name": name, "value": value, "bounds": bounds, "disabled": disabled || _disabled_on > 0, "focused": _kbd_focus_id == full_id, "hovered": _iw_hovered, "pressed": _iw_held, "checked": checked, "selected": selected, "expanded": expanded}
-   node["actions"] = actions
+   mut dict node = {
+      "id": to_str(raw.get(0, "")),
+      "parent": "window:" + to_str(raw.get(1, "")),
+      "role": role,
+      "name": to_str(raw.get(3, "")),
+      "value": raw.get(4, nil),
+      "bounds": raw.get(5, []),
+      "disabled": bool(raw.get(6, false)),
+      "focused": bool(raw.get(7, false)),
+      "hovered": bool(raw.get(8, false)),
+      "pressed": bool(raw.get(9, false)),
+      "checked": bool(raw.get(10, false)),
+      "selected": bool(raw.get(11, false)),
+      "expanded": bool(raw.get(12, false)),
+      "actions": actions
+   }
+   def extra = raw.get(13, nil)
    if is_dict(extra) { for k in extra.keys() { node[k] = extra.get(k) } }
-   _accessibility_nodes = _accessibility_nodes.append(node)
-   0
+   node
 }
 
 fn accessibility_tree() dict {
@@ -2331,13 +2375,14 @@ fn accessibility_tree() dict {
    mut by_id = dict(16)
    mut roots = []
    for node in _accessibility_nodes {
-      if to_str(node.get("role", "")) != "window" { continue }
+      if !is_dict(node) { continue }
       def int index = windows.len
       windows = windows.append({"id": node.get("id", ""), "role": "window", "name": node.get("name", ""), "bounds": node.get("bounds", []), "disabled": node.get("disabled", false), "focused": node.get("focused", false), "children": []})
       by_id[to_str(node.get("id", ""))] = index
    }
-   for node in _accessibility_nodes {
-      if to_str(node.get("role", "")) == "window" { continue }
+   for raw in _accessibility_nodes {
+      if !is_list(raw) { continue }
+      def node = _accessibility_materialize(raw)
       def parent = to_str(node.get("parent", ""))
       if by_id.contains(parent) {
          def int index = int(by_id.get(parent, -1))
@@ -2353,12 +2398,14 @@ fn accessibility_action(any id, any action, any value=nil) bool {
    "Queues an action advertised by the current accessibility tree for the next frame. Pass the node id from accessibility_tree; actions are consumed by that widget when it is submitted."
    def node_id, act = to_str(id), to_str(action)
    mut target = nil
-   for node in _accessibility_nodes {
-      if to_str(node.get("id", "")) == node_id { target = node break }
+   for raw in _accessibility_nodes {
+      def rid = is_dict(raw) ? to_str(raw.get("id", "")) : (is_list(raw) && raw.len > 0 ? to_str(raw.get(0, "")) : "")
+      if rid == node_id { target = _accessibility_materialize(raw) break }
    }
    if !is_dict(target) || target.get("disabled", false) { return false }
    def available = target.get("actions", [])
    if !is_list(available) || _list_find_text(available, act) < 0 { return false }
+   if !_accessibility_requests.contains(node_id) { _accessibility_request_count += 1 }
    _accessibility_requests[node_id] = {"action": act, "value": value, "found": true, "expires": float(_gui_frame_id + 1)}
    true
 }
@@ -2771,7 +2818,14 @@ fn button(any id, any label, any w=0.0, any h=0.0, any style=nil) bool {
    if bw <= 0.0 { bw = min(_current_body_w(), max(_sx(84.0), _text_fit_width(_font_body(), txt) + _item_pad_x() * 2.0)) }
    mut bh = float(h)
    if bh <= 0.0 { bh = max(_item_h(), _sx(26.0)) }
-   def rect = _layout_rect(bw, bh)
+   button_at(id, txt, _layout_rect(bw, bh), style)
+}
+
+fn button_at(any id, any label, list rect, any style=nil) bool {
+   "Draws an interactive button at a solved [x, y, w, h] rectangle without moving the window layout cursor."
+   if !_enabled || _current_window_id_cache.len == 0 || rect.len < 4 { return false }
+   if float(rect.get(2)) <= 0.0 || float(rect.get(3)) <= 0.0 { return false }
+   def txt = _ui_text(label)
    def full = _wid(id)
    _register_focusable(full)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
@@ -2805,6 +2859,126 @@ fn button(any id, any label, any w=0.0, any h=0.0, any style=nil) bool {
       _draw_centered_text(txt, x, y, ww, hh, fg)
    }
    clicked
+}
+
+fn _flex_color(any color) any {
+   if !is_list(color) { return color }
+   [float(color.get(0, 255)) / 255.0, float(color.get(1, 255)) / 255.0,
+      float(color.get(2, 255)) / 255.0, float(color.get(3, 255)) / 255.0]
+}
+
+fn _draw_flex_rounded(list shape, any color) any {
+   if _ov_depth > 0 { return _ov_push(7, shape, color, 0, 0, 0) }
+   _flush_text_runs()
+   _flush_rect_batch()
+   def x, y = float(shape.get(0)), float(shape.get(1))
+   def w, h = float(shape.get(2)), float(shape.get(3))
+   def radius, thickness = float(shape.get(4)), float(shape.get(5))
+   if thickness <= 0.0 { return draw_rect_rounded(x, y, w, h, radius, color) }
+   def inset = thickness * 0.5
+   draw_rect_rounded_lines_ex([x + inset, y + inset, w - thickness, h - thickness], max(0.0, radius - inset), 24, thickness, color)
+}
+
+fn _flex_font(dict data) int {
+   def selected = data.get("font", 0)
+   def size = int(clamp(float(data.get("font_size", 16)), 0.0, 256.0))
+   mut font = 0
+   if is_str(selected) {
+      font = str.atoi(selected)
+      if font <= 0 && selected.len > 0 { font = font_load(to_str(selected), size > 0 ? size : 16) }
+   } else { font = int(selected) }
+   if font <= 0 { font = _font_body() }
+   font_at_size(font, size)
+}
+
+fn measure_flex_text(str text, dict node) list {
+   "Measures text with the font and letter spacing used by draw_flex_commands. Pass {\"styled\": gui.measure_flex_text} to flex.solve."
+   measure_text(_flex_font(node), text, float(node.get("letter_spacing", 0.0)))
+}
+
+fn _draw_flex_text(int font, str text, f64 x, f64 y, any color, f64 letter_spacing) any {
+   if text.len == 0 { return 0 }
+   if letter_spacing == 0.0 { return _queue_text_ui(font, text, x, y, color) }
+   def px, py = _snap(x), _snap(y)
+   def packed = _text_color_u32(color)
+   if _ov_depth > 0 { return _ov_push(8, font, text, px, py, [packed, letter_spacing]) }
+   _flush_text_runs()
+   draw_text(font, text, px, py, packed, letter_spacing)
+}
+
+fn draw_flex_commands(list commands, f64 origin_x, f64 origin_y, dict values=dict(0)) list {
+   "Draws flex commands at a screen origin and returns named actions. Checkbox values are read from values by id, default to the markup, and are returned as value in change records."
+   mut actions = []
+   def window = _current_window_state()
+   if !_enabled || !is_dict(window) { return actions }
+   def saved_clip = window.get("clip_override", 0)
+   def body = _current_clip()
+   for command in commands {
+      def kind = to_str(command.get("type", ""))
+      if kind == "scissor_start" || kind == "scissor_end" { continue }
+      def bounds = command.get("rect", [])
+      if bounds.len < 4 { continue }
+      def x = origin_x + float(bounds.get(0))
+      def y = origin_y + float(bounds.get(1))
+      def w = float(bounds.get(2))
+      def h = float(bounds.get(3))
+      def data = command.get("data", dict(0))
+      def clip = command.get("clip", [])
+      if clip.len >= 4 {
+         def left = max(float(body.get(0)), origin_x + float(clip.get(0)))
+         def top = max(float(body.get(1)), origin_y + float(clip.get(1)))
+         def right = min(float(body.get(0)) + float(body.get(2)), origin_x + float(clip.get(0)) + float(clip.get(2)))
+         def bottom = min(float(body.get(1)) + float(body.get(3)), origin_y + float(clip.get(1)) + float(clip.get(3)))
+         if right <= left || bottom <= top { continue }
+         def visible = [left, top, right - left, bottom - top]
+         window["clip_override"] = visible
+         push_clip_rect(visible)
+      }
+      if kind == "button" {
+         def id = command.get("id", "")
+         if button_at(id, data.get("text", ""), [x, y, w, h]) {
+            actions = actions.append({"id": id, "action": data.get("action", "")})
+         }
+      } elif kind == "checkbox" && w > 0.0 && h > 0.0 {
+         def id = to_str(command.get("id", ""))
+         def checked = !!values.get(id, data.get("checked", false))
+         def next = _choice_control_at(id, data.get("text", ""), checked, [x, y, w, h])
+         if next != checked { actions = actions.append({"id": id, "action": data.get("action", ""), "value": next}) }
+      } elif kind == "rect" {
+         def radius = float(data.get("radius", 0.0))
+         def color = _flex_color(data.get("color", 0))
+         if radius > 0.0 { _draw_flex_rounded([x, y, w, h, radius, 0.0], color) }
+         else { paint_rect(x, y, w, h, color) }
+      } elif kind == "text" {
+         def font = _flex_font(data)
+         def tx = origin_x + float(data.get("x", bounds.get(0)))
+         def ty = origin_y + float(data.get("y", bounds.get(1)))
+         _draw_flex_text(font, data.get("text", ""), tx, ty, _flex_color(data.get("color", 0)), float(data.get("letter_spacing", 0.0)))
+      } elif kind == "border" {
+         def width = min(max(0.0, float(data.get("width", 1.0))), min(w, h) * 0.5)
+         def color = _flex_color(data.get("color", 0))
+         def radius = float(data.get("radius", 0.0))
+         if width > 0.0 && radius > 0.0 {
+            _draw_flex_rounded([x, y, w, h, min(radius, min(w, h) * 0.5), width], color)
+         } else {
+            paint_rect(x, y, w, width, color)
+            paint_rect(x, y + h - width, w, width, color)
+            paint_rect(x, y + width, width, h - width * 2.0, color)
+            paint_rect(x + w - width, y + width, width, h - width * 2.0, color)
+         }
+      } elif kind == "image" {
+         def texture = data.get("image", 0)
+         if _tex_ref_id(texture) >= 0 {
+            def tint = _rgba_or_default(_flex_color(data.get("tint", 0)), [1.0, 1.0, 1.0, 1.0])
+            _gui_tex_ref_uv(x, y, w, h, texture, float(tint.get(0)), float(tint.get(1)), float(tint.get(2)), float(tint.get(3)))
+         }
+      }
+      if clip.len >= 4 {
+         pop_clip_rect()
+         window["clip_override"] = saved_clip
+      }
+   }
+   actions
 }
 
 fn small_button(any id, any label, any w=0.0, any h=0.0, any style=nil) bool {
@@ -3019,16 +3193,26 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
       def rwf, rhf = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
       def hovered = bool(_iw_hovered)
       def held = bool(_iw_held)
-      def state = _disabled_on > 0 ? "disabled" : (held ? "pressed" : (hovered ? "hovered" : "active"))
       def default_bg = selected ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
-      def colors = _button_style(style, state, default_bg, _border_u32, _text_u32)
-      def bg, edge, text_col = int(colors.get(0)), int(colors.get(1)), int(colors.get(2))
+      mut int bg = default_bg
+      mut int edge = _border_u32
+      mut int text_col = _text_u32
+      def has_style = is_dict(style)
+      def state = !has_style ? "" : (_disabled_on > 0 ? "disabled" : (held ? "pressed" : (hovered ? "hovered" : "active")))
+      if has_style {
+         def colors = _button_style(style, state, default_bg, _border_u32, _text_u32)
+         bg = int(colors.get(0))
+         edge = int(colors.get(1))
+         text_col = int(colors.get(2))
+      }
       def icon_sz = (_tex_ref_id(tex_id) >= 0) ? min(_sx(18.0), max(_sx(12.0), rhf - _sx(8.0))) : 0.0
       def text_x = x + _item_pad_x() + ((icon_sz > 0.0) ? (icon_sz + _sx(6.0)) : 0.0)
       def text_w = max(1.0, rwf - (text_x - x) - _item_pad_x())
       _gui_rect_fast(x, y, rwf, rhf, bg)
-      def state_style = is_dict(style) ? style.get(state, nil) : nil
-      if is_dict(state_style) && is_list(state_style.get("border", nil)) { _gui_rect_outline_fast(x, y, rwf, rhf, edge) }
+      if has_style {
+         def state_style = style.get(state, nil)
+         if is_dict(state_style) && is_list(state_style.get("border", nil)) { _gui_rect_outline_fast(x, y, rwf, rhf, edge) }
+      }
       if selected || hovered { _gui_rect_fast(x, y, selected ? _sx(4.0) : _sx(2.0), rhf, selected ? _accent_u32 : _border_u32) }
       if icon_sz > 0.0 {
          _gui_tex_ref_uv(x + _item_pad_x(), y + max(_sx(4.0), (rhf - icon_sz) * 0.5), icon_sz, icon_sz,
@@ -3352,17 +3536,6 @@ fn title_input_text(any id, any value, any placeholder="", any w=0.0) str {
    out
 }
 
-fn _choice_box_interact(any id, any txt, any box) list {
-   def rect = _layout_rect(_current_body_w(), max(float(box) + _sx(6.0), _small_item_h()))
-   def full = _wid(id)
-   _register_focusable(full)
-   _begin_interact_widget(full,
-      float(rect.get(0, 0.0)), float(rect.get(1, 0.0)),
-      float(rect.get(2, 0.0)), float(rect.get(3, 0.0)),
-      true)
-   [rect, full, _kbd_focus_id == full]
-}
-
 fn _draw_choice_label(any txt, any rect, any box, any bx, any by, int text_color=_text_u32) any {
    def ry, rh = float(rect.get(1, 0.0)), float(rect.get(3, 0.0))
    _draw_text_ui_clipped(
@@ -3373,13 +3546,18 @@ fn _draw_choice_label(any txt, any rect, any box, any bx, any by, int text_color
 }
 
 fn _choice_control(any id, any label, any value, bool radio=false, any style=nil) bool {
+   def rect = _layout_rect(_current_body_w(), max(_sx(22.0), _small_item_h()))
+   _choice_control_at(id, label, value, rect, radio, style)
+}
+
+fn _choice_control_at(any id, any label, any value, list rect, bool radio=false, any style=nil) bool {
    def txt = _ui_text(label)
    def box = _sx(16.0)
-   def hit = _choice_box_interact(id, txt, box)
-   def rect = hit.get(0, [0.0, 0.0, 0.0, 0.0])
-   def full = hit.get(1, "")
+   def full = _wid(id)
+   _register_focusable(full)
+   _begin_interact_widget(full, float(rect.get(0)), float(rect.get(1)), float(rect.get(2)), float(rect.get(3)), true)
    mut out = !!value
-   def focused = hit.get(2, false)
+   def focused = _kbd_focus_id == full
    def a11y_activate = _accessibility_take(full, "activate")
    if _iw_clicked || _widget_key_activate(full) || a11y_activate.get("found", false) { out = radio ? true : !out }
    _accessibility_record(full, radio ? "radio" : "checkbox", txt, out, rect, out)
@@ -5100,6 +5278,13 @@ fn _overlay_replay(list cmds) any {
       } elif kind == 4 {
          _flush_rect_batch()
          scissor_pop()
+      } elif kind == 7 {
+         def shape = cmds.get(i1, [])
+         if is_list(shape) && shape.len == 6 { _draw_flex_rounded(shape, cmds.get(i2, 0)) }
+      } elif kind == 8 {
+         _flush_rect_batch()
+         def style = cmds.get(i5, [])
+         draw_text(int(cmds.get(i1, 0)), to_str(cmds.get(i2, "")), float(cmds.get(i3, 0.0)), float(cmds.get(i4, 0.0)), int(style.get(0, 0)), float(style.get(1, 0.0)))
       } elif kind == 6 {
          _flush_rect_batch()
          def any ln = cmds.get(i1, 0)

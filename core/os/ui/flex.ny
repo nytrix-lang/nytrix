@@ -37,12 +37,13 @@
 ;; References:
 ;; - https://github.com/nicbarker/clay
 ;; - https://www.w3.org/TR/css-flexbox-1/
-module core.os.ui.flex(node, text, from_xml, classes, styled_node, reconcile, grid, solve, solve_animated, rect_of, mono_measure, boxes_at, render_commands)
+module core.os.ui.flex(node, text, from_xml, watch_xml, poll_xml, classes, styled_node, reconcile, grid, solve, solve_animated, rect_of, mono_measure, boxes_at, render_commands)
 use core
 use core.str as str
 use core.math (max, min, floor)
 use core.os.ui.anim as anim
 use core.math.parse.data.xml as xml
+use core.os as os
 
 fn node(dict props, list children=[]) dict {
    "Creates a layout node with `props` and `children`."
@@ -61,31 +62,38 @@ fn text(str id, str s, dict props=dict(0)) dict {
 
 fn _xml_layout_node(dict element) any {
    def tag = to_str(element.get("name", ""))
-   if tag != "row" && tag != "column" && tag != "box" && tag != "text" { return nil }
-   mut props = dict(16)
-   if tag == "row" || tag == "column" { props["dir"] = tag == "row" ? "row" : "col" }
+   def interactive = tag == "button" || tag == "checkbox"
+   if tag != "row" && tag != "column" && tag != "box" && tag != "text" && !interactive { return nil }
    def attrs = element.get("attr", dict(0))
+   mut props = classes(attrs.get("class", ""))
+   if tag == "row" || tag == "column" { props["dir"] = tag == "row" ? "row" : "col" }
    for attr in attrs.keys() {
       def key = to_str(attr)
+      if key == "class" { continue }
       def value = to_str(attrs.get(attr, ""))
-      if ["id", "align", "justify", "font"].contains(key) {
+      if ["id", "align", "justify", "font"].contains(key) || (interactive && key == "action") {
          props[key] = value
       } elif key == "w" || key == "h" {
          if value == "grow" || value == "fit" || str.endswith(value, "%") { props[key] = value }
          else { props[key] = float(str.atof(value)) }
-      } elif ["min_w", "max_w", "min_h", "max_h", "pad", "gap", "aspect", "font_size", "letter_spacing", "scroll_x", "scroll_y", "z", "radius"].contains(key) {
+      } elif ["min_w", "max_w", "min_h", "max_h", "pad", "gap", "aspect", "font_size", "letter_spacing", "line_height", "scroll_x", "scroll_y", "z", "radius"].contains(key) {
          props[key] = float(str.atof(value))
-      } elif key == "wrap" || key == "clip" {
+      } elif key == "wrap" || key == "clip" || (tag == "checkbox" && key == "checked") {
          if value != "true" && value != "false" { return nil }
          props[key] = value == "true"
       } else { return nil }
    }
    def raw_children = element.get("children", [])
    def label = to_str(element.get("text", ""))
-   if tag == "text" {
+   if tag == "text" || interactive {
       if raw_children.len > 0 { return nil }
       props["text"] = label
    } elif label.len > 0 { return nil }
+   if interactive {
+      if to_str(props.get("id", "")).len == 0 || to_str(props.get("action", "")).len == 0 { return nil }
+      props["widget"] = tag
+      if !props.contains("pad") { props["pad"] = tag == "checkbox" ? [6.0, 6.0, 6.0, 26.0] : 6.0 }
+   }
    mut children = []
    for raw_child in raw_children {
       if !is_dict(raw_child) { return nil }
@@ -97,10 +105,43 @@ fn _xml_layout_node(dict element) any {
 }
 
 fn from_xml(str source) any {
-   "Reads a declarative flex layout with row, column, box and text elements. Attributes use flex property names. Text elements take their label from the element body. Returns nil for an unsupported layout."
-   def root = xml.parse(source)
+   "Reads a declarative flex layout with row, column, box, text, button and checkbox elements. Interactive controls require a stable id and named action. The class attribute accepts flex utility classes. Element direction and explicit attributes override classes, and descendants inherit text styles. Returns nil for an unsupported layout."
+   def root = xml.parse(source, true)
    if !is_dict(root) { return nil }
-   _xml_layout_node(root)
+   def tree = _xml_layout_node(root)
+   if !is_dict(tree) { return nil }
+   tree.set("children", _inherit_text_styles(_kids(tree), tree))
+}
+
+fn watch_xml(str path) dict {
+   "Loads a file and returns its watch state. Read tree for the current layout and call poll_xml from your frame loop or timer."
+   mut watch = {"path": path, "source": "", "tree": nil, "status": "unreadable"}
+   poll_xml(watch)
+   watch
+}
+
+fn poll_xml(dict watch) str {
+   "Checks a watched XML file. Returns updated, unchanged, invalid, or unreadable. Invalid edits and read failures preserve the last valid tree."
+   mut status = "unreadable"
+   match os.file_read(to_str(watch.get("path", ""))) {
+      ok(contents) -> {
+         def source = to_str(contents)
+         if !is_nil(watch.get("tree", nil)) && source == watch.get("source", "") {
+            status = "unchanged"
+         } else {
+            def next = from_xml(source)
+            if is_dict(next) {
+               def result = reconcile(watch.get("tree", nil), next)
+               watch["tree"] = result.get("tree")
+               watch["source"] = source
+               status = "updated"
+            } else { status = "invalid" }
+         }
+      }
+      err(_) -> {}
+   }
+   watch["status"] = status
+   status
 }
 
 fn _tw_scale(str value) f64 {
@@ -549,15 +590,21 @@ fn _size_key(bool x) str { x ? "_w" : "_h" }
 ;; ---- text ------------------------------------------------------------------
 ;; Calls the caller-supplied text measure callback.
 @effects(all)
-fn _measure(any measure, str s) list {
+fn _measure(any measure, str s, dict node) list {
    if is_nil(measure) { return mono_measure(s) }
+   if is_dict(measure) {
+      def fnptr styled = measure.get("styled", 0)
+      if !styled { return mono_measure(s) }
+      def result = styled(s, node)
+      return is_list(result) && result.len >= 2 ? result : mono_measure(s)
+   }
    def r = measure(s)
    is_list(r) && r.len >= 2 ? r : mono_measure(s)
 }
 
 ;; Calls the caller-supplied text measure callback.
 @effects(all)
-fn _wrap_lines(any measure, str s, f64 width) list {
+fn _wrap_lines(any measure, str s, f64 width, dict node) list {
    ;; Greedy word wrap; a word wider than the line gets its own line.
    mut out = []
    for para in str.split(s, "\n") {
@@ -566,7 +613,7 @@ fn _wrap_lines(any measure, str s, f64 width) list {
       for w in words {
          def word = to_str(w)
          def cand = line.len > 0 ? line + " " + word : word
-         if line.len > 0 && float(_measure(measure, cand).get(0, 0.0)) > width + 0.01 {
+         if line.len > 0 && float(_measure(measure, cand, node).get(0, 0.0)) > width + 0.01 {
             out = out.append(line)
             line = word
          } else { line = cand }
@@ -587,16 +634,17 @@ fn _fit(dict n, bool x, any measure) f64 {
       def s = to_str(n.get("text", ""))
       if x {
          ;; Wrapping text can shrink to its widest word.
-         content = float(_measure(measure, s).get(0, 0.0))
+         content = float(_measure(measure, s, n).get(0, 0.0))
          if bool(n.get("wrap", false)) {
             mut f64 widest = 0.0
-            for w in str.split(s, " ") { widest = float(max(widest, float(_measure(measure, to_str(w)).get(0, 0.0)))) }
+            for w in str.split(s, " ") { widest = float(max(widest, float(_measure(measure, to_str(w), n).get(0, 0.0)))) }
             n["_text_min_w"] = widest
          }
       } else {
          def lines = n.get("_lines", nil)
-         def lh = float(_measure(measure, "Ag").get(1, 16.0))
-         content = is_list(lines) ? lh * float(lines.len) : float(_measure(measure, s).get(1, lh))
+         def lh = float(n.get("line_height", _measure(measure, "Ag", n).get(1, 16.0)))
+         n["_text_line_height"] = lh
+         content = is_list(lines) ? lh * float(lines.len) : float(_measure(measure, s, n).get(1, lh))
       }
    }
    def kids = _kids(n)
@@ -740,10 +788,10 @@ fn _refit_widths(dict n, any measure) f64 {
    mut f64 content = 0.0
    if n.contains("text") {
       def s = to_str(n.get("text", ""))
-      content = float(_measure(measure, s).get(0, 0.0))
+      content = float(_measure(measure, s, n).get(0, 0.0))
       if bool(n.get("wrap", false)) {
          mut f64 widest = 0.0
-         for word in str.split(s, " ") { widest = float(max(widest, float(_measure(measure, to_str(word)).get(0, 0.0)))) }
+         for word in str.split(s, " ") { widest = float(max(widest, float(_measure(measure, to_str(word), n).get(0, 0.0)))) }
          n["_text_min_w"] = widest
       }
    }
@@ -780,7 +828,7 @@ fn _wrap(dict n, any measure) int {
    if n.contains("text") && bool(n.get("wrap", false)) {
       def pad = _pad(n)
       def f64 width = float(n.get("_w", 0.0)) - float(pad.get(1, 0.0)) - float(pad.get(3, 0.0))
-      n["_lines"] = _wrap_lines(measure, to_str(n.get("text", "")), float(max(1.0, width)))
+      n["_lines"] = _wrap_lines(measure, to_str(n.get("text", "")), float(max(1.0, width)), n)
    } elif n.contains("text") {
       n["_lines"] = str.split(to_str(n.get("text", "")), "\n")
    }
@@ -892,7 +940,8 @@ fn _place(dict n, f64 x, f64 y, list clip, int depth, list out, dict rects) list
 fn solve(dict root, f64 width, f64 height, any measure=nil) dict {
    "Lays out `root` inside a width x height viewport. Returns
    {rects: {id: [x, y, w, h]}, boxes: [{id, x, y, w, h, depth, clip, node, lines}]}
-   with boxes in draw order(parents before children, floats last)."
+   with boxes in draw order(parents before children, floats last). The measure
+   option is a text callback or a dict with a styled callback taking text and node."
    ;; Root: grow/pct resolve against the viewport.
    _fit(root, true, measure)
    def kx = _kind(root, true)
@@ -994,13 +1043,19 @@ fn _with_clip(list out, any box, dict command) list {
 }
 
 fn render_commands(dict result) list {
-   "Builds renderer-neutral tagged rect, border, text, image and scissor records in layout draw order."
+   "Builds renderer-neutral rect, border, text, image, widget and scissor records in layout draw order. Widget records carry a named action for the caller's event dispatch."
    def boxes = result.get("boxes", [])
    if !is_list(boxes) { return [] }
    mut out = []
    for box in boxes {
       if !is_dict(box) { continue }
       def node = box.get("node", dict(0))
+      def widget = to_str(node.get("widget", ""))
+      if widget == "button" || widget == "checkbox" {
+         def payload = {"text": node.get("text", ""), "action": node.get("action", ""), "checked": node.get("checked", false)}
+         out = _with_clip(out, box, _render_command(widget, box, payload))
+         continue
+      }
       if node.contains("background") {
          out = _with_clip(out, box, _render_command("rect", box, {"color": node.get("background"), "radius": node.get("radius", 0.0)}))
       }
@@ -1017,7 +1072,7 @@ fn render_commands(dict result) list {
          def f64 ty = float(box.get("y", 0.0)) + float(pad.get(0, 0.0))
          mut lines = box.get("lines", [])
          if !is_list(lines) || lines.len == 0 { lines = [to_str(node.get("text", ""))] }
-         def f64 line_height = float(node.get("line_height", 16.0))
+         def f64 line_height = float(node.get("_text_line_height", node.get("line_height", 16.0)))
          mut int li = 0
          for line in lines {
             def payload = {"text": to_str(line), "color": node.get("color", [255, 255, 255, 255]), "font": node.get("font", 0), "font_size": node.get("font_size", 16), "letter_spacing": node.get("letter_spacing", 0), "line_height": line_height, "x": tx, "y": ty + float(li) * line_height}

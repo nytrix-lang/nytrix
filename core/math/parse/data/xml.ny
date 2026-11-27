@@ -36,7 +36,7 @@ fn _attr_key_stop(int c) bool {
    }
 }
 
-fn _parse_attr(str s, int p, int n) list {
+fn _parse_attr(str s, int p, int n, bool strict) list {
    mut attrs = dict(8)
    while p < n {
       p = _skip_ws(s, p, n)
@@ -53,10 +53,12 @@ fn _parse_attr(str s, int p, int n) list {
       }
       def key = builder_to_str(kb)
       builder_free(kb)
+      if key.len == 0 || (strict && attrs.contains(key)) { return [attrs, -1] }
       p = _skip_ws(s, p, n)
       if p < n && load8(s, p) == 61 {
          p += 1
          p = _skip_ws(s, p, n)
+         if p >= n { return [attrs, -1] }
          def quote = load8(s, p)
          mut attr_value = ""
          if quote == 34 || quote == 39 {
@@ -67,10 +69,12 @@ fn _parse_attr(str s, int p, int n) list {
                attr_value = str.str_slice(s, value_start, quote_at)
                p = quote_at + 1
             } else {
+               if strict { return [attrs, -1] }
                attr_value = str.str_slice(s, value_start, n)
                p = n
             }
          } else {
+            if strict { return [attrs, -1] }
             mut vb = Builder(32)
             while p < n {
                def c = load8(s, p)
@@ -85,14 +89,15 @@ fn _parse_attr(str s, int p, int n) list {
          }
          if key.len > 0 { attrs = attrs.set(key, attr_value) }
       } else {
+         if strict { return [attrs, -1] }
          if key.len > 0 { attrs = attrs.set(key, true) }
       }
    }
    [attrs, p]
 }
 
-fn parse(any data) any {
-   "Parses a simple XML string into a tree of nodes."
+fn parse(any data, bool strict=false) any {
+   "Parses a simple XML string into a tree of nodes. Strict mode requires balanced tags, quoted attributes and exactly one root."
    if !is_str(data) { return 0 }
    def n = data.len
    mut p = 0
@@ -112,14 +117,27 @@ fn parse(any data) any {
             }
             def name = builder_to_str(nb)
             builder_free(nb)
+            if strict {
+               if p >= n || stack.len == 0 { return 0 }
+               def current = stack.get(stack.len - 1)
+               if str.strip(name) != current.get("name", "") { return 0 }
+            }
             p += 1
-            if stack.len > 1 { stack.pop() }
+            if stack.len > 0 { stack.pop() }
          } elif p < n && load8(data, p) == 33 {
-            while p < n && load8(data, p) != 62 { p += 1 }
-            p += 1
+            if str.str_slice(data, p, min(p + 3, n)) == "!--" {
+               def end = str.find_from(data, "-->", p + 3)
+               if end < 0 { return 0 }
+               p = end + 3
+            } else {
+               if strict { return 0 }
+               while p < n && load8(data, p) != 62 { p += 1 }
+               p += 1
+            }
          } elif p < n && load8(data, p) == 63 {
-            while p < n && load8(data, p) != 62 { p += 1 }
-            p += 1
+            def end = str.find_from(data, "?>", p + 1)
+            if end < 0 { return 0 }
+            p = end + 2
          } else {
             mut nb = Builder(16)
             while p < n {
@@ -132,17 +150,20 @@ fn parse(any data) any {
             }
             def name = builder_to_str(nb)
             builder_free(nb)
-            def attr_res = _parse_attr(data, p, n)
+            if strict && (name.len == 0 || (stack.len == 0 && is_dict(root))) { return 0 }
+            def attr_res = _parse_attr(data, p, n, strict)
             def attrs = __load_item_any(attr_res, 0)
             ; `__load_item_any` returns a tagged dynamic integer; parser
             ; offsets are raw native indices and must be unboxed once here.
             p = __any_to_i64(__load_item_any(attr_res, 1))
+            if p < 0 { return 0 }
             mut self_closing = false
             if p < n && load8(data, p) == 47 {
                self_closing = true
                p += 1
             }
             if p < n && load8(data, p) == 62 { p += 1 }
+            elif strict { return 0 }
             def node = Node(name, attrs)
             if !is_dict(root) { root = node }
             if stack.len > 0 {
@@ -167,6 +188,7 @@ fn parse(any data) any {
          }
          def text = builder_to_str(tb)
          builder_free(tb)
+         if strict && stack.len == 0 && str.strip(text).len > 0 { return 0 }
          if stack.len > 0 {
             def current = stack.get(stack.len - 1)
             def existing = current.get("text")
@@ -174,6 +196,7 @@ fn parse(any data) any {
          }
       }
    }
+   if strict && stack.len > 0 { return 0 }
    root
 }
 
