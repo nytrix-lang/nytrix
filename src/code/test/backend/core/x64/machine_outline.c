@@ -21,6 +21,9 @@ static bool build_constant(nyr_mach_func_t *func, int64_t value) {
                                              .as.imm = value} }) &&
          nyr_mach_emit(func,
                       (nyr_mach_inst_t){ .opcode = NYR_MACH_RET,
+                                         .src0 = {.kind = NYR_MACH_OPERAND_VREG,
+                                                  .reg_class = NYR_MACH_REGCLASS_GPR,
+                                                  .as.reg = dst},
                                        .effects = NYR_MACH_EFFECT_CONTROL });
 }
 
