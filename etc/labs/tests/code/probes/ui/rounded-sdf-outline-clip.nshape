@@ -1,0 +1,34 @@
+shape rounded_sdf_outline_clip {
+  family "runtime/ui"
+  generator "regression"
+  features [ui sdf outline clip framebuffer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_stdout "ROUNDED-OUTLINE-CLIP-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+
+assert(gfx.apply_backend_name("mock"), "select software backend")
+assert(gfx.init_window(32, 32, "rounded outline clip probe", 0, false, false, 1), "open mock window")
+assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin frame")
+gfx.set_ortho_2d(0.0, 32.0, 32.0, 0.0)
+assert(gfx.draw_rect_rounded_sdf_outline_clipped(
+   4.0, 4.0, 24.0, 24.0, 5.0, 2.0,
+   [0.0, 0.0, 1.0, 1.0], [4.0, 4.0, 10.0, 24.0]), "submit clipped outline")
+assert(gfx.end_frame(), "present frame")
+def fb = gfx.read_framebuffer()
+def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+assert(pixels, "read pixels")
+def int edge_b = load8(pixels, (16 * 32 + 4) * 4 + 2) & 255
+def int edge_r = load8(pixels, (16 * 32 + 4) * 4) & 255
+def int inside_r = load8(pixels, (16 * 32 + 8) * 4) & 255
+def int clipped_r = load8(pixels, (16 * 32 + 15) * 4) & 255
+free(pixels)
+assert(edge_b > 160 && edge_r < 80, "visible outline segment is blue")
+assert(inside_r > 200 && clipped_r > 200, "stroke leaves the interior and clipped side clear")
+gfx.close_window()
+print("ROUNDED-OUTLINE-CLIP-OK")
+NY
+}
