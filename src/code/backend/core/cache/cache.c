@@ -16,6 +16,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/IRReader.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm/Config/llvm-config.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -926,6 +927,55 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module,
     return false;
   }
   LLVMStripModuleDebugInfo(emit_mod);
+  for (LLVMValueRef f = LLVMGetFirstFunction(emit_mod); f;
+       f = LLVMGetNextFunction(f)) {
+    if (!LLVMGetFirstBasicBlock(f))
+      continue;
+    const char *fname = LLVMGetValueName(f);
+    if (!fname || strcmp(fname, "_ny_top_entry") == 0 ||
+        strcmp(fname, "main") == 0)
+      continue;
+    if (LLVMGetLinkage(f) == LLVMExternalLinkage)
+      LLVMSetLinkage(f, LLVMInternalLinkage);
+  }
+  {
+    LLVMPassBuilderOptionsRef popt = LLVMCreatePassBuilderOptions();
+    if (popt) {
+      LLVMErrorRef perr = LLVMRunPasses(emit_mod, "globaldce", NULL, popt);
+      if (perr)
+        LLVMConsumeError(perr);
+      LLVMDisposePassBuilderOptions(popt);
+    }
+  }
+  /*
+   * Pruned stdlib helpers can leave bodyless `ny_fn_*` declarations referenced
+   * by unreachable branches (e.g. type-name checks or terminal helpers). MCJIT
+   * tolerates them lazily, whereas dlopen(RTLD_NOW) rejects the whole .so on
+   * any undefined symbol. Give remaining bodyless `ny_fn_*` declarations a
+   * minimal internal stub so real C/FFI/runtime symbols remain RTLD_NOW-checked.
+   */
+  for (LLVMValueRef f = LLVMGetFirstFunction(emit_mod); f;
+       f = LLVMGetNextFunction(f)) {
+    if (LLVMGetFirstBasicBlock(f) || !LLVMGetFirstUse(f))
+      continue;
+    const char *fname = LLVMGetValueName(f);
+    if (!fname || strncmp(fname, "ny_fn_", 6) != 0)
+      continue;
+    LLVMTypeRef fty = LLVMGlobalGetValueType(f);
+    if (!fty || LLVMGetTypeKind(fty) != LLVMFunctionTypeKind)
+      continue;
+    LLVMSetLinkage(f, LLVMInternalLinkage);
+    LLVMBasicBlockRef bb = LLVMAppendBasicBlockInContext(
+        LLVMGetModuleContext(emit_mod), f, "entry");
+    LLVMBuilderRef b = LLVMCreateBuilderInContext(LLVMGetModuleContext(emit_mod));
+    LLVMPositionBuilderAtEnd(b, bb);
+    LLVMTypeRef rty = LLVMGetReturnType(fty);
+    if (!rty || LLVMGetTypeKind(rty) == LLVMVoidTypeKind)
+      LLVMBuildRetVoid(b);
+    else
+      LLVMBuildRet(b, LLVMConstNull(rty));
+    LLVMDisposeBuilder(b);
+  }
   bool ok = ny_llvm_emit_object(emit_mod, obj_path, opt_level);
   LLVMDisposeModule(emit_mod);
   if (!ok) {

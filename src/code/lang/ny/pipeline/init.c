@@ -749,6 +749,7 @@ static void ny_pipeline_promote_jit_cache(const ny_options *opt,
       ny_access(path, R_OK) == 0)
     return;
   ny_tick_t started = opt->do_timing ? ny_ticks_now() : 0;
+  ny_jit_canonicalize_internal_calls(cg->module);
   bool saved = ny_jit_native_cache_save(path, cg->module, opt->opt_level,
                                         (const char *const *)cg->links.data,
                                         cg->links.len);
@@ -3514,6 +3515,13 @@ int ny_pipeline_run(ny_options *opt) {
           codegen_repopulate_interns(&cg);
 #ifndef _WIN32
           ny_pipeline_promote_jit_cache(opt, native_cache_file, &cg);
+          if (native_cache_file && !native_cache_entry &&
+              ny_jit_native_cache_load(native_cache_file, &native_cache_handle,
+                                       &native_cache_entry)) {
+            if (opt->verbose || ny_env_enabled("NYTRIX_TRACE_CACHE"))
+              fprintf(stderr, "JIT native cache loaded after promote: %s\n",
+                      native_cache_file);
+          }
 #endif
           goto skip_compilation;
         }
@@ -4079,6 +4087,13 @@ int ny_pipeline_run(ny_options *opt) {
   if (write_compile_caches && jit_cache_file) {
 #ifndef _WIN32
     ny_pipeline_promote_jit_cache(opt, native_cache_file, &cg);
+    if (native_cache_file && !native_cache_entry &&
+        ny_jit_native_cache_load(native_cache_file, &native_cache_handle,
+                                 &native_cache_entry)) {
+      if (opt->verbose || ny_env_enabled("NYTRIX_TRACE_CACHE"))
+        fprintf(stderr, "JIT native cache loaded after save: %s\n",
+                native_cache_file);
+    }
 #endif
     if (!loaded_from_cache && ny_jit_cache_save(jit_cache_file, cg.module) &&
         ny_cache_artifact_manifest_save(jit_cache_file, source)) {
@@ -4100,7 +4115,7 @@ skip_compilation:
    * length/index calls jump into stale compiler memory.
    */
   if (opt->native_backend == NY_NATIVE_BACKEND_LLVM && cg.module &&
-      opt->run_jit && !opt->run_aot)
+      opt->run_jit && !opt->run_aot && !native_cache_entry)
     ny_jit_define_runtime_trampolines(cg.module);
   if (opt->native_backend != NY_NATIVE_BACKEND_LLVM)
     ny_type_pipeline_persist_native_facts(&prog, &cg, parse_name);
