@@ -1767,12 +1767,14 @@ comptime template _native_set2_all(name, x11_fn, win32_fn, cocoa_fn){
 comptime emit _native_set1_all(set_window_decorated, x11_backend.set_window_decorated, win32_impl.set_window_decorated, cocoa_impl.set_window_decorated)
 
 fn start_window_move(any win) bool {
-   "Starts a native client-side window drag on supported Linux window systems."
+   "Starts a native client-side window drag on the active platform."
    if !win { return false }
    def backend_name = _select_backend_name()
    def native = _native_window(win)
    if backend_name == "x11" { return x11_backend.start_window_move(native) }
    if backend_name == "wayland" { return wayland_backend.start_window_move(native) }
+   if backend_name == "win32" { return win32_impl.start_window_move(native) }
+   if backend_name == "cocoa" { return cocoa_impl.start_window_move(native) }
    false
 }
 
