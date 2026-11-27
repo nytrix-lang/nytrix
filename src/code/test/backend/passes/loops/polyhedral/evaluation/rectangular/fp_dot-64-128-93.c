@@ -1,0 +1,2 @@
+/* C evaluation fixture for the bounded polyhedral optimizer. */
+long kernel(long seed){double a[5952],b[11904],c[8192];for(long x=0;x<5952;x++)a[x]=(x+seed)&15;for(long x=0;x<11904;x++)b[x]=(x*3)&7;for(long x=0;x<8192;x++)c[x]=1;for(long i=0;i<64;i++)for(long j=0;j<128;j++)for(long t=0;t<93;t++)c[i*128+j]+=a[i*93+t]*b[j*93+t];long sum=0;for(long i=0;i<64;i++)for(long j=0;j<128;j++)sum+=(long)c[i*128+j]*(i+j+1);return sum;}

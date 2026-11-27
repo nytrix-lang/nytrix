@@ -3043,6 +3043,21 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
   )
   target_link_libraries(nyc PRIVATE nyr m)
 
+  if(BUILD_TESTING)
+    add_executable(nyr-polyhedral-native-evaluation
+      "${NYTRIX_ROOT}/src/code/test/backend/passes/loops/polyhedral/native_evaluation.c")
+    target_compile_options(nyr-polyhedral-native-evaluation PRIVATE
+      -Wall -Wextra -Werror)
+    target_compile_definitions(nyr-polyhedral-native-evaluation PRIVATE
+      NYR_POLY_EVALUATION_DIR="${NYTRIX_ROOT}/src/code/test/backend/passes/loops/polyhedral/evaluation")
+    add_custom_target(nyr-polyhedral-evaluation-test
+      COMMAND "$<TARGET_FILE:nyr-polyhedral-native-evaluation>"
+        "$<TARGET_FILE:nyc>" "${CMAKE_C_COMPILER}"
+      DEPENDS nyr-polyhedral-native-evaluation nyc
+      USES_TERMINAL
+      VERBATIM)
+  endif()
+
   # Differential fuzzer and reducer (reference compiler versus NYC); it
   # drives yarpgen and csmith when they are installed.
   add_executable(ny-fuzz "${NYTRIX_ROOT}/src/cmd/tools/fuzz/main.c")

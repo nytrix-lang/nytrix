@@ -9,6 +9,10 @@ list(SORT NYR_BACKEND_TEST_DRIVERS)
 list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX
   ".*/core/(backend_(monolithic_)?scaling|floating-kernel|integer-kernel)\\.c$")
 list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX ".*/gcfuzz\\.c$")
+list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX
+  ".*/passes/loops/polyhedral/evaluation/.*\\.c$")
+list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX
+  ".*/passes/loops/polyhedral/native_evaluation\\.c$")
 
 # CTest runs this standalone even when LLVM is disabled.
 list(FILTER NYR_BACKEND_TEST_DRIVERS EXCLUDE REGEX ".*/lower/jit_layout\\.c$")
