@@ -1,0 +1,93 @@
+shape elm_app {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "elm", "messages"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect_stdout "ELM-APP-OK"
+  source ny <<'SOURCE'
+use core
+use core.os.ui.elm as elm
+use core.os.ui.window.event as ev
+use core.os.ui.window.consts as win
+
+fn _secondary_resize(any event) any {
+   if event.get("window_id") != 2 || event.get("kind") != win.EVENT_WINDOW_RESIZED { return nil }
+   {"type": "add", "amount": event.get("data").get("w")}
+}
+
+fn _update(any raw_state, any message) any {
+   def dict state = raw_state
+   def kind = to_str(message.get("type", ""))
+   if kind == "add" { return state.set("count", int(state.get("count", 0)) + int(message.get("amount", 1))) }
+   elif kind == "reset" { return state.set("count", 0) }
+   state
+}
+
+fn _view(any raw_state) any {
+   def dict state = raw_state
+   {"role": "text", "text": "Count: " + to_str(state.get("count", 0))}
+}
+
+fn _counter_event(any event) any {
+   if to_str(event.get("kind", "")) == "counter" { return {"type": "add", "amount": int(event.get("amount", 1))} }
+   nil
+}
+
+fn _reset_event(any event) any {
+   if to_str(event.get("kind", "")) == "reset" { return {"type": "reset"} }
+   nil
+}
+
+fn _double(any value) any { int(value) * 2 }
+fn _cancelled_work(any value) any {
+   assert(false, "cancelled queued work must not execute")
+   value
+}
+
+fn _task_message(any result) any { {"type": "add", "amount": int(result)} }
+
+
+def app = elm.new({"count": 0})
+def initial = elm.snapshot(app, _view)
+assert(initial.get("revision") == 0 && initial.get("model").get("count") == 0 && initial.get("view").get("text") == "Count: 0", "initial model and view")
+def changed = elm.frame(app, [{"type": "add", "amount": 2}, {"type": "add", "amount": 3}], _update, _view)
+assert(changed.get("revision") == 2 && changed.get("model").get("count") == 5 && changed.get("last_message").get("amount") == 3 && changed.get("view").get("text") == "Count: 5", "ordered message updates and view snapshot")
+elm.dispatch(app, {"type": "reset"}, _update)
+assert(elm.revision(app) == 3 && elm.model(app).get("count") == 0 && elm.view(app, _view).get("text") == "Count: 0", "direct dispatch updates model and reevaluates view")
+def counter_sub = elm.subscribe(app, "input", _counter_event)
+def reset_sub = elm.subscribe(app, "input", _reset_event)
+assert(elm.subscription_count(app) == 2 && elm.publish(app, "unrelated", {"kind": "counter", "amount": 4}, _update) == 0, "subscriptions are topic-scoped")
+assert(elm.publish(app, "input", {"kind": "counter", "amount": 7}, _update) == 1 && elm.model(app).get("count") == 7, "matching subscription maps external events into model messages")
+assert(elm.publish(app, "input", {"kind": "reset"}, _update) == 1 && elm.model(app).get("count") == 0, "subscriptions can dispatch different message types")
+assert(elm.unsubscribe(app, counter_sub) && !elm.unsubscribe(app, counter_sub) && elm.unsubscribe(app, reset_sub) && elm.subscription_count(app) == 0, "unsubscribe removes one stable registration exactly once")
+def task_id_a = elm.command_task(app, _double, 3, _task_message)
+def task_id_b = elm.command_task(app, _double, 4, _task_message)
+def scheduled_count = elm.task_count(app)
+def dict scheduled_model = elm.model(app)
+def scheduled_value = int(scheduled_model.get("count", -1))
+assert(task_id_a == 1 && task_id_b == 2 && scheduled_count == 2 && scheduled_value == 0, "async commands schedule without synchronously mutating the model")
+mut ticks = 0
+mut task_report = {"completed": [], "failed": [], "pending": elm.task_count(app)}
+mut async_frame = elm.frame(app, [], _update, _view)
+task_report = async_frame.get("tasks", task_report)
+while elm.task_count(app) > 0 && ticks < 8 {
+   async_frame = elm.frame(app, [], _update, _view)
+   task_report = async_frame.get("tasks", task_report)
+   ticks += 1
+}
+assert(elm.task_count(app) == 0 && task_report.get("failed", []).len == 0 && elm.model(app).get("count") == 14, "completed async commands map results into ordered application messages")
+assert(task_report.get("completed", []).contains(task_id_a) && task_report.get("completed", []).contains(task_id_b) && elm.revision(app) == 7, "task completion is reported and each result dispatch increments revision")
+def cancelled_id = elm.command_task(app, _cancelled_work, 100, _task_message)
+def kept_id = elm.command_task(app, _double, 2, _task_message)
+assert(elm.cancel_task(app, cancelled_id) && !elm.cancel_task(app, cancelled_id) && elm.task_count(app) == 1, "cancel removes exactly one pending command")
+def after_cancel = elm.tick_tasks(app, _update)
+assert(after_cancel.get("completed", []).contains(kept_id) && !after_cancel.get("completed", []).contains(cancelled_id) && elm.model(app).get("count") == 18, "only the uncancelled task completes and updates the model")
+elm.subscribe(app, "window.lifecycle", _secondary_resize)
+assert(elm.publish_window_event(app, ev.make_event(win.EVENT_WINDOW_RESIZED, 0, 1, {"w": 30}), _update) == 0, "a resize on the first window is ignored by the secondary window selector")
+assert(elm.publish_window_event(app, ev.make_event(win.EVENT_KEY_PRESSED, 0, 2, {}), _update) == 0, "input events are not window lifecycle events")
+assert(elm.publish_window_event(app, ev.make_event(win.EVENT_WINDOW_RESIZED, 0, 2, {"w": 40}), _update) == 1 && elm.model(app).get("count") == 58, "lifecycle subscriptions receive window identity and the original payload")
+print("ELM-APP-OK")
+SOURCE
+}

@@ -1,0 +1,61 @@
+shape vg_splines {
+  family "ui/render"
+  generator "embedded"
+  features ["ny", "ui", "render", "vg"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  timeout 420
+  expect compile_and_run
+  expect_stdout "spline paths passed"
+  source ny <<'NY'
+use core
+use core.os (temp_dir)
+use core.os.ui.window.consts
+use core.os.ui.render as gfx
+use core.os.ui.render.vg as vg
+use core.math.parse.img as img
+
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+assert(!!gfx.init_window(200, 120, "splines", consts.WINDOW_CENTER, false, true, 1), "window")
+def shot = temp_dir() + "/ny-vg-splines.png"
+mut int frame = 0
+while frame < 6 {
+   if frame == 4 { gfx.request_frame_capture() }
+   if gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]) {
+      gfx.set_ortho_2d(0.0, 200.0, 120.0, 0.0)
+      vg.begin_frame(200.0, 120.0)
+      vg.stroke_color([1.0, 1.0, 1.0, 1.0]) vg.stroke_width(3.0)
+      vg.begin_path() vg.catmull_rom([[0, 20], [10, 40], [40, 10], [70, 40], [90, 20]]) vg.stroke()
+      vg.begin_path() vg.move_to(110.0, 40.0)
+      vg.bezier_to(116.6666666667, 38.3333333333, 130.0, 10.0, 140.0, 10.0)
+      vg.bezier_to(150.0, 10.0, 161.6666666667, 38.3333333333, 170.0, 40.0) vg.stroke()
+      vg.begin_path() vg.bspline([[0, 80], [10, 100], [40, 70], [70, 100]]) vg.stroke()
+      vg.begin_path() vg.move_to(113.3333333333, 91.6666666667)
+      vg.bezier_to(120.0, 90.0, 130.0, 80.0, 140.0, 80.0) vg.stroke()
+      vg.end_frame() gfx.end_frame()
+      if frame == 4 { assert(gfx.snapshot(shot), "snapshot") }
+      frame += 1
+   }
+}
+def pic = img.load(shot)
+assert(is_dict(pic), "image")
+def ptr data = pic.get("data", 0)
+def int ch = int(pic.get("channels", pic.get("bpp", 4)))
+mut int y = 0
+mut int lit = 0
+mut int diff = 0
+while y < 120 {
+   mut int x = 0
+   while x < 100 {
+      def int a = int(load8(data, (y * 200 + x) * ch))
+      def int b = int(load8(data, (y * 200 + x + 100) * ch))
+      if a > 10 { lit += 1 }
+      if a > b + 4 || b > a + 4 { diff += 1 }
+      x += 1
+   }
+   y += 1
+}
+assert(lit > 100 && diff < 20, "spline paths match equivalent cubic curves")
+print("spline paths passed")
+NY
+}

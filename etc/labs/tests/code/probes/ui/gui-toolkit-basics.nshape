@@ -22,6 +22,7 @@ mut any R = dict(64)
 mut cb, tg = false, false
 mut radio = 0
 mut sl = 0.25
+mut amount = 0.5
 mut si = 3
 mut combo = 0
 mut txt = "ab"
@@ -48,6 +49,7 @@ fn ui() any {
       si = gui.slider_int("si", "Steps", si, 0, 10, 300.0)  note("si")
       txt = gui.input_text("tx", "Name", txt, "type", 300.0)  note("tx")
       tab = gui.tab_strip("tabs", ["One", "Two", "Three"], tab, 300.0, 26.0)  note("tabs")
+      gui.tree_node("files", "Files", false, true, true)  note("files")
       header_open = gui.collapsing_header("hd", "Section", true)  note("hd")
       if header_open {
          gui.text("inside")
@@ -74,9 +76,13 @@ fn ui() any {
       R["state_error"] = gui.panel_state("error", "Failed", "", 40.0)
    }
    gui.end_window()
-   if gui.begin_window("w2", "Second", 430.0, 10.0, 200.0, 160.0, {}) {
+   if gui.begin_window("w2", "Second", 430.0, 10.0, 200.0, 480.0, {}) {
       if gui.button("b2", "Two", 100.0, 26.0) { second_clicks += 1 }
       note("b2")
+      gui.progress_bar("load", 0.4, "Load", 160.0)
+      gui.collapsing_header("sem_disc", "More", true)
+      amount = gui.drag_float("amount", "Amount", amount, 0.01, 0.0, 1.0, 2, 160.0)
+      gui.color_edit4("sem_color", "Color", [0.2, 0.4, 0.6, 1.0])
    }
    gui.end_window()
 }
@@ -110,6 +116,62 @@ gui.set_enabled(true)
 gui.set_headless_input(true)
 mx = 630.0 my = 750.0
 frame() frame()
+def a11y = gui.accessibility_tree()
+mut has_window = false
+mut has_button = false
+mut has_checkbox = false
+mut has_textbox = false
+mut has_slider = false
+mut has_combo = false
+mut has_tab = false
+mut has_treeitem = false
+mut has_progressbar = false
+mut has_disclosure = false
+mut has_spinbutton = false
+mut has_color_group = false
+for win in a11y.get("children", []) {
+   if win.get("name", "") == "Widgets" { has_window = win.get("role", "") == "window" && win.get("bounds", []).len == 4 }
+   for node in win.get("children", []) {
+      def role = to_str(node.get("role", ""))
+      def name = to_str(node.get("name", ""))
+      if role == "button" && name == "Go" { has_button = node.get("id", "") == "w::go" && node.get("actions", []).contains("activate") && node.get("actions", []).contains("focus") }
+      if role == "checkbox" && name == "Check" { has_checkbox = node.get("checked", true) == false }
+      if role == "textbox" && name == "Name" { has_textbox = node.get("value", "") == "ab" && node.get("bounds", []).len == 4 }
+      if role == "slider" && name == "Slide" { has_slider = float(node.get("min", -1.0)) == 0.0 && float(node.get("max", -1.0)) == 1.0 }
+      if role == "combobox" && name == "Pick" { has_combo = node.get("value", "") == "alpha" && node.get("options", []).len == 4 }
+      if role == "tab" && name == "One" { has_tab = node.get("selected", false) && int(node.get("position", 0)) == 1 && int(node.get("set_size", 0)) == 3 }
+      if role == "treeitem" && name == "Files" { has_treeitem = node.get("leaf", false) && node.get("selected", false) }
+      if role == "progressbar" && name == "Load" { has_progressbar = float(node.get("value", -1.0)) == 0.4 && float(node.get("max", 0.0)) == 1.0 }
+      if role == "button" && name == "More" { has_disclosure = node.get("disclosure", false) && node.get("expanded", false) }
+      if role == "spinbutton" && name == "Amount" { has_spinbutton = float(node.get("value", -1.0)) == 0.5 && float(node.get("min", -1.0)) == 0.0 && float(node.get("max", -1.0)) == 1.0 }
+      if role == "group" && name == "Color" { has_color_group = node.get("format", "") == "RGBA" && node.get("value", []).len == 4 }
+   }
+}
+assert(a11y.get("role", "") == "application" && has_window && has_button && has_checkbox && has_textbox && has_slider && has_combo && has_tab && has_treeitem && has_progressbar && has_disclosure && has_spinbutton && has_color_group, "GUI accessibility tree exposes window, widget, tab, tree and compound control semantics")
+chk(gui.accessibility_action("w::go", "activate"), "accessibility tree accepts advertised button activation")
+frame()
+chk(clicks == 1, "accessibility activation reaches the immediate-mode button")
+clicks = 0
+chk(gui.accessibility_action("w::cb", "activate"), "accessibility tree accepts a checkbox activation")
+frame()
+chk(cb, "accessibility activation updates a choice control")
+cb = false
+frame()
+chk(gui.accessibility_action("w::sl", "set_value", 0.75), "accessibility tree accepts a slider value action")
+frame()
+chk(sl > 0.74 && sl < 0.76, "accessibility value action updates the slider")
+sl = 0.25
+chk(gui.accessibility_action("w2::amount", "set_value", 0.8), "accessibility tree accepts a spin button value action")
+frame()
+chk(amount > 0.79 && amount < 0.81, "accessibility value action updates the spin button")
+amount = 0.5
+frame()
+chk(!gui.accessibility_action("w::go", "set_value", 0), "accessibility rejects actions not advertised by a node")
+chk(gui.accessibility_action("w::tx", "focus"), "accessibility tree accepts text field focus")
+frame()
+chk(gui.focused_id() == "w::tx", "accessibility focus reaches the immediate-mode widget")
+gui.clear_focus()
+frame()
 
 ;; --- choices
 at("cb") click()

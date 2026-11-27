@@ -46,7 +46,7 @@ module core.os.ui.render.vg(
    reset_transform, transform, translate, rotate, scale, skew_x, skew_y, current_transform,
    linear_gradient, radial_gradient, box_gradient, image_pattern,
    scissor, intersect_scissor, reset_scissor,
-   begin_path, move_to, line_to, bezier_to, quad_to, arc_to, close_path, path_winding,
+   begin_path, move_to, line_to, bezier_to, quad_to, catmull_rom, bspline, arc_to, close_path, path_winding,
    arc, rect, rounded_rect, rounded_rect_varying, ellipse, circle, fill, stroke,
    font_face, text_align, text, text_bounds,
    frame_stats, release,
@@ -711,6 +711,43 @@ fn quad_to(f64 cx, f64 cy, f64 x, f64 y) any {
    "Adds a quadratic bezier from the pen through one control point to(x, y)."
    def f64 x0, y0 = _pen_x, _pen_y
    bezier_to(x0 + 2.0 / 3.0 * (cx - x0), y0 + 2.0 / 3.0 * (cy - y0), x + 2.0 / 3.0 * (cx - x), y + 2.0 / 3.0 * (cy - y), x, y)
+}
+
+fn catmull_rom(list points) any {
+   "Starts a subpath through the interior of a uniform Catmull-Rom point list.
+   Each point is [x, y] ; the first and last points control the end tangents.
+   Fewer than four points leave the path unchanged."
+   if points.len < 4 { return 0 }
+   def p = points.get(1)
+   move_to(float(p.get(0)), float(p.get(1)))
+   mut int i = 0
+   while i + 3 < points.len {
+      def a, b, c, d = points.get(i), points.get(i + 1), points.get(i + 2), points.get(i + 3)
+      def f64 bx, by = float(b.get(0)), float(b.get(1))
+      def f64 cx, cy = float(c.get(0)), float(c.get(1))
+      bezier_to(bx + (cx - float(a.get(0))) / 6.0, by + (cy - float(a.get(1))) / 6.0,
+         cx - (float(d.get(0)) - bx) / 6.0, cy - (float(d.get(1)) - by) / 6.0, cx, cy)
+      i += 1
+   }
+}
+
+fn bspline(list points) any {
+   "Starts a subpath for a uniform cubic B-spline through a control point list.
+   Each point is [x, y] ; fewer than four points leave the path unchanged."
+   if points.len < 4 { return 0 }
+   def a, b, c = points.get(0), points.get(1), points.get(2)
+   move_to((float(a.get(0)) + 4.0 * float(b.get(0)) + float(c.get(0))) / 6.0,
+      (float(a.get(1)) + 4.0 * float(b.get(1)) + float(c.get(1))) / 6.0)
+   mut int i = 0
+   while i + 3 < points.len {
+      def p, q, r = points.get(i + 1), points.get(i + 2), points.get(i + 3)
+      def f64 px, py = float(p.get(0)), float(p.get(1))
+      def f64 qx, qy = float(q.get(0)), float(q.get(1))
+      bezier_to((2.0 * px + qx) / 3.0, (2.0 * py + qy) / 3.0,
+         (px + 2.0 * qx) / 3.0, (py + 2.0 * qy) / 3.0,
+         (px + 4.0 * qx + float(r.get(0))) / 6.0, (py + 4.0 * qy + float(r.get(1))) / 6.0)
+      i += 1
+   }
 }
 
 fn close_path() any {

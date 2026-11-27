@@ -1,0 +1,301 @@
+shape gui_button_style {
+  family "ui/widgets"
+  generator "embedded"
+  features ["ny", "ui", "gui"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  timeout 300
+  expect compile_and_run
+  expect_stdout "button styles passed"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.consts
+mut style = {"active": {"background": [1.0, 0.0, 0.0, 1.0]}, "hovered": {"background": [0.0, 1.0, 0.0, 1.0]}, "pressed": {"background": [0.0, 0.0, 1.0, 1.0]}, "disabled": {"background": [1.0, 1.0, 0.0, 1.0]}}
+fn style_for_state(any state) any { style.get(to_str(state), dict(0)) }
+mut rect = []
+mut choice_rect = []
+mut selectable_rect = []
+mut tab_rect = []
+mut combo_rect = []
+mut slider_rect = []
+mut menu_rect = []
+mut submenu_rect = []
+mut tree_rect = []
+mut table_row_rect = []
+mut animated_rect = []
+mut input_rect = []
+mut f64 mx = 0.0
+mut f64 my = 0.0
+mut bool disabled = false
+mut bool activated = false
+fn frame() any {
+   gui.feed_event(EVENT_MOUSE_POS_CHANGED, {"x": mx, "y": my})
+   gui.prepare_input(0, 240.0, 1100.0)
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, 240.0, 1100.0, 0.0)
+   gui.begin_frame(0, 0, 240.0, 1100.0)
+   if gui.begin_window("w", "W", 0.0, 0.0, 240.0, 1100.0, {"closable": false, "movable": false, "resizable": false, "collapsible": false}) {
+      gui.begin_disabled(disabled)
+      activated = gui.button("b", "", 100.0, 30.0, style)
+      rect = gui.last_item_rect()
+      gui.button("animated", "", 100.0, 30.0)
+      animated_rect = gui.last_item_rect()
+      gui.checkbox("c", "Choice", false, style)
+      choice_rect = gui.last_item_rect()
+      gui.toggle("t", "Toggle", false, style)
+      gui.selectable("s", "Row", false, 100.0, 24.0, "", -1, true, style)
+      selectable_rect = gui.last_item_rect()
+      gui.tab_strip("tab", ["Tab", "Other"], 0, 160.0, 26.0, style)
+      tab_rect = gui.last_item_rect()
+      gui.combo_box("combo", "Pick", ["First", "Second"], 0, 160.0, 4, style)
+      combo_rect = gui.last_item_rect()
+      gui.slider_float("slider", "Range", 0.0, 0.0, 1.0, 160.0, style)
+      slider_rect = gui.last_item_rect()
+      gui.icon_button("icon", -1, "Icon", 120.0, 28.0, false, style)
+      gui.selectable_file("file", "File", false, 120.0, 24.0, -1, style)
+      gui.progress_bar("progress", 0.5, "Progress", 160.0, style)
+      gui.collapsing_header("header", "Header", false, style)
+      gui.tree_node("tree", "Tree", false, true, true, style)
+      tree_rect = gui.last_item_rect()
+      if gui.begin_table("styled_table", ["Column"], 0, style) {
+         gui.table_next_row(true)
+         table_row_rect = gui.last_item_rect()
+         gui.table_text("Styled row")
+         gui.end_table()
+      }
+      gui.input_text("input", "Text", "value", "hint", 160.0, style)
+      input_rect = gui.last_item_rect()
+      gui.drag_float("drag", "Drag", 0.5, 0.01, 0.0, 1.0, 3, 160.0, style)
+      gui.color_edit4("color", "Color", [0.2, 0.4, 0.6, 1.0], style)
+      gui.color_picker4("picker", "Picker", [0.2, 0.3, 0.4, 1.0], style)
+      gui.end_disabled()
+      gui.open_popup("style_popup", 180.0, 180.0)
+      if gui.begin_popup("style_popup", 110.0) {
+         gui.begin_menu("style_submenu", "Styled submenu", true, style)
+         submenu_rect = gui.last_item_rect()
+         gui.menu_item("style_item", "Styled item", "", false, true, style)
+         menu_rect = gui.last_item_rect()
+         gui.end_popup()
+      }
+   }
+   gui.end_window() gui.end_frame() gfx.end_frame()
+}
+@effects(all)
+fn sample() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(rect.get(0)) + 5.0)
+   def int y = int(float(rect.get(1)) + 5.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_choice() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(choice_rect.get(0)) + 7.0)
+   def int y = int(float(choice_rect.get(1)) + float(choice_rect.get(3)) * 0.5)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_selectable() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(selectable_rect.get(0)) + 1.0)
+   def int y = int(float(selectable_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_tab() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(tab_rect.get(0)) + 8.0)
+   def int y = int(float(tab_rect.get(1)) + 4.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_combo() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(combo_rect.get(0)) + 1.0)
+   def int y = int(float(combo_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_combo_popup() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(combo_rect.get(0)) + 10.0)
+   def int y = int(float(combo_rect.get(1)) + float(combo_rect.get(3)) + 6.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_slider_track() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(slider_rect.get(0)) + 24.0)
+   def int y = int(float(slider_rect.get(1)) + 29.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_menu() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(menu_rect.get(0)) + 1.0)
+   def int y = int(float(menu_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_tree() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(tree_rect.get(0)) + 1.0)
+   def int y = int(float(tree_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_animated() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(animated_rect.get(0)) + 5.0)
+   def int y = int(float(animated_rect.get(1)) + 5.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_submenu() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(submenu_rect.get(0)) + 1.0)
+   def int y = int(float(submenu_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_table_row() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(table_row_rect.get(0)) + 1.0)
+   def int y = int(float(table_row_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+@effects(all)
+fn sample_input() list {
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def int x = int(float(input_rect.get(0)) + 1.0)
+   def int y = int(float(input_rect.get(1)) + 1.0)
+   def int off = (y * 240 + x) * 4
+   def color = [load8(pixels, off), load8(pixels, off + 1), load8(pixels, off + 2)]
+   free(pixels)
+   color
+}
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK) && gfx.init_window(240, 1100, "style"), "mock window")
+gui.reset_state() gui.set_enabled(true) gui.set_headless_input(true)
+frame() frame()
+def red = sample()
+assert(int(red.get(0)) > 240 && int(red.get(1)) < 10, "active color rendered")
+def choice_red = sample_choice()
+assert(int(choice_red.get(0)) > 240 && int(choice_red.get(1)) < 10, "checkbox consumes style colors")
+def selectable_red = sample_selectable()
+assert(int(selectable_red.get(0)) > 240 && int(selectable_red.get(1)) < 10, "selectable row consumes style colors")
+def tab_red = sample_tab()
+assert(int(tab_red.get(0)) > 240 && int(tab_red.get(1)) < 10, "tab consumes state style colors")
+def combo_red = sample_combo()
+assert(int(combo_red.get(0)) > 240 && int(combo_red.get(1)) < 10, "combo field consumes state style colors")
+mx = float(combo_rect.get(0)) + 10.0 my = float(combo_rect.get(1)) + 10.0
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my}) frame()
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my}) frame() frame()
+def combo_popup_red = sample_combo_popup()
+assert(int(combo_popup_red.get(0)) > 240 && int(combo_popup_red.get(1)) < 10, "combo popup row consumes state style colors")
+def slider_red = sample_slider_track()
+assert(int(slider_red.get(0)) > 240 && int(slider_red.get(1)) < 10, "slider track consumes state style colors")
+def menu_red = sample_menu()
+assert(int(menu_red.get(0)) > 240 && int(menu_red.get(1)) < 10, "menu item consumes state style colors")
+def tree_red = sample_tree()
+assert(int(tree_red.get(0)) > 240 && int(tree_red.get(1)) < 10, "tree row consumes state style colors")
+def submenu_red = sample_submenu()
+assert(int(submenu_red.get(0)) > 240 && int(submenu_red.get(1)) < 10, "submenu row consumes state style colors")
+def table_row_red = sample_table_row()
+assert(int(table_row_red.get(0)) > 240 && int(table_row_red.get(1)) < 10, "table row consumes state style colors")
+def input_red = sample_input()
+assert(int(input_red.get(0)) > 240 && int(input_red.get(1)) < 10, "text field consumes state style colors")
+def idle_button = sample_animated()
+mx = float(animated_rect.get(0)) + 10.0 my = float(animated_rect.get(1)) + 10.0
+mut hover_frame = 0
+while hover_frame < 12 { frame() hover_frame += 1 }
+def hovered_button = sample_animated()
+assert(int(hovered_button.get(0)) > int(idle_button.get(0)), "default button hover paint springs toward its target")
+def motion_start = gui.animate_value("api-motion", 10.0)
+assert(motion_start == 10.0, "GUI animation API snaps its initial value")
+gui.begin_frame(0, 0, 240.0, 1100.0, 0.05)
+mut motion_mid = 10.0
+motion_mid = gui.animate_value("api-motion", 40.0)
+assert(motion_mid > 10.0 && motion_mid < 40.0 && gui.animation_busy(), "GUI animation API advances and requests another frame")
+mut settle_frame = 0
+while settle_frame < 80 {
+   gui.begin_frame(0, 0, 240.0, 1100.0, 0.05)
+   motion_mid = gui.animate_value("api-motion", 40.0)
+   settle_frame += 1
+}
+assert(motion_mid > 39.9 && motion_mid < 40.1 && !gui.animation_busy(), "GUI animation API settles and clears redraw state")
+mx = float(rect.get(0)) + 10.0 my = float(rect.get(1)) + 10.0
+frame() frame()
+def green = sample()
+assert(int(green.get(1)) > 240 && int(green.get(0)) < 10, "hover color rendered")
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+def blue = sample()
+assert(int(blue.get(2)) > 240 && int(blue.get(0)) < 10, "pressed color rendered")
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+assert(activated, "styled button activates")
+disabled = true
+frame()
+def yellow = sample()
+assert(int(yellow.get(0)) > 240 && int(yellow.get(1)) > 240 && !activated, "disabled style and interaction")
+style = gui.button_style_map(style_for_state)
+assert(style.contains("active") && style.contains("hovered") && style.contains("pressed") && style.contains("disabled"), "style function evaluates all widget states")
+disabled = false
+mx = float(rect.get(0)) + 10.0 my = float(rect.get(1)) + 10.0
+frame() frame()
+def callback_green = sample()
+assert(int(callback_green.get(1)) > 240 && int(callback_green.get(0)) < 10, "function-derived hover style renders")
+print("button styles passed")
+NY
+}

@@ -1,0 +1,115 @@
+shape gui_theme_files {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui gui theme json hot-reload]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_stdout "GUI-THEME-FILES-OK"
+  source ny <<'NY'
+use core
+use core.os (ticks, file_write, file_read, file_remove)
+use core.os.path as ospath
+use core.math.parse.data.json as json
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+
+@effects(all)
+fn button_pixel() list {
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, 240.0, 160.0, 0.0)
+   gui.begin_frame(0, 0, 240.0, 160.0)
+   assert(gui.begin_window("sample", "", 0.0, 0.0, 240.0, 160.0, {"titlebar": false, "resizable": false}), "sample window")
+   gui.button("sample-button", "", 100.0, 30.0)
+   def rect = gui.last_item_rect()
+   gui.end_window()
+   gui.end_frame()
+   gfx.end_frame()
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   def offset = (int(float(rect.get(1)) + 5.0) * 240 + int(float(rect.get(0)) + 5.0)) * 4
+   def color = [load8(pixels, offset), load8(pixels, offset + 1)]
+   free(pixels)
+   color
+}
+
+def path = ospath.temp_dir() + "/nytrix-gui-theme-" + to_str(ticks()) + ".json"
+defer { file_remove(path) }
+def saved_path = path + ".saved"
+defer { file_remove(saved_path) }
+mut doc = gui.export_theme()
+doc["name"] = "plum-workbench"
+mut parts = doc.get("parts", dict(0))
+parts["accent"] = [0.70, 0.20, 0.80, 1.0]
+parts["press"] = [0.30, 0.10, 0.40, 1.0]
+doc["parts"] = parts
+doc["states"] = {"button": {
+   "active": {"background": [0.15, 0.10, 0.20, 1.0], "text": [1.0, 1.0, 1.0, 1.0]},
+   "pressed": {"background": [0.05, 0.02, 0.08, 1.0]}
+}}
+file_write(path, json.json_encode(doc))
+def reset_dark = gui.set_theme("dark")
+def loaded_file = gui.load_theme_file(path)
+assert(reset_dark && loaded_file && gui.theme() == "plum-workbench", "load and apply named theme file")
+def loaded_accent = gui.theme_color("accent")
+def loaded_press = gui.theme_color("press")
+assert(float(loaded_accent.get(0)) == 0.70 && float(loaded_accent.get(2)) == 0.80 && float(loaded_press.get(2)) == 0.40, "theme parts include semantic and pressed colors")
+assert(gui.save_theme_file(saved_path), "save the active named theme")
+def saved = json.json_try_decode(unwrap(file_read(saved_path)))
+def dict saved_value = saved.get("value", dict(0))
+def saved_name = to_str(saved_value.get("name", ""))
+assert(saved.get("ok", false) && saved_name == "plum-workbench", "saved theme contains the active name")
+def stable_before = gui.theme_color("accent")
+file_write(path, "not-json")
+assert(!gui.poll_theme_file(), "invalid hot-reload edit is rejected")
+def after_invalid = gui.theme_color("accent")
+assert(float(after_invalid.get(0)) == float(stable_before.get(0)) && gui.theme() == "plum-workbench", "invalid edits leave the current theme intact")
+parts["accent"] = [0.15, 0.65, 0.30, 1.0]
+doc["parts"] = parts
+file_write(path, json.json_encode(doc))
+mut int frame = 0
+while frame < 30 {
+   gui.begin_frame()
+   frame += 1
+}
+def reloaded_accent = gui.theme_color("accent")
+assert(float(reloaded_accent.get(0)) == 0.15 && float(reloaded_accent.get(1)) == 0.65 && gui.theme() == "plum-workbench", "watched files hot-reload after the frame poll interval")
+def exported = gui.export_theme()
+def all_states = exported.get("states", dict(0))
+def exported_states = all_states.get("button", dict(0))
+def active_button = exported_states.get("active", dict(0))
+def active_background = active_button.get("background", [])
+assert(float(active_background.get(0, -1.0)) == 0.15, "button state parts survive theme export")
+gui.unwatch_theme_file()
+assert(gui.load_theme_file("etc/assets/themes/dark.json") && gui.theme() == "dark", "checked-in dark theme file uses the public schema")
+gui.unwatch_theme_file()
+gui.set_enabled(true)
+def before_editor = json.json_encode(gui.export_theme())
+gui.begin_frame(0, 0, 800.0, 720.0)
+def editor = gui.theme_editor("theme-editor", saved_path)
+assert(editor.get("open", false) && to_str(editor.get("path", "")) == saved_path, "interactive theme editor exposes its window and editable path")
+gui.end_frame()
+assert(json.json_encode(gui.export_theme()) == before_editor, "opening the theme editor leaves the palette and implicit button defaults intact")
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK) && gfx.init_window(240, 160, "theme reload"), "offscreen framebuffer")
+gui.reset_state()
+gui.set_headless_input(true)
+doc["states"] = {"button": {"active": {"background": [1.0, 0.0, 0.0, 1.0]}}}
+file_write(path, json.json_encode(doc))
+assert(gui.watch_theme_file(path), "watch initial red theme")
+def red = button_pixel()
+assert(int(red.get(0)) > 240 && int(red.get(1)) < 10, "initial theme draws a red button")
+doc["states"] = {"button": {"active": {"background": [0.0, 1.0, 0.0, 1.0]}}}
+file_write(path, json.json_encode(doc))
+mut reload_frame = 0
+while reload_frame < 29 {
+   gui.begin_frame()
+   gui.end_frame()
+   reload_frame += 1
+}
+def green = button_pixel()
+assert(int(green.get(0)) < 10 && int(green.get(1)) > 240, "frame polling reloads the external edit and draws a green button")
+gui.unwatch_theme_file()
+gfx.close_window()
+print("GUI-THEME-FILES-OK")
+NY
+}

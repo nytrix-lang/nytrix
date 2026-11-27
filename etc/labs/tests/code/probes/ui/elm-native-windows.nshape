@@ -1,0 +1,75 @@
+shape elm-native-windows {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "elm", "x11", "wayland"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3"
+  expect_stdout "ELM-NATIVE-WINDOWS-OK"
+  source ny <<'NY'
+;; Run under an isolated display:
+;; env -u WAYLAND_DISPLAY NY_TEST_ELM_PLATFORM=x11 NYTRIX_TEST_ALLOW_DISPLAY=1 xvfb-run -a build/release/ny-test etc/labs/tests/code/probes/ui/elm-native-windows.nshape
+;; For headless Weston set NY_TEST_ELM_PLATFORM=wayland, XDG_RUNTIME_DIR
+;; and WAYLAND_DISPLAY to the private socket, and unset DISPLAY.
+use core
+use core.os (msleep)
+use core.os.ui.elm as elm
+use core.os.ui.window as window
+use core.os.ui.window.consts as event_kind
+use core.os.ui.window.platform as platform
+
+fn lifecycle_message(any event) any {
+   def kind = int(event.get("kind"))
+   if kind == event_kind.EVENT_WINDOW_RESIZED || kind == event_kind.EVENT_WINDOW_MAXIMIZED { return event }
+   nil
+}
+
+fn update(any model, any event) any {
+   def dict sizes = model
+   def key = to_str(event.get("window_id"))
+   if int(event.get("kind")) == event_kind.EVENT_WINDOW_MAXIMIZED {
+      sizes[key + ":maximized"] = true
+   } else {
+      sizes[key] = event.get("data").get("w")
+   }
+   sizes
+}
+
+def target = __env_get("NY_TEST_ELM_PLATFORM")
+if target == "x11" || target == "wayland" {
+   window.window_hint(window.CLIENT_API, window.NO_API)
+   def first = window.open_window("First", 0, 0, 80, 50)
+   defer { window.close(first) }
+   def second = window.open_window("Second", 100, 0, 80, 50)
+   defer { window.close(second) }
+   assert(window.backend() == target && window.id(first) && window.id(second), "native windows on the requested backend")
+   def first_id = window.id(first)
+   def second_id = window.id(second)
+   def app = elm.new(dict(4))
+   elm.subscribe(app, "window.lifecycle", lifecycle_message)
+   if target == "x11" {
+      ;; Resize through the platform API so only native events report the resize.
+      platform.set_size(first_id, 115, 70)
+      platform.set_size(second_id, 155, 90)
+   } else {
+      window.maximize(first)
+      window.maximize(second)
+   }
+   mut attempts = 0
+   while attempts < 100 {
+      elm.publish_window_event(app, window.check_event(second), update)
+      elm.publish_window_event(app, window.check_event(first), update)
+      def sizes = elm.model(app)
+      if target == "x11" {
+         if int(sizes.get(to_str(first_id), 0)) == 115 && int(sizes.get(to_str(second_id), 0)) == 155 { break }
+      } elif sizes.get(to_str(first_id) + ":maximized", false) && sizes.get(to_str(second_id) + ":maximized", false) { break }
+      msleep(5)
+      attempts += 1
+   }
+   assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs")
+} else {
+   print("Skipped: set NY_TEST_ELM_PLATFORM under an isolated display")
+}
+print("ELM-NATIVE-WINDOWS-OK")
+NY
+}

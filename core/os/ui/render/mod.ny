@@ -37,7 +37,7 @@ module core.os.ui.render(
    draw_line_fast, draw_circle, draw_circle_lines, draw_ring, draw_polygon,
    draw_circle_v, draw_circle_lines_v, draw_circle_sector, draw_circle_sector_lines,
    draw_ellipse, draw_ellipse_v, draw_ellipse_lines, draw_ellipse_lines_v,
-   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf,
+   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf, draw_rect_rounded_shadow_sdf,
    draw_triangle_lines, draw_triangle_fan, draw_triangle_strip,
    draw_poly, draw_poly_lines, draw_poly_lines_ex,
    check_collision_recs, check_collision_circles, check_collision_circle_rec,
@@ -6203,6 +6203,15 @@ fn draw_rect_rounded_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color) bool
       return lib_vkr.draw_rounded_rect_sdf(x, y, w, h, radius, r, g, b, a)
    }
    draw_rect_rounded(x, y, w, h, radius, color, 48)
+}
+
+fn draw_rect_rounded_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, any color) bool {
+   "Draws a soft rounded-rectangle shadow with the Vulkan SDF renderer; returns false on backends without this primitive."
+   if _backend != BACKEND_VK { return false }
+   if w <= 0.0 || h <= 0.0 || blur <= 0.0 { return false }
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
+   lib_vkr.draw_rounded_rect_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, r, g, b, a)
 }
 
 fn draw_rect_rounded_lines_ex(any rec, f64 radius, int segments, f64 thickness, any color) bool {

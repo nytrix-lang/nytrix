@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
+module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_rounded_rect_shadow_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use core
 use core.mem
 use core.math
@@ -1741,6 +1741,40 @@ fn draw_rounded_rect_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 r, f64 g, f
       x, y, w, h,
       c, w, h, rr
    )
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   true
+}
+
+fn draw_rounded_rect_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, f64 r, f64 g, f64 b, f64 a) bool {
+   "Draws one soft rounded-rectangle drop shadow with an SDF coverage falloff. `blur` is the outside feather radius; offsets move the shadow without changing its source shape."
+   if w <= 0.0 || h <= 0.0 || blur <= 0.0 || a <= 0.0 { return false }
+   blur = min(blur, 2048.0)
+   if !_rounded_rect_pipeline && !_ensure_rounded_rect_pipeline() { return false }
+   if !_prepare_sdf_draw(_rounded_rect_pipeline) { return false }
+   def rr = min(radius, min(w, h) * 0.5)
+   def pad_x = blur * 2.0 + abs(offset_x)
+   def pad_y = blur * 2.0 + abs(offset_y)
+   def x0 = x - pad_x + offset_x
+   def y0 = y - pad_y + offset_y
+   def x1 = x + w + pad_x + offset_x
+   def y1 = y + h + pad_y + offset_y
+   ;; The SDF origin follows the requested shadow offset. Local coordinates
+   ;; stay anchored to the source bounds so adding an offset doesn't cancel
+   ;; itself through the quad's interpolated UVs.
+   def u0, v0 = -pad_x, -pad_y
+   def u1, v1 = w + pad_x, h + pad_y
+   def c = _pack_color(r, g, b, a)
+   ;; Odd texture indices select the shadow branch in rounded_rect.frag.glsl;
+   ;; upper bits store blur in sixteenths of a pixel. This SDF pipeline does
+   ;; not sample a texture.
+   def tag = int(ceil(blur * 16.0)) * 2 + 1
+   def base = _local_vertex_map + _vertex_offset
+   _vkr_store_vertex(base, 0, x0, y0, 0.0, u0, v0, c, tag, w, h, rr)
+   _vkr_store_vertex(base, 1, x0, y1, 0.0, u0, v1, c, tag, w, h, rr)
+   _vkr_store_vertex(base, 2, x1, y1, 0.0, u1, v1, c, tag, w, h, rr)
+   _vkr_store_vertex(base, 3, x1, y1, 0.0, u1, v1, c, tag, w, h, rr)
+   _vkr_store_vertex(base, 4, x1, y0, 0.0, u1, v0, c, tag, w, h, rr)
+   _vkr_store_vertex(base, 5, x0, y0, 0.0, u0, v0, c, tag, w, h, rr)
    _vertex_offset += _VKR_VERT_STRIDE * 6
    true
 }

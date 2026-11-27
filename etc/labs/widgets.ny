@@ -19,6 +19,7 @@
 ;;   NY_WIDGETS_TILE=1              fixed tiled panels instead of the dockspace
 ;;   NY_WIDGETS_FRAMES=N            exit after N frames (0 = run until closed)
 ;;   NY_WIDGETS_SNAPSHOT=path.png   write the framebuffer on the last frame
+
 use core
 use core.common as common
 use core.os (exit, file_read, file_write)

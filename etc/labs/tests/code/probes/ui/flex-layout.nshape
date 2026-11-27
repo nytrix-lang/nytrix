@@ -9,6 +9,7 @@ shape ui_flex_layout {
   source ny <<'NY'
 use core
 use core.os.ui.flex as flex
+use core.os.ui.anim as anim
 fn _near(any a, f64 b) bool { def f64 d = float(a) - b d < 0.01 && d > -0.01 }
 ;; App shell: header, sidebar + main, footer.
 def ui = flex.node({"id": "root", "dir": "col", "w": "grow", "h": "grow", "pad": 10, "gap": 10}, [
@@ -38,6 +39,197 @@ def grow_tree = flex.node({"id": "r", "w": 300, "h": 10}, [
    flex.node({"id": "b", "w": g2, "h": 10, "max_w": 50})])
 def g = flex.solve(grow_tree, 300.0, 10.0)
 assert(_near(flex.rect_of(g, "b").get(2), 50.0) && _near(flex.rect_of(g, "a").get(2), 250.0), "max clamp re-shared")
+;; Aspect ratios derive a fit dimension from the resolved other dimension.
+def aspect_tree = flex.node({"id": "ar", "w": 300, "h": "fit", "dir": "col", "align": "stretch"}, [
+   flex.node({"id": "wide", "w": "50%", "h": "fit", "aspect": 2.0}),
+   flex.node({"id": "tall", "w": "fit", "h": 40, "aspect": 0.5}),
+   flex.node({"id": "limited", "w": 100, "h": "fit", "aspect": 2.0, "max_h": 30})])
+def ar = flex.solve(aspect_tree, 300.0, 300.0)
+assert(_near(flex.rect_of(ar, "wide").get(2), 150.0) && _near(flex.rect_of(ar, "wide").get(3), 75.0), "aspect uses resolved percent width")
+assert(_near(flex.rect_of(ar, "tall").get(2), 20.0) && _near(flex.rect_of(ar, "tall").get(3), 40.0), "aspect uses fixed height")
+assert(_near(flex.rect_of(ar, "limited").get(3), 30.0) && _near(flex.rect_of(ar, "ar").get(3), 145.0), "aspect obeys clamps and contributes to parent fit")
+def grow_aspect_tree = flex.node({"id": "grow-ar", "w": 100, "h": 40, "dir": "col", "align": "start"}, [
+   flex.node({"id": "grow-ar-child", "w": "fit", "h": "grow", "aspect": 1.5, "max_w": 55})])
+def grow_ar = flex.solve(grow_aspect_tree, 100.0, 40.0)
+assert(_near(flex.rect_of(grow_ar, "grow-ar-child").get(3), 40.0) && _near(flex.rect_of(grow_ar, "grow-ar-child").get(2), 55.0), "fit width resolves from distributed grow height and applies max clamp")
+def pct_aspect_tree = flex.node({"id": "pct-ar", "w": 100, "h": 80, "dir": "col", "align": "start"}, [
+   flex.node({"id": "pct-ar-child", "w": "fit", "h": "50%", "aspect": 2.0, "max_w": 70}),
+   flex.node({"id": "min-ar-child", "w": "fit", "h": "50%", "aspect": 2.0, "min_w": 90})])
+def pct_ar = flex.solve(pct_aspect_tree, 100.0, 80.0)
+assert(_near(flex.rect_of(pct_ar, "pct-ar-child").get(3), 40.0) && _near(flex.rect_of(pct_ar, "pct-ar-child").get(2), 70.0) && _near(flex.rect_of(pct_ar, "min-ar-child").get(2), 90.0), "fit width resolves from percentage height and observes both clamps")
+def nested_aspect_tree = flex.node({"id": "nested-root", "w": 300, "h": 100, "dir": "col", "align": "start"}, [
+   flex.node({"id": "fit-parent", "w": "fit", "h": 60, "dir": "row", "align": "start", "pad": [0, 3]}, [
+      flex.node({"id": "nested-aspect", "w": "fit", "h": "grow", "aspect": 1.25})])])
+def nested_ar = flex.solve(nested_aspect_tree, 300.0, 100.0)
+assert(_near(flex.rect_of(nested_ar, "nested-aspect").get(3), 60.0) && _near(flex.rect_of(nested_ar, "nested-aspect").get(2), 75.0) && _near(flex.rect_of(nested_ar, "fit-parent").get(2), 81.0), "aspect-derived width refits nested fit ancestors after grow distribution")
+def visual_tree = flex.node({"id": "visual", "w": 40, "h": 30, "clip": true, "background": [10, 20, 30, 255], "border": {"color": [200, 210, 220, 255], "width": 2}}, [
+   flex.text("label", "hello", {"w": 24, "h": 20, "pad": 2, "color": [255, 240, 220, 255], "font": 3, "font_size": 12}),
+   flex.node({"id": "sprite", "w": 4, "h": 5, "image": "image-handle", "image_tint": [255, 128, 64, 255]})])
+def visual_result = flex.solve(visual_tree, 40.0, 30.0)
+def commands = flex.render_commands(visual_result)
+mut saw_rect = false
+mut saw_border = false
+mut saw_text = false
+mut saw_image = false
+mut saw_scissor_start = false
+mut saw_scissor_end = false
+for command in commands {
+   def typ = to_str(command.get("type", ""))
+   if typ == "rect" { saw_rect = command.get("data").get("color").get(0) == 10 }
+   elif typ == "border" { saw_border = float(command.get("data").get("width")) == 2.0 }
+   elif typ == "text" { saw_text = command.get("data").get("text") == "hello" && command.get("data").get("font") == 3 }
+   elif typ == "image" { saw_image = command.get("data").get("image") == "image-handle" }
+   elif typ == "scissor_start" { saw_scissor_start = float(command.get("data").get("rect").get(2)) == 40.0 }
+   elif typ == "scissor_end" { saw_scissor_end = true }
+}
+assert(saw_rect && saw_border && saw_text && saw_image && saw_scissor_start && saw_scissor_end, "typed renderer command stream preserves visual data and nested clip state")
+def utility_props = flex.classes("flex-col gap-2 p-3 items-center justify-between bg-accent text-muted rounded border text-lg", {"gap": 1.0})
+assert(utility_props.get("dir", "") == "col" && float(utility_props.get("gap", 0.0)) == 8.0 && float(utility_props.get("pad", 0.0)) == 12.0 && utility_props.get("align", "") == "center" && utility_props.get("justify", "") == "between", "utility classes build layout properties with deterministic override order")
+def utility_node = flex.styled_node("utility-card", "flex-col w-full h-16 p-2 bg-accent text-primary rounded-lg border", [flex.text("utility-label", "styled", {"w": "grow", "h": "fit"})], {"min_h": 48})
+def utility_tree = flex.node({"id": "utility-root", "w": 120, "h": 80}, [utility_node])
+def utility_result = flex.solve(utility_tree, 120.0, 80.0)
+def utility_rect = flex.rect_of(utility_result, "utility-card")
+def utility_commands = flex.render_commands(utility_result)
+mut utility_background = false
+mut utility_label = false
+mut utility_border = false
+for command in utility_commands {
+   if command.get("type", "") == "rect" && command.get("id", "") == "utility-card" {
+      utility_background = command.get("data", {}).get("color", []).get(0, 0) == 112 && float(command.get("data", {}).get("radius", 0.0)) == 8.0
+   }
+   if command.get("type", "") == "text" && command.get("id", "") == "utility-label" {
+      utility_label = command.get("data", {}).get("color", []).get(0, 0) == 240
+   }
+   if command.get("type", "") == "border" && command.get("id", "") == "utility-card" { utility_border = float(command.get("data", {}).get("width", 0.0)) == 1.0 }
+}
+assert(float(utility_rect.get(2, 0.0)) == 120.0 && utility_background && utility_label && utility_border, "styled nodes flow through flex layout and renderer commands")
+def retained_first = flex.reconcile(nil, flex.node({"id": "retained", "w": 120, "h": 40, "state": {"persist": 9, "collision": "old"}}, [
+   flex.node({"id": "keep", "w": 20, "h": 20, "state": {"open": true}}),
+   flex.node({"id": "gone", "w": 10, "h": 10})]))
+def retained_next = flex.node({"id": "retained", "w": 120, "h": 40, "state": {"collision": "new"}}, [
+   flex.node({"id": "keep", "w": 30, "h": 20, "state": {"dirty": true}}),
+   flex.node({"id": "new", "w": 10, "h": 10})])
+def retained_diff = flex.reconcile(retained_first, retained_next)
+def retained_tree = retained_diff.get("tree")
+def retained_root_state = retained_tree.get("state")
+def retained_keep = retained_tree.get("children").get(0)
+def retained_keep_state = retained_keep.get("state")
+assert(retained_root_state.get("persist", 0) == 9 && retained_root_state.get("collision", "") == "new", "reconciliation preserves old local state and applies explicit updates")
+assert(retained_keep_state.get("open", false) && retained_keep_state.get("dirty", false), "matching child ids retain their local state across rebuilt trees")
+assert(retained_diff.get("added", []).contains("retained/new") && retained_diff.get("removed", []).contains("retained/gone") && retained_diff.get("updated", []).contains("retained/keep"), "reconciliation reports keyed additions, removals and property changes")
+def retained_layout = flex.solve(retained_tree, 120.0, 40.0)
+assert(_near(flex.rect_of(retained_layout, "keep").get(2), 30.0), "reconciled tree feeds directly into flex layout")
+def markup = "<column id='xml-root' w='grow' h='grow' pad='5' gap='3'><text id='xml-label'>Hello</text><row id='xml-row' w='grow' h='20'><box id='xml-box' w='50%' h='grow'/></row></column>"
+def xml_tree = flex.from_xml(markup)
+assert(is_dict(xml_tree), "declarative XML produces a flex tree")
+def xml_layout = flex.solve(xml_tree, 110.0, 80.0)
+def xml_box = flex.rect_of(xml_layout, "xml-box")
+assert(_near(xml_box.get(0), 5.0) && _near(xml_box.get(1), 24.0) && _near(xml_box.get(2), 50.0), "XML layouts resolve text, padding, gap and percentage sizes")
+assert(is_nil(flex.from_xml("<column><unknown/></column>")), "unsupported elements fail the whole layout")
+def grid_tree = flex.grid("grid", ["1fr", "2fr"], [
+   flex.styled_node("grid-a", "bg-accent", [flex.text("grid-label", "A")]),
+   flex.node({"id": "grid-b", "background": [20, 30, 40, 255]}),
+   flex.node({"id": "grid-c", "h": 20, "background": [50, 60, 70, 255]}),
+   flex.node({"id": "grid-d", "h": 20, "background": [80, 90, 100, 255]})
+], ["1fr", "auto"], 6.0, 4.0, {"w": 300, "h": 120})
+;; Track trees retain the declared weighted sizes.
+def grid_result = flex.solve(grid_tree, 300.0, 120.0)
+def grid_a = flex.rect_of(grid_result, "grid-a")
+def grid_b = flex.rect_of(grid_result, "grid-b")
+def grid_c = flex.rect_of(grid_result, "grid-c")
+def grid_d = flex.rect_of(grid_result, "grid-d")
+assert(_near(grid_a.get(0), 0.0) && _near(grid_a.get(2), 98.0) && _near(grid_b.get(0), 104.0) && _near(grid_b.get(2), 196.0), "grid fractional tracks distribute width by fr weights")
+assert(_near(grid_c.get(1), 100.0) && _near(grid_d.get(1), 100.0) && _near(grid_c.get(3), 20.0) && _near(grid_d.get(3), 20.0), "grid auto tracks fit content while fractional rows share remaining height")
+def grid_commands = flex.render_commands(grid_result)
+def grid_names = ["grid-a", "grid-b", "grid-c", "grid-d"]
+mut grid_paints = 0
+for command in grid_commands { if command.get("type", "") == "rect" && grid_names.contains(to_str(command.get("id", ""))) { grid_paints += 1 } }
+assert(grid_paints == 4, "grid children retain their renderer commands")
+def placed_grid = flex.grid("placed-grid", ["1fr", "1fr"], [
+   flex.node({"id": "placed-right", "grid_row": 1, "grid_column": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "placed-lower-left", "grid_row": 2, "grid_column": 1, "w": "grow", "h": 20}),
+   flex.node({"id": "placed-auto", "w": "grow", "h": 20})
+], ["auto", "auto"], 5.0, 5.0, {"w": 205, "h": 100})
+def placed_result = flex.solve(placed_grid, 205.0, 100.0)
+def placed_right = flex.rect_of(placed_result, "placed-right")
+def placed_lower = flex.rect_of(placed_result, "placed-lower-left")
+def placed_auto = flex.rect_of(placed_result, "placed-auto")
+assert(_near(placed_right.get(0), 105.0) && _near(placed_right.get(1), 0.0) && _near(placed_lower.get(0), 0.0) && _near(placed_lower.get(1), 25.0) && _near(placed_auto.get(0), 0.0), "grid honors explicit 1-based placement and auto-places remaining items")
+def priority_grid = flex.grid("priority-grid", [40, 40, 40], [
+   flex.node({"id": "priority-auto", "w": "grow", "h": 20}),
+   flex.node({"id": "priority-row", "grid_row": 1, "w": "grow", "h": 20}),
+   flex.node({"id": "priority-cell", "grid_row": 1, "grid_column": 1, "grid_column_span": 2, "w": "grow", "h": 20})
+], [20, 20], 5.0, 5.0)
+def priority_result = flex.solve(priority_grid, 130.0, 45.0)
+def priority_cell = flex.rect_of(priority_result, "priority-cell")
+def priority_row = flex.rect_of(priority_result, "priority-row")
+def priority_auto = flex.rect_of(priority_result, "priority-auto")
+assert(_near(priority_cell.get(0), 0.0) && _near(priority_cell.get(2), 85.0) && _near(priority_row.get(0), 90.0) && _near(priority_auto.get(1), 25.0), "grid reserves explicit cells before row-only and automatic placement")
+def minmax_grid = flex.grid("minmax-grid", ["minmax(100px, 2fr)", "1fr"], [
+   flex.node({"id": "minmax-a", "w": "grow", "h": 20}), flex.node({"id": "minmax-b", "w": "grow", "h": 20})
+], ["20px"], 0.0, 0.0, {"w": 300, "h": 20})
+def minmax_result = flex.solve(minmax_grid, 300.0, 20.0)
+def minmax_a = flex.rect_of(minmax_result, "minmax-a")
+def minmax_b = flex.rect_of(minmax_result, "minmax-b")
+assert(_near(minmax_a.get(2), 233.333333) && _near(minmax_b.get(2), 66.666667), "grid minmax tracks enforce their minimum and preserve fractional maximum weights")
+def span_grid = flex.grid("span-grid", ["1fr", "1fr", "1fr"], [
+   flex.node({"id": "span-wide", "grid_column": 1, "grid_column_span": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "span-last", "grid_column": 3, "w": "grow", "h": 20})
+], ["20px"], 5.0, 0.0, {"w": 300, "h": 20})
+def span_result = flex.solve(span_grid, 300.0, 20.0)
+def span_wide = flex.rect_of(span_result, "span-wide")
+def span_last = flex.rect_of(span_result, "span-last")
+assert(_near(span_wide.get(2), 198.333333) && _near(span_last.get(0), 203.333333) && _near(span_last.get(2), 96.666667), "grid column spans combine weighted tracks and internal gaps")
+def collision_grid = flex.grid("collision-grid", [40, 40, 40], [
+   flex.node({"id": "occupied", "grid_row": 1, "grid_column": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "relocated", "grid_row": 1, "grid_column": 1, "grid_column_span": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "after-span", "w": "grow", "h": 20})
+], [20, 20], 5.0, 5.0)
+def collision_result = flex.solve(collision_grid, 130.0, 45.0)
+def occupied = flex.rect_of(collision_result, "occupied")
+def relocated = flex.rect_of(collision_result, "relocated")
+def after_span = flex.rect_of(collision_result, "after-span")
+assert(_near(occupied.get(0), 45.0) && _near(occupied.get(1), 0.0), "a span cannot overwrite an occupied cell")
+assert(_near(relocated.get(1), 25.0) && _near(relocated.get(2), 85.0) && _near(after_span.get(0), 90.0) && _near(after_span.get(1), 25.0), "auto placement finds and reserves an entire span on one row")
+def pct_grid = flex.grid("pct-grid", ["20%", "30%", "40%"], [
+   flex.node({"id": "pct-span", "grid_column_span": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "pct-next", "w": "grow", "h": 20})
+], [20], 5.0)
+def pct_result = flex.solve(pct_grid, 200.0, 20.0)
+def pct_span = flex.rect_of(pct_result, "pct-span")
+def pct_next = flex.rect_of(pct_result, "pct-next")
+assert(_near(pct_span.get(2), 105.0) && _near(pct_next.get(0), 110.0) && _near(pct_next.get(2), 80.0), "percentage spans include their internal gaps without shifting the column boundary")
+def mixed_grid = flex.grid("mixed-grid", [40, "1fr", "2fr"], [
+   flex.node({"id": "mixed-span", "grid_column_span": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "mixed-next", "w": "grow", "h": 20})
+], [20], 5.0)
+def mixed_result = flex.solve(mixed_grid, 200.0, 20.0)
+def mixed_span = flex.rect_of(mixed_result, "mixed-span")
+def mixed_next = flex.rect_of(mixed_result, "mixed-next")
+assert(_near(mixed_span.get(2), 95.0) && _near(mixed_next.get(0), 100.0) && _near(mixed_next.get(2), 100.0), "mixed fixed and fractional spans reserve fixed space before distributing the remainder")
+def combined_grid = flex.grid("combined-grid", [40, "20%", "1fr", "2fr"], [
+   flex.node({"id": "combined-span", "grid_column_span": 3, "w": "grow", "h": 20}),
+   flex.node({"id": "combined-next", "w": "grow", "h": 20})
+], [20], 5.0)
+def combined_result = flex.solve(combined_grid, 250.0, 20.0)
+def combined_span = flex.rect_of(combined_result, "combined-span")
+def combined_next = flex.rect_of(combined_result, "combined-next")
+assert(_near(combined_span.get(2), 148.333333) && _near(combined_next.get(0), 153.333333) && _near(combined_next.get(2), 96.666667), "fixed and percentage bases are reserved before allocating fractional space within a span")
+def mover = flex.node({"id": "mover", "w": 12, "h": 12, "float": {"anchor": "tl", "x": 4, "y": 3}, "transition": {"spring": anim.spring(2.0, 1.0), "properties": ["x"]}})
+def motion_tree = flex.node({"id": "motion-root", "w": 120, "h": 40, "dir": "col"}, [mover])
+def motion_state = anim.animator()
+def motion_first = flex.solve_animated(motion_tree, 120.0, 40.0, motion_state, 0.016)
+mover["float"] = {"anchor": "tl", "x": 84, "y": 3}
+def motion_second = flex.solve_animated(motion_tree, 120.0, 40.0, motion_first.get("animation_state"), 0.016)
+def motion_rect = flex.rect_of(motion_second, "mover")
+assert(_near(flex.rect_of(motion_first, "mover").get(0), 4.0) && float(motion_rect.get(0)) > 4.0 && float(motion_rect.get(0)) < 84.0 && motion_second.get("animation_busy"), "flex transitions animate changed geometry and request another frame")
+mut motion_frame = motion_second
+mut int motion_steps = 0
+while motion_frame.get("animation_busy") && motion_steps < 80 {
+   motion_frame = flex.solve_animated(motion_tree, 120.0, 40.0, motion_frame.get("animation_state"), 0.05)
+   motion_steps += 1
+}
+assert(_near(flex.rect_of(motion_frame, "mover").get(0), 84.0) && !motion_frame.get("animation_busy"), "flex spring settles on target and clears redraw state")
 ;; Justify and align.
 def just_tree = flex.node({"id": "r", "w": 100, "h": 50, "justify": "center", "align": "center"}, [flex.node({"id": "c", "w": 20, "h": 10})])
 def j = flex.solve(just_tree, 100.0, 50.0)
@@ -46,6 +238,13 @@ def between_tree = flex.node({"id": "r", "w": 100, "h": 10, "justify": "between"
    flex.node({"id": "a", "w": 10, "h": 10}), flex.node({"id": "b", "w": 10, "h": 10}), flex.node({"id": "c", "w": 10, "h": 10})])
 def sb = flex.solve(between_tree, 100.0, 10.0)
 assert(_near(flex.rect_of(sb, "b").get(0), 45.0) && _near(flex.rect_of(sb, "c").get(0), 90.0), "space between")
+def sparse_z_tree = flex.node({"id": "z-root", "w": 100, "h": 20}, [
+   flex.node({"id": "z-one", "w": 10, "h": 10, "z": 1}),
+   flex.node({"id": "z-high", "w": 10, "h": 10, "z": 100000000}),
+   flex.node({"id": "z-low", "w": 10, "h": 10, "z": -100000000}),
+   flex.node({"id": "z-one-later", "w": 10, "h": 10, "z": 1})])
+def sparse_z_boxes = flex.solve(sparse_z_tree, 100.0, 20.0).get("boxes")
+assert(sparse_z_boxes.get(1).get("id") == "z-low" && sparse_z_boxes.get(2).get("id") == "z-one" && sparse_z_boxes.get(3).get("id") == "z-one-later" && sparse_z_boxes.get(4).get("id") == "z-high", "sparse z ordering visits occupied levels and preserves ties")
 ;; Overflow shrinks fit children down to their minimum.
 def shrink_tree = flex.node({"id": "r", "w": 100, "h": 10}, [
    flex.node({"id": "a", "w": "fit", "h": 10, "min_w": 30}, [flex.node({"id": "a1", "w": 80, "h": 10})]),

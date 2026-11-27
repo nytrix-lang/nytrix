@@ -24,6 +24,7 @@ assert(draw.draw_quad_3d(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 
 assert(draw.draw_rect_lines_2d(0.0, 0.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw rect lines no frame")
 assert(draw.draw_chamfer_rect_2d(0.0, 0.0, 10.0, 10.0, 2.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw chamfer no frame")
 assert(draw.draw_rounded_rect_2d(0.0, 0.0, 10.0, 10.0, 2.0, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw rounded no frame")
+assert(draw.draw_rounded_rect_shadow_sdf(0.0, 0.0, 10.0, 10.0, 2.0, 4.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.5) == false, "rounded SDF shadow rejects a missing frame")
 assert(draw.draw_fan_2d(0.0, 0.0, 5.0, 5.0, 8, 0.0, 6.28, 1.0, 1.0, 1.0, 1.0) == 0, "draw fan no frame")
 assert(draw.draw_ellipse_lines_2d(0.0, 0.0, 5.0, 5.0, 1.0, 16, 1.0, 1.0, 1.0, 1.0) == 0, "draw ellipse no frame")
 assert(draw.draw_arc_2d(0.0, 0.0, 5.0, 0.0, 3.14, 1.0, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw arc no frame")
