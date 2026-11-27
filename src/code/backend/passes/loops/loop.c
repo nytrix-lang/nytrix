@@ -6345,7 +6345,7 @@ static bool lu_try_clone_cfg_values(nyr_func_t *work,
                                     const nyr_cfg_t *cfg, const bool *members,
                                     const int64_t *iv_values) {
   if (!work || !loop || !cfg || !members || !loop->trip_count_known ||
-      loop->trip_count < 2 || loop->trip_count > 32 ||
+      loop->trip_count < 2 || loop->trip_count > 16 ||
       (!iv_values && loop->step == 0) ||
       loop->iv < 0 || loop->iv >= work->next_value)
     return lu_clone_reject(loop, "loop-shape");
@@ -7068,7 +7068,7 @@ done:
 static bool lu_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
   const char *reject_stage = "loop-shape";
   if (!work || !loop || !loop->init_is_const || !loop->trip_count_known ||
-      loop->trip_count < 2 || loop->trip_count > 32 || loop->step == 0 ||
+      loop->trip_count < 2 || loop->trip_count > 16 || loop->step == 0 ||
       loop->iv < 0)
     return false;
 

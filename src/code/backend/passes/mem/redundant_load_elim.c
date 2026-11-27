@@ -668,7 +668,7 @@ static bool rle_expand_small_memcpy(nyr_func_t *f) {
                                         chunk_off[ci], pl->debug);
         pl->rep[n++] = rle_make_inst(NYIR_STORE_I64, -1, dst_v, -1, tmps[ci], 0,
                                      rle_width_flag(chunk_w[ci]),
-                                     NYIR_SCALAR_I64_RAW, pl->debug);
+                                     NYIR_SCALAR_UNKNOWN, pl->debug);
       }
     }
     if (pl->ret_dst >= 0) {
@@ -963,7 +963,8 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
           if (mem_avail[m].flags == flags &&
               rle_same_address(f, definition, addr, mem_avail[m].addr, 0,
                                &(unsigned){128}) &&
-              mem_avail[m].scalar_class == in->scalar_class) {
+              (mem_avail[m].scalar_class == in->scalar_class ||
+               in->scalar_class == NYIR_SCALAR_I64_RAW)) {
             /*
              * Replace the load through the shared shape constructor so
              * metadata derived from the old memory read (notably range and

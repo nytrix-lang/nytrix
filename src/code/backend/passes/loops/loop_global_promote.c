@@ -263,8 +263,8 @@ static nyr_inst_t lgp_clone_addr(const nyr_inst_t *tmpl, nyr_op_t op, int dst) {
 /*
  * True when the address is derived from a fresh allocator result of this
  * function (malloc/calloc/zalloc or a raw tbuf payload) through copies and
- * additions. Such memory is a distinct object from every symbol cell, so an
- * access through it can neither read nor clobber a promoted slot.
+ * constant additions. Dynamic arithmetic is kept conservative because it may
+ * combine pointer values and create an alias to a symbol cell.
  */
 static bool lgp_post_inline_disabled(void) {
   static int disabled = -1;
@@ -294,8 +294,11 @@ static bool lgp_private_heap_addr(const nyr_func_t *f, const int *defs,
     return true;
   }
   if (def->op == NYIR_ADD_I64) {
-    return lgp_private_heap_addr(f, defs, def->a, depth + 1) ||
-           lgp_private_heap_addr(f, defs, def->b, depth + 1);
+    bool a_private = lgp_private_heap_addr(f, defs, def->a, depth + 1);
+    bool b_private = lgp_private_heap_addr(f, defs, def->b, depth + 1);
+    bool a_const = lgp_is_const_i64(f, defs, def->a);
+    bool b_const = lgp_is_const_i64(f, defs, def->b);
+    return (a_private && b_const) || (b_private && a_const);
   }
   if (def->op == NYIR_LOAD_LOCAL) {
     int loc = (int)def->imm;

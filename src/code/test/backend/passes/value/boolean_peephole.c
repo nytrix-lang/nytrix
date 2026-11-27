@@ -209,13 +209,19 @@ int main(void) {
   }
   long long before = nyr_opt_eval(&f, name);
   bool ok = nyr_peephole(&f) && nyr_opt_verify(&f, name) &&
-            count_op(&f, NYIR_AND_I64) == 0;
+            count_op(&f, NYIR_AND_I64) == 1;
   const nyr_inst_t *normalized_def = NULL;
   for (size_t i = 0; ok && i < f.len; ++i)
     if (f.data[i].dst == normalized)
       normalized_def = &f.data[i];
   ok = ok && normalized_def && normalized_def->op == NYIR_COPY &&
        normalized_def->a == comparison;
+  const nyr_inst_t *mask_def = NULL;
+  for (size_t i = 0; ok && i < f.len; ++i)
+    if (f.data[i].op == NYIR_AND_I64) mask_def = &f.data[i];
+  ok = ok && mask_def &&
+       ((mask_def->a == normalized && mask_def->b == one) ||
+        (mask_def->b == normalized && mask_def->a == one));
   const nyr_inst_t *result_def = NULL;
   for (size_t i = 0; ok && i < f.len; ++i)
     if (f.data[i].dst == inverted)
