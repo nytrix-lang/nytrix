@@ -19,6 +19,41 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
   not support an operation.
 - **Tooling and docs**: benchmark/reporting improvements, clearer contributor
   guides, and consolidated documentation.
+- **UI and input**: `ytool` now provides an XDND source (`ytool x11 drop FILE
+  WINDOW`) and replaces the Python Wayland seat driver;
+  `x11-file-drop.nshape` verifies a real file drop into an X11 window.
+- **UI rendering**: rounded-rect SDF outlines now have a shader stroke branch and
+  a mock/OpenGL fallback; `rounded-sdf-outline.nshape` verifies the outline
+  leaves its interior clear. SDF clipping now carries a per-instance clip rect
+  through the vertex shader and discards outside pixels in the fragment shader,
+  avoiding a scissor flush per clipped draw.
+- **UI themes**: added 23 ported Glemax palettes under `etc/assets/themes`,
+  including Nord, Modus, Kaolin, Molokai, and Monokai Ristretto variants. All
+  theme files load through the versioned `gui.load_theme_file` schema.
+- **Editor LSP**: code lenses are requested, rendered inline as clickable pills,
+  and executed through `workspace/executeCommand`; process, debug, and message
+  actions are handled. The live inlay probe now also verifies lens placement in
+  a rendered frame.
+- **Editor folding**: server folding ranges are requested and rendered as gutter
+  markers. Folds collapse and reopen from the gutter, `C-SPC v t`/`c`/`o`, and
+  the command palette, with cursor, find, diagnostics, code lenses, and the
+  minimap mapped through the folded view.
+- **Editor git annotations**: `C-SPC v b` toggles inline porcelain blame for the
+  current line and added/modified/deleted hunk bars in the gutter. A headless
+  probe verifies the annotation and the hunk bars against this repository's own
+  history in a rendered frame.
+- **Native debug info**: x86-64 ELF objects built with `-g` now emit DWARF
+  subprogram DIEs with relocated code ranges, so debuggers name frames and
+  resolve function source lines. `--debug-locals` adds base types, decl lines,
+  frame-relative parameter/local DIEs (`DW_OP_fbreg`), and nested
+  `DW_TAG_lexical_block` scopes whose pc ranges come from the line table.
+  Frame-resident locals are described by `.debug_loc` location lists with pc
+  ranges, and `any` locals get a 16-byte structure DIE (the same path handles
+  other aggregate type names once the frontend records them).
+  `debug-info.nshape` checks the tree with `readelf`, links the object against
+  the runtime, and has gdb break on a source line and read parameters through
+  their location lists; when `cc` or `gdb` is unavailable that half is skipped.
+  Locals the optimizer folds away remain undescribed.
 
 <details>
 <summary>Details</summary>
@@ -201,9 +236,48 @@ build and runtime evidence and its limits.
 
 ### Runtime and standard library
 
+- Flex grids share track sizes across rows and support row spans, explicit
+  overlaps, intrinsic track sizing, capped fractional tracks, and separate
+  alignment for tracks and items. Tracks accept named and negative lines,
+  automatic flow can run column-major or dense, items align on a shared text
+  baseline, and `min-content` tracks size to the widest unbreakable content.
+- Declarative XML layouts support dropdown `<menu>` widgets with `<item>`
+  actions and shortcuts, plus reusable `<component>`/`<use>` markup with
+  `<slot>` children and attribute overrides.
+- Canvas fills and strokes can be captured into retained blocks with
+  `vg.cache_begin`/`vg.cache_end`. Later frames replay the stored vertex
+  streams, scissor and blend state until the caller's revision changes.
+- Added a raw int64 arena fast path for simple flex layouts (`flex.fast_node`,
+  `flex.fast_solve`, `flex.fast_solve_into`, `flex.fast_boxes`); it produces the
+  same boxes as `solve`, allocates nothing while solving into a caller-owned
+  arena, and lays out 111 nodes in about 0.2 ms.
+
+- `elm.publish_window_event` now routes `EVENT_DATA_DROP` and `EVENT_DATA_DRAG`
+  with their source window ID; verified by `elm-drop-routing.nshape`.
+- Added `draw_rect_rounded_sdf_clipped`, which intersects a clip rectangle,
+  scopes the scissor to one rounded-SDF draw and restores the previous state;
+  verified by `rounded-sdf-clip.nshape`.
+- `gui.overlay_offset` eases popovers from a pixel offset to their resting
+  place; the editor palette, find bar, context menu and which-key panel use it
+  so they slide in instead of popping.
+- Added a standalone scrollable `gui.list_view` with click and Up/Down
+  selection, stock `gui.message_dialog`/`gui.text_input_dialog` dialogs, a
+  filesystem-backed open dialog (`gui.file_dialog`), and icon packs that load
+  and save C-style `#define` or `NAME value` files.
 - Declarative flex text honors `letter_spacing` in pixels. Pass
   `{"styled": gui.measure_flex_text}` to `flex.solve` to use the same spacing
   and font metrics for intrinsic widths and wrapping as the GUI uses to draw.
+- XML flex layouts support sliders, editable text fields, numeric spin boxes,
+  and combo boxes with ordered `<option>` children. Changes report a named
+  action and a typed value; the application owns state keyed by widget ID.
+- Rounded drop shadows use Vulkan SDF coverage or an interpolated feather
+  mesh on OpenGL and the software renderer.
+- Editor bindings in `NY_EDITOR_KEYS` can use
+  `chord when selection && writable = command-id`. Flags include `editor`,
+  `selection`, `writable`, `readonly`, `file`, and `scratch`; `!`, `&&`, and
+  `||` combine flags. Dispatch and key help use the current buffer context.
+- `Ctrl+Shift+F` searches all open editor buffers, including unsaved text.
+  Results show the buffer and position; Enter jumps to and selects the match.
 - GUI accessibility nodes defer dictionary construction until queried. The
   editor's docked layout now finishes warming up so idle frame reuse can resume.
 - Large runtime allocations (`>= 2 MiB`) request `MADV_HUGEPAGE` on Linux and

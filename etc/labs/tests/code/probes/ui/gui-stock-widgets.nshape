@@ -1,0 +1,222 @@
+shape gui-stock-widgets {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui gui list dialog icon]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3"
+  timeout 300
+  expect compile_and_run
+  expect_stdout "GUI-STOCK-WIDGETS-OK"
+  source ny <<'NY'
+;; Standalone list view, stock dialogs and icon-pack round-tripping.
+use core
+use core.str as str
+use core.os (temp_dir, file_write)
+use core.os.fs as fs
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.consts
+
+def W = 480.0
+def H = 360.0
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK) && gfx.init_window(480, 360, "stock widgets"), "mock window")
+gui.reset_state()
+gui.set_enabled(true)
+gui.set_headless_input(true)
+mut f64 mx = -1.0
+mut f64 my = -1.0
+
+fn frame() any {
+   gui.feed_event(EVENT_MOUSE_POS_CHANGED, {"x": mx, "y": my})
+   gui.prepare_input(0, W, H)
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, W, H, 0.0)
+   gui.begin_frame(0, 0, W, H)
+}
+
+fn finish() any {
+   gui.end_frame()
+   gfx.end_frame()
+}
+
+fn a11y_node(str name, str role) any {
+   def tree = gui.accessibility_tree()
+   for win in tree.get("children", []) {
+      for node in win.get("children", []) {
+         if to_str(node.get("name", "")) == name && to_str(node.get("role", "")) == role { return node }
+      }
+   }
+   for node in tree.get("orphans", []) {
+      if to_str(node.get("name", "")) == name && to_str(node.get("role", "")) == role { return node }
+   }
+   nil
+}
+
+def win_opts = {"closable": false, "movable": false, "resizable": false, "collapsible": false}
+def list_rows = ["Alpha", "Beta", "Gamma", "Delta"]
+
+;; ---- list view ------------------------------------------------------------
+mut int selected = -1
+frame()
+if gui.begin_window("w", "", 10.0, 10.0, 300.0, 250.0, win_opts) {
+   selected = gui.list_view("lv", list_rows, 280.0, 190.0, selected)
+   gui.end_window()
+}
+finish()
+def delta = a11y_node("Delta", "option")
+assert(is_dict(delta) && float(delta.get("bounds", [0.0, 0.0, 0.0, 0.0]).get(2, 0.0)) > 0.0, "the list view exposes row bounds")
+def delta_rect = delta.get("bounds", [0.0, 0.0, 0.0, 0.0])
+
+mx = float(delta_rect.get(0, 0.0)) + float(delta_rect.get(2, 0.0)) * 0.5
+my = float(delta_rect.get(1, 0.0)) + float(delta_rect.get(3, 0.0)) * 0.5
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+if gui.begin_window("w", "", 10.0, 10.0, 300.0, 250.0, win_opts) {
+   selected = gui.list_view("lv", list_rows, 280.0, 190.0, selected)
+   gui.end_window()
+}
+finish()
+
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+if gui.begin_window("w", "", 10.0, 10.0, 300.0, 250.0, win_opts) {
+   selected = gui.list_view("lv", list_rows, 280.0, 190.0, selected)
+   gui.end_window()
+}
+finish()
+assert(selected == 3, "clicking the last list row selects it")
+
+gui.feed_event(EVENT_KEY_PRESSED, {"key": KEY_UP, "mod": 0})
+frame()
+if gui.begin_window("w", "", 10.0, 10.0, 300.0, 250.0, win_opts) {
+   selected = gui.list_view("lv", list_rows, 280.0, 190.0, selected)
+   gui.end_window()
+}
+finish()
+assert(selected == 2, "Up moves the focused list selection")
+
+;; ---- message dialog -------------------------------------------------------
+assert(gui.dialog_open("msg", 300.0), "message dialog opens")
+mx, my = -1.0, -1.0
+frame()
+def msg_choice = gui.message_dialog("msg", "Confirm", "Delete three files?", ["OK"], 300.0)
+finish()
+def msg_button = a11y_node("OK", "button")
+assert(msg_choice == -1 && is_dict(msg_button), "the message dialog draws its button")
+def msg_rect = msg_button.get("bounds", [0.0, 0.0, 0.0, 0.0])
+
+mx = float(msg_rect.get(0, 0.0)) + float(msg_rect.get(2, 0.0)) * 0.5
+my = float(msg_rect.get(1, 0.0)) + float(msg_rect.get(3, 0.0)) * 0.5
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+mut int msg_clicked = gui.message_dialog("msg", "Confirm", "Delete three files?", ["OK"], 300.0)
+finish()
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+def msg_release = gui.message_dialog("msg", "Confirm", "Delete three files?", ["OK"], 300.0)
+finish()
+if msg_clicked < 0 { msg_clicked = msg_release }
+assert(msg_clicked == 0, "clicking OK returns its button index")
+assert(!gui.dialog_is_open("msg"), "a message dialog closes after a choice")
+
+;; ---- text input dialog ----------------------------------------------------
+assert(gui.dialog_open("ren", 320.0), "text dialog opens")
+mx, my = -1.0, -1.0
+frame()
+def ren = gui.text_input_dialog("ren", "Rename", "Name", "initial", ["OK"], 320.0)
+finish()
+def ren_button = a11y_node("OK", "button")
+assert(!bool(ren.get("done", true)) && to_str(ren.get("text", "")) == "initial" && is_dict(ren_button), "the text dialog starts with the supplied value")
+def ren_rect = ren_button.get("bounds", [0.0, 0.0, 0.0, 0.0])
+
+mx = float(ren_rect.get(0, 0.0)) + float(ren_rect.get(2, 0.0)) * 0.5
+my = float(ren_rect.get(1, 0.0)) + float(ren_rect.get(3, 0.0)) * 0.5
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+mut any ren_clicked = gui.text_input_dialog("ren", "Rename", "Name", "initial", ["OK"], 320.0)
+finish()
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+def ren_release = gui.text_input_dialog("ren", "Rename", "Name", "initial", ["OK"], 320.0)
+finish()
+if !bool(ren_clicked.get("done", false)) { ren_clicked = ren_release }
+assert(bool(ren_clicked.get("done", false)) && bool(ren_clicked.get("ok", false)) && to_str(ren_clicked.get("text", "")) == "initial", "OK reports the edited text")
+
+assert(gui.dialog_open("ren2", 320.0), "text dialog reopens")
+frame()
+ren = gui.text_input_dialog("ren2", "Rename", "Name", "initial", ["OK", "Cancel"], 320.0)
+finish()
+def cancel_button = a11y_node("Cancel", "button")
+assert(is_dict(cancel_button), "the text dialog draws a cancel button")
+def cancel_rect = cancel_button.get("bounds", [0.0, 0.0, 0.0, 0.0])
+mx = float(cancel_rect.get(0, 0.0)) + float(cancel_rect.get(2, 0.0)) * 0.5
+my = float(cancel_rect.get(1, 0.0)) + float(cancel_rect.get(3, 0.0)) * 0.5
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+mut any cancel_clicked = gui.text_input_dialog("ren2", "Rename", "Name", "initial", ["OK", "Cancel"], 320.0)
+finish()
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+def cancel_release = gui.text_input_dialog("ren2", "Rename", "Name", "initial", ["OK", "Cancel"], 320.0)
+finish()
+if !bool(cancel_clicked.get("done", false)) { cancel_clicked = cancel_release }
+assert(bool(cancel_clicked.get("done", false)) && !bool(cancel_clicked.get("ok", true)), "Cancel reports a cancelled dialog")
+
+;; ---- file dialog ----------------------------------------------------------
+def fd_dir = temp_dir() + "/nytrix-ui-file-dialog"
+fs.make_dir(fd_dir)
+file_write(fd_dir + "/alpha.txt", "a")
+file_write(fd_dir + "/beta.txt", "b")
+assert(fs.is_file(fd_dir + "/alpha.txt") && fs.is_file(fd_dir + "/beta.txt"), "file dialog fixtures")
+assert(gui.dialog_open("fd", 380.0), "file dialog opens")
+mx, my = -1.0, -1.0
+frame()
+def fd_res = gui.file_dialog("fd", fd_dir)
+finish()
+def alpha = a11y_node("alpha.txt", "option")
+assert(is_dict(alpha), "the file dialog lists files")
+def alpha_rect = alpha.get("bounds", [0.0, 0.0, 0.0, 0.0])
+mx = float(alpha_rect.get(0, 0.0)) + float(alpha_rect.get(2, 0.0)) * 0.5
+my = float(alpha_rect.get(1, 0.0)) + float(alpha_rect.get(3, 0.0)) * 0.5
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+gui.file_dialog("fd", fd_dir)
+finish()
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+gui.file_dialog("fd", fd_dir)
+finish()
+def open_button = a11y_node("Open", "button")
+assert(is_dict(open_button), "the file dialog draws an Open button")
+def open_rect = open_button.get("bounds", [0.0, 0.0, 0.0, 0.0])
+mx = float(open_rect.get(0, 0.0)) + float(open_rect.get(2, 0.0)) * 0.5
+my = float(open_rect.get(1, 0.0)) + float(open_rect.get(3, 0.0)) * 0.5
+gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my})
+frame()
+mut any fd_clicked = gui.file_dialog("fd", fd_dir)
+finish()
+gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my})
+frame()
+def fd_release = gui.file_dialog("fd", fd_dir)
+finish()
+if !bool(fd_clicked.get("done", false)) { fd_clicked = fd_release }
+assert(bool(fd_clicked.get("done", false)) && bool(fd_clicked.get("ok", false)), "Open completes the file dialog")
+assert(to_str(fd_clicked.get("path", "")) == fd_dir + "/alpha.txt", "the chosen path is returned")
+
+;; ---- icon pack ------------------------------------------------------------
+def pack_path = temp_dir() + "/nytrix-ui-icon-pack.h"
+assert(gui.icon_pack_define("RAYGUI_ICON_OK", 57345), "icon define")
+assert(gui.icon_pack_define("RAYGUI_ICON_CANCEL", 57346), "icon define")
+assert(gui.icon_pack_count() == 2, "two icons defined")
+assert(gui.icon_pack_glyph("RAYGUI_ICON_OK") == 57345, "glyph lookup")
+assert(gui.icon_pack_text("RAYGUI_ICON_OK") == str.chr(57345), "glyph text")
+assert(gui.icon_pack_save(pack_path), "icon pack saves")
+gui.icon_pack_clear()
+assert(gui.icon_pack_count() == 0, "clear empties the pack")
+assert(gui.icon_pack_load(pack_path) == 2, "the saved pack reloads")
+assert(gui.icon_pack_glyph("RAYGUI_ICON_CANCEL") == 57346, "reloaded glyph survives the round trip")
+
+gfx.close_window()
+print("GUI-STOCK-WIDGETS-OK")
+NY
+}

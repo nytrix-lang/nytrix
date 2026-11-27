@@ -832,7 +832,9 @@ bool nyr_jump_thread(nyr_func_t *f) {
       bool direct_constant = false;
       jt_cond_term_t terms[8];
       size_t term_count = 0;
-      /* `v == const` decided by a dominating branch on v itself. */
+      /*
+       * `v == const` decided by a dominating branch on v itself.
+       */
       int implied_value = -1;
       nyr_cmp_t implied_cmp = NYIR_CMP_EQ;
       int64_t implied_const = 0;

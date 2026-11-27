@@ -1,7 +1,7 @@
 shape elm-native-windows {
   family "probe-suite"
   generator "regression"
-  features ["ny", "ui", "elm", "x11", "wayland"]
+  features ["ny", "ui", "elm", "x11", "wayland", "win32", "cocoa"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--native-only -O0; --native-only -O3"
@@ -10,7 +10,8 @@ shape elm-native-windows {
 ;; Run under an isolated display:
 ;; env -u WAYLAND_DISPLAY NY_TEST_ELM_PLATFORM=x11 NYTRIX_TEST_ALLOW_DISPLAY=1 xvfb-run -a build/release/ny-test etc/labs/tests/code/probes/ui/elm-native-windows.nshape
 ;; For headless Weston set NY_TEST_ELM_PLATFORM=wayland, XDG_RUNTIME_DIR
-;; and WAYLAND_DISPLAY to the private socket, and unset DISPLAY.
+;; and WAYLAND_DISPLAY to the private socket, and unset DISPLAY. On native
+;; hosts set NY_TEST_ELM_PLATFORM=win32 or cocoa to exercise those backends.
 use core
 use core.os (msleep)
 use core.os.ui.elm as elm
@@ -36,7 +37,7 @@ fn update(any model, any event) any {
 }
 
 def target = __env_get("NY_TEST_ELM_PLATFORM")
-if target == "x11" || target == "wayland" {
+if target == "x11" || target == "wayland" || target == "win32" || target == "cocoa" {
    window.window_hint(window.CLIENT_API, window.NO_API)
    def first = window.open_window("First", 0, 0, 80, 50)
    defer { window.close(first) }
@@ -47,7 +48,7 @@ if target == "x11" || target == "wayland" {
    def second_id = window.id(second)
    def app = elm.new(dict(4))
    elm.subscribe(app, "window.lifecycle", lifecycle_message)
-   if target == "x11" {
+   if target != "wayland" {
       ;; Resize through the platform API so only native events report the resize.
       platform.set_size(first_id, 115, 70)
       platform.set_size(second_id, 155, 90)
@@ -57,16 +58,36 @@ if target == "x11" || target == "wayland" {
    }
    mut attempts = 0
    while attempts < 100 {
-      elm.publish_window_event(app, window.check_event(second), update)
-      elm.publish_window_event(app, window.check_event(first), update)
+      window.poll_events()
+      def se = window.check_event(second)
+      def fe = window.check_event(first)
+      elm.publish_window_event(app, se, update)
+      elm.publish_window_event(app, fe, update)
       def sizes = elm.model(app)
-      if target == "x11" {
+      if target != "wayland" {
          if int(sizes.get(to_str(first_id), 0)) == 115 && int(sizes.get(to_str(second_id), 0)) == 155 { break }
       } elif sizes.get(to_str(first_id) + ":maximized", false) && sizes.get(to_str(second_id) + ":maximized", false) { break }
       msleep(5)
       attempts += 1
    }
    assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs")
+   if target == "win32" || target == "cocoa" {
+      window.maximize(first)
+      window.maximize(second)
+      attempts = 0
+      while attempts < 100 {
+         window.poll_events()
+         def se = window.check_event(second)
+         def fe = window.check_event(first)
+         elm.publish_window_event(app, se, update)
+         elm.publish_window_event(app, fe, update)
+         def sizes = elm.model(app)
+         if sizes.get(to_str(first_id) + ":maximized", false) && sizes.get(to_str(second_id) + ":maximized", false) { break }
+         msleep(5)
+         attempts += 1
+      }
+      assert(attempts < 100, "maximize lifecycle events reach the Elm subscriber independently for both native windows")
+   }
 } else {
    print("Skipped: set NY_TEST_ELM_PLATFORM under an isolated display")
 }

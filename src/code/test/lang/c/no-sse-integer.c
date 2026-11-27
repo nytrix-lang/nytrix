@@ -20,7 +20,9 @@ int nyc_no_sse_varargs(int count, ...) {
   return checksum;
 }
 
-/* Adjacent word copies are SLP/memcombine candidates; they must stay scalar. */
+/*
+ * Adjacent word copies are SLP/memcombine candidates; they must stay scalar.
+ */
 void nyc_no_sse_copy4(long *restrict dst, const long *restrict src) {
   long a = src[0], b = src[1], c = src[2], d = src[3];
   dst[0] = a;

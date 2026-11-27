@@ -1,4 +1,6 @@
-/* A value carried across blocks after being spilled under register pressure must be reloaded, not read from a stale register (fuzzer seed 245). */
+/*
+ * A value carried across blocks after being spilled under register pressure must be reloaded, not read from a stale register (fuzzer seed 245).
+ */
 #include <stdint.h>
 #include <stdio.h>
 static uint64_t sink = 1469598103934665603ull;

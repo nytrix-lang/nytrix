@@ -1061,12 +1061,118 @@ const char *nyr_func_own_symbol_copy(nyr_func_t *f, const char *symbol) {
   return copy;
 }
 
+bool nyr_debug_locals_enabled(void) {
+  static int cached = -1;
+  if (cached >= 0)
+    return cached != 0;
+  const char *v = getenv("NYTRIX_DEBUG_LOCALS");
+  cached = (v && *v && strcmp(v, "0") != 0 && strcmp(v, "false") != 0 &&
+            strcmp(v, "no") != 0 && strcmp(v, "off") != 0)
+               ? 1
+               : 0;
+  return cached != 0;
+}
+
+bool nyr_ir_func_debug_slot(const nyr_func_t *f, int slot) {
+  if (!f || slot < 0 || !nyr_debug_locals_enabled())
+    return false;
+  for (size_t i = 0; i < f->debug_var_count; ++i)
+    if (f->debug_vars[i].is_param != 2 && f->debug_vars[i].slot == slot)
+      return true;
+  return false;
+}
+
+bool nyr_ir_func_debug_var(nyr_func_t *f, const char *name,
+                           const char *type_name, int slot, bool is_param,
+                           int decl_line) {
+  if (!f || !name || !*name || slot < 0 || !nyr_debug_locals_enabled())
+    return false;
+  if (f->debug_var_count >= f->debug_var_cap) {
+    size_t cap = f->debug_var_cap ? f->debug_var_cap * 2 : 16;
+    if (cap < f->debug_var_cap || cap > SIZE_MAX / sizeof(*f->debug_vars))
+      return false;
+    nyr_debug_var_t *grown =
+        realloc(f->debug_vars, cap * sizeof(*f->debug_vars));
+    if (!grown)
+      return false;
+    f->debug_vars = grown;
+    f->debug_var_cap = cap;
+  }
+  const char *owned = nyr_func_own_symbol_copy(f, name);
+  if (!owned)
+    return false;
+  const char *owned_type =
+      type_name ? nyr_func_own_symbol_copy(f, type_name) : NULL;
+  f->debug_vars[f->debug_var_count++] =
+      (nyr_debug_var_t){owned, owned_type, slot, is_param ? 1 : 0, decl_line};
+  return true;
+}
+
+/*
+ * Bind sites record the variable before the declaration's line is known, so
+ * the lowering site fills it in. The declaration line decides both DW_AT_decl_line
+ * and which lexical block owns the DIE.
+ */
+bool nyr_ir_func_debug_var_line(nyr_func_t *f, int slot, int decl_line) {
+  if (!f || slot < 0 || decl_line <= 0 || !nyr_debug_locals_enabled())
+    return false;
+  for (size_t i = 0; i < f->debug_var_count; ++i) {
+    nyr_debug_var_t *dv = &f->debug_vars[i];
+    if (dv->slot == slot && dv->is_param != 2) {
+      dv->decl_line = decl_line;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool nyr_ir_func_debug_var_type(nyr_func_t *f, int slot,
+                                const char *type_name) {
+  if (!f || !type_name || !*type_name || slot < 0 ||
+      !nyr_debug_locals_enabled())
+    return false;
+  for (size_t i = 0; i < f->debug_var_count; ++i) {
+    nyr_debug_var_t *dv = &f->debug_vars[i];
+    if (dv->slot != slot || dv->is_param == 2)
+      continue;
+    const char *owned = nyr_func_own_symbol_copy(f, type_name);
+    if (!owned)
+      return false;
+    dv->type_name = owned;
+    return true;
+  }
+  return false;
+}
+
+bool nyr_ir_func_debug_scope(nyr_func_t *f, int depth, int start_line,
+                             int end_line) {
+  if (!f || depth <= 0 || start_line <= 0 || end_line < start_line ||
+      !nyr_debug_locals_enabled())
+    return false;
+  if (f->debug_scope_count >= f->debug_scope_cap) {
+    size_t cap = f->debug_scope_cap ? f->debug_scope_cap * 2 : 16;
+    if (cap < f->debug_scope_cap || cap > SIZE_MAX / sizeof(*f->debug_scopes))
+      return false;
+    nyr_debug_scope_t *grown =
+        realloc(f->debug_scopes, cap * sizeof(*f->debug_scopes));
+    if (!grown)
+      return false;
+    f->debug_scopes = grown;
+    f->debug_scope_cap = cap;
+  }
+  f->debug_scopes[f->debug_scope_count++] =
+      (nyr_debug_scope_t){depth, start_line, end_line};
+  return true;
+}
+
 void nyr_ir_func_free(nyr_func_t *f) {
   if (!f)
     return;
   for (size_t i = 0; i < f->owned_symbols_len; ++i)
     free(f->owned_symbols[i]);
   free(f->owned_symbols);
+  free(f->debug_vars);
+  free(f->debug_scopes);
   free(f->param_types);
   free(f->param_abi);
   free(f->source_param_widths);

@@ -67,9 +67,9 @@ static nyr_inst_t ivm_make(nyr_op_t op, int dst, int a, int b) {
   return in;
 }
 
-static bool ivm_const(const nyr_func_t *f, const int *defs, int v,
+static bool ivm_const(const nyr_func_t *f, const int *defs, int defs_count, int v,
                       int64_t *out) {
-  for (int depth = 0; depth < 16 && v >= 0 && v < f->next_value; ++depth) {
+  for (int depth = 0; depth < 16 && v >= 0 && v < defs_count; ++depth) {
     int at = defs[v];
     if (at < 0)
       return false;
@@ -106,7 +106,9 @@ static size_t ivm_block_tail(const nyr_func_t *f, const nyr_cfg_t *cfg,
   return end;
 }
 
-/* Number of operand uses of v across the function (PHI incomings included). */
+/*
+ * Number of operand uses of v across the function (PHI incomings included).
+ */
 static size_t ivm_use_count(const nyr_func_t *f, int v) {
   size_t n = 0;
   for (size_t i = 0; i < f->len; ++i) {
@@ -125,8 +127,9 @@ static size_t ivm_use_count(const nyr_func_t *f, int v) {
 }
 
 static bool ivm_invariant(const nyr_cfg_t *cfg, const int *defs,
-                          const bool *member, int v) {
-  if (v < 0)
+                          const bool *member, int defs_count, int v) {
+  /* Staged insertions have fresh SSA IDs, but defs describes the old CFG. */
+  if (v < 0 || v >= defs_count)
     return false;
   if (defs[v] < 0)
     return true; /* parameter / entry value */
@@ -138,7 +141,7 @@ static bool ivm_invariant(const nyr_cfg_t *cfg, const int *defs,
  * loop-invariant B inside the loop.
  */
 static bool ivm_all_rebaseable(const nyr_func_t *f, const nyr_cfg_t *cfg,
-                               const int *defs, const bool *member,
+                               const int *defs, const bool *member, int defs_count,
                                const ivm_iv_t *p2) {
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -158,7 +161,7 @@ static bool ivm_all_rebaseable(const nyr_func_t *f, const nyr_cfg_t *cfg,
         !member[cfg->inst_block[i]])
       return false;
     int other = in->a == p2->phi ? in->b : in->a;
-    if (!ivm_invariant(cfg, defs, member, other))
+    if (!ivm_invariant(cfg, defs, member, defs_count, other))
       return false;
   }
   return true;
@@ -169,13 +172,13 @@ static bool ivm_all_rebaseable(const nyr_func_t *f, const nyr_cfg_t *cfg,
  * arithmetic chains so scaled loop inits like `(i << 3)` vs `i - 1` resolve to
  * a constant offset instead of per-outer-iteration materialization.
  */
-static bool ivm_linear_of(const nyr_func_t *f, const int *defs, int v,
+static bool ivm_linear_of(const nyr_func_t *f, const int *defs, int defs_count, int v,
                           int *root_out, int64_t *scale_out,
                           int64_t *off_out) {
   int cur = v;
   int64_t scale = 1;
   int64_t off = 0;
-  for (int depth = 0; depth < 8 && cur >= 0 && cur < f->next_value; ++depth) {
+  for (int depth = 0; depth < 8 && cur >= 0 && cur < defs_count; ++depth) {
     int at = defs[cur];
     if (at < 0)
       break;
@@ -186,33 +189,33 @@ static bool ivm_linear_of(const nyr_func_t *f, const int *defs, int v,
       continue;
     }
     if (d->op == NYIR_ADD_I64 && d->a >= 0 && d->b >= 0) {
-      if (ivm_const(f, defs, d->b, &c)) {
+      if (ivm_const(f, defs, defs_count, d->b, &c)) {
         off = (int64_t)((uint64_t)off + (uint64_t)scale * (uint64_t)c);
         cur = d->a;
         continue;
       }
-      if (ivm_const(f, defs, d->a, &c)) {
+      if (ivm_const(f, defs, defs_count, d->a, &c)) {
         off = (int64_t)((uint64_t)off + (uint64_t)scale * (uint64_t)c);
         cur = d->b;
         continue;
       }
     } else if (d->op == NYIR_SUB_I64 && d->a >= 0 && d->b >= 0 &&
-               ivm_const(f, defs, d->b, &c)) {
+               ivm_const(f, defs, defs_count, d->b, &c)) {
       off = (int64_t)((uint64_t)off - (uint64_t)scale * (uint64_t)c);
       cur = d->a;
       continue;
     } else if (d->op == NYIR_SHL_I64 && d->a >= 0 &&
-               ivm_const(f, defs, d->b, &c) && c >= 0 && c <= 62) {
+               ivm_const(f, defs, defs_count, d->b, &c) && c >= 0 && c <= 62) {
       scale = (int64_t)((uint64_t)scale * (UINT64_C(1) << (unsigned)c));
       cur = d->a;
       continue;
     } else if (d->op == NYIR_MUL_I64 && d->a >= 0 && d->b >= 0) {
-      if (ivm_const(f, defs, d->b, &c)) {
+      if (ivm_const(f, defs, defs_count, d->b, &c)) {
         scale = (int64_t)((uint64_t)scale * (uint64_t)c);
         cur = d->a;
         continue;
       }
-      if (ivm_const(f, defs, d->a, &c)) {
+      if (ivm_const(f, defs, defs_count, d->a, &c)) {
         scale = (int64_t)((uint64_t)scale * (uint64_t)c);
         cur = d->b;
         continue;
@@ -223,20 +226,20 @@ static bool ivm_linear_of(const nyr_func_t *f, const int *defs, int v,
   *root_out = cur;
   *scale_out = scale;
   *off_out = off;
-  return cur >= 0;
+  return cur >= 0 && cur < defs_count;
 }
 
-static bool ivm_init_diff(const nyr_func_t *f, const int *defs, int init1,
+static bool ivm_init_diff(const nyr_func_t *f, const int *defs, int defs_count, int init1,
                           int64_t scale, int init2, int64_t *diff_out) {
   int64_t c1 = 0, c2 = 0;
-  if (ivm_const(f, defs, init1, &c1) && ivm_const(f, defs, init2, &c2)) {
+  if (ivm_const(f, defs, defs_count, init1, &c1) && ivm_const(f, defs, defs_count, init2, &c2)) {
     *diff_out = (int64_t)((uint64_t)c2 - (uint64_t)scale * (uint64_t)c1);
     return true;
   }
   int r1 = -1, r2 = -1;
   int64_t s1 = 0, s2 = 0, o1 = 0, o2 = 0;
-  if (ivm_linear_of(f, defs, init1, &r1, &s1, &o1) &&
-      ivm_linear_of(f, defs, init2, &r2, &s2, &o2) && r1 == r2 &&
+  if (ivm_linear_of(f, defs, defs_count, init1, &r1, &s1, &o1) &&
+      ivm_linear_of(f, defs, defs_count, init2, &r2, &s2, &o2) && r1 == r2 &&
       (uint64_t)s2 == (uint64_t)scale * (uint64_t)s1) {
     *diff_out = (int64_t)((uint64_t)o2 - (uint64_t)scale * (uint64_t)o1);
     return true;
@@ -252,6 +255,7 @@ static size_t ivm_collect(const nyr_func_t *f, const nyr_cfg_t *cfg,
                           int64_t pre_label, int64_t latch_label,
                           ivm_iv_t *out) {
   size_t n = 0;
+  int defs_count=f->next_value;
   bool allow_sub = ivm_scaled_enabled();
   for (size_t i = cfg->block_start[header];
        i < cfg->block_end[header] && n < IVM_MAX_PHIS; ++i) {
@@ -279,11 +283,11 @@ static size_t ivm_collect(const nyr_func_t *f, const nyr_cfg_t *cfg,
     int64_t step = 0;
     if (inc->op == NYIR_ADD_I64) {
       int other = inc->a == in->dst ? inc->b : inc->b == in->dst ? inc->a : -2;
-      if (other == -2 || other == in->dst || !ivm_const(f, defs, other, &step))
+      if (other == -2 || other == in->dst || !ivm_const(f, defs, defs_count, other, &step))
         continue;
     } else {
       if (inc->a != in->dst || inc->b == in->dst ||
-          !ivm_const(f, defs, inc->b, &step) || step == INT64_MIN)
+          !ivm_const(f, defs, defs_count, inc->b, &step) || step == INT64_MIN)
         continue;
       step = -step;
     }
@@ -304,6 +308,7 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
                             const int *defs, const bool *member, size_t header,
                             size_t pre, int64_t pre_label,
                             int64_t latch_label) {
+  const int defs_count=f->next_value;
   ivm_iv_t ivs[IVM_MAX_PHIS];
   size_t n = ivm_collect(f, cfg, defs, member, header, pre_label, latch_label,
                          ivs);
@@ -343,21 +348,25 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
       if (shift < 0)
         continue;
       const ivm_iv_t *p1 = &ivs[a], *p2 = &ivs[b];
-      /* The increment of p2 must feed only p2. */
+      /*
+       * The increment of p2 must feed only p2.
+       */
       if (ivm_use_count(f, p2->next) != 1)
         continue;
       if (nins + IVM_MAX_BASES * 3 + 8 > ins_cap)
         break;
       int64_t c1 = 0, const_diff = 0;
-      bool k1 = ivm_const(f, defs, p1->init, &c1);
+      bool k1 = ivm_const(f, defs, defs_count, p1->init, &c1);
       bool has_const_diff =
-          ivm_init_diff(f, defs, p1->init, scale, p2->init, &const_diff);
+          ivm_init_diff(f, defs, defs_count, p1->init, scale, p2->init, &const_diff);
       bool zero_diff = (shift == 0 && p1->init == p2->init) ||
                        (has_const_diff && const_diff == 0);
       size_t saved_nins = nins;
       int dval = -1;
       if (zero_diff) {
-        /* p2 == p1 << shift; no preheader offset difference to materialize. */
+        /*
+         * p2 == p1 << shift; no preheader offset difference to materialize.
+         */
       } else if (has_const_diff) {
         dval = f->next_value++;
         nyr_inst_t c = ivm_make(NYIR_CONST_I64, dval, -1, -1);
@@ -387,7 +396,7 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
        * base in the preheader so the loop body folds into x86 SIB [B'+i*s].
        */
       if (!zero_diff && (shift > 0 || !has_const_diff) &&
-          !ivm_all_rebaseable(f, cfg, defs, member, p2)) {
+          !ivm_all_rebaseable(f, cfg, defs, member, defs_count, p2)) {
         nins = saved_nins;
         continue;
       }
@@ -408,12 +417,14 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
           uses = in->phi_incoming[k].value == p2->phi;
         if (!uses)
           continue;
-        /* `B + p2` with an invariant B: rebase onto (p1 << shift). */
+        /*
+         * `B + p2` with an invariant B: rebase onto (p1 << shift).
+         */
         if ((shift > 0 || !zero_diff) && in->op == NYIR_ADD_I64 &&
             in->a != in->b && !in->extra_args_len &&
             member[cfg->inst_block[i]]) {
           int other = in->a == p2->phi ? in->b : in->a;
-          if (ivm_invariant(cfg, defs, member, other)) {
+          if (ivm_invariant(cfg, defs, member, defs_count, other)) {
             int new_base = other;
             if (!zero_diff) {
               size_t k = 0;
@@ -444,7 +455,9 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
               repl_idx = f->next_value++;
               nyr_inst_t kci = ivm_make(NYIR_CONST_I64, kc, -1, -1);
               kci.imm = shift;
-              /* Emit const+shl immediately before `in` for x86 SIB folding. */
+              /*
+               * Emit const+shl immediately before `in` for x86 SIB folding.
+               */
               ins[nins++] = (ivm_insert_t){i, kci};
               ins[nins++] = (ivm_insert_t){
                   i, ivm_make(NYIR_SHL_I64, repl_idx, p1->phi, kc)};
@@ -501,7 +514,9 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
       }
       if (!ok)
         return -1;
-      /* p2 and its increment are dead now. */
+      /*
+       * p2 and its increment are dead now.
+       */
       nyr_inst_discard(&f->data[p2->at]);
       nyr_inst_discard(&f->data[p2->next_at]);
       dead[b] = true;
@@ -510,7 +525,9 @@ static int ivm_rewrite_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
   }
   if (!merged_any)
     return 0;
-  /* Insert back to front; same-position groups keep program order. */
+  /*
+   * Insert back to front; same-position groups keep program order.
+   */
   for (size_t i = 0; i < nins / 2; ++i) {
     ivm_insert_t t = ins[i];
     ins[i] = ins[nins - 1 - i];
@@ -562,7 +579,9 @@ static int ivm_round(nyr_func_t *f, size_t *skip) {
         continue;
       if (seen++ < *skip)
         continue;
-      /* Exactly one outside predecessor and this single latch. */
+      /*
+       * Exactly one outside predecessor and this single latch.
+       */
       size_t pre = SIZE_MAX, preds = 0;
       bool single_latch = true;
       for (size_t k = cfg.pred_offsets[header]; k < cfg.pred_offsets[header + 1];

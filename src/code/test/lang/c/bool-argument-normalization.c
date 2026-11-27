@@ -1,4 +1,6 @@
-/* Converting a non-zero integer to _Bool yields 1 for arguments and struct members, not the low byte. */
+/*
+ * Converting a non-zero integer to _Bool yields 1 for arguments and struct members, not the low byte.
+ */
 typedef _Bool bool;
 static inline bool sp(unsigned long f) { return f & 0x200; }
 static inline bool sp2(unsigned long f) { bool r = f & 0x200; return r; }

@@ -323,6 +323,9 @@ fn _next_cursor_id() int {
       fn _c_xchange_window_attributes(ptr display, u64 win, u64 mask, ptr attributes) i32 as "XChangeWindowAttributes"
       fn _c_xget_window_attributes(ptr display, u64 win, ptr attributes) i32 as "XGetWindowAttributes"
       fn _c_xtranslate_coordinates(ptr display, u64 source, u64 destination, i32 src_x, i32 src_y, ptr dst_x, ptr dst_y, ptr child) i32 as "XTranslateCoordinates"
+      fn _c_xconvert_selection(ptr display, u64 selection, u64 target, u64 property, u64 requestor, u64 time) i32 as "XConvertSelection"
+      fn _c_xdelete_property(ptr display, u64 win, u64 property) i32 as "XDeleteProperty"
+      fn _c_xget_window_property(ptr display, u64 win, u64 property, i64 offset, i64 length, i32 delete, u64 req_type, ptr actual_type, ptr actual_format, ptr nitems, ptr bytes_after, ptr prop) i32 as "XGetWindowProperty"
       fn _c_xget_input_focus(ptr display, ptr focus, ptr revert_to) i32 as "XGetInputFocus"
       fn _c_xquery_pointer(ptr display, u64 window, ptr root, ptr child, ptr root_x, ptr root_y, ptr window_x, ptr window_y, ptr mask) i32 as "XQueryPointer"
       fn _c_xflush(ptr display) i32 as "XFlush"
@@ -1146,7 +1149,7 @@ fn get_window_property(any display, any win, any property, any typ, int long_len
       return false
    }
    store64_h(prop, 0, 0)
-   def status = XGetWindowProperty(_x11_raw(display), _x11_raw(win), _x11_raw(property), 0,
+   def status = _c_xget_window_property(_x11_raw(display), _x11_raw(win), _x11_raw(property), 0,
       long_length, 0, _x11_raw(typ), _x11_raw(actual_type), _x11_raw(actual_format),
       _x11_raw(nitems), _x11_raw(bytes_after), _x11_raw(prop))
    if status != Success {
@@ -2812,7 +2815,12 @@ fn _translate_root_to_window(any display, any root, any win, int xabs, int yabs)
       if child { free(child) }
       return [0, 0]
    }
-   XTranslateCoordinates(display, root, win, xabs, yabs, out_x, out_y, child)
+   store32(out_x, 0, 0)
+   store32(out_y, 0, 0)
+   store64_h(child, 0, 0)
+   _c_xtranslate_coordinates(
+      _x11_raw(display), _x11_raw(root), _x11_raw(win), xabs, yabs, out_x, out_y, child,
+   )
    def res = [load32(out_x, 0), load32(out_y, 0)]
    free(out_x, out_y, child)
    res
@@ -3610,7 +3618,10 @@ fn _get_selection_text(any win, str selection_key, str local_key) str {
    mut target = utf8_string_atom
    while i < 2 {
       if i == 1 { target = XA_STRING }
-      XConvertSelection(display, selection, target, selection_property_atom, handle, CurrentTime)
+      _c_xconvert_selection(
+         _x11_raw(display), _x11_raw(selection), _x11_raw(target),
+         _x11_raw(selection_property_atom), _x11_raw(handle), CurrentTime,
+      )
       flush(display)
       def notification = zalloc(96)
       if !notification { return "" }
@@ -3765,7 +3776,10 @@ fn _push_selection_to_manager(any win, int timeout_ms=250) bool {
    def clipboard_manager = win.get("clipboard_manager", 0)
    def save_targets = win.get("save_targets", 0)
    if !display || !handle || !clipboard_manager || !save_targets { return false }
-   XConvertSelection(display, clipboard_manager, save_targets, NoAtom, handle, CurrentTime)
+   _c_xconvert_selection(
+      _x11_raw(display), _x11_raw(clipboard_manager), _x11_raw(save_targets),
+      NoAtom, _x11_raw(handle), CurrentTime,
+   )
    flush(display)
    def event_buf = zalloc(192)
    if !event_buf { return false }
@@ -4483,7 +4497,10 @@ fn _translate_client_message_event(
             mut time = CurrentTime
             if xdnd_ver >= 1 { time = _xevent_client_l(event_ptr, 2) }
             def xdnd_sel = win.get("xdnd_selection", 0)
-            XConvertSelection(display, xdnd_sel, xdnd_fmt, xdnd_sel, window_handle, time)
+            _c_xconvert_selection(
+               _x11_raw(display), _x11_raw(xdnd_sel), _x11_raw(xdnd_fmt),
+               _x11_raw(xdnd_sel), _x11_raw(window_handle), time,
+            )
             flush(display)
          } else {
             if xdnd_ver >= 2 { _send_xdnd_finished(display, source, win, false, 0) }
@@ -4504,8 +4521,10 @@ fn _translate_selection_notify_event(any win, any event_ptr, list events, any di
       def prop = get_window_property(display, window_handle, property, common.value_or(target, AnyPropertyType))
       if prop && is_dict(prop) {
          def data_ptr = _prop_data_ptr(prop)
-         if data_ptr {
-            def raw = x11_common.dup_string(data_ptr)
+         def prop_count = int(prop.get("count", 0))
+         def prop_format = int(prop.get("format", 0))
+         if data_ptr && prop_format == 8 && prop_count > 0 {
+            def raw = x11_common.dup_string(init_str(data_ptr, prop_count))
             def paths = x11_common.parseUriList(raw)
             def data = {"paths": paths}
             events = _push_translated_event(events, 16, win, data)
@@ -4513,7 +4532,7 @@ fn _translate_selection_notify_event(any win, any event_ptr, list events, any di
             accepted = is_list(paths) && paths.len > 0
          }
       }
-      XDeleteProperty(display, window_handle, property)
+      _c_xdelete_property(_x11_raw(display), _x11_raw(window_handle), _x11_raw(property))
       flush(display)
    }
    def xdnd_ver = win.get("xdnd_version", 0)

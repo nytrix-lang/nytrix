@@ -148,7 +148,7 @@ fn hexdump(bytes data, int start, int count) str {
 
 fn fmt_bytes(f64 n) str {
    "Formats a byte count with binary units: 512 B, 1.5 KiB, 2.0 GiB; \"N/A\"
-   for a negative (unknown) count."
+   for a negative(unknown) count."
    if n < 0.0 { return "N/A" }
    if n > 0.0 && n < 1.0 { return to_str(round(n, 2)) + " B" }
    mut v = n

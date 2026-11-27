@@ -1,4 +1,6 @@
-/* No instruction follows a noreturn call or __builtin_unreachable. */
+/*
+ * No instruction follows a noreturn call or __builtin_unreachable.
+ */
 void die(const char *) __attribute__((noreturn));
 static __attribute__((always_inline)) inline int tripled(int x) { return x * 3; }
 int checked(int x) {

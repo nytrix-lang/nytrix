@@ -202,6 +202,22 @@ bool nyr_native_debug_line_append(nyr_native_debug_line_t **lines,
                                   size_t *count, size_t *cap,
                                   nyr_native_debug_line_t line);
 
+typedef struct {
+  size_t def_index;
+  const char *name;      /* owned copy */
+  const char *type_name; /* owned copy, never NULL */
+  int offset;            /* rbp-relative frame offset */
+  uint32_t decl_line;
+  /* 0 variable, 1 parameter, 2 lexical-scope marker (name/type are NULL). */
+  uint32_t is_param;
+  uint32_t end_line; /* scope markers only */
+  int32_t depth;     /* scope markers only */
+} nyr_native_debug_var_t;
+
+bool nyr_native_debug_var_append(nyr_native_debug_var_t **vars, size_t *count,
+                                 size_t *cap, nyr_native_debug_var_t var);
+void nyr_native_debug_vars_free(nyr_native_debug_var_t *vars, size_t count);
+
 bool nyr_native_build_debug_line(const nyr_native_debug_line_t *lines,
                                  size_t line_count, size_t text_len,
                                  nyr_obj_buf_t *out, size_t *base_reloc_offset,
@@ -425,7 +441,9 @@ bool nyr_x64_mach_append_function_debug(
     const nyr_mach_func_t *mach, const ny_native_target_info_t *target,
     const char *symbol, bool tag_return, bool bare_syscalls,
     const nyr_func_t *source, nyr_native_debug_line_t **debug_lines,
-    size_t *debug_line_count, size_t *debug_line_cap, char *err, size_t err_len,
+    size_t *debug_line_count, size_t *debug_line_cap,
+    nyr_native_debug_var_t **debug_vars, size_t *debug_var_count,
+    size_t *debug_var_cap, char *err, size_t err_len,
     size_t **inst_offsets_out, size_t *inst_offsets_count);
 bool nyr_x64_try_stencil_bundle(const nyr_func_t *rt_main,
                                 const ny_native_target_info_t *target,

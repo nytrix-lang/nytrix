@@ -1,7 +1,9 @@
-/* A callee whose body starts with a loop has a back edge to its entry label.
-   Inlining it before it is optimized must store the formals before that
-   label, not inside the loop. The caller comes first so the callee is still
-   in its unoptimized form when it is spliced. */
+/*
+ * A callee whose body starts with a loop has a back edge to its entry label.
+ * Inlining it before it is optimized must store the formals before that
+ * label, not inside the loop. The caller comes first so the callee is still
+ * in its unoptimized form when it is spliced.
+ */
 static void nyc_fix(char *string, unsigned long length);
 
 int nyc_inline_loop_entry(char *buffer) {

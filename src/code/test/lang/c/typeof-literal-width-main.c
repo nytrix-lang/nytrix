@@ -1,4 +1,6 @@
-/* Host driver for typeof-literal-width.c. */
+/*
+ * Host driver for typeof-literal-width.c.
+ */
 long a1(long), a2(long), a4(long), a5(long), a6(long), a7(long), a8(long long);
 unsigned long a3(unsigned long), a9(unsigned long);
 int main(void) {

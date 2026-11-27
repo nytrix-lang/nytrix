@@ -1,4 +1,6 @@
-/* Runs %gs-relative loads, stores, increments and subscripts against a block installed with arch_prctl and prints the results. */
+/*
+ * Runs %gs-relative loads, stores, increments and subscripts against a block installed with arch_prctl and prints the results.
+ */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>

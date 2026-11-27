@@ -1,5 +1,7 @@
-/* Storing a pointer into a struct member must write four bytes on i386; an
-   eight-byte store clobbers the neighboring field. */
+/*
+ * Storing a pointer into a struct member must write four bytes on i386; an
+ * eight-byte store clobbers the neighboring field.
+ */
 struct card {
   const char *name;
   int (*set)(void *);

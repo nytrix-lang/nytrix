@@ -6,7 +6,8 @@ module core.os.ui.render.viewer.editor.commands(
    commands, all_commands, enabled, with_tag, by_id, id_for_chord, which_key, has_id,
    config, set_enabled, is_enabled, toggle, toggles, row_id, row_key, row_tag,
    keymap, set_keymap, keymap_names, bindings_for, describe_chord,
-   rebind, unbind, user_bindings, parse_bindings, load_bindings_file
+   rebind, unbind, user_bindings, parse_bindings, load_bindings_file,
+   has_chord_prefix, has_context_bindings
 )
 
 use core
@@ -60,8 +61,10 @@ def _COMMANDS = [
    ["Debug reverse step", "debug-reverse-step", "C-SPC d a", "reverse step under rr/gdb record", "debug"],
    ["Debug load coredump", "debug-coredump", "C-SPC d k", "open latest coredump in gdb", "debug"],
    ["Refresh project", "refresh", "C-SPC g", "refresh tree and git status", "project"],
+   ["Toggle git blame", "git-blame", "C-SPC v b", "show inline blame and hunk markers", "git"],
    ["Rename selected file", "rename", "F2", "rename tree selection", "project"],
    ["Find in buffer", "find", "C-f", "open search in the current buffer", "search"],
+   ["Find in open buffers", "find-buffers", "C-Shift-f", "search all open buffers, including unsaved edits", "search"],
    ["Replace in buffer", "replace", "C-h", "open search and replace in the current buffer", "search"],
    ["Replace in buffer", "replace", "C-SPC s r", "open search and replace in the current buffer", "search"],
    ["Find next", "find-next", "F3", "jump to next search result", "search"],
@@ -186,6 +189,9 @@ def _COMMANDS = [
    ["Document symbols", "lsp-symbols", "C-SPC l o", "list symbols in this file", "lsp"],
    ["Code actions", "lsp-actions", "C-SPC l a", "apply the quick fix at the cursor", "lsp"],
    ["Signature help", "lsp-signature", "C-SPC l k", "show the call signature", "lsp"],
+   ["Toggle fold", "fold-toggle", "C-SPC v t", "collapse or expand the fold at the cursor", "view"],
+   ["Close fold", "fold-close", "C-SPC v c", "collapse the fold at the cursor", "view"],
+   ["Open all folds", "fold-open-all", "C-SPC v o", "expand every folded region", "view"],
 ]
 
 def _ALIASES = []
@@ -334,7 +340,7 @@ fn _template_row(str id) list {
 }
 
 fn parse_bindings(str text) list {
-   "Parses `chord = command-id` lines(# starts a comment; `chord =` unbinds). Returns [chord, id] pairs; malformed lines are skipped."
+   "Parses `chord = command-id` or `chord when predicate = command-id` lines. `#` starts a comment and an unconditional empty command unbinds."
    mut out = []
    def lines = str.split(text, "\n")
    mut i = 0
@@ -344,10 +350,16 @@ fn parse_bindings(str text) list {
       if line.len == 0 || str.startswith(line, "#") { continue }
       def eq = str.find(line, "=")
       if eq <= 0 { continue }
-      def chord = str.strip(str.str_slice(line, 0, eq))
+      def lhs = str.strip(str.str_slice(line, 0, eq))
       def id = str.strip(str.str_slice(line, eq + 1, line.len))
+      def at = str.find(lhs, " when ")
+      def chord = at < 0 ? lhs : str.strip(str.str_slice(lhs, 0, at))
       if chord.len == 0 { continue }
-      out = out.append([chord, id])
+      if at < 0 { out = out.append([chord, id]) }
+      else {
+         def predicate = str.strip(str.str_slice(lhs, at + 6, lhs.len))
+         if id.len > 0 && _predicate_terms(predicate).len > 0 { out = out.append([chord, id, predicate]) }
+      }
    }
    out
 }
@@ -367,10 +379,7 @@ fn load_bindings_file(str path) int {
    while i < pairs.len {
       def pr = pairs.get(i)
       def id = to_str(pr.get(1, ""))
-      if id.len == 0 || _template_row(id).len > 0 {
-         rebind(to_str(pr.get(0, "")), id)
-         n += 1
-      }
+      if rebind(to_str(pr.get(0, "")), id, to_str(pr.get(2, ""))) { n += 1 }
       i += 1
    }
    n
@@ -383,9 +392,64 @@ fn _ensure_user_bindings() {
    if path && to_str(path).len > 0 { load_bindings_file(to_str(path)) }
 }
 
-fn rebind(str chord, str id) bool {
-   "Binds `chord` to command `id` on top of the active keymap(empty `id` unbinds). Returns false for an unknown command."
+fn _predicate_terms(str expression) list {
+   mut clauses = []
+   for clause in str.split(expression, "||") {
+      mut terms = []
+      for raw in str.split(to_str(clause), "&&") {
+         def term = str.strip(to_str(raw))
+         def negative = str.startswith(term, "!")
+         def name = negative ? str.strip(str.str_slice(term, 1, term.len)) : term
+         if name.len == 0 { return [] }
+         mut int i = 0
+         while i < name.len {
+            def int c = load8(name, i) & 255
+            if !((c >= 97 && c <= 122) || c == 95 || (i > 0 && c >= 48 && c <= 57)) { return [] }
+            i += 1
+         }
+         terms = terms.append([name, !negative])
+      }
+      if terms.len == 0 { return [] }
+      clauses = clauses.append(terms)
+   }
+   clauses
+}
+
+mut list _CONTEXT_BINDS = []
+
+fn has_context_bindings() bool {
+   _ensure_user_bindings()
+   _CONTEXT_BINDS.len > 0
+}
+
+fn _predicate_matches(list clauses, dict context) bool {
+   mut int i = 0
+   while i < clauses.len {
+      def clause = clauses.get(i, [])
+      mut matches = true
+      mut int j = 0
+      while j < clause.len {
+         def term = clause.get(j, [])
+         if bool(context.get(term.get(0), false)) != bool(term.get(1)) { matches = false break }
+         j += 1
+      }
+      if matches { return true }
+      i += 1
+   }
+   false
+}
+
+fn rebind(str chord, str id, str predicate="") bool {
+   "Binds a chord to a registered action. Optional predicates use flags, !, &&, and ||; && binds tighter. The latest matching conditional binding wins, otherwise the active profile applies. An empty id unbinds an unconditional key."
+   if chord.len <= 0 { return false }
    if id.len > 0 && _template_row(id).len == 0 { return false }
+   if predicate.len > 0 {
+      def terms = _predicate_terms(predicate)
+      if id.len == 0 || terms.len == 0 { return false }
+      def t = _template_row(id)
+      _CONTEXT_BINDS = _CONTEXT_BINDS.append([[t.get(0), id, chord, t.get(3), t.get(4)], terms])
+      return true
+   }
    mut next = []
    mut i = 0
    while i < _USER_BINDS.len {
@@ -467,6 +531,57 @@ fn all_commands() list {
    _KM.get("rows", [])
 }
 
+fn _active_commands(any context) list {
+   "Returns bindings applicable to a context, with conditional chords taking precedence."
+   def rows = all_commands()
+   if !is_dict(context) || _CONTEXT_BINDS.len <= 0 { return rows }
+   mut selected = []
+   mut seen = nil
+   mut int i = _CONTEXT_BINDS.len - 1
+   while i >= 0 {
+      def binding = _CONTEXT_BINDS.get(i)
+      def row = binding.get(0)
+      def chord = row_key(row)
+      if _predicate_matches(binding.get(1), context) {
+         if is_nil(seen) { seen = dict(8) }
+         if !seen.contains(chord) {
+            selected = selected.append(row)
+            seen[chord] = true
+         }
+      }
+      i -= 1
+   }
+   if is_nil(seen) { return rows }
+   for row in rows { if !seen.contains(row_key(row)) { selected = selected.append(row) } }
+   selected
+}
+
+fn _context_row(str chord, any context) any {
+   if !is_dict(context) { return nil }
+   mut int i = _CONTEXT_BINDS.len - 1
+   while i >= 0 {
+      def binding = _CONTEXT_BINDS.get(i)
+      def row = binding.get(0)
+      if row_key(row) == chord && _predicate_matches(binding.get(1), context) { return row }
+      i -= 1
+   }
+   nil
+}
+
+fn has_chord_prefix(str chord, any context=nil) bool {
+   "Whether this context has an active longer binding. An exact conditional binding takes precedence over a profile prefix."
+   def rows = all_commands()
+   def prefix = chord + " "
+   if is_dict(context) {
+      if !is_nil(_context_row(chord, context)) { return false }
+      for binding in _CONTEXT_BINDS {
+         if str.startswith(row_key(binding.get(0)), prefix) && _predicate_matches(binding.get(1), context) { return true }
+      }
+   }
+   for row in rows { if str.startswith(row_key(row), prefix) { return true } }
+   false
+}
+
 fn bindings_for(str id) list {
    "Returns every chord bound to command `id` in the active keymap."
    mut out = []
@@ -480,18 +595,24 @@ fn bindings_for(str id) list {
    out
 }
 
-fn describe_chord(str chord) str {
+fn describe_chord(str chord, any context=nil) str {
    "Returns a help line for `chord`: the command it runs and its description."
    def rows = all_commands()
+   def override = _context_row(chord, context)
+   if is_list(override) { return _describe_binding(chord, override) }
    mut i = 0
    while i < rows.len {
       def row = rows.get(i)
       if row_key(row) == chord {
-         return chord + " runs " + row_id(row) + " (" + to_str(row.get(0, "")) + "): " + to_str(row.get(3, ""))
+         return _describe_binding(chord, row)
       }
       i += 1
    }
    chord + " is not bound"
+}
+
+fn _describe_binding(str chord, list row) str {
+   chord + " runs " + row_id(row) + " (" + to_str(row.get(0, "")) + "): " + to_str(row.get(3, ""))
 }
 
 fn row_id(any row) str { to_str(row.get(1, "")) }
@@ -568,8 +689,10 @@ fn by_id(str id) list {
 fn has_id(str id) bool { by_id(id).len > 0 }
 
 ;; Returns the result of the `id_for_chord` operation.
-fn id_for_chord(str chord) str {
+fn id_for_chord(str chord, any context=nil) str {
    def rows = all_commands()
+   def override = _context_row(chord, context)
+   if is_list(override) { return row_id(override) }
    mut i = 0
    while i < rows.len {
       def row = rows.get(i)
@@ -603,12 +726,12 @@ fn _group_label(str head) str {
 }
 
 ;; Finds the key and returns the matching result.
-fn which_key(str prefix) list {
+fn which_key(str prefix, any context=nil) list {
    def p = str.strip(prefix)
    mut out = []
    mut seen = dict(32)
    mut i = 0
-   def rows = all_commands()
+   def rows = _active_commands(context)
    while i < rows.len {
       def row = rows.get(i)
       def key = row_key(row)

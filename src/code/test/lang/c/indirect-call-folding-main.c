@@ -1,4 +1,6 @@
-/* Host driver for indirect-call-folding.c. */
+/*
+ * Host driver for indirect-call-folding.c.
+ */
 long viasym(long, long), viasym2(long);
 double viafloat(double);
 long tramp(long a, long b) { return a * 10 + b; }

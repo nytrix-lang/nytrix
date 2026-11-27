@@ -85,12 +85,16 @@ static int run_wait(char *const argv[]) {
   return -1;
 }
 
-/* Optimize a private copy of `f` at `level`. */
+/*
+ * Optimize a private copy of `f` at `level`.
+ */
 static bool optimized(const nyr_func_t *f, int level, nyr_func_t *out,
                       const char *name) {
   char err[512] = {0};
   nyr_func_init(out);
-  /* -O0 still runs the O0 pipeline: it lowers PHIs out of SSA. */
+  /*
+   * -O0 still runs the O0 pipeline: it lowers PHIs out of SSA.
+   */
   if (!nyr_func_clone(f, out, err, sizeof(err)) ||
       !nyr_optimize(out, (nyr_opt_level_t)level, err, sizeof(err))) {
     fprintf(stderr, "nyr: optimizing %s failed: %s\n", name, err);
@@ -214,7 +218,9 @@ int main(int argc, char **argv) {
     rc = 0;
   } else if (!strcmp(cmd, "ir") || !strcmp(cmd, "asm")) {
     if (!strcmp(cmd, "ir") && nyr_text_has_data(m)) {
-      /* data travels as top-level asm lines: the output is a module */
+      /*
+       * data travels as top-level asm lines: the output is a module
+       */
       char *buf = NULL;
       size_t blen = 0;
       FILE *mf = open_memstream(&buf, &blen);

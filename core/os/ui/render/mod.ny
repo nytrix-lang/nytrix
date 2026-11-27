@@ -37,7 +37,7 @@ module core.os.ui.render(
    draw_line_fast, draw_circle, draw_circle_lines, draw_ring, draw_polygon,
    draw_circle_v, draw_circle_lines_v, draw_circle_sector, draw_circle_sector_lines,
    draw_ellipse, draw_ellipse_v, draw_ellipse_lines, draw_ellipse_lines_v,
-   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf, draw_rect_rounded_shadow_sdf,
+   draw_ring_lines, draw_arc, draw_sector, draw_rect_rounded_sdf, draw_rect_rounded_sdf_outline, draw_rect_rounded_sdf_clipped, draw_rect_rounded_shadow_sdf,
    draw_triangle_lines, draw_triangle_fan, draw_triangle_strip,
    draw_poly, draw_poly_lines, draw_poly_lines_ex,
    check_collision_recs, check_collision_circles, check_collision_circle_rec,
@@ -119,6 +119,7 @@ use core.os.ui.render.atlas as lib_atlas
 use core.os.ui.render.tty as render_tty
 use core.os.ui.render.env as render_env
 use core.os.ui.font.truetype as lib_ttf
+use core.os.ui.font.harfbuzz as lib_hb
 use core.str as lib_str
 use core.math.crypto.encoding.base as str_base
 use core.math.crypto.encoding.bytes
@@ -2623,12 +2624,13 @@ fn _font_prepare_bitmap_for_atlas(
    [out_bm, font_obj]
 }
 
-fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
+fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true, bool glyph_index=false) any {
    mut font_obj = _font_get(font_id)
    if !is_dict(font_obj) { return 0 }
    def font_size = _dict_int(font_obj, "size", 16)
    mut glyphs = font_obj.get("glyphs", dict(256))
-   def cached = glyphs.get(cp, 0)
+   def cache_key = glyph_index ? cp + 1114112 : cp
+   def cached = glyphs.get(cache_key, 0)
    if cached && !_dict_bool(cached, "_provisional", false) { return cached }
    def info = font_obj.get("info", 0)
    if !info { return 0 }
@@ -2637,10 +2639,10 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
    mut fallbacks = font_obj.get("fallback_chain", [])
    def atlas_size = _dict_int(font_obj, "atlas_size", 2048)
    def atlas_filter = _dict_int(font_obj, "filter", FONT_FILTER_DEFAULT)
-   mut gi = lib_ttf.get_glyph_index(info, cp)
+   mut gi = glyph_index ? cp : lib_ttf.get_glyph_index(info, cp)
    mut _used_q_fallback = false
    mut _skipped_fallback_build = false
-   if gi == 0 && cp != 32 {
+   if gi == 0 && cp != 32 && !glyph_index {
       if !fallbacks || !is_list(fallbacks) { fallbacks = [] }
       if fallbacks.len == 0 && !_dict_bool(font_obj, "fallback_built", false) {
          _font_build_fallback_chain(font_id)
@@ -2656,7 +2658,7 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
    }
    if gi == 0 {
       def empty = {"gi": 0, "bitmap": 0, "advance": float(font_size) * 0.5}
-      glyphs[cp] = empty
+      glyphs[cache_key] = empty
       font_obj["glyphs"] = glyphs
       _font_set(font_id, font_obj)
       return empty
@@ -2670,17 +2672,113 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true) any {
    mut hm = lib_ttf.get_hmetrics(info, gi, font_size)
    mut glyph = {"gi": gi}
    if bm {
-      def bm_state = _font_prepare_bitmap_for_atlas(font_id, font_obj, bm, cp, raster_os, atlas_size, atlas_filter)
+      def bm_state = _font_prepare_bitmap_for_atlas(font_id, font_obj, bm, cache_key, raster_os, atlas_size, atlas_filter)
       bm, font_obj = bm_state.get(0, bm), bm_state.get(1, font_obj)
    }
    glyph["bitmap"] = bm
    glyph["advance"] = _list_num_safe(hm, 0, 0.0)
    glyph["_font_id"] = font_id
    if _used_q_fallback { glyph["_provisional"] = true }
-   glyphs[cp] = glyph
+   glyphs[cache_key] = glyph
    font_obj["glyphs"] = glyphs
    _font_set(font_id, font_obj)
    glyph
+}
+
+fn _harfbuzz_eligible(str text) bool {
+   text.len > 0 && lib_str.find(text, "\n") < 0 && lib_str.find(text, "\r") < 0 && lib_str.find(text, "\t") < 0
+}
+
+fn _ttf_harfbuzz_runs(int font_id, str text) list {
+   mut runs = []
+   mut run_font = 0
+   mut run_start = 0
+   mut i = 0
+   def n = text.len
+   while i < n {
+      def decoded = _utf8_next_cp(text, i, n)
+      def cp = int(decoded.get(0, 63))
+      def next_i = int(decoded.get(1, i + 1))
+      def glyph = _font_resolve_glyph(font_id, cp)
+      if !glyph || int(glyph.get("gi", 0)) == 0 { return [] }
+      mut fid = int(glyph.get("_font_id", font_id))
+      ;; Keep combining marks and join controls with the preceding base so a
+      ;; fallback boundary cannot split a shaping cluster.
+      def extender = (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+      (cp >= 0x1DC0 && cp <= 0x1DFF) || (cp >= 0x20D0 && cp <= 0x20FF) ||
+      (cp >= 0xFE00 && cp <= 0xFE2F) || cp == 0x200D
+      if extender && run_font { fid = run_font }
+      if run_font && fid != run_font {
+         runs = runs.append({"font_id": run_font, "start": run_start, "end": i})
+         run_start = i
+      }
+      run_font = fid
+      i = next_i
+   }
+   if run_font { runs = runs.append({"font_id": run_font, "start": run_start, "end": n}) }
+   runs
+}
+
+fn _ttf_measure_harfbuzz(int font_id, dict font_obj, str text, f64 letter_spacing=0.0) any {
+   if !_harfbuzz_eligible(text) { return [false, 0.0] }
+   def runs = _ttf_harfbuzz_runs(font_id, text)
+   if runs.len == 0 { return [false, 0.0] }
+   mut width = 0.0
+   mut glyph_count = 0
+   for run in runs {
+      def run_font = _font_get(int(run.get("font_id", font_id)))
+      if !run_font { return [false, 0.0] }
+      def piece = str._substr(text, int(run.get("start", 0)), int(run.get("end", text.len)))
+      def shaped = lib_hb.shape(to_str(run_font.get("path", "")), int(run_font.get("size", 16)), piece)
+      if !is_list(shaped) || shaped.len == 0 { return [false, 0.0] }
+      for glyph in shaped {
+         if int(glyph.get(0, 0)) == 0 { return [false, 0.0] }
+         if glyph_count > 0 { width += letter_spacing }
+         width += float(glyph.get(2, 0.0))
+         glyph_count += 1
+      }
+   }
+   [true, width]
+}
+
+fn _ttf_draw_harfbuzz(int font_id, str text, f64 x, f64 baseline, f64 cr, f64 cg, f64 cb, f64 ca, f64 letter_spacing=0.0) list {
+   if !_harfbuzz_eligible(text) { return [false, false] }
+   def runs = _ttf_harfbuzz_runs(font_id, text)
+   if runs.len == 0 { return [false, false] }
+   mut pen_x = x
+   mut pen_y = baseline
+   mut drew = false
+   mut glyph_count = 0
+   for run in runs {
+      def run_id = int(run.get("font_id", font_id))
+      def run_font = _font_get(run_id)
+      if !run_font { return [false, false] }
+      def piece = str._substr(text, int(run.get("start", 0)), int(run.get("end", text.len)))
+      def shaped = lib_hb.shape(to_str(run_font.get("path", "")), int(run_font.get("size", 16)), piece)
+      if !is_list(shaped) || shaped.len == 0 { return [false, false] }
+      for item in shaped {
+         def gi = int(item.get(0, 0))
+         if gi == 0 { return [false, false] }
+      }
+      for item in shaped {
+         def gi = int(item.get(0, 0))
+         def glyph = _font_resolve_glyph(run_id, gi, false, true)
+         if glyph {
+            def bm = glyph.get("bitmap", 0)
+            def adv = float(item.get(2, 0.0))
+            if bm {
+               def draw_res = _ttf_draw_bitmap_glyph(run_font, bm,
+                  pen_x + float(item.get(4, 0.0)), pen_y - float(item.get(5, 0.0)), adv, cr, cg, cb, ca)
+               drew = _list_any_safe(draw_res, 1, false) || drew
+            }
+         }
+         if glyph_count > 0 { pen_x += letter_spacing }
+         pen_x += float(item.get(2, 0.0))
+         pen_y -= float(item.get(3, 0.0))
+         glyph_count += 1
+      }
+   }
+   [true, drew]
 }
 
 fn _utf8_next_cp(str s, int i, int n) list {
@@ -3059,13 +3157,6 @@ fn _ttf_draw_bitmap_glyph(
 }
 
 fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color, f64 letter_spacing=0.0) bool {
-   if _backend == BACKEND_GL {
-      _font_maybe_prime_string(font_id, text)
-      _font_sync_and_ensure_gpu(font_id)
-   } elif _backend == BACKEND_VK {
-      _font_maybe_prime_string(font_id, text)
-      _font_sync_and_ensure_gpu(font_id)
-   }
    def font_obj = _font_get(font_id)
    if !font_obj || !is_str(text) { return false }
    def info = font_obj.get("info", 0)
@@ -3078,6 +3169,17 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color, f64 letter_spa
    def cg = _list_num_safe(rgba, 1, 1.0)
    def cb = _list_num_safe(rgba, 2, 1.0)
    def ca = _list_num_safe(rgba, 3, 1.0)
+   if letter_spacing == 0.0 {
+      def shaped = _ttf_draw_harfbuzz(font_id, text, x, y + ascent, cr, cg, cb, ca)
+      if shaped.get(0, false) {
+         if _backend == BACKEND_GL || _backend == BACKEND_VK { _font_sync_and_ensure_gpu(font_id) }
+         return shaped.get(1, false)
+      }
+   }
+   if _backend == BACKEND_GL || _backend == BACKEND_VK {
+      _font_maybe_prime_string(font_id, text)
+      _font_sync_and_ensure_gpu(font_id)
+   }
    mut f64 pen_x = x
    mut f64 pen_y = y + ascent
    mut prev_gi = -1
@@ -6250,13 +6352,125 @@ fn draw_rect_rounded_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color) bool
    draw_rect_rounded(x, y, w, h, radius, color, 48)
 }
 
-fn draw_rect_rounded_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, any color) bool {
-   "Draws a soft rounded-rectangle shadow with the Vulkan SDF renderer; returns false on backends without this primitive."
-   if _backend != BACKEND_VK { return false }
-   if w <= 0.0 || h <= 0.0 || blur <= 0.0 { return false }
+fn draw_rect_rounded_sdf_outline(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 thickness, any color) bool {
+   "Draws a rounded-rectangle outline. Vulkan evaluates the stroke in its SDF; OpenGL and software use the rounded line mesh."
+   if w <= 0.0 || h <= 0.0 || thickness <= 0.0 { return false }
    def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
    def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
-   lib_vkr.draw_rounded_rect_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, r, g, b, a)
+   if a <= 0.0 { return false }
+   if _backend == BACKEND_VK && radius > 0.0 {
+      return lib_vkr.draw_rounded_rect_outline_sdf(x, y, w, h, radius, thickness, r, g, b, a)
+   }
+   draw_rect_rounded_lines_ex([x, y, w, h], max(0.0, radius), 48, thickness, color)
+}
+
+fn draw_rect_rounded_sdf_clipped(f64 x, f64 y, f64 w, f64 h, f64 radius, any color, any clip) bool {
+   "Draws a rounded SDF rect clipped to `clip` [x, y, w, h] and restores the previous scissor."
+   if !is_list(clip) || clip.len < 4 { return draw_rect_rounded_sdf(x, y, w, h, radius, color) }
+   def cx = max(x, float(clip.get(0, 0.0)))
+   def cy = max(y, float(clip.get(1, 0.0)))
+   def cx1 = min(x + w, float(clip.get(0, 0.0)) + max(0.0, float(clip.get(2, 0.0))))
+   def cy1 = min(y + h, float(clip.get(1, 0.0)) + max(0.0, float(clip.get(3, 0.0))))
+   if cx1 <= cx || cy1 <= cy { return false }
+   if _backend == BACKEND_VK && radius > 0.0 {
+      def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+      def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
+      return lib_vkr.draw_rounded_rect_sdf_clipped(x, y, w, h, radius, r, g, b, a, clip)
+   }
+   scissor_push(cx, cy, cx1 - cx, cy1 - cy)
+   def ok = draw_rect_rounded_sdf(x, y, w, h, radius, color)
+   scissor_pop()
+   ok
+}
+
+fn _draw_shadow_mesh(f64 cx, f64 cy, f64 hw, f64 hh, f64 radius, f64 blur, f64 r, f64 g, f64 b, f64 a) bool {
+   ;; Draw the solid interior and a non-overlapping strip for each coverage
+   ;; interval. A stack of translucent rounded rectangles would blend the
+   ;; same pixel repeatedly and produce a different shadow color.
+   def int arc_steps = 8
+   def int perimeter = 4 * (arc_steps + 1)
+   def int bands = 6
+   def int vertex_bytes = perimeter * (3 + bands * 6) * VERTEX_STRIDE
+   def ptr vertices = _shape_scratch_alloc(vertex_bytes + (bands + 1) * 4)
+   if !vertices { return false }
+   def ptr colors = vertices + vertex_bytes
+   mut int k = 0
+   while k <= bands {
+      def f64 t = float(k) / float(bands)
+      store32(colors, render_shared.pack_rgba_u32(r, g, b, a * (1.0 - t * t * (3.0 - 2.0 * t))), k * 4)
+      k += 1
+   }
+   def f64 inner = -float(min(1.0, min(hw, hh)))
+   def f64 step = (float(max(0.5, min(blur, 2048.0))) + 1.0 - inner) / float(bands)
+   def f64 angle_step = 1.5707963267948966 / float(arc_steps)
+   mut int edge = 0
+   mut int at = 0
+   while edge < perimeter {
+      def int next = (edge + 1) % perimeter
+      def int c0 = int(edge / (arc_steps + 1))
+      def int c1 = int(next / (arc_steps + 1))
+      def f64 angle0 = float(c0 * arc_steps + edge % (arc_steps + 1)) * angle_step
+      def f64 angle1 = float(c1 * arc_steps + next % (arc_steps + 1)) * angle_step
+      def f64 ux = float(cos(angle0))
+      def f64 uy = float(sin(angle0))
+      def f64 vx = float(cos(angle1))
+      def f64 vy = float(sin(angle1))
+      def f64 sx = c0 == 0 || c0 == 3 ? 1.0 : -1.0
+      def f64 sy = c0 < 2 ? 1.0 : -1.0
+      def f64 tx = c1 == 0 || c1 == 3 ? 1.0 : -1.0
+      def f64 ty = c1 < 2 ? 1.0 : -1.0
+      def f64 rr = max(0.0, radius + inner)
+      mut f64 x0 = cx + sx * (hw + inner - rr) + ux * rr
+      mut f64 y0 = cy + sy * (hh + inner - rr) + uy * rr
+      mut f64 x1 = cx + tx * (hw + inner - rr) + vx * rr
+      mut f64 y1 = cy + ty * (hh + inner - rr) + vy * rr
+      mut int col0 = load32(colors, 0)
+      render_shared.store_vertex64_typed(vertices, at, cx, cy, 0.0, 0.0, 0.0, col0)
+      render_shared.store_vertex64_typed(vertices, at + 1, x0, y0, 0.0, 0.0, 0.0, col0)
+      render_shared.store_vertex64_typed(vertices, at + 2, x1, y1, 0.0, 0.0, 0.0, col0)
+      at += 3
+      k = 1
+      while k <= bands {
+         def f64 d = inner + float(k) * step
+         def f64 ro = max(0.0, radius + d)
+         def f64 x2 = cx + sx * (hw + d - ro) + ux * ro
+         def f64 y2 = cy + sy * (hh + d - ro) + uy * ro
+         def f64 x3 = cx + tx * (hw + d - ro) + vx * ro
+         def f64 y3 = cy + ty * (hh + d - ro) + vy * ro
+         def int col1 = load32(colors, k * 4)
+         render_shared.store_vertex64_typed(vertices, at, x0, y0, 0.0, 0.0, 0.0, col0)
+         render_shared.store_vertex64_typed(vertices, at + 1, x2, y2, 0.0, 0.0, 0.0, col1)
+         render_shared.store_vertex64_typed(vertices, at + 2, x3, y3, 0.0, 0.0, 0.0, col1)
+         render_shared.store_vertex64_typed(vertices, at + 3, x0, y0, 0.0, 0.0, 0.0, col0)
+         render_shared.store_vertex64_typed(vertices, at + 4, x3, y3, 0.0, 0.0, 0.0, col1)
+         render_shared.store_vertex64_typed(vertices, at + 5, x1, y1, 0.0, 0.0, 0.0, col0)
+         x0 = x2
+         y0 = y2
+         x1 = x3
+         y1 = y3
+         col0 = col1
+         at += 6
+         k += 1
+      }
+      edge += 1
+   }
+   _reset_material_state()
+   draw_vertices(vertices, at)
+}
+
+fn draw_rect_rounded_shadow_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 blur, f64 offset_x, f64 offset_y, any color) bool {
+   "Draws a soft rounded-rectangle shadow. Vulkan evaluates its SDF in one quad; OpenGL and software interpolate a feather mesh."
+   if !_active_win || w <= 0.0 || h <= 0.0 || blur <= 0.0 { return false }
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
+   if a <= 0.0 { return false }
+   if _backend == BACKEND_VK {
+      return lib_vkr.draw_rounded_rect_shadow_sdf(x, y, w, h, radius, blur, offset_x, offset_y, r, g, b, a)
+   }
+   if _backend != BACKEND_GL && _backend != BACKEND_MOCK { return false }
+   def f64 hw = w * 0.5
+   def f64 hh = h * 0.5
+   _draw_shadow_mesh(x + hw + offset_x, y + hh + offset_y, hw, hh, float(clamp(radius, 0.0, min(hw, hh))), blur, r, g, b, a)
 }
 
 fn draw_rect_rounded_lines_ex(any rec, f64 radius, int segments, f64 thickness, any color) bool {
@@ -8408,6 +8622,10 @@ fn measure_text(int font, any text, f64 letter_spacing=0.0) list {
    def info = f.get("info", 0)
    def size = f.get("size", 16.0)
    def line_h = f.get("line_height", 16.0)
+   if info {
+      def shaped = _ttf_measure_harfbuzz(font_id, f, text, letter_spacing)
+      if shaped.get(0, false) { return [float(shaped.get(1, 0.0)), line_h] }
+   }
    if !glyphs_ptr { return [float(text.len) * line_h * 0.5, line_h] }
    mut pen_x = 0.0
    mut max_x = 0.0
@@ -9339,6 +9557,10 @@ fn _draw_text_impl(int font, any text, f64 x, f64 y, any color=WHITE) bool {
       return _draw_text_builtin(text, x, y, color)
    }
    def font_id = _resolve_text_font(font)
+   def use_harfbuzz = font_id > 0 && _harfbuzz_eligible(text) && lib_hb.available()
+   if use_harfbuzz && (_backend == BACKEND_VK || _backend == BACKEND_GL) {
+      if _draw_text_ttf(font_id, text, x, y, color) { return true }
+   }
    if _backend == BACKEND_VK && font_id > 0 {
       def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
       if _draw_text_ttf_fast(font_id, text, x, y, packed) { return true }

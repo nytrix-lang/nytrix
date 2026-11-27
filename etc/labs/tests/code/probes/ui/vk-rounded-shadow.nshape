@@ -1,48 +1,47 @@
 shape vk_rounded_shadow {
   family "runtime/ui"
   generator "regression"
-  features [ui vulkan sdf shadow framebuffer]
+  features [ui vulkan opengl sdf shadow framebuffer]
   template ny-test-case
   flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
   expect compile_and_run
-  expect_stdout "VK-ROUNDED-SHADOW"
+  expect_stdout "ROUNDED-SHADOW-OK"
   source ny <<'NY'
 use core
+use core.common as common
 use core.os.ui.render as gfx
 
-assert(gfx.apply_backend_name("vk"), "select Vulkan renderer")
+def backend = common.env_trim("NY_UI_SHADOW_PROBE_BACKEND")
+def want = backend == "" ? "mock" : backend
+assert(gfx.apply_backend_name(want), "select renderer")
 assert(!gfx.draw_rect_rounded_shadow_sdf(20.0, 20.0, 24.0, 24.0, 7.0, 7.0, 0.0, 5.0, [0.0, 0.0, 0.0, 0.8]), "reject shadow drawing before frame initialization")
 def win = gfx.init_window(64, 64, "SDF shadow probe", 0, false, false, 1)
-if !win {
-   print("VK-ROUNDED-SHADOW-SKIP: " + gfx.window_error())
-} else {
+assert(win && gfx.get_active_backend_name() == want, "requested backend is active: " + gfx.get_active_backend_name())
 mut int frame = 0
-mut any framebuffer = nil
 while frame < 3 {
-   assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin Vulkan frame")
+   if frame == 2 { gfx.request_frame_capture() }
+   assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin frame")
    gfx.set_ortho_2d(0.0, 64.0, 64.0, 0.0)
-   assert(gfx.draw_rect_rounded_shadow_sdf(20.0, 20.0, 24.0, 24.0, 7.0, 7.0, 0.0, 5.0, [0.0, 0.0, 0.0, 0.8]), "submit SDF shadow")
+   gfx.scissor_push(0.0, 0.0, 54.0, 64.0)
+   assert(gfx.draw_rect_rounded_shadow_sdf(20.0, 20.0, 24.0, 24.0, 7.0, 7.0, 6.0, 0.0, [0.0, 0.0, 0.0, 0.8]), "submit shadow")
+   gfx.scissor_pop()
    assert(gfx.draw_rect_rounded_sdf(20.0, 20.0, 24.0, 24.0, 7.0, [1.0, 1.0, 1.0, 1.0]), "submit rounded surface")
-   assert(gfx.end_frame(), "present Vulkan frame")
-   framebuffer = gfx.read_framebuffer()
+   assert(gfx.end_frame(), "present frame")
    frame += 1
 }
+def framebuffer = gfx.read_framebuffer()
 assert(is_dict(framebuffer) && int(framebuffer.get("width", 0)) == 64 && int(framebuffer.get("height", 0)) == 64, "read back rendered frame")
 def ptr pixels = __ffi_untag_ptr(framebuffer.get("data", 0))
 assert(pixels, "framebuffer pixels are available")
-def int y0 = 45
-def int y1 = 64 - y0
-def int shadow0 = (y0 * 64 + 32) * 4
-def int shadow1 = (y1 * 64 + 32) * 4
-def int red0 = int(load8(pixels, shadow0))
-def int red1 = int(load8(pixels, shadow1))
-def int shadow_red = red0 < red1 ? red0 : red1
-def int body = int(load8(pixels, (30 * 64 + 32) * 4))
-def int background = int(load8(pixels, (4 * 64 + 4) * 4))
-assert(shadow_red < 245 && body > 245 && background > 245, "SDF shadow feathers outside the rounded surface while preserving surface and clear areas")
+def int body = load8(pixels, (31 * 64 + 30) * 4) & 255
+def int left = load8(pixels, (31 * 64 + 16) * 4) & 255
+def int near = load8(pixels, (31 * 64 + 49) * 4) & 255
+def int far = load8(pixels, (31 * 64 + 52) * 4) & 255
+def int clipped = load8(pixels, (31 * 64 + 54) * 4) & 255
 free(pixels)
+assert(body > 245 && left > 245 && near > 35 && near < far && far < 220 && clipped > 245,
+   "shadow uses its offset, feathers toward the edge, preserves the body, and obeys clip: " + to_str([body, left, near, far, clipped]))
 gfx.close_window()
-print("VK-ROUNDED-SHADOW-OK")
-}
+print("ROUNDED-SHADOW-OK " + want)
 NY
 }

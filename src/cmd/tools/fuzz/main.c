@@ -1,4 +1,6 @@
-/* ny-fuzz: seeded differential fuzzer and test-case reducer, reference C compiler versus NYC. */
+/*
+ * ny-fuzz: seeded differential fuzzer and test-case reducer, reference C compiler versus NYC.
+ */
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -19,9 +21,9 @@
 
 extern char **environ;
 
-/* ------------------------------------------------------------------ */
-/* Small utilities                                                     */
-/* ------------------------------------------------------------------ */
+/*
+ * Small utilities
+ */
 
 typedef struct {
   char *data;
@@ -107,9 +109,9 @@ static void remove_tree(const char *path) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Process execution                                                   */
-/* ------------------------------------------------------------------ */
+/*
+ * Process execution
+ */
 
 #define RUN_TIMEOUT 124
 #define RUN_SPAWN_FAILED 127
@@ -117,7 +119,9 @@ static void remove_tree(const char *path) {
 static _Thread_local long g_child_cpu_ms;
 static _Thread_local long g_child_rss_kb;
 
-/* Totals over every NYC compile of a run. */
+/*
+ * Totals over every NYC compile of a run.
+ */
 static long g_nyc_cpu_ms;
 static long g_nyc_rss_kb;
 static long g_nyc_compiles;
@@ -132,7 +136,9 @@ static void note_nyc_compile(void) {
   }
 }
 
-/* Resource use of the most recent child in this thread (see run_cmd). */
+/*
+ * Resource use of the most recent child in this thread (see run_cmd).
+ */
 
 /*
  * Run argv with stdout and stderr captured into files. Returns the exit
@@ -185,9 +191,9 @@ static int run_cmd(char *const argv[], const char *out_path,
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Configuration                                                       */
-/* ------------------------------------------------------------------ */
+/*
+ * Configuration
+ */
 
 enum { GEN_BUILTIN = 1, GEN_YARPGEN = 2, GEN_CSMITH = 4 };
 
@@ -213,9 +219,9 @@ typedef struct {
   int opt_count;
 } config_t;
 
-/* ------------------------------------------------------------------ */
-/* Builtin generator: undefined-behaviour-free integer programs         */
-/* ------------------------------------------------------------------ */
+/*
+ * Builtin generator: undefined-behaviour-free integer programs
+ */
 
 typedef struct {
   uint64_t state;
@@ -284,7 +290,9 @@ static name_t emit_temp(gen_t *g, const char *fmt, ...) {
   return n;
 }
 
-/* One binary or select operation per temporary (three-address form). */
+/*
+ * One binary or select operation per temporary (three-address form).
+ */
 static name_t expr(gen_t *g, int depth) {
   if (depth == 0)
     return atom(g);
@@ -408,8 +416,9 @@ static void gen_integer(uint64_t seed, bool small, sb_t *out) {
   sb_addf(out, "  printf(\"%%llu\\n\", (unsigned long long)sink);\n  return 0;\n}\n");
 }
 
-
-/* Binary operators over unsigned 64-bit operands; every one is defined. */
+/*
+ * Binary operators over unsigned 64-bit operands; every one is defined.
+ */
 static const char *const k_binops[] = {"+", "-", "*", "^", "|", "&"};
 
 static void gen_preamble(sb_t *out) {
@@ -423,7 +432,9 @@ static void gen_epilogue(sb_t *out) {
   sb_addf(out, "  printf(\"%%llu\\n\", (unsigned long long)sink);\n  return 0;\n}\n");
 }
 
-/* Structures passed and returned by value, by pointer, and copied in arrays. */
+/*
+ * Structures passed and returned by value, by pointer, and copied in arrays.
+ */
 static void gen_struct(uint64_t seed, sb_t *out) {
   rng_t r = {.state = seed * UINT64_C(0x9e3779b97f4a7c15) + 7};
   int nf = 3 + (int)rng_below(&r, 4);
@@ -488,7 +499,9 @@ static void gen_struct(uint64_t seed, sb_t *out) {
   gen_epilogue(out);
 }
 
-/* Unsigned bit-fields: truncating stores, compound updates, copies. */
+/*
+ * Unsigned bit-fields: truncating stores, compound updates, copies.
+ */
 static void gen_bits(uint64_t seed, sb_t *out) {
   rng_t r = {.state = seed * UINT64_C(0xd1b54a32d192ed03) + 11};
   int nf = 3 + (int)rng_below(&r, 5);
@@ -536,7 +549,9 @@ static void gen_bits(uint64_t seed, sb_t *out) {
   gen_epilogue(out);
 }
 
-/* Variadic functions reading mixed integer and double arguments. */
+/*
+ * Variadic functions reading mixed integer and double arguments.
+ */
 static void gen_varargs(uint64_t seed, sb_t *out) {
   rng_t r = {.state = seed * UINT64_C(0xa0761d6478bd642f) + 13};
   gen_preamble(out);
@@ -572,8 +587,9 @@ static void gen_varargs(uint64_t seed, sb_t *out) {
   gen_epilogue(out);
 }
 
-
-/* Atomic builtins on plain objects, single threaded and so deterministic. */
+/*
+ * Atomic builtins on plain objects, single threaded and so deterministic.
+ */
 static void gen_atomic(uint64_t seed, sb_t *out) {
   rng_t r = {.state = seed * UINT64_C(0xe7037ed1a0b428db) + 17};
   gen_preamble(out);
@@ -611,7 +627,9 @@ static void gen_atomic(uint64_t seed, sb_t *out) {
   gen_epilogue(out);
 }
 
-/* Type punning through unions, character pointers and memcpy. */
+/*
+ * Type punning through unions, character pointers and memcpy.
+ */
 static void gen_alias(uint64_t seed, sb_t *out) {
   rng_t r = {.state = seed * UINT64_C(0x8ebc6af09c88c6e3) + 19};
   gen_preamble(out);
@@ -641,7 +659,9 @@ static void gen_alias(uint64_t seed, sb_t *out) {
   gen_epilogue(out);
 }
 
-/* GNU attributes, builtins and register-constrained inline assembly. */
+/*
+ * GNU attributes, builtins and register-constrained inline assembly.
+ */
 static void gen_gnu(uint64_t seed, sb_t *out) {
   rng_t r = {.state = seed * UINT64_C(0x589965cc75374cc3) + 23};
   gen_preamble(out);
@@ -695,9 +715,9 @@ static void gen_builtin(uint64_t seed, bool small, int profile, sb_t *out) {
     gen_integer(seed, small, out);
 }
 
-/* ------------------------------------------------------------------ */
-/* Case checking                                                       */
-/* ------------------------------------------------------------------ */
+/*
+ * Case checking
+ */
 
 typedef enum {
   ST_OK,
@@ -745,7 +765,9 @@ static void path_in(char *out, size_t cap, const char *dir, const char *name) {
     out[0] = '\0';
 }
 
-/* Compare NYC's build of one case at every optimization level. */
+/*
+ * Compare NYC's build of one case at every optimization level.
+ */
 typedef struct {
   const char *dir;
   const char *driver;       /* compiled by the reference compiler, or NULL */
@@ -790,7 +812,9 @@ static outcome_t check_case(const config_t *cfg, const case_t *c) {
   sb_t want = {0};
   read_file(want_out, &want);
   if (cfg->ref2) {
-    /* A second compiler settles disputes about what the program means. */
+    /*
+     * A second compiler settles disputes about what the program means.
+     */
     char ref2_exe[PATH_MAX], ref2_out[PATH_MAX];
     path_in(ref2_exe, sizeof(ref2_exe), c->dir, "ref2");
     path_in(ref2_out, sizeof(ref2_out), c->dir, "ref2.out");
@@ -903,9 +927,9 @@ static outcome_t check_case(const config_t *cfg, const case_t *c) {
   return result;
 }
 
-/* ------------------------------------------------------------------ */
-/* Generators that drive external tools                                */
-/* ------------------------------------------------------------------ */
+/*
+ * Generators that drive external tools
+ */
 
 static outcome_t run_builtin_seed(const config_t *cfg, long seed, const char *dir) {
   sb_t src = {0};
@@ -989,9 +1013,9 @@ static const char *find_csmith_include(void) {
   return NULL;
 }
 
-/* ------------------------------------------------------------------ */
-/* Parallel driver                                                     */
-/* ------------------------------------------------------------------ */
+/*
+ * Parallel driver
+ */
 
 typedef struct {
   const config_t *cfg;
@@ -1007,7 +1031,9 @@ static const char *gen_name(int gen) {
   return gen == GEN_BUILTIN ? "builtin" : gen == GEN_YARPGEN ? "yarpgen" : "csmith";
 }
 
-/* Everything needed to rebuild a failing case: versions, checksum, commands. */
+/*
+ * Everything needed to rebuild a failing case: versions, checksum, commands.
+ */
 static void tool_first_line(char *const argv[], char *out, size_t cap) {
   char tmp[PATH_MAX];
   snprintf(tmp, sizeof(tmp), "/tmp/ny-fuzz-ver-%d-%lu", (int)getpid(),
@@ -1143,7 +1169,9 @@ static int command_run(config_t *cfg) {
     long base_ms = 0, base_kb = 0;
     FILE *f = fopen(cfg->baseline, "r");
     if (f && fscanf(f, "%ld %ld", &base_ms, &base_kb) == 2 && !cfg->save_baseline) {
-      /* Generous bounds: this guards against regressions, not noise. */
+      /*
+       * Generous bounds: this guards against regressions, not noise.
+       */
       if (base_ms > 0 && per_compile_ms > 2 * base_ms + 50) {
         printf("compile-time regression: %ld ms against a %ld ms baseline\n",
                per_compile_ms, base_ms);
@@ -1168,9 +1196,9 @@ static int command_run(config_t *cfg) {
   return failed ? 1 : 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Reducer                                                             */
-/* ------------------------------------------------------------------ */
+/*
+ * Reducer
+ */
 
 typedef struct {
   char **line;
@@ -1224,7 +1252,9 @@ typedef struct {
   int route;          /* 0 object, 1 direct encoder, 2 assembly */
 } reducer_t;
 
-/* GCC must accept the program cleanly and NYC must still differ. */
+/*
+ * GCC must accept the program cleanly and NYC must still differ.
+ */
 static bool still_bad(const reducer_t *rd, const char *text) {
   char src[PATH_MAX], exe_ref[PATH_MAX], exe_n[PATH_MAX], obj[PATH_MAX],
       out_ref[PATH_MAX], out_n[PATH_MAX];
@@ -1291,7 +1321,9 @@ static bool still_bad(const reducer_t *rd, const char *text) {
 }
 
 static bool is_temp_line(const char *line, char **prefix_out) {
-  /* "  uint64_t eNN = <expr>;" */
+  /*
+   * "  uint64_t eNN = <expr>;"
+   */
   const char *p = line;
   if (strncmp(p, "  uint64_t e", 12) != 0)
     return false;
@@ -1322,7 +1354,9 @@ static int command_reduce(const config_t *cfg, const char *dir, const char *opt,
   }
   lines_t lines = split_lines(text.data);
   sb_free(&text);
-  /* Phase 1: delete chunks of lines, halving the chunk size. */
+  /*
+   * Phase 1: delete chunks of lines, halving the chunk size.
+   */
   for (size_t chunk = lines.count / 2 ? lines.count / 2 : 1; chunk >= 1;
        chunk /= 2) {
     bool changed = true;
@@ -1344,7 +1378,9 @@ static int command_reduce(const config_t *cfg, const char *dir, const char *opt,
     if (chunk == 1)
       break;
   }
-  /* Phase 2: replace each temporary's initialiser with 0 or 1. */
+  /*
+   * Phase 2: replace each temporary's initialiser with 0 or 1.
+   */
   bool changed = true;
   while (changed) {
     changed = false;
@@ -1383,9 +1419,9 @@ static int command_reduce(const config_t *cfg, const char *dir, const char *opt,
   return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Command line                                                        */
-/* ------------------------------------------------------------------ */
+/*
+ * Command line
+ */
 
 static void usage(void) {
   fputs(

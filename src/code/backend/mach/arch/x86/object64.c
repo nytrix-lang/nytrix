@@ -85,7 +85,9 @@ typedef struct {
   unsigned pending_frame_scale;
   int32_t pending_frame_disp;
   bool pending_frame_valid;
-  /* [base + disp] for an adjacent ADD of a constant that was not emitted. */
+  /*
+   * [base + disp] for an adjacent ADD of a constant that was not emitted.
+   */
   uint32_t pending_disp_vreg;
   unsigned pending_disp_base;
   int32_t pending_disp;
@@ -157,7 +159,9 @@ typedef struct {
    * into that copy's register instead of through %rax.
    */
   uint32_t *vreg_use_count;
-  /* Every operand reference (dst, sources, call args), saturating at 3. */
+  /*
+   * Every operand reference (dst, sources, call args), saturating at 3.
+   */
   uint8_t *vreg_any_ref;
   /*
    * Encoder decision counters for the audit: how symbol addresses were
@@ -376,8 +380,10 @@ typedef struct {
 static bool mach_no_caller_save_loop_gpr(void) {
   static int disabled = -1;
   if (disabled < 0) {
-    /* Opt-in: NYTRIX_CALLER_SAVE_LOOP_GPR=1. It miscompiles crc32 and
-     * dict-set through NYC, so it stays off until that is fixed. */
+    /*
+     * Opt-in: NYTRIX_CALLER_SAVE_LOOP_GPR=1. It miscompiles crc32 and
+     * dict-set through NYC, so it stays off until that is fixed.
+     */
     const char *env = getenv("NYTRIX_CALLER_SAVE_LOOP_GPR");
     disabled = !(env && *env && strcmp(env, "0") != 0);
   }
@@ -1064,8 +1070,10 @@ static bool mach_is_known_copy(const nyr_mach_inst_t *in) {
 #define MACH_LOOP_GPR_MAX_RANGE_CELLS 1048576u
 #define MACH_LOOP_GPR_MAX_BLOCKS 2048u
 #define MACH_LOOP_GPR_WORK_BUDGET 400000u
-/* The 256-bit set type only crosses static inline helpers in this file, so
-   the AVX return-ABI note for non-AVX builds does not apply. */
+/*
+ * The 256-bit set type only crosses static inline helpers in this file, so
+ * the AVX return-ABI note for non-AVX builds does not apply.
+ */
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wpsabi"
 #endif
@@ -2967,7 +2975,9 @@ static int mach_slot_off(const nyr_x64_mach_enc_t *e,
     size_t slot = op->as.frame_index;
     if (slot > e->mach->frame_slot_len)
       slot = e->mach->frame_slot_len;
-    /* Encoder-internal folds carry `frame + c` in the addend. */
+    /*
+     * Encoder-internal folds carry `frame + c` in the addend.
+     */
     if (e->frame_slot_offsets)
       return e->frame_slot_offsets[slot] + (int)op->addend;
     size_t off = 0;
@@ -6534,7 +6544,9 @@ static bool mach_disp_add_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
                   !mach_op_is_vreg(&use->src2, vreg);
   if (!is_load && !is_store)
     return false;
-  /* One definition and this one access: nothing else reads the sum. */
+  /*
+   * One definition and this one access: nothing else reads the sum.
+   */
   if (!e->vreg_any_ref || e->vreg_any_ref[vreg] != 2)
     return false;
   if (base_out)
@@ -6998,8 +7010,7 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
  * Resolve a memory-access address operand.  Prefers SIB form
  * [base + index*scale] when the defining ADD decomposes; otherwise falls
  * back to a single base register (rax when no colored preg exists).
- */
-/*
+ *
  * An elided `add frame_addr, index` feeding the adjacent scalar load or
  * store: address the stack buffer as [rbp + index*scale + slot] instead of
  * rematerializing the frame address into RAX at every access. Vector
@@ -7090,7 +7101,9 @@ static bool mach_resolve_mem_addr(nyr_x64_mach_enc_t *e,
     e->pending_disp_valid = false;
     return true;
   }
-  /* A folded frame address is [rbp + slot] itself. */
+  /*
+   * A folded frame address is [rbp + slot] itself.
+   */
   if (op && op->kind == NYR_MACH_OPERAND_VREG &&
       op->as.reg < e->mach->vreg_len && e->addr_fold && e->addr_fold_known &&
       e->addr_fold_known[op->as.reg] &&
@@ -7241,7 +7254,9 @@ static bool mach_emit_mem(nyr_x64_mach_enc_t *e, const ny_x64_mem_addr_t *a,
     if (!mach_u8(
             e, (unsigned char)((mod << 6) | ((reg & 7) << 3) | (a->base & 7))))
       return false;
-    /* An RSP/R12 base is encoded only through a SIB byte (no index). */
+    /*
+     * An RSP/R12 base is encoded only through a SIB byte (no index).
+     */
     if ((a->base & 7) == 4 && !mach_u8(e, 0x24))
       return false;
     return mod == 1 ? mach_u8(e, (unsigned char)a->disp) : mach_i32(e, a->disp);
@@ -10839,7 +10854,9 @@ static bool mach_ymm_vptest_reg(nyr_x64_mach_enc_t *e, unsigned reg,
 }
 
 static bool mach_ymm_broadcast_u32_ymm14(nyr_x64_mach_enc_t *e, uint32_t val) {
-  /* mov eax, val; vmovq xmm14, rax; vpbroadcastq ymm14, xmm14 */
+  /*
+   * mov eax, val; vmovq xmm14, rax; vpbroadcastq ymm14, xmm14
+   */
   if (!mach_u8(e, 0xb8u) || !mach_i32(e, (int32_t)val))
     return false;
   mach_rax_invalidate(e);
@@ -10915,7 +10932,9 @@ static bool mach_vector_ymm_div_const_i64(nyr_x64_mach_enc_t *e,
   bool has_fast = !no_vec_div_u31;
   size_t done_jmp = 0;
   if (has_fast) {
-    /* Verify all 4 lanes fit in [0, 2^32 - 1] (upper 32 bits == 0). */
+    /*
+     * Verify all 4 lanes fit in [0, 2^32 - 1] (upper 32 bits == 0).
+     */
     if (!mach_ymm_op_reg(e, 14u, 14u, 0x76u) ||
         !mach_ymm_qword_shift_imm(e, 14u, 14u, 6u, 32u) ||
         !mach_ymm_vptest_reg(e, 14u, a) || !mach_u8(e, 0x75u))
@@ -10959,35 +10978,47 @@ static bool mach_vector_ymm_div_const_i64(nyr_x64_mach_enc_t *e,
   }
   if (a != 15u && !mach_ymm_mov_reg(e, 15u, a))
     return false;
-  /* movabs r11, magic */
+  /*
+   * movabs r11, magic
+   */
   if (!mach_rex(e, true, false, false, true) || !mach_u8(e, 0xbb) ||
       !mach_i64(e, magic))
     return false;
-  /* lane 0: vmovq r10, xmm15 -> div -> vmovq xmm14, rdx */
+  /*
+   * lane 0: vmovq r10, xmm15 -> div -> vmovq xmm14, rdx
+   */
   if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x41) || !mach_u8(e, 0xf9) ||
       !mach_u8(e, 0x7e) || !mach_u8(e, 0xfa) ||
       !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
       !mach_u8(e, 0xc4) || !mach_u8(e, 0x61) || !mach_u8(e, 0xf9) ||
       !mach_u8(e, 0x6e) || !mach_u8(e, 0xf2))
     return false;
-  /* lane 1: vpextrq r10, xmm15, 1 -> div -> vpinsrq xmm14, xmm14, rdx, 1 */
+  /*
+   * lane 1: vpextrq r10, xmm15, 1 -> div -> vpinsrq xmm14, xmm14, rdx, 1
+   */
   if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x43) || !mach_u8(e, 0xf9) ||
       !mach_u8(e, 0x16) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x01) ||
       !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
       !mach_u8(e, 0xc4) || !mach_u8(e, 0x63) || !mach_u8(e, 0x89) ||
       !mach_u8(e, 0x22) || !mach_u8(e, 0xf2) || !mach_u8(e, 0x01))
     return false;
-  /* extract upper 128b to xmm15 */
+  /*
+   * extract upper 128b to xmm15
+   */
   if (!mach_xmm_vextractf128(e, 15u, 15u, 1u))
     return false;
-  /* lane 2: vmovq r10, xmm15 -> div -> vpinsrq xmm15, xmm15, rdx, 0 */
+  /*
+   * lane 2: vmovq r10, xmm15 -> div -> vpinsrq xmm15, xmm15, rdx, 0
+   */
   if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x41) || !mach_u8(e, 0xf9) ||
       !mach_u8(e, 0x7e) || !mach_u8(e, 0xfa) ||
       !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
       !mach_u8(e, 0xc4) || !mach_u8(e, 0x63) || !mach_u8(e, 0x81) ||
       !mach_u8(e, 0x22) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x00))
     return false;
-  /* lane 3: vpextrq r10, xmm15, 1 -> div -> vpinsrq xmm15, xmm15, rdx, 1 */
+  /*
+   * lane 3: vpextrq r10, xmm15, 1 -> div -> vpinsrq xmm15, xmm15, rdx, 1
+   */
   if (!mach_u8(e, 0xc4) || !mach_u8(e, 0x43) || !mach_u8(e, 0xf9) ||
       !mach_u8(e, 0x16) || !mach_u8(e, 0xfa) || !mach_u8(e, 0x01) ||
       !mach_vector_ymm_div_lane_rdx(e, magic, mshift, negate) ||
@@ -18739,7 +18770,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               const char *env = getenv("NYTRIX_NO_DIV_DIRECT");
               no_div_direct = env && *env && strcmp(env, "0") != 0;
             }
-            /* A resident dividend goes straight to R10 (no RAX hop). */
+            /*
+             * A resident dividend goes straight to R10 (no RAX hop).
+             */
             int dividend_preg =
                 !no_div_direct && in->src0.kind == NYR_MACH_OPERAND_VREG
                     ? mach_vreg_preg(e, in->src0.as.reg)
@@ -18786,7 +18819,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                   !mach_alu_preg_preg(e, NYR_MACH_SUB, 0, 2))
                 return false;
             } else {
-              /* The quotient is in RDX: move it to its register directly. */
+              /*
+               * The quotient is in RDX: move it to its register directly.
+               */
               int qp = !no_div_direct && in->dst.kind == NYR_MACH_OPERAND_VREG
                            ? mach_vreg_def_preg(e, in->dst.as.reg)
                            : -1;
@@ -20897,13 +20932,38 @@ static bool ny_x64_parallel_encode_task(size_t task, void *opaque) {
 
 #include "code/backend/mach/arch/x86/object/home_dse.h"
 
+/*
+ * rbp-relative frame offset of one machine frame slot, or INT_MIN.
+ */
+static int nyr_x64_debug_frame_offset(const nyr_x64_mach_enc_t *e,
+                                      size_t slot) {
+  if (!e || !e->mach || slot >= e->mach->frame_slot_len)
+    return INT_MIN;
+  if (e->frame_slot_offsets)
+    return e->frame_slot_offsets[slot];
+  size_t off = 0;
+  for (size_t i = 0; i < slot; ++i) {
+    size_t size = e->mach->frame_slots[i].size;
+    size_t align = e->mach->frame_slots[i].align;
+    if (size < 8)
+      size = 8;
+    if (!align)
+      align = 1;
+    off = (off + align - 1) & ~(align - 1);
+    off += size;
+  }
+  return -((int)(e->cs_slots * 8u + off + 8));
+}
+
 bool nyr_x64_mach_append_function_debug(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
     const nyr_mach_func_t *mach, const ny_native_target_info_t *target,
     const char *symbol, bool tag_return, bool bare_syscalls,
     const nyr_func_t *source, nyr_native_debug_line_t **debug_lines,
-    size_t *debug_line_count, size_t *debug_line_cap, char *err, size_t err_len,
+    size_t *debug_line_count, size_t *debug_line_cap,
+    nyr_native_debug_var_t **debug_vars, size_t *debug_var_count,
+    size_t *debug_var_cap, char *err, size_t err_len,
     size_t **inst_offsets_out, size_t *inst_offsets_count) {
   if (!code || !defs || !def_count || !relocs || !reloc_count || !mach ||
       !symbol || !symbol[0]) {
@@ -20919,9 +20979,17 @@ bool nyr_x64_mach_append_function_debug(
   size_t dead_limit = 0;
   nyr_x64_mach_enc_t enc = {0};
   bool encoded = false;
-  unsigned char *dead_homes =
-      mach_home_dse_analyze(&mach_mut, target, symbol, tag_return,
-                            bare_syscalls, &dead_limit, &enc, &encoded);
+  /*
+   * A debug variable's home store is the only place its value exists; the
+   * home looks dead because every source read was folded into SSA. Omitting
+   * the frame slot would leave the DIE describing memory that was never
+   * written. Keep homes intact while --debug-locals is on.
+   */
+  unsigned char *dead_homes = NULL;
+  if (!nyr_debug_locals_enabled())
+    dead_homes = mach_home_dse_analyze(&mach_mut, target, symbol, tag_return,
+                                       bare_syscalls, &dead_limit, &enc,
+                                       &encoded);
   enc.mach = &mach_mut;
   enc.target = target;
   enc.bare_syscalls = bare_syscalls;
@@ -20962,6 +21030,62 @@ bool nyr_x64_mach_append_function_debug(
         mach_enc_dispose(&enc);
         return false;
       }
+    }
+  }
+  if (source && debug_vars && debug_var_count && debug_var_cap &&
+      source->debug_var_count > 0) {
+    /*
+     * The machine form allocates one frame slot per NYIR local id, so a debug
+     * slot's home sits at that same index. Ids beyond the real frame belong to
+     * hidden or dropped slots and stay undescribed rather than aliasing a
+     * neighbour's value.
+     */
+    for (size_t i = 0; i < source->debug_var_count; ++i) {
+      const nyr_debug_var_t *dv = &source->debug_vars[i];
+      int mapped = dv->slot;
+      if (mapped < 0 || (enc.mach && (size_t)mapped >= enc.mach->frame_slot_len))
+        continue;
+      int off = nyr_x64_debug_frame_offset(&enc, (size_t)mapped);
+      if (off == INT_MIN)
+        continue;
+      uint32_t line = dv->decl_line > 0 ? (uint32_t)dv->decl_line : 0;
+      for (size_t j = 0; line == 0 && j < source->len; ++j) {
+        const nyr_inst_t *in = &source->data[j];
+        if ((in->op == NYIR_STORE_LOCAL || in->op == NYIR_LOAD_LOCAL) &&
+            in->imm == dv->slot && in->debug.line) {
+          line = in->debug.line;
+          break;
+        }
+      }
+      char *name = strdup(dv->name ? dv->name : "");
+      char *type_name = strdup(dv->type_name ? dv->type_name : "int");
+      if (!name || !type_name) {
+        free(name);
+        free(type_name);
+        continue;
+      }
+      /*
+       * Parameters bind before body locals, so their records lead.
+       */
+      bool is_param = dv->is_param != 0 || i < source->param_count;
+      if (!nyr_native_debug_var_append(
+              debug_vars, debug_var_count, debug_var_cap,
+              (nyr_native_debug_var_t){*def_count, name, type_name, off, line,
+                                       is_param ? 1u : 0u})) {
+        free(name);
+        free(type_name);
+      }
+    }
+  }
+  if (source && debug_vars && debug_var_count && debug_var_cap &&
+      source->debug_scope_count > 0) {
+    for (size_t i = 0; i < source->debug_scope_count; ++i) {
+      const nyr_debug_scope_t *sc = &source->debug_scopes[i];
+      (void)nyr_native_debug_var_append(
+          debug_vars, debug_var_count, debug_var_cap,
+          (nyr_native_debug_var_t){*def_count, NULL, NULL, 0,
+                                   (uint32_t)sc->start_line, 2,
+                                   (uint32_t)sc->end_line, (int32_t)sc->depth});
     }
   }
   size_t *captured_offsets = enc.inst_offsets;
@@ -21010,7 +21134,8 @@ bool nyr_x64_mach_append_function(
     const char *symbol, bool tag_return, char *err, size_t err_len) {
   return nyr_x64_mach_append_function_debug(
       code, defs, def_count, relocs, reloc_count, mach, target, symbol,
-      tag_return, false, NULL, NULL, NULL, NULL, err, err_len, NULL, NULL);
+      tag_return, false, NULL, NULL, NULL, NULL, NULL, NULL, NULL, err, err_len,
+      NULL, NULL);
 }
 
 /*

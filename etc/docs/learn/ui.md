@@ -182,10 +182,11 @@ The repository driver is [`etc/labs/ytool.ny`](../../../etc/labs/ytool.ny),
 which merges the Wayland seat driver with the X11 automation command set in one
 file and picks a backend at runtime. When the driver name ends in `.ny` the
 probe runs it with the test compiler named by `NYTRIX_TEST_NY_FULL_BIN` (or
-`ny` on `PATH`); other names are executed directly, so the Python reference
-helper also works. `ytool probe` reports both backends, `ytool env` shows the
-session, `ytool selftest` checks the wire encoding without a compositor, and
-`ytool run SCRIPT` replays a step script. Pointer and keyboard commands
+`ny` on `PATH`); other names are executed directly. The former Python helper
+has been retired. `ytool probe` reports both backends, `ytool env` shows the
+session, `ytool selftest` checks the wire encoding without a compositor,
+`ytool run SCRIPT` replays a step script, and
+`ytool x11 drop FILE WINDOW [X Y]` drives an XDND file drop. Pointer and keyboard commands
 (`type`, `key`, `move`, `click`) use the X11 backend when a display is
 reachable and otherwise replay through the virtual seat; prefix a command with
 `x11` or `wayland` to force a backend.

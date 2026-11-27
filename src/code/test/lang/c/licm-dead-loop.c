@@ -1,4 +1,6 @@
-/* Loop-invariant loads and branches in a loop with a dead result keep every operand defined, at -O3. */
+/*
+ * Loop-invariant loads and branches in a loop with a dead result keep every operand defined, at -O3.
+ */
 #include <stdint.h>
 #include <stdio.h>
 unsigned g5 = 7, g2 = 11, g0 = 13;

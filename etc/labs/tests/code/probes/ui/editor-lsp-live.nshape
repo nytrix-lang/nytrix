@@ -25,17 +25,21 @@ st = lsp.inlay_hints(st, path, 0, 1)
 st = lsp.inlay_hints(st, path, 1, 2)
 st = lsp.inlay_hints(st, path, 1, 1, 10)
 st = lsp.inlay_hints(st, path, 1, 1, 11)
+st = lsp.code_lens(st, path)
 mut tokens = []
 mut hints = []
+mut lenses = []
 mut int token_events = 0
 mut bool got_hints = false
+mut bool got_lenses = false
 mut bool empty_range = false
 mut bool before_end = false
 mut bool after_end = false
 n = 0
-while (token_events < 1 || !got_hints || !empty_range || !before_end || !after_end) && n < 500 {
+while (token_events < 1 || !got_hints || !got_lenses || !empty_range || !before_end || !after_end) && n < 500 {
    for e in lsp.pump(st) {
       if to_str(e.get("kind", "")) == "semantic_tokens" { token_events += 1 tokens = e.get("items", []) }
+      if to_str(e.get("kind", "")) == "code_lenses" { got_lenses = true lenses = e.get("items", []) }
       if to_str(e.get("kind", "")) == "inlay_hints" {
          if int(e.get("start_line", -1)) == 0 { empty_range = e.get("items", []).len == 0 }
          elif int(e.get("end_col", 0)) == 10 { before_end = e.get("items", []).len == 0 }
@@ -55,6 +59,38 @@ for t in tokens {
 assert(keyword && unicode_comment, "server legend and UTF-8 token length decoded")
 def hint = hints.get(0, dict(0))
 assert(empty_range && before_end && after_end && got_hints && hints.len > 0 && to_str(hint.get("label", "")) == ": int" && int(hint.get("line", -1)) == 1, "live inlay hint decoded in requested range")
+assert(got_lenses && lenses.len == 2 && to_str(lenses.get(0).get("title", "")) == "▶ Run" && to_str(lenses.get(1).get("title", "")) == "Debug", "live code lenses decoded at the source line")
+assert(to_str(lenses.get(0).get("command", dict(0)).get("command", "")) == "nytrix.run" && int(lenses.get(0).get("line", -1)) == 0, "code lens command and position preserved")
+st = lsp.execute_command(st, "nytrix.run", [{"uri": lsp.uri_of(path), "line": 0}])
+mut bool got_command = false
+mut dict action = dict(0)
+n = 0
+while !got_command && n < 500 {
+   for e in lsp.pump(st) {
+      if to_str(e.get("kind", "")) == "command" { got_command = true action = e.get("result", dict(0)) }
+   }
+   os.msleep(10) n += 1
+}
+assert(got_command && to_str(action.get("kind", "")) == "process" && to_str(action.get("command", "")).len > 0, "code lens command returns a runnable process action")
+def fold_path = "/tmp/ny-editor-lsp-fold.ny"
+st = lsp.did_open(st, fold_path, "fn outer() {\n   if true {\n      answer\n   }\n}\n")
+st = lsp.folding_ranges(st, fold_path)
+mut fold_items = []
+mut bool got_folds = false
+n = 0
+while !got_folds && n < 500 {
+   for e in lsp.pump(st) {
+      if to_str(e.get("kind", "")) == "folding_ranges" { got_folds = true fold_items = e.get("items", []) }
+   }
+   os.msleep(10) n += 1
+}
+mut bool outer_fold = false
+mut bool inner_fold = false
+for r in fold_items {
+   if int(r.get("start", -1)) == 0 && int(r.get("end", -1)) == 4 { outer_fold = true }
+   if int(r.get("start", -1)) == 1 && int(r.get("end", -1)) == 3 { inner_fold = true }
+}
+assert(got_folds && fold_items.len == 2 && outer_fold && inner_fold, "live nested folding ranges decoded")
 lsp.stop(st)
 print("editor lsp live passed")
 NY

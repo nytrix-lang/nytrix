@@ -1,0 +1,84 @@
+shape flex-arena {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui flex arena layout]
+  template ny-test-case
+  flags_matrix "--native-only -O2"
+  timeout 240
+  expect compile_and_run
+  expect_stdout "FLEX-ARENA-OK"
+  source ny <<'NY'
+;; The typed fast path must produce exactly the dict solver's boxes and stay
+;; faster on a tree large enough for the difference to matter.
+use core
+use core.os.ui.flex as flex
+use core.os (ticks)
+
+fn dict_tree(int blocks) dict {
+   mut list rows = []
+   mut r = 0
+   while r < blocks {
+      mut list kids = []
+      mut i = 0
+      while i < 10 {
+         kids = kids.append(flex.node({"id": "r" + to_str(r) + "_" + to_str(i), "w": 40, "h": 24}))
+         i += 1
+      }
+      rows = rows.append(flex.node({"id": "r" + to_str(r), "dir": "row", "w": "grow", "h": 50, "gap": 4}, kids))
+      r += 1
+   }
+   flex.node({"id": "root", "dir": "col", "w": "grow", "h": "grow", "gap": 2}, rows)
+}
+
+fn fast_tree(int blocks) int {
+   mut list rows = []
+   mut r = 0
+   while r < blocks {
+      mut list kids = []
+      mut i = 0
+      while i < 10 {
+         kids = kids.append(flex.fast_node({"id": "r" + to_str(r) + "_" + to_str(i), "w": 40, "h": 24}))
+         i += 1
+      }
+      rows = rows.append(flex.fast_node({"id": "r" + to_str(r), "dir": "row", "w": "grow", "h": 50, "gap": 4}, kids))
+      r += 1
+   }
+   flex.fast_node({"id": "root", "dir": "col", "w": "grow", "h": "grow", "gap": 2}, rows)
+}
+
+def slow = flex.solve(dict_tree(1), 800.0, 600.0)
+def fast = flex.fast_solve(fast_tree(1), 800.0, 600.0)
+assert(fast.len == 12, "the fast path emits every box")
+mut int i = 0
+while i < 10 {
+   def id = "r0_" + to_str(i)
+   def a = flex.rect_of(slow, id)
+   def b = flex.fast_rect(fast, id)
+   assert(a.len == 4 && b.len == 4 && float(a.get(0)) == float(b.get(0)) && float(a.get(1)) == float(b.get(1)) && float(a.get(2)) == float(b.get(2)) && float(a.get(3)) == float(b.get(3)), "fast and dict boxes agree for " + id)
+   i += 1
+}
+
+def int big_fast = fast_tree(10)
+def list arena = flex.fast_boxes(200)
+def int warm = 0
+while warm < 50 { flex.fast_solve_into(big_fast, 800.0, 600.0, arena) warm += 1 }
+assert(arena.len == 200 && flex.fast_solve_into(big_fast, 800.0, 600.0, arena) == 111, "the fast path fills a caller-owned arena without resizing it")
+def int t0 = ticks()
+i = 0
+while i < 2000 { flex.fast_solve_into(big_fast, 800.0, 600.0, arena) i += 1 }
+def int fast_ns = (ticks() - t0) / 2000
+
+def big_slow = dict_tree(10)
+warm = 0
+while warm < 10 { flex.solve(big_slow, 800.0, 600.0) warm += 1 }
+t0 = ticks()
+i = 0
+while i < 100 { flex.solve(big_slow, 800.0, 600.0) i += 1 }
+def int slow_ns = (ticks() - t0) / 100
+
+print("fast=" + to_str(fast_ns) + " dict=" + to_str(slow_ns))
+assert(fast_ns > 0 && slow_ns > 0 && fast_ns * 2 < slow_ns, "the typed path is at least twice as fast on 111 nodes")
+assert(fast_ns < 1000000, "the arena path lays out 111 nodes in under a millisecond")
+print("FLEX-ARENA-OK")
+NY
+}

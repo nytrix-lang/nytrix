@@ -1,4 +1,6 @@
-/* Complex arithmetic, mixed real/complex, calls with complex arguments and results, libm calls, and casts agree with GCC. */
+/*
+ * Complex arithmetic, mixed real/complex, calls with complex arguments and results, libm calls, and casts agree with GCC.
+ */
 #include <complex.h>
 #include <stdio.h>
 double _Complex addc(double _Complex a, double _Complex b) { return a + b; }

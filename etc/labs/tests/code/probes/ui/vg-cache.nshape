@@ -1,0 +1,70 @@
+shape vg-cache {
+  family "probe-suite"
+  generator "regression"
+  features [ny render vg canvas cache]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  timeout 240
+  expect_stdout "VG-CACHE-OK"
+  source ny <<'NY'
+;; Retained canvas blocks: the first frame builds and captures fill/stroke
+;; vertex streams; later frames replay them until the revision changes.
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.vg as vg
+use core.os.ui.window.consts
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK) && gfx.init_window(200, 100, "vg cache"), "offscreen surface")
+
+fn paint_block(int rev) bool {
+   if !vg.cache_begin("panel", rev) { return false }
+   vg.begin_path() vg.rounded_rect(20.0, 20.0, 120.0, 60.0, 10.0) vg.fill_color([0.8, 0.2, 0.3, 1.0]) vg.fill()
+   vg.begin_path() vg.rect(160.0, 20.0, 20.0, 60.0) vg.fill_color([0.1, 0.6, 0.2, 1.0]) vg.fill()
+   vg.begin_path() vg.move_to(20.0, 90.0) vg.line_to(180.0, 90.0)
+   vg.stroke_width(2.0) vg.stroke_color([1.0, 1.0, 1.0, 1.0]) vg.stroke()
+   vg.cache_end()
+   true
+}
+
+vg.begin_frame(200.0, 100.0)
+assert(paint_block(1), "first frame builds and captures the block")
+def first = vg.frame_stats()
+assert(int(first.get(0)) == 3 && int(first.get(1)) > 0, "capture records every fill and stroke")
+vg.end_frame()
+
+vg.begin_frame(200.0, 100.0)
+assert(!paint_block(1), "second frame replays the cached block")
+def second = vg.frame_stats()
+assert(int(second.get(0)) == 3 && int(second.get(1)) == int(first.get(1)), "replay emits the same draws and vertices")
+vg.end_frame()
+
+vg.begin_frame(200.0, 100.0)
+assert(paint_block(2), "a revision change rebuilds the block")
+vg.end_frame()
+vg.begin_frame(200.0, 100.0)
+assert(!paint_block(2), "the rebuilt block is cached")
+vg.end_frame()
+
+;; Scissor and compositing state travel with the retained stream.
+vg.begin_frame(200.0, 100.0)
+vg.scissor(0.0, 0.0, 100.0, 100.0)
+vg.global_composite_operation(vg.ATOP)
+assert(vg.cache_begin("clipped", 1), "a new entry captures")
+vg.begin_path() vg.rect(4.0, 4.0, 40.0, 40.0) vg.fill_color([0.5, 0.5, 0.5, 1.0]) vg.fill()
+vg.cache_end()
+vg.global_composite_operation(vg.SOURCE_OVER)
+vg.reset_scissor()
+vg.end_frame()
+
+vg.begin_frame(200.0, 100.0)
+assert(!vg.cache_begin("clipped", 1), "the clipped block replays")
+def clipped = vg.frame_stats()
+assert(int(clipped.get(0)) == 1 && int(clipped.get(1)) > 0, "clipped replay emits its stored draw")
+vg.end_frame()
+
+vg.release()
+gfx.close_window()
+print("VG-CACHE-OK")
+NY
+}

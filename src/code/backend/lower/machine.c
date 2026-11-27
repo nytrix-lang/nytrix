@@ -820,7 +820,9 @@ static void mach_fuse_unsigned_cmp(nyr_mach_func_t *m) {
         m->vreg_types[cmp->src0.as.reg] != NYR_MACH_TYPE_I64 ||
         m->vreg_classes[cmp->src0.as.reg] != NYR_MACH_REGCLASS_GPR)
       continue;
-    /* Side k: the flipped value's source, or a constant to unflip. */
+    /*
+     * Side k: the flipped value's source, or a constant to unflip.
+     */
     int64_t flip_src[2] = {-1, -1};
     size_t flip_def[2] = {SIZE_MAX, SIZE_MAX};
     int64_t konst[2] = {0, 0};

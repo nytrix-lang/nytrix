@@ -35,7 +35,7 @@ fn start(list argv, str cwd="") any {
    def int pid = int(p.get(0, 0))
    if pid <= 0 { return "cannot start " + to_str(argv.get(0, "")) }
    {"pid": pid, "in": int(p.get(1, -1)), "out": int(p.get(2, -1)), "buf": "",
-    "next_id": 1, "alive": true, "argv": argv, "error": ""}
+      "next_id": 1, "alive": true, "argv": argv, "error": ""}
 }
 
 fn alive(dict c) bool {
@@ -58,7 +58,7 @@ fn _reaped(int pid) bool {
 }
 
 fn send(dict c, any msg) bool {
-   "Writes one framed message; false (and the connection closed) on failure."
+   "Writes one framed message; false(and the connection closed) on failure."
    if !bool(c.get("alive", false)) { return false }
    def data = frame(msg)
    def int fd = int(c.get("in", -1))
@@ -76,7 +76,7 @@ fn send(dict c, any msg) bool {
 }
 
 fn request(dict c, str method, any params=nil) int {
-   "Sends a JSON-RPC request and returns its id (0 when it could not be sent)."
+   "Sends a JSON-RPC request and returns its id(0 when it could not be sent)."
    def int id = int(c.get("next_id", 1))
    c["next_id"] = id + 1
    mut dict msg = {"jsonrpc": "2.0", "id": id, "method": method}
@@ -118,7 +118,7 @@ fn _readable(int fd, int timeout_ms) bool {
 
 fn take_frames(dict c) list {
    "Removes every complete message from the connection's buffer and returns
-   them decoded (undecodable bodies are skipped)."
+   them decoded(undecodable bodies are skipped)."
    mut out = []
    mut buf = to_str(c.get("buf", ""))
    while true {
@@ -145,7 +145,7 @@ fn take_frames(dict c) list {
 }
 
 fn poll(dict c, int timeout_ms=0) list {
-   "Reads what has arrived (waiting at most `timeout_ms` for the first byte)
+   "Reads what has arrived(waiting at most `timeout_ms` for the first byte)
    and returns the complete messages, oldest first."
    if !bool(c.get("alive", false)) { return take_frames(c) }
    def int fd = int(c.get("out", -1))

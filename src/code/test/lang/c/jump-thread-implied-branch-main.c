@@ -1,4 +1,6 @@
-/* Host driver for jump-thread-implied-branch.c. */
+/*
+ * Host driver for jump-thread-implied-branch.c.
+ */
 int implied(long);
 static int pass_check;
 int check(long p) { return p != 0 ? pass_check : 0; }

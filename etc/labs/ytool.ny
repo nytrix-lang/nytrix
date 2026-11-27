@@ -237,6 +237,75 @@ fn send_client_message(any target, str atom_str, int val0, int val1) {
    client_message(target, root, atom_str, 1572864, [val0, val1])
 }
 
+
+;; --------------------------------------------------------- X11 file drop
+;; Act as an XDND drag source: create a hidden owner window, advertise
+;; text/uri-list, send Enter/Position/Drop to the target, and serve the
+;; conversion request until the target reports XdndFinished.
+fn xdnd_send(int target, str name, list values) {
+   client_message(target, target, name, 0, values)
+}
+
+fn x11_drop(str file, int target, int x, int y) int {
+   if target == 0 || file.len == 0 || load8(file, 0) != 47 {
+      eprint("drop requires an absolute FILE and a target WINDOW")
+      return 1
+   }
+   if !display { eprint("drop requires X11") return 1 }
+   def uri = "file://" + file + "\r\n"
+   def source = XCreateSimpleWindow(display, root, -10, -10, 1, 1, 0, 0, 0)
+   def sel = atom_val("XdndSelection")
+   def uri_atom = atom_val("text/uri-list")
+   def finished_atom = atom_val("XdndFinished")
+   XSetSelectionOwner(display, sel, source, 0)
+   XFlush(display)
+   if int(XGetSelectionOwner(display, sel)) != int(source) {
+      eprint("drop could not own XdndSelection")
+      XDestroyWindow(display, source)
+      return 1
+   }
+   xdnd_send(target, "XdndEnter", [int(source), 5 << 24, int(uri_atom), 0, 0])
+   xdnd_send(target, "XdndPosition", [int(source), 0, (x << 16) | y, 0, int(atom_val("XdndActionCopy"))])
+   xdnd_send(target, "XdndDrop", [int(source), 0, 0, 0, 0])
+   def ev = zalloc(192)
+   mut done = false
+   mut served = 0
+   def end = now_ms() + 8000
+   while !done && now_ms() < end {
+      if XCheckTypedWindowEvent(display, source, 30, ev) {
+         ;; The drop target is the only requestor for this transfer; use the
+         ;; known atoms so the reply does not depend on event-field layout.
+         def requestor = target
+         def target_atom = uri_atom
+         def property = sel
+         XChangeProperty(display, requestor, property, target_atom, 8, 0, cstr(uri), uri.len + 1)
+         def notify = zalloc(192)
+         store32(notify, 31, 0)
+         store32(notify, 1, 16)
+         store64(notify, display, 24)
+         store64(notify, requestor, 32)
+         store64(notify, sel, 40)
+         store64(notify, target_atom, 48)
+         store64(notify, property, 56)
+         store64(notify, 0, 64)
+         XSendEvent(display, requestor, 0, 0, notify)
+         XFlush(display)
+         free(notify)
+         served += 1
+      } elif XCheckTypedWindowEvent(display, source, 33, ev) {
+         if load64(ev, 40) == finished_atom { done = true }
+      } else {
+         msleep(10)
+      }
+   }
+   free(ev)
+   XSetSelectionOwner(display, sel, 0, 0)
+   XDestroyWindow(display, source)
+   XFlush(display)
+   if !done { eprint("drop: target did not finish (conversions=" + to_str(served) + ")") }
+   done && served > 0 ? 0 : 1
+}
+
 fn window_geom(int win) list {
    def attr = zalloc(136)
    def ok = xt_xget_window_attributes(display, win, attr)
@@ -967,6 +1036,7 @@ fn print_usage() {
 Usage: ytool [--] <command> [args...]
 Backends: probe | env | run SCRIPT | x11 CMD | wayland CMD
 Wayland: type TEXT | key SEQ | move X Y | click X Y | sleep SECONDS
+X11: drop FILE WINDOW [X Y]     Send an XDND file drop to a window
 
 Mouse commands:
    mousemove x y                  Move mouse to absolute position
@@ -1035,6 +1105,7 @@ Other:
    sleep <sec>                    Sleep for N seconds
    exec <cmd...>                  Execute a command
    windowquit <id>                Send WM_DELETE_WINDOW (close request)
+   x11 drop FILE WINDOW [X Y]     Drag a file into an X11 window
    help                           Show this help
    version                        Print version
 
@@ -2114,6 +2185,15 @@ if(cmd == "mousemove" || cmd == "mousemove_relative" || cmd == "mousemove_smooth
    } elif(code == 0) {
       eprint("type requires a string")
       code = 1
+   }
+} elif(cmd == "drop") {
+   if(nargs < 4) {
+      eprint("drop requires FILE and WINDOW")
+      code = 1
+   } else {
+      def dx = nargs > 4 ? parse_int(xt_arg(4)) : 16
+      def dy = nargs > 5 ? parse_int(xt_arg(5)) : 16
+      code = x11_drop(xt_arg(2), parse_int(xt_arg(3)), dx, dy)
    }
 } elif(cmd == "getmouselocation") {
    def info = pointer_info()

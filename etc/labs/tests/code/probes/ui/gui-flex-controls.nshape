@@ -1,0 +1,80 @@
+shape gui_flex_controls {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui gui flex xml input accessibility]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect_stdout "GUI-FLEX-CONTROLS-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.flex as flex
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.consts
+
+@effects(all)
+fn frame(list commands, dict values) list {
+   gui.prepare_input(0, 320.0, 240.0)
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, 320.0, 240.0, 0.0)
+   gui.begin_frame(0, 0, 320.0, 240.0)
+   assert(gui.begin_window("form", "", 0.0, 0.0, 320.0, 240.0, {"titlebar": false, "resizable": false}), "open form")
+   def remaining = gui.remaining_h()
+   def actions = gui.draw_flex_commands(commands, 24.0, 26.0, values)
+   assert(gui.remaining_h() == remaining, "declarative widgets do not consume the window layout cursor")
+   gui.end_window()
+   gui.end_frame()
+   gfx.end_frame()
+   actions
+}
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK) && gfx.init_window(320, 240, "XML form"), "offscreen surface")
+gui.reset_state()
+gui.set_headless_input(true)
+def dict tree = flex.from_xml("<column gap='6'><slider id='volume' action='set-volume' min='-2' max='2' value='0.25' w='170'>Volume</slider><input id='name' action='rename' value='untitled' placeholder='Type a name' w='170'>Name</input><spinbox id='rate' action='set-rate' min='0' max='2' value='0.5' step='0.25' decimals='2' w='170'>Rate</spinbox><combo id='mode' action='set-mode' selected='1' w='170'>Mode<option>Draft</option><option>Final</option></combo></column>")
+def commands = flex.render_commands(flex.solve(tree, 200.0, 198.0))
+assert(frame(commands, {}).len == 0, "initial values do not emit changes")
+def children = gui.accessibility_tree().get("children").get(0).get("children")
+def slider = children.get(0)
+def field = children.get(1)
+assert(slider.get("role") == "slider" && float(slider.get("value")) == 0.25 && float(slider.get("min")) == -2.0, "slider exposes the markup value and range")
+assert(field.get("role") == "textbox" && field.get("value") == "untitled" && field.get("placeholder") == "Type a name", "text field exposes its initial value and placeholder")
+def spin = children.get(2)
+def combo = children.get(3)
+assert(spin.get("role") == "spinbutton" && float(spin.get("value")) == 0.5 && int(spin.get("decimals")) == 2, "numeric field exposes its value and precision")
+assert(combo.get("role") == "combobox" && combo.get("value") == "Final" && combo.get("options").get(0) == "Draft", "combo exposes the selected option and preserves markup order")
+assert(gui.accessibility_action("form::volume", "set_value", 3.0), "queue slider action")
+assert(gui.accessibility_action("form::name", "focus"), "queue text focus")
+def changed = frame(commands, {"volume": 0.5, "name": ""})
+assert(changed.len == 1 && changed.get(0).get("action") == "set-volume" && float(changed.get(0).get("value")) == 2.0,
+   "slider clamps the requested value and emits only its named change")
+gui.feed_event(EVENT_KEY_CHAR, {"char": 90})
+def typed = frame(commands, {"volume": 2.0, "name": ""})
+assert(typed.len == 1 && typed.get(0).get("id") == "name" && typed.get(0).get("action") == "rename" && typed.get(0).get("value") == "Z",
+   "keyboard entry edits the application-provided value, not the markup default")
+gui.clear_focus()
+assert(gui.accessibility_action("form::rate", "increment"), "queue numeric increment")
+assert(gui.accessibility_action("form::mode", "focus"), "queue combo focus")
+def stepped = frame(commands, {"rate": 1.0})
+assert(stepped.len == 1 && stepped.get(0).get("action") == "set-rate" && float(stepped.get(0).get("value")) == 1.25, "spinbox applies its fractional step to application state")
+gui.feed_event(EVENT_KEY_PRESSED, {"key": KEY_DOWN, "mod": 0})
+def selected = frame(commands, {"mode": 0})
+assert(selected.len == 1 && selected.get(0).get("action") == "set-mode" && int(selected.get(0).get("value")) == 1, "combo keyboard selection reports an option index")
+assert(is_nil(flex.from_xml("<combo id='mode' action='go'><text>not an option</text></combo>")), "combo rejects unsupported children")
+def menu_tree = flex.from_xml("<menu id='menu-tools' action='tools' w='120' h='30'>Tools<item id='menu-opt' action='do-opt'>Option</item></menu>")
+def menu_commands = flex.render_commands(flex.solve(menu_tree, 120.0, 30.0))
+assert(frame(menu_commands, {}).len == 0, "a closed declarative menu emits nothing")
+assert(gui.accessibility_action("form::menu-tools", "activate"), "queue menu open")
+assert(frame(menu_commands, {}).len == 0, "opening the menu emits no action")
+assert(frame(menu_commands, {}).len == 0, "the menu popup measures before drawing its items")
+def menu_tree_nodes = gui.accessibility_tree()
+mut str menu_item_id = ""
+for node in menu_tree_nodes.get("orphans", []) { if node.get("role", "") == "menuitem" { menu_item_id = to_str(node.get("id", "")) } }
+assert(menu_item_id.len > 0 && gui.accessibility_action(menu_item_id, "activate"), "queue menu item activation from the advertised tree")
+def menu_chosen = frame(menu_commands, {})
+assert(menu_chosen.len == 1 && menu_chosen.get(0).get("action") == "do-opt" && menu_chosen.get(0).get("id") == "menu-opt", "declarative menu items dispatch their named actions")
+gfx.close_window()
+print("GUI-FLEX-CONTROLS-OK")
+NY
+}

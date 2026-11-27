@@ -14,7 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---------------------------------------------------------------- lexer */
+/*
+ * ---------------------------------------------------------------- lexer
+ */
 
 typedef enum {
   TK_EOF,
@@ -39,7 +41,9 @@ typedef struct {
 } tk_t;
 
 typedef enum { TY_VOID, TY_INT, TY_F64, TY_F32 } ty_t;
-/* Extern-only result widths; values are `int` after extension. */
+/*
+ * Extern-only result widths; values are `int` after extension.
+ */
 typedef enum { RW_NONE, RW_I32, RW_U32, RW_U8, RW_U16 } rw_t;
 
 typedef struct {
@@ -436,8 +440,10 @@ static bool expect_ident(px_t *p, char **out) {
   return *out != NULL;
 }
 
-/* Types: int (i64, ptr, bool, str are its aliases), f64, f32, void.
- * Extern result types may also be i32, u32, u8 or u16. */
+/*
+ * Types: int (i64, ptr, bool, str are its aliases), f64, f32, void.
+ * Extern result types may also be i32, u32, u8 or u16.
+ */
 static bool parse_type_word(const tk_t *t, ty_t *ty, rw_t *rw) {
   static const struct {
     const char *name;
@@ -467,7 +473,9 @@ static const char *ty_name(ty_t t) {
                         : "int";
 }
 
-/* ---------------------------------------------------------- module items */
+/*
+ * ---------------------------------------------------------- module items
+ */
 
 static fsig_t *find_sig(px_t *p, const char *name, size_t len) {
   for (size_t i = 0; i < p->nsigs; ++i)
@@ -539,8 +547,10 @@ static bool asm_append(px_t *p, const char *fmt, ...) {
   return true;
 }
 
-/* Address of an extern (or exported) function: a .quad stub in the data
- * section, since NYIR addresses only module symbols directly. */
+/*
+ * Address of an extern (or exported) function: a .quad stub in the data
+ * section, since NYIR addresses only module symbols directly.
+ */
 static const char *extern_stub(px_t *p, const char *name) {
   char sym[200];
   snprintf(sym, sizeof(sym), "__nyc_data_nyr_addr_%s", name);
@@ -583,7 +593,9 @@ static data_t *string_data(px_t *p, const char *bytes, size_t len,
   d->bytes[len] = 0;
   d->len = len;
   char sym[96];
-  /* ny_str_ and __nyc_data_ names reach the object unprefixed */
+  /*
+   * ny_str_ and __nyc_data_ names reach the object unprefixed
+   */
   snprintf(sym, sizeof(sym), "ny_str_nyr%zu", p->anon++);
   d->symbol = strdup(sym);
   return d;
@@ -620,8 +632,10 @@ static bool add_sig(px_t *p, fsig_t *s, const tk_t *at) {
   return true;
 }
 
-/* `fn name(type a, type b, ...) rettype` with Ny's `type name` order; extern
- * parameters may omit their names. */
+/*
+ * `fn name(type a, type b, ...) rettype` with Ny's `type name` order; extern
+ * parameters may omit their names.
+ */
 static bool parse_signature(px_t *p, fsig_t *s, bool is_extern) {
   memset(s, 0, sizeof(*s));
   s->is_extern = is_extern;
@@ -679,9 +693,11 @@ static bool parse_signature(px_t *p, fsig_t *s, bool is_extern) {
   return true;
 }
 
-/* data NAME [align N] [section "s"] = { TYPE v, v, TYPE v, zero N, "str", ptr
+/*
+ * data NAME [align N] [section "s"] = { TYPE v, v, TYPE v, zero N, "str", ptr
  * sym } Symbol items (`ptr fib`, `ptr other`) resolve after every item is
- * known. */
+ * known.
+ */
 static bool parse_data(px_t *p, bool exported) {
   tk_t *nt = peek(p);
   char *name = NULL;
@@ -798,7 +814,9 @@ static bool parse_data(px_t *p, bool exported) {
     }
     if (t->kind == TK_IDENT && !neg) {
       ++p->pos;
-      /* resolved by resolve_data_refs once every item is known */
+      /*
+       * resolved by resolve_data_refs once every item is known
+       */
       ok = asm_append(p, "\t.quad \x01%.*s\x01\n", (int)t->len, t->start);
       continue;
     }
@@ -807,7 +825,9 @@ static bool parse_data(px_t *p, bool exported) {
   return ok;
 }
 
-/* Replace \x01name\x01 markers with the object symbol of `name`. */
+/*
+ * Replace \x01name\x01 markers with the object symbol of `name`.
+ */
 static bool resolve_data_refs(px_t *p) {
   nyr_text_module_t *m = p->mod;
   if (!m->asm_text || !memchr(m->asm_text, 1, m->asm_len))
@@ -995,7 +1015,9 @@ static bool parse_top(px_t *p) {
   return true;
 }
 
-/* ------------------------------------------------------------- lowering */
+/*
+ * ------------------------------------------------------------- lowering
+ */
 
 typedef struct {
   int v;
@@ -1104,8 +1126,10 @@ static bool fx_label(fx_t *x, int64_t id) {
 static bool fx_emit(fx_t *x, nyr_inst_t in, ty_t ty, int *out) {
   if (x->dead && !fx_label(x, x->next_label++))
     return false;
-  /* The x86 encoders do not apply a load/store displacement in every form
-   * (an ADDR_SYMBOL base drops it), so fold it into the address. */
+  /*
+   * The x86 encoders do not apply a load/store displacement in every form
+   * (an ADDR_SYMBOL base drops it), so fold it into the address.
+   */
   if ((in.op == NYIR_LOAD_I64 || in.op == NYIR_STORE_I64) && in.imm) {
     nyr_inst_t k = nyr_inst_init(NYIR_CONST_I64),
                add = nyr_inst_init(NYIR_ADD_I64);
@@ -1226,7 +1250,9 @@ static bool fx_addr_symbol(fx_t *x, const char *symbol, val_t *out) {
   return fx_emit(x, in, TY_INT, &out->v);
 }
 
-/* Width flags for load8..load64 / store8..store64. */
+/*
+ * Width flags for load8..load64 / store8..store64.
+ */
 static unsigned width_flags(int bits) {
   return bits == 8    ? NYIR_INST_F_MEM_BYTE
          : bits == 16 ? NYIR_INST_F_MEM_U16
@@ -1313,7 +1339,9 @@ static label_t *label_get(fx_t *x, const tk_t *t) {
   return l;
 }
 
-/* Literal operands adapt to the other side's float type. */
+/*
+ * Literal operands adapt to the other side's float type.
+ */
 static bool coerce_literal(fx_t *x, val_t *v, ty_t want) {
   if (v->ty == want)
     return true;
@@ -1370,7 +1398,9 @@ static bool call_fn(fx_t *x, fsig_t *s, tk_t *at, val_t *out) {
       if (!expect_type(x, &args[i], s->params[i], ats[i], what))
         return false;
     } else if (args[i].ty == TY_F32) {
-      /* C default promotion for variadic floats */
+      /*
+       * C default promotion for variadic floats
+       */
       if (!fx_unop(x, NYIR_F32_TO_F64, args[i].v, TY_F64, &args[i]))
         return false;
     } else if (args[i].ty == TY_VOID)
@@ -1394,7 +1424,9 @@ static bool call_fn(fx_t *x, fsig_t *s, tk_t *at, val_t *out) {
     return false;
   out->ty = s->ret;
   out->is_const = false;
-  /* Narrow C results: the upper register bits are unspecified. */
+  /*
+   * Narrow C results: the upper register bits are unspecified.
+   */
   if (s->ret_width != RW_NONE) {
     val_t k;
     if (s->ret_width == RW_I32) {
@@ -1512,7 +1544,9 @@ static bool builtin_call(fx_t *x, tk_t *name, val_t *out, bool *handled) {
       return false;
     return fx_unop(x, NYIR_BSWAP_I64, a[0].v, TY_INT, out);
   }
-  /* select(cond, a, b): both arms are evaluated */
+  /*
+   * select(cond, a, b): both arms are evaluated
+   */
   if (!expect_type(x, &a[0], TY_INT, ats[0], "the condition") ||
       !expect_type(x, &a[1], TY_INT, ats[1], "select's first arm") ||
       !expect_type(x, &a[2], TY_INT, ats[2], "select's second arm"))
@@ -1527,7 +1561,8 @@ static bool builtin_call(fx_t *x, tk_t *name, val_t *out, bool *handled) {
   return fx_emit(x, in, TY_INT, &out->v);
 }
 
-/* ------------------------------------------------------------ IR layer
+/*
+ * ------------------------------------------------------------ IR layer
  *
  * Any NYIR instruction can be written directly and mixed with the Ny-style
  * statements above:
@@ -1546,7 +1581,9 @@ static bool adjacent(const tk_t *a, const tk_t *b) {
   return a->start + a->len == b->start;
 }
 
-/* `%name`: '%' directly followed by a name or number. */
+/*
+ * `%name`: '%' directly followed by a name or number.
+ */
 static bool at_ssa(px_t *p) {
   tk_t *t = peek(p), *n = peek_at(p, 1);
   return is_punct(t, "%") && adjacent(t, n) &&
@@ -1593,8 +1630,10 @@ static int op_by_name(const tk_t *t) {
   return -1;
 }
 
-/* An identifier starts an IR instruction when it names an opcode and is
- * not shadowed by a binding or function (`copy`, `phi` and friends). */
+/*
+ * An identifier starts an IR instruction when it names an opcode and is
+ * not shadowed by a binding or function (`copy`, `phi` and friends).
+ */
 static int ir_op_at(fx_t *x, const tk_t *t) {
   int op = op_by_name(t);
   if (op < 0)
@@ -1651,8 +1690,10 @@ typedef struct {
   tk_t *fwd; /* forward %name (phi only) */
 } iop_t;
 
-/* `$name`: the raw symbol `name`. A module function's `$name` is its
- * internal symbol. */
+/*
+ * `$name`: the raw symbol `name`. A module function's `$name` is its
+ * internal symbol.
+ */
 static const char *raw_symbol(fx_t *x, const tk_t *n) {
   char *tmp = xstrndup(n->start, n->len);
   const char *own = tmp ? nyr_func_own_symbol_copy(x->f, tmp) : NULL;
@@ -1729,7 +1770,9 @@ static bool ir_operand(fx_t *x, iop_t *o, bool allow_forward) {
     o->symbol = d ? (char *)nyr_func_own_symbol_copy(x->f, d->symbol) : NULL;
     return o->symbol != NULL;
   }
-  /* anything else is a Ny-style expression: a binding, (a + b), f(x)... */
+  /*
+   * anything else is a Ny-style expression: a binding, (a + b), f(x)...
+   */
   o->kind = IO_VALUE;
   return expr(x, &o->v);
 }
@@ -1769,7 +1812,9 @@ static ty_t op_result_type(nyr_op_t op) {
   return TY_INT;
 }
 
-/* Parse one IR instruction starting at its opcode; `dst` names its result. */
+/*
+ * Parse one IR instruction starting at its opcode; `dst` names its result.
+ */
 static bool ir_inst(fx_t *x, int op, tk_t *dst) {
   px_t *p = x->p;
   tk_t *opt = peek(p);
@@ -1940,7 +1985,9 @@ static bool ir_inst(fx_t *x, int op, tk_t *dst) {
                   (nyr_op_t)op == NYIR_ADDR_LOCAL ||
                   (nyr_op_t)op == NYIR_STORE_LOCAL ||
                   (nyr_op_t)op == NYIR_ALLOCA ||
-                  /* memory offsets follow the address (and value) */
+                  /*
+                   * memory offsets follow the address (and value)
+                   */
                   (nvals > 0 &&
                    ((nyr_op_t)op == NYIR_LOAD_I64 ||
                     (nyr_op_t)op == NYIR_STORE_I64 ||
@@ -1968,7 +2015,9 @@ static bool ir_inst(fx_t *x, int op, tk_t *dst) {
           return false;
         if (nvals >= 6)
           FAIL(o.tok, "too many operands for '%s'", nyr_op_name(in.op));
-        /* stores keep the value in c (a = address, b = unused) */
+        /*
+         * stores keep the value in c (a = address, b = unused)
+         */
         int slot = nvals;
         if ((nyr_op_t)op == NYIR_STORE_I64 && nvals == 1)
           slot = 2;
@@ -1984,7 +2033,9 @@ static bool ir_inst(fx_t *x, int op, tk_t *dst) {
     }
     break;
   }
-  /* !flags, -> type */
+  /*
+   * !flags, -> type
+   */
   bool bits_flag = false;
   while (is_punct(peek(p), "!") && adjacent(peek(p), peek_at(p, 1))) {
     ++p->pos;
@@ -2007,7 +2058,9 @@ static bool ir_inst(fx_t *x, int op, tk_t *dst) {
     in.flags |= IR_FLAGS[k].flag;
   }
   if (raw_bits && !bits_flag) {
-    /* `const.f64 3` means 3.0 unless marked !bits */
+    /*
+     * `const.f64 3` means 3.0 unless marked !bits
+     */
     double d = (double)in.imm;
     if ((nyr_op_t)op == NYIR_CONST_F64)
       memcpy(&in.imm, &d, sizeof(d));
@@ -2054,7 +2107,9 @@ static bool ir_inst(fx_t *x, int op, tk_t *dst) {
 #undef MORE
 }
 
-/* `%x = <IR instruction | expression>` */
+/*
+ * `%x = <IR instruction | expression>`
+ */
 static bool ssa_stmt(fx_t *x) {
   px_t *p = x->p;
   ++p->pos;
@@ -2310,8 +2365,10 @@ static bool binary(fx_t *x, int min_prec, val_t *out) {
     const binop_t *b = binop_at(t);
     if (!b || b->prec < min_prec)
       return true;
-    /* An operator that starts a line starts a new statement (`-y`,
-     * `%x = ...`); continue an expression by ending the line with it. */
+    /*
+     * An operator that starts a line starts a new statement (`-y`,
+     * `%x = ...`); continue an expression by ending the line with it.
+     */
     if (t->line_start)
       return true;
     ++p->pos;
@@ -2325,7 +2382,9 @@ static bool binary(fx_t *x, int min_prec, val_t *out) {
   }
 }
 
-/* `a && b`, `a || b` (also `and`, `or`) short-circuit through a temp slot. */
+/*
+ * `a && b`, `a || b` (also `and`, `or`) short-circuit through a temp slot.
+ */
 static bool logic(fx_t *x, int level, val_t *out) {
   px_t *p = x->p;
   if (!(level == 0 ? logic(x, 1, out) : binary(x, 3, out)))
@@ -2345,7 +2404,9 @@ static bool logic(fx_t *x, int level, val_t *out) {
     if (!fx_const_i(x, 0, &z) || !fx_cmp(x, NYIR_CMP_NE, *out, z, &b) ||
         !fx_store_slot(x, slot, b))
       return false;
-    /* || skips the right side when true, && when false */
+    /*
+     * || skips the right side when true, && when false
+     */
     if (is_or) {
       if (!fx_br_if(x, b.v, done) || !fx_br(x, rhs))
         return false;
@@ -2364,7 +2425,9 @@ static bool logic(fx_t *x, int level, val_t *out) {
   }
 }
 
-/* `cond ? a : b` lowers to branches, so only the chosen arm runs. */
+/*
+ * `cond ? a : b` lowers to branches, so only the chosen arm runs.
+ */
 static bool expr(fx_t *x, val_t *out) {
   px_t *p = x->p;
   if (!logic(x, 0, out))
@@ -2463,7 +2526,9 @@ static bool decl_stmt(fx_t *x, bool is_mut) {
   return ok;
 }
 
-/* `name = e`, `name op= e`, `name++`, `name--`. */
+/*
+ * `name = e`, `name op= e`, `name++`, `name--`.
+ */
 static bool assign_stmt(fx_t *x, tk_t *nt) {
   px_t *p = x->p;
   tk_t *op = peek(p);
@@ -2558,7 +2623,9 @@ static bool while_stmt(fx_t *x, tk_t *at) {
 
 static bool simple_stmt(fx_t *x);
 
-/* `for (init cond update) { }` and `for i in lo..hi { }` (inclusive). */
+/*
+ * `for (init cond update) { }` and `for i in lo..hi { }` (inclusive).
+ */
 static bool for_stmt(fx_t *x, tk_t *at) {
   px_t *p = x->p;
   ++x->depth;
@@ -2573,7 +2640,9 @@ static bool for_stmt(fx_t *x, tk_t *at) {
     } else
       ok = ok && cond_branch(x, body, end);
     ok = ok && (accept(p, ";"), true);
-    /* the update is parsed now but emitted after the body */
+    /*
+     * the update is parsed now but emitted after the body
+     */
     size_t upd = p->pos;
     if (ok && !is_punct(peek(p), ")")) {
       int depth = 0;
@@ -2630,7 +2699,9 @@ static bool for_stmt(fx_t *x, tk_t *at) {
   return ok;
 }
 
-/* Declarations, assignments and expression statements (for headers too). */
+/*
+ * Declarations, assignments and expression statements (for headers too).
+ */
 static bool simple_stmt(fx_t *x) {
   px_t *p = x->p;
   tk_t *t = peek(p);
@@ -2758,7 +2829,9 @@ static bool lower_function(px_t *p, fsig_t *s, nyr_func_t *f) {
   }
   x.depth = 1;
   for (size_t i = 0; ok && i < s->nparams; ++i) {
-    /* parameters are mutable slots 0..n-1, as in Ny */
+    /*
+     * parameters are mutable slots 0..n-1, as in Ny
+     */
     for (size_t j = 0; j < i; ++j)
       if (!strcmp(s->pnames[i], s->pnames[j])) {
         px_error_at(p, &p->t[s->body], "parameter '%s' is repeated",
@@ -2823,7 +2896,9 @@ static bool lower_function(px_t *p, fsig_t *s, nyr_func_t *f) {
   return ok;
 }
 
-/* ---------------------------------------------------------------- API */
+/*
+ * ---------------------------------------------------------------- API
+ */
 
 void nyr_text_module_free(nyr_text_module_t *m) {
   if (!m)
@@ -2960,7 +3035,9 @@ bool nyr_text_write_data(const nyr_text_module_t *m, FILE *out) {
   return !ferror(out);
 }
 
-/* ---------------------------------------------------------------- printer */
+/*
+ * ---------------------------------------------------------------- printer
+ */
 
 static void print_val(FILE *out, int v) {
   if (v >= 0)
@@ -2970,8 +3047,10 @@ static void print_val(FILE *out, int v) {
 }
 
 static void print_flags(FILE *out, unsigned flags, nyr_op_t op) {
-  /* NYIR_INST_F_* bits overlap between instruction families; print the
-   * names that apply to this opcode and the rest as raw numbers. */
+  /*
+   * NYIR_INST_F_* bits overlap between instruction families; print the
+   * names that apply to this opcode and the rest as raw numbers.
+   */
   bool mem = op == NYIR_LOAD_I64 || op == NYIR_STORE_I64;
   bool call = op == NYIR_CALL;
   unsigned rest = flags;

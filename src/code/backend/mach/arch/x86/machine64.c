@@ -356,7 +356,9 @@ static bool ny_x64_nir_value_occupancy(const nyr_func_t *f, int tracked,
         const nyr_inst_t *in = &f->data[i];
         bool asm_goto = in->op == NYIR_INLINE_ASM &&
                         (in->imm == -14 || in->imm == -82 || in->imm == -83);
-        /* occupancy(i) = live-after(i) + defs(i) + uses(i) */
+        /*
+         * occupancy(i) = live-after(i) + defs(i) + uses(i)
+         */
         for (size_t w = 0; w < vwords; ++w) {
           uint64_t m = cur[w];
           while (m) {
@@ -390,7 +392,9 @@ static bool ny_x64_nir_value_occupancy(const nyr_func_t *f, int tracked,
         }
       }
     }
-    /* Fusion keeps some values live past their IR uses; honor those. */
+    /*
+     * Fusion keeps some values live past their IR uses; honor those.
+     */
     for (size_t v = 0; v < V; ++v) {
       size_t top = 0;
       bool any = false;
@@ -437,8 +441,10 @@ static void ny_x64_nir_sort_roots(size_t *order, size_t count,
   }
 }
 
-/* Parses the `nyc_slots=a,b,c` suffix the C frontend attaches to templates
-   that store results into C locals. Returns the number of slots found. */
+/*
+ * Parses the `nyc_slots=a,b,c` suffix the C frontend attaches to templates
+ * that store results into C locals. Returns the number of slots found.
+ */
 static size_t ny_x64_asm_slot_list(const char *symbol, int *slots,
                                    size_t capacity) {
   size_t count = 0;
@@ -1445,7 +1451,9 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
     int *owner = n_vals ? malloc(n_vals * sizeof(int)) : NULL; /* alloca idx */
     c->alloca_off = calloc(len ? len : 1, sizeof(int));
     {
-      /* One array per thread stays reachable until the next function. */
+      /*
+       * One array per thread stays reachable until the next function.
+       */
       static _Thread_local int *cache;
       free(cache);
       cache = c->alloca_off;
@@ -1520,14 +1528,18 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
                   c->epilogue_label, (long long)c->nyir->data[i].imm,
                   !!(c->nyir->data[i].flags & NYIR_INST_F_SCOPE_LOCAL),
                   (int)pinned[i], first_ref[i] == SIZE_MAX ? (ssize_t)-1 : (ssize_t)first_ref[i], last_ref[i]);
-    /* bins: offsets handed out in the same downward order as before. */
+    /*
+     * bins: offsets handed out in the same downward order as before.
+     */
     size_t cap = len ? len : 1;
     int *bin_size = calloc(cap, sizeof(int));
     size_t *bin_end = calloc(cap, sizeof(size_t));
     int *bin_off = calloc(cap, sizeof(int));
     size_t bins = 0;
     if (bin_size && bin_end && bin_off) {
-      /* order candidates by first reference */
+      /*
+       * order candidates by first reference
+       */
       for (size_t pass = 0; pass < 2; ++pass)
         for (size_t i = 0; i < len; ++i) {
           const nyr_inst_t *in = &c->nyir->data[i];
@@ -1669,8 +1681,10 @@ static void ny_x64_nir_assign_loop_regs(ny_x64_nir_ctx_t *c) {
         in->imm - 1 < c->max_local_slot)
       address_taken[in->imm - 1] = true;
     if (in->op == NYIR_INLINE_ASM) {
-      /* Helper-style templates write their result slots outside normal
-         stores, so those slots must stay in memory. */
+      /*
+       * Helper-style templates write their result slots outside normal
+       * stores, so those slots must stay in memory.
+       */
       int slots[8];
       size_t count = ny_x64_asm_slot_list(in->symbol, slots, 8);
       for (size_t k = 0; k < count; ++k)
@@ -4836,7 +4850,9 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                     c->target->shadow_space_bytes))
       return false;
     if (indirect && (in->flags & NYIR_INST_F_PV_TEMPLATE) && in->symbol) {
-      /* The kernel's own call and alternative entry, printed as written. */
+      /*
+       * The kernel's own call and alternative entry, printed as written.
+       */
       if (!nyr_put(c->w, in->symbol) || !nyr_put(c->w, "\n"))
         return false;
     } else if (indirect) {

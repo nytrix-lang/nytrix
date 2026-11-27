@@ -1431,7 +1431,9 @@ static unsigned nyc_patchable_total, nyc_patchable_before;
 static bool nyc_record_mcount;
 static size_t nyc_function_note_counter;
 
-/* Insert a formatted note into a malloc'd text at `at` (an offset). */
+/*
+ * Insert a formatted note into a malloc'd text at `at` (an offset).
+ */
 static char *nyc_text_insert(char *text, size_t at, const char *note) {
   size_t length = strlen(text), note_length = strlen(note);
   char *grown = realloc(text, length + note_length + 1);
@@ -1486,7 +1488,9 @@ static char *nyc_apply_entry_notes(const char *name, const char *text) {
     if (!at)
       return out;
     size_t label_offset = (size_t)(at - out) + 1;
-    /* NOPs after the label (and after an endbr landing pad). */
+    /*
+     * NOPs after the label (and after an endbr landing pad).
+     */
     size_t body = label_offset + strlen(name) + 2;
     if (!strncmp(out + body, "\tendbr64\n", 10))
       body += 10;
@@ -1506,7 +1510,9 @@ static char *nyc_apply_entry_notes(const char *name, const char *text) {
       if (!out)
         return NULL;
     }
-    /* NOPs before the label, recorded in __patchable_function_entries. */
+    /*
+     * NOPs before the label, recorded in __patchable_function_entries.
+     */
     size_t note_size = 256 + (size_t)nyc_patchable_before * 5 + strlen(name);
     char *prefix = malloc(note_size);
     if (!prefix) {
@@ -1610,7 +1616,9 @@ write_c_function_assembly(nyr_writer_t *assembly, const char *function_assembly,
         if (at) {
           char *keep = at + 1;
           char *line = at + strlen(definition);
-          /* Drop the label and the instruction lines after it. */
+          /*
+           * Drop the label and the instruction lines after it.
+           */
           while (*line == '\t' && line[1] != '.' && line[1] != '\0') {
             char *line_end = strchr(line, '\n');
             if (!line_end)
@@ -1733,7 +1741,9 @@ static size_t nyc_i386_text_peephole(char *text) {
     if (prev_start && prev_len > 8 && len > 8 &&
         memcmp(prev_start, "\tmovl\t%", 7) == 0 &&
         memcmp(in, "\tmovl\t", 6) == 0) {
-      /* prev: "\tmovl\t%R, M\n"; this: "\tmovl\tM, %R\n" */
+      /*
+       * prev: "\tmovl\t%R, M\n"; this: "\tmovl\tM, %R\n"
+       */
       const char *r = prev_start + 6;
       const char *comma = memchr(r, ',', prev_len);
       if (comma && comma[1] == ' ') {
@@ -1749,7 +1759,9 @@ static size_t nyc_i386_text_peephole(char *text) {
           drop = true;
       }
     }
-    /* "movl $sym, %r" + "addl $imm, %r" -> "movl $sym+imm, %r". */
+    /*
+     * "movl $sym, %r" + "addl $imm, %r" -> "movl $sym+imm, %r".
+     */
     if (!drop && prev_start && prev_len > 10 &&
         memcmp(prev_start, "\tmovl\t$", 7) == 0 &&
         memcmp(in, "\taddl\t$0x", 9) == 0) {
@@ -1931,7 +1943,9 @@ static void nyc_compact_local_slots(nyr_func_t *f) {
   for (size_t i = 0; i < len; ++i) {
     const nyr_inst_t *in = &f->data[i];
     {
-      /* asm goto transfers control to the label in operand c like a branch */
+      /*
+       * asm goto transfers control to the label in operand c like a branch
+       */
       int64_t target = -1;
       if (in->op == NYIR_BR || in->op == NYIR_BR_IF)
         target = in->imm;
@@ -1979,7 +1993,9 @@ static void nyc_compact_local_slots(nyr_func_t *f) {
       last[slot] = i;
     }
   }
-  /* Intervals, widened over every loop they touch. */
+  /*
+   * Intervals, widened over every loop they touch.
+   */
   for (size_t s = params; s < slots; ++s) {
     if (fixed[s] || first[s] == SIZE_MAX)
       continue;
@@ -2000,7 +2016,9 @@ static void nyc_compact_local_slots(nyr_func_t *f) {
     first[s] = lo;
     last[s] = hi;
   }
-  /* Renumber: params keep their ids, then fixed slots, then colors. */
+  /*
+   * Renumber: params keep their ids, then fixed slots, then colors.
+   */
   int next = (int)params;
   for (size_t s = 0; s < slots; ++s)
     remap[s] = -1;
@@ -2013,7 +2031,9 @@ static void nyc_compact_local_slots(nyr_func_t *f) {
   size_t *color_last = calloc(slots + 1, sizeof(size_t));
   size_t colors = 0;
   if (color_last) {
-    /* order eligible slots by first use (slots are few: simple selection) */
+    /*
+     * order eligible slots by first use (slots are few: simple selection)
+     */
     bool *done = calloc(slots, sizeof(bool));
     if (done) {
       for (;;) {
@@ -2189,7 +2209,9 @@ static bool nyc_mark_noreturn_calls(nyr_func_t *f, const char *const *names,
                          .e = -1,
                          .f = -1,
                          .symbol = "ud2 # noreturn",
-                         /* What the verifier derives for inline assembly. */
+                         /*
+                          * What the verifier derives for inline assembly.
+                          */
                          .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_VOLATILE |
                                     NYIR_EFFECT_UNKNOWN_SIDE_EFFECT};
     bool already = i + 1 < f->len && f->data[i + 1].op == NYIR_INLINE_ASM &&
@@ -2215,8 +2237,7 @@ static bool nyc_mark_noreturn_calls(nyr_func_t *f, const char *const *names,
  * report as unreachable. This runs before SSA construction, where the only
  * edges are BR, BR_IF and fallthrough. A function with computed jumps or
  * asm goto is left alone, since its label edges are not all visible here.
- */
-/*
+ *
  * Jump threading can leave `br.if (const == const)`: the constant a threaded
  * edge used to take from a phi now sits next to the test. Decide those
  * branches here so the paths they never take stop being reachable.
@@ -2332,7 +2353,9 @@ static void nyc_drop_code_after_trap(nyr_func_t *f) {
         label_reached[in->imm] = true;
         changed = true;
       }
-      /* asm goto and faulting accesses may also transfer to label `c`. */
+      /*
+       * asm goto and faulting accesses may also transfer to label `c`.
+       */
       if (in->op == NYIR_INLINE_ASM &&
           (in->imm == -14 || in->imm == -82 || in->imm == -83) &&
           in->c >= 0 && !label_reached[in->c]) {
@@ -2463,7 +2486,9 @@ static bool nyc_fold_indirect_calls(nyr_func_t *f) {
     static const char extern_prefix[] = "__nyc_extern_";
     bool is_extern =
         !strncmp(def->symbol, extern_prefix, sizeof(extern_prefix) - 1);
-    /* A function defined in this unit is addressed as ny_fn_NAME. */
+    /*
+     * A function defined in this unit is addressed as ny_fn_NAME.
+     */
     bool is_unit_function = !strncmp(def->symbol, "ny_fn_", 6);
     if (!is_extern && !is_unit_function && !strncmp(def->symbol, "__nyc_", 6))
       continue; /* data, string or label address */
@@ -2473,8 +2498,10 @@ static bool nyc_fold_indirect_calls(nyr_func_t *f) {
     direct.symbol = is_extern         ? def->symbol + sizeof(extern_prefix) - 1
                     : is_unit_function ? def->symbol + 6
                                        : def->symbol;
-    /* C calls name their target directly; the EXTERN flag keeps the symbol
-       from being rewritten to an ny_fn_ label. */
+    /*
+     * C calls name their target directly; the EXTERN flag keeps the symbol
+     * from being rewritten to an ny_fn_ label.
+     */
     direct.flags = (call->flags & ~NYIR_INST_F_INDIRECT) |
                    NYIR_INST_F_EXTERN;
     direct.imm = (int64_t)(argc - 1);
@@ -2490,7 +2517,9 @@ static bool nyc_fold_indirect_calls(nyr_func_t *f) {
                              nyr_call_arg_class_get(call, k));
     *call = direct;
     folded = true;
-    /* The inliner skips functions that report no symbol calls. */
+    /*
+     * The inliner skips functions that report no symbol calls.
+     */
     f->has_symbol_calls = true;
   }
   free(defs);
@@ -2845,8 +2874,10 @@ static bool write_c_unit_assembly(
                     target->symbol_prefix, alias->name, target->symbol_prefix,
                     alias->target);
   }
-  /* GNU as writes no .symtab for a unit without symbols, which objtool and
-     other ELF consumers reject; a FILE symbol keeps the object well-formed. */
+  /*
+   * GNU as writes no .symtab for a unit without symbols, which objtool and
+   * other ELF consumers reject; a FILE symbol keeps the object well-formed.
+   */
   if (ok && !target->symbol_prefix[0])
     ok = nyr_put(&assembly, "\t.file ") &&
          write_assembly_quoted_string(&assembly, "nyc") &&
@@ -4309,9 +4340,11 @@ int main(int argc, char **argv) {
        * caller asked for an object (realmode C files do exactly that).
        */
       driver.code16 = true;
-      /* Real-mode code has no use for 16-byte call alignment; GCC and Clang
-         keep the four-byte i386 stack there, and the realigning call
-         sequence costs about 16 bytes per call. */
+      /*
+       * Real-mode code has no use for 16-byte call alignment; GCC and Clang
+       * keep the four-byte i386 stack there, and the realigning call
+       * sequence costs about 16 bytes per call.
+       */
       if (!driver.i386_stack_alignment)
         driver.i386_stack_alignment = 4;
       continue;

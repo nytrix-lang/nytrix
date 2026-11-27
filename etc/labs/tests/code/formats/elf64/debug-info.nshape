@@ -1,0 +1,86 @@
+shape x86_64_elf64_debug_info_subprograms {
+  family "runtime-native"
+  generator "embedded"
+  features ["native", "object", "elf", "x86_64", "debug", "dwarf-info"]
+  template ny-test-case
+  flags "--native --run -O0 --no-progress"
+  timeout 300
+  expect compile_and_run
+  expect_stdout "ELF64-DEBUG-INFO-OK"
+  source ny <<'NY'
+use core
+use core.os (file_write, file_remove, pid)
+use core.os.subprocess (run_capture)
+use core.os.path as path
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+
+def base = path.join(path.temp_dir(), "nytrix-elf64-debug-info-" + to_str(pid()))
+def src = base + ".ny"
+def plain = base + "-plain.o"
+def debug = base + "-debug.o"
+def exe = base + ".exe"
+defer { file_remove(src) file_remove(plain) file_remove(debug) file_remove(exe) }
+
+file_write(src, "fn add(int a, int b) int {\n  def sum = a + b\n  sum\n}\nfn pick(int n) int {\n  if n > 0 {\n    def big = n * 2\n    big\n  } else {\n    def small = 0 - n\n    small\n  }\n}\nprint(add(20, 22) + pick(3))\n")
+
+def plain_build = run_capture([compiler, "--native-only", "-O0", "-g", "-emit-only", "-o", plain, src], [], nil, false)
+assert(int(plain_build.get("code", 127)) == 0, "debug object builds: " + to_str(plain_build.get("stderr", "")))
+def debug_build = run_capture([compiler, "--native-only", "-O0", "-g", "--debug-locals", "-emit-only", "-o", debug, src], [], nil, false)
+assert(int(debug_build.get("code", 127)) == 0, "debug-locals object builds: " + to_str(debug_build.get("stderr", "")))
+
+def plain_dump = run_capture(["readelf", "--debug-dump=info", plain], [], nil, false)
+def plain_text = to_str(plain_dump.get("stdout", ""))
+assert(int(plain_dump.get("code", 127)) == 0, "readelf reads the plain object")
+assert(plain_text.contains("DW_TAG_compile_unit") && plain_text.contains("DW_TAG_subprogram"), "compile unit carries subprogram DIEs")
+assert(plain_text.contains("add") && plain_text.contains("main"), "subprogram DIEs carry source names")
+assert(plain_text.contains("DW_AT_low_pc") && plain_text.contains("DW_AT_high_pc"), "subprograms carry code ranges")
+assert(!plain_text.contains("invalid") && !plain_text.contains("Error"), "DWARF info is well formed")
+assert(!plain_text.contains("DW_TAG_formal_parameter") && !plain_text.contains("DW_TAG_variable"), "variables stay behind --debug-locals")
+
+def debug_dump = run_capture(["readelf", "--debug-dump=info", debug], [], nil, false)
+def debug_text = to_str(debug_dump.get("stdout", ""))
+assert(int(debug_dump.get("code", 127)) == 0, "readelf reads the debug-locals object")
+assert(debug_text.contains("DW_TAG_base_type") && debug_text.contains("DW_AT_decl_line"), "base types and decl lines are present")
+assert(debug_text.contains("DW_TAG_formal_parameter"), "parameters get DIEs")
+assert(debug_text.contains("DW_AT_location"), "parameters and locals carry locations")
+assert(debug_text.contains("DW_AT_frame_base") && debug_text.contains("DW_OP_reg6"), "subprograms declare the rbp frame base")
+assert(debug_text.contains("DW_AT_producer") && debug_text.contains("DW_AT_comp_dir"), "compile unit names its producer and directory")
+assert(debug_text.contains("DW_AT_external"), "subprograms record linkage")
+assert(debug_text.contains("DW_TAG_lexical_block"), "nested blocks become lexical-block DIEs")
+def debug_sections = to_str(run_capture(["readelf", "-SW", debug], [], nil, false).get("stdout", ""))
+assert(debug_sections.contains(".debug_loc") && debug_sections.contains(".rela.debug_loc"), "frame locals use location lists")
+def loc_dump = run_capture(["readelf", "--debug-dump=loc", debug], [], nil, false)
+def loc_text = to_str(loc_dump.get("stdout", ""))
+assert(loc_text.contains("DW_OP_fbreg"), "location lists use frame-relative expressions: " + loc_text)
+assert(!plain_text.contains("DW_TAG_lexical_block"), "lexical blocks stay behind --debug-locals")
+assert(!debug_text.contains("invalid") && !debug_text.contains("Error"), "debug-locals DWARF is well formed")
+
+;; A runtime-linked executable lets gdb break on source lines and read values.
+def lib_dir = path.dirname(compiler)
+def have_cc = int(run_capture(["sh", "-c", "command -v cc >/dev/null 2>&1"], [], nil, false).get("code", 1)) == 0
+def have_gdb = int(run_capture(["sh", "-c", "command -v gdb >/dev/null 2>&1"], [], nil, false).get("code", 1)) == 0
+if have_cc {
+  def link = run_capture(["cc", debug, "-o", exe, "-L", lib_dir, "-lnytrixrt",
+                          "-Wl,-rpath," + lib_dir, "-lm", "-ldl", "-lpthread"], [], nil, false)
+  assert(int(link.get("code", 127)) == 0, "debug object links with the runtime: " + to_str(link.get("stderr", "")))
+  if have_gdb {
+    def gdb = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":7",
+                           "-ex", "run", "-ex", "print n", exe], [], nil, false)
+    def gdb_text = to_str(gdb.get("stdout", "")) + to_str(gdb.get("stderr", ""))
+    assert(gdb_text.contains("pick") && gdb_text.contains("$1 = 3"), "gdb breaks on the source line and reads the argument: " + gdb_text)
+    def gdb_loc = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":2",
+                               "-ex", "run", "-ex", "print a", exe], [], nil, false)
+    def gdb_loc_text = to_str(gdb_loc.get("stdout", "")) + to_str(gdb_loc.get("stderr", ""))
+    assert(gdb_loc_text.contains("$1 = 20"), "gdb reads a parameter through its location list: " + gdb_loc_text)
+    def gdb_sum = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":2",
+                               "-ex", "run", "-ex", "next", "-ex", "print sum", exe], [], nil, false)
+    def gdb_sum_text = to_str(gdb_sum.get("stdout", "")) + to_str(gdb_sum.get("stderr", ""))
+    assert(gdb_sum_text.contains("$1 = 42"), "gdb reads a declared local kept for debug info: " + gdb_sum_text)
+  }
+}
+
+print("ELF64-DEBUG-INFO-OK")
+NY
+}

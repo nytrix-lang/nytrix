@@ -18,6 +18,7 @@ module core.os.ui.anim(
    ease_out_elastic, ease_out_bounce, mix, mix_color, spring, spring_step,
    animator, step, value, set_now, busy, tween
 )
+
 use core
 use core.math (exp, cos, sin, sqrt, pow, min, max, abs)
 
@@ -28,37 +29,48 @@ fn mix(f64 a, f64 b, f64 t) f64 { "Linear interpolation." a + (b - a) * t }
 fn mix_color(list a, list b, f64 t) list {
    "Component-wise interpolation of [r, g, b, a] colours."
    [mix(float(a.get(0, 0.0)), float(b.get(0, 0.0)), t), mix(float(a.get(1, 0.0)), float(b.get(1, 0.0)), t),
-    mix(float(a.get(2, 0.0)), float(b.get(2, 0.0)), t), mix(float(a.get(3, 1.0)), float(b.get(3, 1.0)), t)]
+      mix(float(a.get(2, 0.0)), float(b.get(2, 0.0)), t), mix(float(a.get(3, 1.0)), float(b.get(3, 1.0)), t)]
 }
 
 fn _c(f64 t) f64 { float(max(0.0, min(1.0, t))) }
 
 fn ease_in_quad(f64 t) f64 { def x = _c(t) x * x }
+
 fn ease_out_quad(f64 t) f64 { def x = _c(t) 1.0 - (1.0 - x) * (1.0 - x) }
+
 fn ease_in_out_quad(f64 t) f64 { def x = _c(t) x < 0.5 ? 2.0 * x * x : 1.0 - pow(-2.0 * x + 2.0, 2.0) / 2.0 }
+
 fn ease_in_cubic(f64 t) f64 { def x = _c(t) x * x * x }
+
 fn ease_out_cubic(f64 t) f64 { def x = 1.0 - _c(t) 1.0 - x * x * x }
+
 fn ease_in_out_cubic(f64 t) f64 { def x = _c(t) x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(-2.0 * x + 2.0, 3.0) / 2.0 }
+
 fn ease_out_quint(f64 t) f64 { def x = 1.0 - _c(t) 1.0 - x * x * x * x * x }
+
 fn ease_out_expo(f64 t) f64 { def x = _c(t) x >= 1.0 ? 1.0 : 1.0 - pow(2.0, -10.0 * x) }
+
 fn ease_in_out_expo(f64 t) f64 {
    def x = _c(t)
    if x <= 0.0 { return 0.0 }
    if x >= 1.0 { return 1.0 }
    x < 0.5 ? pow(2.0, 20.0 * x - 10.0) / 2.0 : (2.0 - pow(2.0, -20.0 * x + 10.0)) / 2.0
 }
+
 fn ease_out_back(f64 t) f64 {
    def x = _c(t)
    def c1 = 1.70158
    def c3 = c1 + 1.0
    1.0 + c3 * pow(x - 1.0, 3.0) + c1 * pow(x - 1.0, 2.0)
 }
+
 fn ease_out_elastic(f64 t) f64 {
    def x = _c(t)
    if x <= 0.0 { return 0.0 }
    if x >= 1.0 { return 1.0 }
    pow(2.0, -10.0 * x) * sin((x * 10.0 - 0.75) * (2.0 * PI / 3.0)) + 1.0
 }
+
 fn ease_out_bounce(f64 t) f64 {
    mut x = _c(t)
    def n1 = 7.5625
@@ -71,7 +83,7 @@ fn ease_out_bounce(f64 t) f64 {
 }
 
 fn ease(str name, f64 t) f64 {
-   "Easing curve by name (linear, quad, cubic, quint, expo, back, elastic, bounce, in-/in-out- variants)."
+   "Easing curve by name(linear, quad, cubic, quint, expo, back, elastic, bounce, in-/in-out- variants)."
    case name {
       "in-quad" -> ease_in_quad(t)
       "quad", "out-quad" -> ease_out_quad(t)
@@ -96,16 +108,15 @@ fn tween(f64 from, f64 to, f64 elapsed, f64 duration, str curve="cubic") f64 {
 }
 
 ;; ---- springs ---------------------------------------------------------------
-
 fn spring(f64 frequency=2.0, f64 damping=1.0) dict {
-   "Spring parameters: natural frequency in Hz (higher is snappier; 2 Hz
-   settles in about 0.4 s) and damping ratio (1 = critically damped, no
-   overshoot; below 1 overshoots and wobbles)."
+   "Spring parameters: natural frequency in Hz(higher is snappier; 2 Hz
+   settles in about 0.4 s) and damping ratio(1 = critically damped, no
+   overshoot ; below 1 overshoots and wobbles)."
    {"freq": frequency, "damp": damping}
 }
 
 fn spring_step(dict sp, f64 pos, f64 vel, f64 target, f64 dt) list {
-   "Advances a damped harmonic oscillator exactly (closed form), so large or
+   "Advances a damped harmonic oscillator exactly(closed form), so large or
    uneven frame times never explode. Returns [pos, vel]."
    if dt <= 0.0 { return [pos, vel] }
    def f64 w = float(max(0.0001, float(sp.get("freq", 2.0)))) * 2.0 * PI
@@ -143,9 +154,8 @@ fn spring_step(dict sp, f64 pos, f64 vel, f64 target, f64 dt) list {
 }
 
 ;; ---- keyed animator ----------------------------------------------------------
-
 fn animator(dict sp=dict(0)) dict {
-   "Creates an animator; `sp` is the default spring (see `spring`)."
+   "Creates an animator; `sp` is the default spring(see `spring`)."
    {"spring": sp.len > 0 ? sp : spring(), "vals": dict(32), "dt": 0.0, "busy": false, "eps": 0.01}
 }
 
@@ -157,7 +167,7 @@ fn step(dict a, f64 dt) dict {
 }
 
 fn set_now(dict a, str id, f64 v) dict {
-   "Jumps a value to `v` with no motion (first layout, resets)."
+   "Jumps a value to `v` with no motion(first layout, resets)."
    a.get("vals", dict(32))[id] = [v, 0.0]
    a
 }
@@ -185,6 +195,6 @@ fn value(dict a, str id, f64 target, dict sp=dict(0)) f64 {
 }
 
 fn busy(dict a) bool {
-   "True when some value is still moving (request another frame)."
+   "True when some value is still moving(request another frame)."
    bool(a.get("busy", false))
 }

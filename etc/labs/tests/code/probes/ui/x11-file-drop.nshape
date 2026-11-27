@@ -1,0 +1,78 @@
+shape x11-file-drop {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui x11 xdnd drop]
+  template ny-test-case
+  flags_matrix "--native-only -O2"
+  timeout 300
+  expect compile_and_run
+  expect_stdout "X11-FILE-DROP-OK"
+  source ny <<'NY2'
+;; Run with an isolated X11 display:
+;; env -u WAYLAND_DISPLAY NY_TEST_ELM_PLATFORM=x11 NYTRIX_TEST_ALLOW_DISPLAY=1 \
+;;   xvfb-run -a build/release/ny-test etc/labs/tests/code/probes/ui/x11-file-drop.nshape
+use core
+use core.common as common
+use core.os (file_write, file_remove, temp_dir, msleep, now_ms)
+use core.os.subprocess (run_capture)
+use core.os.ui.elm as elm
+use core.os.ui.window as window
+use core.os.ui.window.consts as event_kind
+
+fn drop_message(any event) any {
+   if int(event.get("kind", 0)) == event_kind.EVENT_DATA_DROP { return event }
+   nil
+}
+
+fn update_drop(any model, any event) any {
+   def dict m = model
+   m["window_id"] = int(event.get("window_id", 0))
+   m["data"] = event.get("data", nil)
+   m
+}
+
+def str display = common.env_trim("DISPLAY")
+if display.len == 0 {
+   print("skip: no DISPLAY")
+   print("X11-FILE-DROP-OK")
+   exit(0)
+}
+def win = window.open_window("drop target", 20, 20, 240, 140)
+assert(win && window.backend() == "x11", "x11 drop window opens (backend=" + window.backend() + ")")
+def int handle = int(window.id(win))
+assert(handle > 0, "native X11 handle")
+def app = elm.new({"window_id": 0, "data": nil})
+elm.subscribe(app, "window.lifecycle", drop_message)
+def str path = temp_dir() + "/ny-xdnd-public-file.txt"
+file_write(path, "public drop payload\n")
+def str ny = common.env_trim("NYTRIX_TEST_NY_FULL_BIN")
+if ny.len == 0 { ny = "build/release/ny-full" }
+def str log = temp_dir() + "/ny-xdnd-ytool.log"
+def str cmd = ny + " etc/labs/ytool.ny x11 drop " + path + " " + to_str(handle) + " 20 20 > " + log + " 2>&1 &"
+run_capture(["sh", "-c", cmd], [], nil, false)
+mut any dropped = nil
+def int end = now_ms() + 30000
+while is_nil(dropped) && now_ms() < end {
+   mut any e = window.check_event(win)
+   while !is_nil(e) && !(is_int(e) && int(e) == 0) {
+      if window.event_type(e) == window.EVENT_DATA_DROP {
+         assert(elm.publish_window_event(app, e, update_drop) == 1, "native file drop reaches the Elm lifecycle subscriber")
+         dropped = elm.model(app).get("data", nil)
+         break
+      }
+      e = window.check_event(win)
+   }
+   if is_nil(dropped) { msleep(10) }
+}
+def str logtext = ""
+def lr = file_read(log)
+if is_ok(lr) { logtext = to_str(unwrap(lr)) }
+window.close(win)
+file_remove(path)
+assert(is_dict(dropped), "a native XDND drop reaches the window: " + logtext)
+assert(int(elm.model(app).get("window_id", 0)) == handle, "Elm drop event retains its source window ID")
+def paths = dropped.get("paths", [])
+assert(is_list(paths) && paths.len == 1 && to_str(paths.get(0)) == path, "dropped path is the public file: " + to_str(paths))
+print("X11-FILE-DROP-OK")
+NY2
+}

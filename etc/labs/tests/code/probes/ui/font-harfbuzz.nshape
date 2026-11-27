@@ -1,0 +1,56 @@
+shape font_harfbuzz_shaping {
+  family "runtime/ui"
+  generator "regression"
+  features [ny font harfbuzz shaping unicode]
+  template ny-test-case
+  timeout 180
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_stdout "FONT-HARFBUZZ-OK"
+  source ny <<'NY'
+use core
+use core.os (file_exists)
+use core.os.ui.font.harfbuzz as hb
+use core.os.ui.render as gfx
+
+assert(hb.available(), "HarfBuzz runtime is available for the shaping probe")
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "mock renderer is available")
+def font_path = "etc/assets/fonts/jetbrains.ttf"
+def font = gfx.font_load(font_path, 20)
+assert(font > 0, "bundled font loads")
+def shaped = hb.shape(font_path, 20, "office")
+assert(shaped.len == 6, "font shaping returns positioned glyph records")
+mut width = 0.0
+for glyph in shaped { width += float(glyph.get(2, 0.0)) }
+def measured = gfx.measure_text(font, "office")
+assert(measured.get(0, 0.0) > 0.0 && abs(float(measured.get(0, 0.0)) - width) < 0.01,
+   "renderer measurement uses HarfBuzz advances")
+gfx.draw_text(font, "office", 0.0, 0.0)
+def keys = dict_keys(gfx._font_get(font).get("glyphs"))
+mut shaped_glyph_cached = false
+for key in keys { if int(key) > 1114111 { shaped_glyph_cached = true } }
+assert(shaped_glyph_cached, "renderer resolves glyph IDs from shaped output")
+
+mut arabic_path = ""
+for candidate in [
+   "/usr/share/fonts/TTF/DejaVuSans.ttf",
+   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+   "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+   "C:/Windows/Fonts/arial.ttf"
+] {
+   if arabic_path == "" && file_exists(candidate) { arabic_path = candidate }
+}
+if arabic_path != "" {
+   def rtl = hb.shape(arabic_path, 20, "مرحبا")
+   assert(rtl.len == 5, "Arabic word shapes into positioned glyphs")
+   assert(int(rtl.get(0).get(0, 0)) > 0 && int(rtl.get(0).get(1, 0)) > int(rtl.get(4).get(1, 0)),
+      "RTL shaping returns contextual glyphs in visual order with source clusters")
+   def fallback_measure = gfx.measure_text(font, "مرحبا")
+   assert(float(fallback_measure.get(0, 0.0)) > 0.0,
+      "renderer shapes a fallback-font run rather than measuring Arabic as isolated characters")
+   gfx.draw_text(font, "مرحبا", 0.0, 24.0)
+}
+assert(gfx.font_destroy(font), "font and HarfBuzz cache release")
+print("FONT-HARFBUZZ-OK")
+NY
+}

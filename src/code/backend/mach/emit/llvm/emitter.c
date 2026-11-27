@@ -811,11 +811,15 @@ static bool ny_llvm_should_internalize_func(const ny_llvm_context_t *cg,
     return false;
   if (!cg || !cg->emit_entry || cg->module_declarations_only)
     return false;
-  /* Interactive REPL evaluates chunks in separate JIT modules and resolves
-   * earlier user functions across chunks via LLVMGetFunctionAddress. */
+  /*
+   * Interactive REPL evaluates chunks in separate JIT modules and resolves
+   * earlier user functions across chunks via LLVMGetFunctionAddress.
+   */
   if (cg->default_filename && strncmp(cg->default_filename, "<repl", 5) == 0)
     return false;
-  /* Restrict to user code; stdlib functions feed std.bc cache linking. */
+  /*
+   * Restrict to user code; stdlib functions feed std.bc cache linking.
+   */
   if (!origin_section || (strcmp(origin_section, "ny.user.text") != 0 &&
                           strcmp(origin_section, "__TEXT,ny_user") != 0))
     return false;
@@ -2166,8 +2170,10 @@ static bool ny_llvm_emit_nyir_func_impl(ny_llvm_context_t *cg, nyr_func_t *f,
         break;
       case NYIR_VEC8_MUL_I64:
         if (in->imm == 1) {
-          /* NYIR mul_u32 proves operands fit in [0, UINT32_MAX], letting
-           * x86 AVX2 lower to a single vpmuludq instead of 64-bit mul. */
+          /*
+           * NYIR mul_u32 proves operands fit in [0, UINT32_MAX], letting
+           * x86 AVX2 lower to a single vpmuludq instead of 64-bit mul.
+           */
           LLVMTypeRef vec_i32 =
               LLVMVectorType(LLVMInt32TypeInContext(cg->context), lanes);
           LLVMValueRef lhs32 = LLVMBuildTrunc(cg->builder, lhs, vec_i32, "");

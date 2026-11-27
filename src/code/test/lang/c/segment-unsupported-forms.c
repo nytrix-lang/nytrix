@@ -1,4 +1,6 @@
-/* Segment qualifiers on aggregate pointers, fields and typedefs and arrays of segment pointers are rejected, not dropped. */
+/*
+ * Segment qualifiers on aggregate pointers, fields and typedefs and arrays of segment pointers are rejected, not dropped.
+ */
 #ifdef SEG_AGGREGATE_PARAM
 struct S { int a; int b; };
 int f(__seg_gs struct S *p) { return p->b; }

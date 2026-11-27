@@ -1,4 +1,6 @@
-/* Host driver for i386-pointer-member-store.c. */
+/*
+ * Host driver for i386-pointer-member-store.c.
+ */
 struct card {
   const char *name;
   int (*set)(void *);

@@ -1,4 +1,6 @@
-/* File-scope float, double and complex objects and arrays: initializers, element reads and writes, and compound assignment agree with GCC. */
+/*
+ * File-scope float, double and complex objects and arrays: initializers, element reads and writes, and compound assignment agree with GCC.
+ */
 #include <complex.h>
 #include <stdio.h>
 double dg[3] = {1.5, 2.5, 3.5};

@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.batch
 ;; - core.os.ui.window
-module core.os.ui.render.viewer.gui(paint_rect, paint_text, item_hovered, mouse_xy, remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, generate_palette, apply_palette, button_style_map, export_theme, save_theme_file, load_theme_file, watch_theme_file, unwatch_theme_file, poll_theme_file, theme_editor, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, accessibility_tree, accessibility_action, animate_value, animation_busy, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, text, label, text_colored, property_row, title_input_text, button, button_at, draw_flex_commands, measure_flex_text, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
+module core.os.ui.render.viewer.gui(paint_rect, paint_text, item_hovered, mouse_xy, remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, generate_palette, apply_palette, button_style_map, export_theme, save_theme_file, load_theme_file, watch_theme_file, unwatch_theme_file, poll_theme_file, theme_editor, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, accessibility_tree, accessibility_action, animate_value, animation_busy, overlay_offset, list_view, dialog_open, dialog_close, dialog_is_open, message_dialog, text_input_dialog, file_dialog, icon_pack_load, icon_pack_save, icon_pack_clear, icon_pack_count, icon_pack_glyph, icon_pack_text, icon_pack_define, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, text, label, text_colored, property_row, title_input_text, button, button_at, draw_flex_commands, measure_flex_text, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
 use core
 use core.os.ui.anim as ui_anim
 use core.math
@@ -16,6 +16,8 @@ use core.str as str
 use core.common as common
 use core.cache as cache
 use core.os (file_read, file_write)
+use core.os.fs as fs
+use core.os.path as ospath
 use core.math.parse.data.json as json
 
 mut bool _enabled = true
@@ -169,6 +171,12 @@ mut _text_measure_cache = dict(1024)
 mut _font_h_cache = dict(16)
 mut _text_caches_ready = false
 mut _gui_frame_id = 0
+mut _overlay_state = nil
+mut _overlay_offsets = nil
+mut _gui_view_w = 0.0
+mut _gui_view_h = 0.0
+mut _dialogs = nil
+mut _icon_pack = nil
 mut _font_metric_frame = -1
 mut _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
 
@@ -211,6 +219,10 @@ fn _ensure_gui_state() any {
    if !is_dict(_window_closed_events) { _window_closed_events = dict(32) }
    if !is_list(_window_order) { _window_order = [] }
    if !is_dict(_dock_spaces) { _dock_spaces = dict(4) }
+   if !is_dict(_overlay_state) { _overlay_state = dict(16) }
+   if !is_dict(_overlay_offsets) { _overlay_offsets = dict(16) }
+   if !is_dict(_dialogs) { _dialogs = dict(8) }
+   if !is_dict(_icon_pack) { _icon_pack = dict(64) }
 }
 
 fn _ui_text(any txt) str {
@@ -885,7 +897,7 @@ fn set_accent(list c) any {
    if !is_list(c) { return 0 }
    if is_list(_accent_rgba) && _accent_rgba.len == 4 && c.len == 4 {
       if c.get(0) == _accent_rgba.get(0) && c.get(1) == _accent_rgba.get(1) &&
-         c.get(2) == _accent_rgba.get(2) && c.get(3) == _accent_rgba.get(3) {
+      c.get(2) == _accent_rgba.get(2) && c.get(3) == _accent_rgba.get(3) {
          return 0
       }
    }
@@ -1847,7 +1859,7 @@ fn _text_cursor_from_x(int font_id, any s, f64 px, f64 text_x) int {
    n
 }
 
-fn _text_state_cursor(any full_id, int fallback_len) int {
+fn _text_state_cursor(str full_id, int fallback_len) int {
    def st = _widget_state.get(full_id, 0)
    mut cur = is_dict(st) ? int(st.get("cursor", fallback_len)) : int(fallback_len)
    def n = int(fallback_len)
@@ -1855,7 +1867,7 @@ fn _text_state_cursor(any full_id, int fallback_len) int {
    cur
 }
 
-fn _text_state_set_cursor(any full_id, int cursor_idx) any {
+fn _text_state_set_cursor(str full_id, int cursor_idx) any {
    mut st = _widget_state.get(full_id, 0)
    if !is_dict(st) { st = dict(4) }
    st["cursor"] = int(cursor_idx)
@@ -1865,7 +1877,10 @@ fn _text_state_set_cursor(any full_id, int cursor_idx) any {
 fn begin_frame(any win=0, int font=0, f64 ww=0.0, f64 wh=0.0, f64 dt=0.016666667) any {
    "Starts a GUI frame and resets per-frame hover/layout state. `dt` is seconds and advances keyed UI animations."
    _ensure_gui_state()
+   if ww > 0.0 { _gui_view_w = ww }
+   if wh > 0.0 { _gui_view_h = wh }
    _gui_frame_id += 1
+   _overlay_offsets = dict(16)
    _theme_hot_reload_tick()
    ui_anim.step(_ui_animator, dt)
    if is_list(_accessibility_nodes) { clear(_accessibility_nodes) } else { _accessibility_nodes = [] }
@@ -2021,6 +2036,33 @@ fn animate_value(any id, f64 target, dict spring=dict(0)) f64 {
 fn animation_busy() bool {
    "Returns whether any keyed GUI animation requested this frame still needs another frame."
    ui_anim.busy(_ui_animator)
+}
+
+fn overlay_offset(any id, bool open, f64 distance=12.0) f64 {
+   "Returns this frame's offset for an overlay: `distance` while closed, then an eased slide to 0 over ten frames after it opens."
+   _ensure_gui_state()
+   def key = _wid("overlay:" + to_str(id))
+   def slot = to_str(_gui_frame_id) + "|" + key
+   def any cached = _overlay_offsets.get(slot, nil)
+   if cached != nil { return float(cached) }
+   mut f64 v = distance
+   if !open {
+      _overlay_state = _overlay_state.delete(key)
+   } else {
+      def state = _overlay_state.get(key, nil)
+      if !is_dict(state) {
+         _overlay_state[key] = {"age": 0, "frame": int(_gui_frame_id)}
+      } else {
+         mut int age = int(state.get("age", 0))
+         if int(state.get("frame", -1)) != int(_gui_frame_id) {
+            age += 1
+            _overlay_state[key] = {"age": age, "frame": int(_gui_frame_id)}
+         }
+         v = distance * (1.0 - ui_anim.ease_out_cubic(min(1.0, float(age) / 10.0)))
+      }
+   }
+   _overlay_offsets[slot] = v
+   v
 }
 
 fn request_focus(any full_id) bool {
@@ -2267,9 +2309,9 @@ fn _accessibility_take(any full_id, str action) dict {
    request
 }
 
-fn _text_selected_all(any full_id) bool { _state_get_num(full_id, "select_all", 0.0) > 0.5 }
+fn _text_selected_all(str full_id) bool { _state_get_num(full_id, "select_all", 0.0) > 0.5 }
 
-fn _text_set_selected_all(any full_id, bool selected) any { _state_set_num(full_id, "select_all", selected ? 1.0 : 0.0) }
+fn _text_set_selected_all(str full_id, bool selected) any { _state_set_num(full_id, "select_all", selected ? 1.0 : 0.0) }
 
 fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=true) any {
    ;; Called for every widget each frame: keep the clip in scalars. Building
@@ -2327,10 +2369,10 @@ fn _accessibility_record(any full_id, str role, str name, any value, any bounds,
    ;; action lists lazily only when accessibility_tree() / accessibility_action()
    ;; is actually queried.
    _accessibility_nodes = _accessibility_nodes.append([
-      full_id, _current_window_id_cache, role, name, value, bounds,
-      disabled || _disabled_on > 0, _kbd_focus_id == full_id, _iw_hovered,
-      _iw_held, checked, selected, expanded, extra
-   ])
+         full_id, _current_window_id_cache, role, name, value, bounds,
+         disabled || _disabled_on > 0, _kbd_focus_id == full_id, _iw_hovered,
+         _iw_held, checked, selected, expanded, extra
+      ])
    0
 }
 
@@ -2348,6 +2390,7 @@ fn _accessibility_materialize(any raw) dict {
    if role == "slider" || role == "spinbutton" {
       actions = actions.append("set_value").append("increment").append("decrement")
    }
+   if role == "textbox" { actions = actions.append("set_value") }
    mut dict node = {
       "id": to_str(raw.get(0, "")),
       "parent": "window:" + to_str(raw.get(1, "")),
@@ -2906,8 +2949,51 @@ fn _draw_flex_text(int font, str text, f64 x, f64 y, any color, f64 letter_spaci
    draw_text(font, text, px, py, packed, letter_spacing)
 }
 
+fn _flex_menu_at(any id, str label, list items, list rect) list {
+   "Draws a declarative menu button at a solved rectangle and returns chosen item actions."
+   mut list chosen = []
+   def full = _wid(id)
+   def pid = _popup_key(to_str(id) + "#menu")
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w, h = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
+   if w <= 0.0 || h <= 0.0 { return chosen }
+   _register_focusable(full)
+   _begin_interact_widget(full, x, y, w, h, true)
+   def is_open = _popup_index(pid) >= 0
+   def a11y_activate = _accessibility_take(full, "activate")
+   if _iw_clicked || _widget_key_activate(full) || a11y_activate.get("found", false) {
+      if is_open { _popup_close_from(_popup_index(pid)) }
+      elif _list_find_text(_popup_dismissed, pid) < 0 { _popup_open_at(pid, x, y + h, _popup_depth) }
+   }
+   _accessibility_record(full, "button", label, "", rect, false, false, is_open, false, {"has_popup": true, "menu": true})
+   if _iw_visible {
+      def lit = _popup_index(pid) >= 0
+      def bg = lit || _iw_hovered || _iw_held ? _panel_active_u32 : _panel_hover_u32
+      def fg = _text_u32
+      _gui_rect_fast(x, y, w, h, bg)
+      _gui_rect_outline_fast(x, y, w, h, _border_u32)
+      if _kbd_focus_id == full { _gui_focus_ring(x, y, w, h) }
+      def ty = _text_center_y_for(_font_small_id(), y, h)
+      _draw_text_ui_small_clipped(label, x + _sx(10.0), ty, fg, max(1.0, w - _sx(30.0)), _clip_rect_inset(x, y, w, h, 0.0))
+      _gui_chevron(x + w - _sx(12.0), y + h * 0.5, _sx(8.0), false, fg)
+   }
+   if _popup_begin(pid, 0.0, _sx(4.0)) {
+      mut int index = 0
+      for item in items {
+         def item_key = to_str(item.get("id", ""))
+         def item_id = item_key.len > 0 ? item_key : full + ":item:" + to_str(index)
+         if menu_item(item_id, item.get("text", ""), item.get("shortcut", ""), bool(item.get("checked", false))) {
+            chosen = chosen.append({"id": item_id, "action": item.get("action", ""), "value": item.get("checked", false)})
+         }
+         index += 1
+      }
+      _popup_end()
+   }
+   chosen
+}
+
 fn draw_flex_commands(list commands, f64 origin_x, f64 origin_y, dict values=dict(0)) list {
-   "Draws flex commands at a screen origin and returns named actions. Checkbox values are read from values by id, default to the markup, and are returned as value in change records."
+   "Draws flex commands at a screen origin and returns named actions. Stateful controls read values by id, default to the markup, and include the new value in change records."
    mut actions = []
    def window = _current_window_state()
    if !_enabled || !is_dict(window) { return actions }
@@ -2944,6 +3030,31 @@ fn draw_flex_commands(list commands, f64 origin_x, f64 origin_y, dict values=dic
          def checked = !!values.get(id, data.get("checked", false))
          def next = _choice_control_at(id, data.get("text", ""), checked, [x, y, w, h])
          if next != checked { actions = actions.append({"id": id, "action": data.get("action", ""), "value": next}) }
+      } elif kind == "slider" && w > 0.0 && h > 0.0 {
+         def id = to_str(command.get("id", ""))
+         def value = float(values.get(id, data.get("value", 0.0)))
+         def next = _slider_float_at(id, data.get("text", ""), value, float(data.get("min", 0.0)), float(data.get("max", 1.0)), [x, y, w, h], nil)
+         if next != value { actions = actions.append({"id": id, "action": data.get("action", ""), "value": next}) }
+      } elif kind == "input" && w > 0.0 && h > 0.0 {
+         def id = to_str(command.get("id", ""))
+         def value = to_str(values.get(id, data.get("value", "")))
+         def next = _input_text_at(id, _ui_text(data.get("text", "")), value, data.get("placeholder", ""), [x, y, w, h], nil)
+         if next != value { actions = actions.append({"id": id, "action": data.get("action", ""), "value": next}) }
+      } elif kind == "spinbox" && w > 0.0 && h > 0.0 {
+         def id = to_str(command.get("id", ""))
+         def value = float(values.get(id, data.get("value", 0.0)))
+         def next = _drag_float_at(id, _ui_text(data.get("text", "")), value, float(data.get("step", 1.0)), float(data.get("min", 0.0)), float(data.get("max", 0.0)), int(data.get("decimals", 0)), [x, y, w, h], nil)
+         if next != value { actions = actions.append({"id": id, "action": data.get("action", ""), "value": next}) }
+      } elif kind == "combo" && w > 0.0 && h > 0.0 {
+         def id = to_str(command.get("id", ""))
+         def selected = int(values.get(id, data.get("selected", 0)))
+         def next = _combo_box_at(id, _ui_text(data.get("text", "")), data.get("options", []), selected, [x, y, w, h], int(data.get("max_visible", 6)), nil)
+         if next != selected { actions = actions.append({"id": id, "action": data.get("action", ""), "value": next}) }
+      } elif kind == "menu" && w > 0.0 && h > 0.0 {
+         def menu_id = to_str(command.get("id", ""))
+         for picked in _flex_menu_at(menu_id, _ui_text(data.get("text", "")), data.get("items", []), [x, y, w, h]) {
+            actions = actions.append(picked)
+         }
       } elif kind == "rect" {
          def radius = float(data.get("radius", 0.0))
          def color = _flex_color(data.get("color", 0))
@@ -3224,13 +3335,14 @@ fn selectable_file(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0,
    _iw_clicked || _widget_key_activate(full) || a11y_activate.get("found", false)
 }
 
-fn _text_edit_apply_input(any full_id, str value, int cursor) list {
-   mut out = to_str(value)
-   mut cur = int(cursor)
+fn _text_edit_apply_input(str full_id, str value, int cursor) list {
+   mut str out = to_str(value)
+   mut int cur = int(cursor)
    mut selected_all = _text_selected_all(full_id)
-   if selected_all { cur = out.len }
+   if selected_all { cur = int(out.len) }
    mut ki = 0
-   def key_events_n = is_list(_key_events) ? _key_events.len : 0
+   mut int key_events_n = 0
+   if is_list(_key_events) { key_events_n = _key_events.len }
    while ki < key_events_n {
       def k = int(_key_events.get(ki, 0))
       if k == _TEXT_SELECT_ALL {
@@ -3354,16 +3466,56 @@ fn ime_preedit() str {
    _ime_preedit
 }
 
+fn list_view(any id, list rows, any w=0.0, any h=0.0, int selected=-1) int {
+   "Draws a standalone scrollable list with click and Up/Down selection; returns the selected row index(-1 when none)."
+   def rw = _pick_positive(w, _current_body_w())
+   def rh = _pick_positive(h, _sx(220.0))
+   def scroll_id = to_str(id) + "#scroll"
+   mut int out = selected
+   set_scroll_area_content_hint(scroll_id, float(rows.len) * _small_item_h() + _sx(8.0))
+   if begin_scroll_area(scroll_id, rw, rh) {
+      mut i = 0
+      while i < rows.len {
+         def row = rows.get(i)
+         def label_text = is_dict(row) ? to_str(row.get("label", "")) : _ui_text(row)
+         def detail_text = is_dict(row) ? to_str(row.get("detail", "")) : ""
+         def int icon = is_dict(row) ? int(row.get("icon", -1)) : -1
+         if selectable(to_str(id) + "#row" + to_str(i), label_text, i == out, 0.0, _small_item_h(), detail_text, icon) { out = i }
+         i += 1
+      }
+      end_scroll_area()
+   }
+   def row_prefix = _wid(to_str(id) + "#row")
+   if rows.len > 0 && str.startswith(_kbd_focus_id, row_prefix) {
+      mut int next = out
+      if _key_event_present(KEY_DOWN) { next = min(rows.len - 1, max(0, out) + 1) }
+      elif _key_event_present(KEY_UP) { next = max(0, out - 1) }
+      if next != out {
+         out = next
+         request_focus(_wid(to_str(id) + "#row" + to_str(next)))
+      }
+   }
+   out
+}
+
 fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0, any style=nil) str {
    "Draws an editable text field and returns the edited value. Optional state styles control field, border and text colors."
-   mut out = _ui_text(value)
-   def full = _wid(id)
    def lbl = _ui_text(label)
-   def ph = _ui_text(placeholder)
    def rw = _pick_positive(w, _current_body_w())
    ;; The caption owns its own line above the field. Reserving a fixed height
    ;; for both let the field spill into the next widget's row.
    def rect = _layout_rect(rw, _labelled_h(lbl))
+   _input_text_at(id, lbl, value, placeholder, rect, style)
+}
+
+fn _input_text_at(any id, str lbl, any value, any placeholder, list rect, any style) str {
+   mut out = _ui_text(value)
+   def full = _wid(id)
+   def ph = _ui_text(placeholder)
+   def f64 height = float(rect.get(3, 0.0))
+   def f64 caption = lbl.len > 0 ? _label_h() : 0.0
+   def f64 field_h = height - caption
+   if field_h <= 0.0 { return out }
    _begin_interact_widget(full,
       float(rect.get(0,
             0.0)),
@@ -3376,8 +3528,7 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0, any s
       true)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def rwf = float(rect.get(2, 0.0))
-   def field_y = y + ((str.len(lbl) > 0) ? _label_h() : 0.0)
-   def field_h = _field_h()
+   def field_y = y + caption
    def tx = x + _item_pad_x()
    def field_hover = _current_window_pointer_hit(x, field_y, rwf, field_h)
    if field_hover {
@@ -3385,6 +3536,14 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0, any s
       _want_cursor(_cursor_ibeam)
    }
    def nav_focus = _register_focusable(full)
+   def a11y_value = _accessibility_take(full, "set_value")
+   if a11y_value.get("found", false) {
+      out = _ui_text(a11y_value.get("value", ""))
+      _kbd_focus_id = full
+      _text_focus_id = full
+      _text_state_set_cursor(full, out.len)
+      _text_set_selected_all(full, false)
+   }
    def mouse_focus = field_hover && _mouse_pressed0
    if nav_focus || mouse_focus || _iw_clicked {
       _kbd_focus_id = full
@@ -3925,17 +4084,6 @@ fn _combo_selected_index(list values, int selected) int {
    out
 }
 
-fn _combo_layout(f64 w, str lbl="x") list {
-   def rw = _pick_positive(w, _current_body_w())
-   def field_h = _field_h()
-   def cap_h = (str.len(lbl) > 0) ? _label_h() : 0.0
-   def rect = _layout_rect(rw, cap_h + field_h)
-   def x = float(rect.get(0, 0.0))
-   def y = float(rect.get(1, 0.0))
-   def rwf = float(rect.get(2, 0.0))
-   [rect, x, y, rwf, y + cap_h, field_h]
-}
-
 fn _combo_apply_trigger(str full, bool open, bool forced_open, bool nav_focus) bool {
    mut next_open = forced_open ? true : !!open
    if nav_focus { _kbd_focus_id = full }
@@ -4012,18 +4160,24 @@ fn _draw_combo_field(str full, str lbl, list values, int out, bool open, f64 x, 
 
 fn combo_box(any id, any label, list items, int selected=0, f64 w=0.0, int max_visible=6, any style=nil) int {
    "Draws a combo box and returns the selected item index. Optional state styles apply to its field."
+   def lbl = _ui_text(label)
+   def rect = _layout_rect(_pick_positive(w, _current_body_w()), _labelled_h(lbl))
+   _combo_box_at(id, lbl, items, selected, rect, max_visible, style)
+}
+
+fn _combo_box_at(any id, str lbl, list items, int selected, list rect, int max_visible, any style) int {
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def rwf = float(rect.get(2, 0.0))
+   def cap_h = lbl.len > 0 ? _label_h() : 0.0
+   def field_y, field_h = y + cap_h, float(rect.get(3, 0.0)) - cap_h
+   mut out = _combo_selected_index(items, selected)
+   if field_h <= 0.0 { return out }
    _popup_combo_style = style
    ;; See tab_strip: a typed list must not pass through an is_list guard.
    def values = items
-   mut out = _combo_selected_index(values, selected)
    def full = _wid(id)
    def open_key = full + "#open"
    def popup_key = full + "#popup"
-   def lbl = _ui_text(label)
-   def geom = _combo_layout(w, lbl)
-   def x, y = float(geom.get(1, 0.0)), float(geom.get(2, 0.0))
-   def rwf, field_y = float(geom.get(3, 0.0)), float(geom.get(4, 0.0))
-   def field_h = float(geom.get(5, _small_item_h()))
    def nav_focus = _register_focusable(full)
    _begin_interact_widget(full, x, field_y, rwf, field_h, true)
    def forced_open = _debug_combo_forced(full, id)
@@ -4048,6 +4202,11 @@ fn combo_box(any id, any label, list items, int selected=0, f64 w=0.0, int max_v
 
 fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0, any style=nil) f64 {
    "Draws a floating-point slider and returns the adjusted value. Optional state styles support background, fill, knob, border and text RGBA colors."
+   def rect = _layout_rect(_pick_positive(w, _current_body_w()), _label_h() + _sx(18.0))
+   _slider_float_at(id, label, value, min_v, max_v, rect, style)
+}
+
+fn _slider_float_at(any id, any label, f64 value, f64 min_v, f64 max_v, list rect, any style) f64 {
    mut lo = float(min_v)
    mut hi = float(max_v)
    if hi < lo {
@@ -4056,8 +4215,9 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0, a
       hi = t
    }
    mut out = clamp(float(value), lo, hi)
-   def full_w = _pick_positive(w, _current_body_w())
-   def rect = _layout_rect(full_w, _label_h() + _sx(18.0))
+   def f64 height = float(rect.get(3, 0.0))
+   def f64 band_h = height - _label_h()
+   if band_h <= 0.0 { return out }
    _last_item = rect
    def full = _wid(id)
    _register_focusable(full)
@@ -4094,8 +4254,8 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0, a
       ;; Caption and value share the first line; the track is centred in the
       ;; band below it with the knob straddling the track.
       def band_y = y + _label_h()
-      def track_h = _sx(4.0)
-      def ry = _snap(band_y + (_sx(18.0) - track_h) * 0.5)
+      def track_h = min(band_h, _sx(4.0))
+      def ry = _snap(band_y + (band_h - track_h) * 0.5)
       def norm = (hi > lo) ? clamp((out - lo) / (hi - lo), 0.0, 1.0) : 0.0
       def clip = _clip_rect_inset(x, y, rw, float(rect.get(3, 0.0)), 0.0)
       def val_s = f"{out:.3f}"
@@ -4109,7 +4269,7 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0, a
       _draw_text_ui_small_clipped(val_s, x + rw - val_w - _item_pad_x(), y, text_col, val_w + _item_pad_x(), clip)
       _gui_rect_fast(rx, ry, tw, track_h, track)
       _gui_rect_fast(rx, ry, max(1.0, tw * norm), track_h, fill)
-      def knob_w, knob_h = _sx(8.0), _sx(14.0)
+      def knob_w, knob_h = _sx(8.0), min(band_h, _sx(14.0))
       def knob_x = _snap(rx + tw * norm - knob_w * 0.5)
       def knob_y = _snap(ry + track_h * 0.5 - knob_h * 0.5)
       _gui_rect_fast(knob_x, knob_y, knob_w, knob_h, knob)
@@ -5493,6 +5653,186 @@ fn export_theme() dict {
    {"format": "nytrix-ui-theme", "version": 1, "name": _theme_name, "parts": parts, "states": {"button": _theme_button_styles}}
 }
 
+fn file_dialog(any id, str start_dir=".") any {
+   "Draws an open stock file picker rooted at `start_dir`; folders navigate and files are chosen. Returns {done, ok, path}."
+   def key = to_str(id)
+   def d = _dialogs.get(key, nil)
+   if !is_dict(d) || !bool(d.get("open", false)) { return {"done": false, "ok": false, "path": ""} }
+   mut st = d
+   if !st.contains("dir") { st["dir"] = start_dir.len > 0 ? start_dir : "." st["sel"] = -1 }
+   def dir = to_str(st.get("dir", "."))
+   if !_dialog_begin(key, "Open file", 380.0, 320.0) { return {"done": false, "ok": false, "path": ""} }
+   text_colored(dir, "text_dim")
+   mut rows = []
+   mut paths = []
+   mut kinds = []
+   if dir != "/" {
+      rows = rows.append({"label": "..", "detail": "folder"})
+      paths = paths.append(ospath.dirname(dir))
+      kinds = kinds.append(true)
+   }
+   for name in fs.list_dir(dir) {
+      def full = ospath.join(dir, to_str(name))
+      def isdir = fs.is_dir(full)
+      rows = rows.append({"label": to_str(name) + (isdir ? "/" : ""), "detail": isdir ? "folder" : "file"})
+      paths = paths.append(full)
+      kinds = kinds.append(isdir)
+   }
+   mut int sel = int(st.get("sel", -1))
+   sel = list_view("stockfile_list", rows, _current_body_w(), 180.0, sel)
+   st["sel"] = sel
+   _dialogs[key] = st
+   spacing(1.0)
+   def chosen = _dialog_buttons(["Open", "Cancel"])
+   end_window()
+   if chosen == 1 {
+      _dialogs = _dialogs.delete(key)
+      return {"done": true, "ok": false, "path": ""}
+   }
+   if chosen == 0 && sel >= 0 && sel < paths.len {
+      def target = to_str(paths.get(sel))
+      if bool(kinds.get(sel)) {
+         st["dir"] = target
+         st["sel"] = -1
+         _dialogs[key] = st
+         return {"done": false, "ok": false, "path": ""}
+      }
+      _dialogs = _dialogs.delete(key)
+      return {"done": true, "ok": true, "path": target}
+   }
+   {"done": false, "ok": false, "path": ""}
+}
+
+;; ---- icon packs -----------------------------------------------------------
+fn _icon_pack_dict() any {
+   _ensure_gui_state()
+   if !is_dict(_icon_pack) { _icon_pack = dict(64) }
+   _icon_pack
+}
+
+fn _icon_parse_int(str raw) int {
+   def t = str.strip(raw)
+   if t.len <= 0 { return -1 }
+   mut int i = 0
+   mut int sign = 1
+   if load8(t, 0) == 45 { sign = -1 i = 1 }
+   mut bool hex = false
+   if i + 1 < t.len && load8(t, i) == 48 && ((load8(t, i + 1) | 32) == 120) { hex = true i += 2 }
+   mut int n = 0
+   mut bool seen = false
+   mut int digit = 0
+   while i < t.len && digit >= 0 {
+      def c = load8(t, i) & 255
+      digit = -1
+      if c >= 48 && c <= 57 { digit = c - 48 }
+      elif hex && c >= 97 && c <= 102 { digit = c - 87 }
+      elif hex && c >= 65 && c <= 70 { digit = c - 55 }
+      if digit >= 0 {
+         n = n * (hex ? 16 : 10) + digit
+         seen = true
+         i += 1
+      }
+   }
+   seen ? n * sign : -1
+}
+
+fn _icon_hex(int n) str {
+   if n == 0 { return "0" }
+   def digits = "0123456789ABCDEF"
+   mut out = ""
+   mut int v = n
+   while v > 0 {
+      def d = v % 16
+      out = str.str_slice(digits, d, d + 1) + out
+      v = v / 16
+   }
+   out
+}
+
+fn _icon_pack_line(str line) list {
+   mut l = str.strip(line)
+   if l.len == 0 || str.startswith(l, "//") { return [] }
+   def comment = str.find(l, "//")
+   if comment >= 0 { l = str.strip(str.str_slice(l, 0, comment)) }
+   if l.len == 0 { return [] }
+   def parts = str.split(l, " ")
+   mut toks = []
+   for part in parts {
+      def t = str.strip(part)
+      if t.len > 0 { toks = toks.append(t) }
+   }
+   if toks.len >= 3 && to_str(toks.get(0)) == "#define" { return [to_str(toks.get(1)), to_str(toks.get(2))] }
+   if toks.len >= 3 && (to_str(toks.get(1)) == "=" || to_str(toks.get(1)) == ":") { return [to_str(toks.get(0)), to_str(toks.get(2))] }
+   if toks.len >= 2 { return [to_str(toks.get(0)), to_str(toks.get(1))] }
+   []
+}
+
+fn icon_pack_load(str path) int {
+   "Loads `NAME codepoint` lines or C-style `#define NAME 0x...` icon packs; returns the glyph count or -1."
+   _icon_pack_dict()
+   if path.len == 0 { return -1 }
+   match file_read(path) {
+      ok(source) -> {
+         mut pack = dict(64)
+         for line in str.split(to_str(source), "\n") {
+            def pair = _icon_pack_line(to_str(line))
+            if pair.len >= 2 {
+               def cp = _icon_parse_int(to_str(pair.get(1)))
+               if cp >= 0 { pack[to_str(pair.get(0))] = cp }
+            }
+         }
+         _icon_pack = pack
+         pack.len
+      }
+      err(_) -> -1
+   }
+}
+
+fn icon_pack_save(str path) bool {
+   "Writes the loaded icons as a `#define NAME 0x...` pack."
+   def pack = _icon_pack_dict()
+   if path.len == 0 { return false }
+   mut out = ""
+   for name in pack.keys() { out = out + "#define " + to_str(name) + " 0x" + _icon_hex(int(pack.get(name))) + "\n" }
+   match file_write(path, out) {
+      ok(_) -> true
+      err(_) -> false
+   }
+}
+
+fn icon_pack_define(any name, int codepoint) bool {
+   "Adds or replaces one icon glyph in the active pack."
+   if codepoint < 0 { return false }
+   def pack = _icon_pack_dict()
+   pack[to_str(name)] = codepoint
+   _icon_pack = pack
+   true
+}
+
+fn icon_pack_clear() any {
+   "Empties the active icon pack."
+   _icon_pack = dict(64)
+   0
+}
+
+fn icon_pack_count() int {
+   "Returns the number of glyphs in the active icon pack."
+   def pack = _icon_pack_dict()
+   int(pack.len)
+}
+
+fn icon_pack_glyph(any name) int {
+   "Returns the codepoint for an icon name, or -1."
+   def pack = _icon_pack_dict()
+   int(pack.get(to_str(name), -1))
+}
+
+fn icon_pack_text(any name) str {
+   "Returns the UTF-8 glyph for an icon name, or the empty string."
+   def cp = icon_pack_glyph(name)
+   cp < 0 ? "" : str.chr(cp)
+}
+
 fn save_theme_file(str path) bool {
    "Writes the current theme parts and state styles as JSON."
    if path.len == 0 { return false }
@@ -6183,6 +6523,97 @@ fn begin_popup(any id, f64 w=0.0) bool {
 
 fn end_popup() any { "Ends the popup started by begin_popup." _popup_end() }
 
+;; ---- stock dialogs --------------------------------------------------------
+fn dialog_open(any id, f64 w=340.0) bool {
+   "Opens the stock dialog `id`; draw it with message_dialog or text_input_dialog."
+   _ensure_gui_state()
+   mut d = _dialogs.get(to_str(id), 0)
+   if !is_dict(d) { d = dict(4) }
+   d["open"] = true
+   d["w"] = w
+   _dialogs[to_str(id)] = d
+   true
+}
+
+fn dialog_close(any id) any {
+   "Closes the stock dialog `id` without a choice."
+   _ensure_gui_state()
+   _dialogs = _dialogs.delete(to_str(id))
+   0
+}
+
+fn dialog_is_open(any id) bool {
+   "Returns true while the stock dialog `id` is open."
+   _ensure_gui_state()
+   def d = _dialogs.get(to_str(id), nil)
+   is_dict(d) && bool(d.get("open", false))
+}
+
+fn _dialog_begin(str key, any title, f64 w, f64 h) bool {
+   def d = _dialogs.get(key, nil)
+   if !is_dict(d) || !bool(d.get("open", false)) { return false }
+   def dw = min(max(220.0, w), max(220.0, _gui_view_w - 32.0))
+   def dh = max(1.0, h)
+   def x = max(16.0, (_gui_view_w - dw) * 0.5)
+   def y = max(16.0, (_gui_view_h - dh) * 0.5)
+   begin_window("stockdlg:" + key, title, x, y, dw, dh, {"closable": false, "movable": false, "resizable": false, "collapsible": false})
+}
+
+fn _dialog_buttons(list labels) int {
+   if labels.len <= 0 { return -1 }
+   def gap = _sx(8.0)
+   def bw = max(64.0, (_current_body_w() - gap * float(labels.len - 1)) / float(labels.len))
+   mut widths = []
+   mut i = 0
+   while i < labels.len { widths = widths.append(bw) i += 1 }
+   layout_row(widths, gap)
+   mut chosen = -1
+   i = 0
+   while i < labels.len {
+      push_id("dlgbtn" + to_str(i))
+      if button("b", labels.get(i), bw, _sx(26.0)) { chosen = i }
+      pop_id()
+      i += 1
+   }
+   chosen
+}
+
+fn message_dialog(any id, any title, any text, any buttons=0, f64 w=340.0) int {
+   "Draws an open stock message dialog; returns the clicked button index, or -1 while it is still open."
+   def key = to_str(id)
+   def d = _dialogs.get(key, nil)
+   if !is_dict(d) || !bool(d.get("open", false)) { return -1 }
+   if !_dialog_begin(key, title, w, 168.0) { return -1 }
+   text_colored(text, "text")
+   spacing(1.0)
+   def labels = is_list(buttons) && buttons.len > 0 ? buttons : ["OK"]
+   def chosen = _dialog_buttons(labels)
+   end_window()
+   if chosen >= 0 { _dialogs = _dialogs.delete(key) }
+   chosen
+}
+
+fn text_input_dialog(any id, any title, any caption, any value, any buttons=0, f64 w=340.0) any {
+   "Draws an open stock single-field dialog. Returns {done, ok, text}; the edited text persists across frames until a button is chosen."
+   def key = to_str(id)
+   def initial = _ui_text(value)
+   def d = _dialogs.get(key, nil)
+   if !is_dict(d) || !bool(d.get("open", false)) { return {"done": false, "ok": false, "text": initial} }
+   mut st = d
+   if !st.contains("text") { st["text"] = initial }
+   if !_dialog_begin(key, title, w, 176.0) { return {"done": false, "ok": false, "text": to_str(st.get("text", initial))} }
+   def edited = input_text("stockdlg_field", caption, to_str(st.get("text", initial)), "", 0.0)
+   st["text"] = edited
+   _dialogs[key] = st
+   spacing(1.0)
+   def labels = is_list(buttons) && buttons.len > 0 ? buttons : ["OK", "Cancel"]
+   def chosen = _dialog_buttons(labels)
+   end_window()
+   def ok = chosen == 0
+   if chosen >= 0 { _dialogs = _dialogs.delete(key) }
+   {"done": chosen >= 0, "ok": ok, "text": edited}
+}
+
 ;; ---- menus ----------------------------------------------------------------
 fn begin_menu_bar() bool {
    "Reserves a menu bar row in the current window; follow with begin_menu calls and end_menu_bar."
@@ -6427,16 +6858,20 @@ fn _fmt_fixed(f64 v, int decimals) str {
 
 fn drag_float(any id, any label, f64 value, f64 speed=0.01, f64 min_v=0.0, f64 max_v=0.0, int decimals=3, f64 w=0.0, any style=nil) f64 {
    "Draws a numeric field edited by dragging horizontally or with the arrow keys; optional state styles control field, fill, border and text colors."
+   def lbl = _ui_text(label)
+   def rect = _layout_rect(_pick_positive(w, _current_body_w()), _labelled_h(lbl))
+   _drag_float_at(id, lbl, value, speed, min_v, max_v, decimals, rect, style)
+}
+
+fn _drag_float_at(any id, str lbl, f64 value, f64 speed, f64 min_v, f64 max_v, int decimals, list rect, any style) f64 {
    mut out = value
    def bounded = max_v > min_v
-   def lbl = _ui_text(label)
-   def full = _wid(id)
-   def rw = _pick_positive(w, _current_body_w())
-   def rect = _layout_rect(rw, _labelled_h(lbl))
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def rwf = float(rect.get(2, 0.0))
-   def fy = y + ((lbl.len > 0) ? _label_h() : 0.0)
-   def fh = _field_h()
+   def cap_h = lbl.len > 0 ? _label_h() : 0.0
+   def fy, fh = y + cap_h, float(rect.get(3, 0.0)) - cap_h
+   if fh <= 0.0 { return out }
+   def full = _wid(id)
    _register_focusable(full)
    _begin_interact_widget(full, x, fy, rwf, fh, true)
    def set_action = _accessibility_take(full, "set_value")
@@ -6513,7 +6948,8 @@ fn drag_float(any id, any label, f64 value, f64 speed=0.01, f64 min_v=0.0, f64 m
          def tx = x + _item_pad_x()
          def ty = _text_center_y_for(_font_body(), fy, fh)
          if _text_selected_all(full) && buf.len > 0 {
-            _gui_rect_fast(tx - 1.0, fy + _sx(4.0), min(rwf - _item_pad_x() * 2.0, float(_measure_text_ui(_font_body(), buf).get(0, 0.0)) + _sx(3.0)), max(_sx(8.0), fh - _sx(8.0)), _select_u32)
+            def measured_buf = _measure_text_ui(_font_body(), buf)
+            _gui_rect_fast(tx - 1.0, fy + _sx(4.0), min(rwf - _item_pad_x() * 2.0, float(measured_buf.get(0, 0.0)) + _sx(3.0)), max(_sx(8.0), fh - _sx(8.0)), _select_u32)
          }
          _draw_text_ui_clipped(shown, tx, ty, text_col, rwf - _item_pad_x() * 2.0, _clip_rect_inset(x, fy, rwf, fh, 1.0))
       } else {
@@ -6525,7 +6961,11 @@ fn drag_float(any id, any label, f64 value, f64 speed=0.01, f64 min_v=0.0, f64 m
       }
    }
    _last_item = [x, fy, rwf, fh]
-   _accessibility_record(full, "spinbutton", lbl, editing ? buf : out, [x, fy, rwf, fh], false, false, false, _disabled_on > 0, {"min": bounded ? min_v : nil, "max": bounded ? max_v : nil, "decimals": decimals})
+   if editing {
+      _accessibility_record(full, "spinbutton", lbl, buf, [x, fy, rwf, fh], false, false, false, _disabled_on > 0, {"min": bounded ? min_v : nil, "max": bounded ? max_v : nil, "decimals": decimals})
+   } else {
+      _accessibility_record(full, "spinbutton", lbl, out, [x, fy, rwf, fh], false, false, false, _disabled_on > 0, {"min": bounded ? min_v : nil, "max": bounded ? max_v : nil, "decimals": decimals})
+   }
    out
 }
 

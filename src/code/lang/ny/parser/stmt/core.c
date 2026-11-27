@@ -1544,9 +1544,9 @@ static bool type_src_expand(parser_t *p, const char *src, size_t len,
 /*
  * Source text of a type between two source positions, whitespace collapsed
  * and type-level definitions expanded.
+ * parser_intern copies into the arena; GCC cannot see that through the
+ * `!p` early return it inlines, and flags `raw`/`out` as escaping.
  */
-/* parser_intern copies into the arena; GCC cannot see that through the
-   `!p` early return it inlines, and flags `raw`/`out` as escaping. */
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wreturn-local-addr"

@@ -37,6 +37,7 @@
 #include "base/util.h"
 #include "code/backend/core/nyr.h"
 #include "code/backend/passes/verify/loop.h"
+#include "code/backend/passes/loops/polyhedral/poly.h"
 #include "code/backend/passes/util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -1048,6 +1049,8 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_loop_interchange, "loop_interchange"},
     {nyr_prefetch_insert, "prefetch_insert"},
     {nyr_polyhedral_tiling, "polyhedral_tiling"},
+    {nyr_polyhedral_tiling_scalar, "polyhedral_tiling"},
+    {nyr_polyhedral_tiling_avx2, "polyhedral_tiling"},
     {nyr_loop_versioning, "loop_versioning"},
     {nyr_loop_predication, "loop_predication"},
     {nyr_loop_unswitch, "loop_unswitch"},
@@ -1975,7 +1978,9 @@ static bool nyr_post_inline_global_promote_disabled(void) {
   return disabled != 0;
 }
 
-/* Re-run global slot promotion after inlining exposes inner-loop globals. */
+/*
+ * Re-run global slot promotion after inlining exposes inner-loop globals.
+ */
 static void nyr_run_post_inline_global_promote(nyr_func_t *f,
                                                nyr_opt_stats_t *stats,
                                                FILE *dump, bool *ok) {
@@ -2217,7 +2222,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
        * does not become the first point where load/store chains disappear.
        */
       nyr_run_seq(f, pre_slp, 7, stats, dump, &ok);
-      /* memcombine is the SLP vectorizer, so it honors the same switch. */
+      /*
+       * memcombine is the SLP vectorizer, so it honors the same switch.
+       */
       if (ok && !nyr_pass_stopped &&
           !(options & NYR_IR_OPT_DISABLE_VECTORIZATION))
         nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
@@ -2304,7 +2311,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_jump_thread, nyr_sccp, nyr_cfg_simplify, nyr_dce};
       nyr_run_seq(f, pre_loop_thread, 4, stats, dump, &ok);
       nyr_run_post_inline_global_promote(f, stats, dump, &ok);
-      static bool (*const loop_analysis[])(nyr_func_t *) = {
+      bool (*const loop_analysis[])(nyr_func_t *) = {
           nyr_loop_rotate,
           nyr_scev_lite,
           nyr_loop_last_overwrite,
@@ -2318,15 +2325,14 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_loop_interchange,
           nyr_loop_versioning,
           nyr_loop_predication,
+          (options & NYR_IR_OPT_DISABLE_VECTORIZATION)
+              ? nyr_polyhedral_tiling_scalar
+              : (options & NYR_IR_OPT_AVX2_VECTORIZE)
+                    ? nyr_polyhedral_tiling_avx2 : nyr_polyhedral_tiling,
           nyr_affine_nest,
           nyr_licm,
           nyr_cse};
-      nyr_run_seq(f, loop_analysis, 16, stats, dump, &ok);
-      /*
-       * Polyhedral tiling: annotate hot loops with tile-size hints.
-       */
-      if (ok && !nyr_pass_stopped)
-        nyr_run_pass(f, nyr_polyhedral_tiling, stats, dump, &ok);
+      nyr_run_seq(f, loop_analysis, 17, stats, dump, &ok);
       /*
        * Drain NOPs licm left so the array doesn't bloat before further loop
        * passes; sparse-gated so it's a no-op when nothing was removed.
@@ -2484,7 +2490,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_if_convert,   nyr_select_chain_fold,
           nyr_peephole,     nyr_copy_prop,
           nyr_dce};
-      /* Join splitting may only reshape loops nothing will vectorize. */
+      /*
+       * Join splitting may only reshape loops nothing will vectorize.
+       */
       nyr_ifconv_late = true;
       nyr_run_seq(f, cfg, 7, stats, dump, &ok);
       nyr_ifconv_late = false;
@@ -2517,7 +2525,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_ilp_reassociate, stats, dump, &ok);
-    /* Loop tests `c1 && c2` back to two branches, once nothing else moves. */
+    /*
+     * Loop tests `c1 && c2` back to two branches, once nothing else moves.
+     */
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_and_branch_split, stats, dump, &ok);
     /*

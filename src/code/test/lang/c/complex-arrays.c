@@ -1,4 +1,6 @@
-/* Local arrays of complex values: initializers, element assignment, compound assignment and pointer stores agree with GCC. */
+/*
+ * Local arrays of complex values: initializers, element assignment, compound assignment and pointer stores agree with GCC.
+ */
 #include <complex.h>
 #include <stdio.h>
 double _Complex sum(int n) {

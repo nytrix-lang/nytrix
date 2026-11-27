@@ -1,0 +1,46 @@
+shape elm-drop-routing {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui elm drop multi-window]
+  template ny-test-case
+  flags_matrix "--native-only -O2"
+  timeout 240
+  expect compile_and_run
+  expect_stdout "ELM-DROP-OK"
+  source ny <<'NY2'
+use core
+use core.os.ui.elm as elm
+use core.os.ui.window.consts as kind
+use core.os.ui.window.event as wevent
+
+fn drop_selector(any event) any {
+   def k = int(event.get("kind", kind.EVENT_NONE))
+   if k == kind.EVENT_DATA_DROP || k == kind.EVENT_DATA_DRAG { return event }
+   nil
+}
+
+fn update(any model, any event) any {
+   def dict m = model
+   m["count"] = int(m.get("count", 0)) + 1
+   m["kind"] = int(event.get("kind", 0))
+   m["window_id"] = int(event.get("window_id", 0))
+   m["data"] = event.get("data", nil)
+   m
+}
+
+def app = elm.new({"count": 0})
+elm.subscribe(app, "window.lifecycle", drop_selector)
+def e1 = wevent.make_event(kind.EVENT_DATA_DROP, 0, 11, {"paths": ["a.txt"]})
+def e2 = wevent.make_event(kind.EVENT_DATA_DRAG, 0, 22, {"x": 12.0})
+def e3 = wevent.make_event(kind.EVENT_KEY_PRESSED, 0, 33, "x")
+assert(elm.publish_window_event(app, e1, update) == 1, "drop delivered")
+assert(elm.publish_window_event(app, e2, update) == 1, "drag delivered")
+assert(elm.publish_window_event(app, e3, update) == 0, "unrelated input filtered")
+def m = elm.model(app)
+assert(int(m.get("count", 0)) == 2, "one message per drop/drag")
+assert(int(m.get("kind", 0)) == kind.EVENT_DATA_DRAG, "drag was last")
+assert(int(m.get("window_id", 0)) == 22, "source window id preserved")
+assert(to_str(m.get("data", dict(0)).get("x", 0.0)) != "", "drag payload preserved")
+print("ELM-DROP-OK")
+NY2
+}

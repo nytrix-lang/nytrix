@@ -694,20 +694,169 @@ oom:
   return false;
 }
 
+typedef struct {
+  size_t offset;
+  size_t def_index;
+  int64_t addend; /* byte offset inside the function, for block low_pc */
+} nyr_native_debug_func_reloc_t;
+
 /*
- * Build a minimal DWARF v4 compile unit for the emitted line table.  The
- * low_pc relocation and high_pc extent make source lines discoverable by
- * debuggers; function and local-variable DIEs require richer compiler facts.
+ * Source-level name for a symbol emitted as `ny_fn_<name>`.
+ */
+static const char *ny_native_debug_func_name(const char *symbol) {
+  if (symbol && strncmp(symbol, "ny_fn_", 6) == 0 && symbol[6])
+    return symbol + 6;
+  return symbol;
+}
+
+/*
+ * First code offset (relative to its function) whose line satisfies the
+ * predicate; SIZE_MAX when the function's line records do not cover it.
+ */
+static size_t ny_dbg_line_pc(const nyr_native_debug_line_t *lines, size_t count,
+                             size_t def_index, size_t def_off, int line,
+                             bool after) {
+  size_t best = SIZE_MAX;
+  for (size_t i = 0; i < count; ++i) {
+    if (lines[i].def_index != def_index || lines[i].line == 0)
+      continue;
+    if (after ? (int)lines[i].line <= line : (int)lines[i].line < line)
+      continue;
+    size_t pc = lines[i].offset >= def_off ? lines[i].offset - def_off : 0;
+    if (pc < best)
+      best = pc;
+  }
+  return best;
+}
+
+/*
+ * Index of the innermost recorded scope containing `line`, or -1.
+ */
+static int ny_dbg_var_scope(const nyr_native_debug_var_t *vars, size_t count,
+                            size_t def_index, uint32_t line) {
+  int best = -1, best_depth = -1, marker = 0;
+  for (size_t v = 0; v < count; ++v) {
+    if (vars[v].is_param != 2 || vars[v].def_index != def_index)
+      continue;
+    if (line >= vars[v].decl_line && line <= vars[v].end_line &&
+        (int)vars[v].depth > best_depth) {
+      best = marker;
+      best_depth = (int)vars[v].depth;
+    }
+    marker++;
+  }
+  return best;
+}
+
+struct nyr_dbg_agg_type {
+  const char *name;
+  size_t offset;
+};
+
+static bool ny_dbg_scalar_type(const char *name) {
+  return !name || !name[0] || strcmp(name, "int") == 0 ||
+         strcmp(name, "f64") == 0 || strcmp(name, "f32") == 0 ||
+         strcmp(name, "str") == 0 || strcmp(name, "cstr") == 0;
+}
+
+static bool ny_dbg_emit_var(nyr_obj_buf_t *info,
+                            const nyr_native_debug_var_t *dv, size_t type_int,
+                            size_t type_f64, size_t type_f32, size_t type_str,
+                            const struct nyr_dbg_agg_type *aggs,
+                            size_t agg_count, uint32_t fallback_line,
+                            size_t loc_off) {
+  size_t type_off = type_int;
+  const char *tn = dv->type_name;
+  if (tn && strcmp(tn, "f64") == 0)
+    type_off = type_f64;
+  else if (tn && strcmp(tn, "f32") == 0)
+    type_off = type_f32;
+  else if (tn && (strcmp(tn, "str") == 0 || strcmp(tn, "cstr") == 0))
+    type_off = type_str;
+  else if (tn && strcmp(tn, "int") != 0) {
+    for (size_t a = 0; a < agg_count; ++a)
+      if (strcmp(aggs[a].name, tn) == 0) {
+        type_off = aggs[a].offset;
+        break;
+      }
+  }
+  uint32_t line = dv->decl_line ? dv->decl_line : fallback_line;
+  return ny_obj_uleb128(info, dv->is_param ? 5 : 4) &&
+         nyr_obj_emit(info, dv->name, strlen(dv->name) + 1) &&
+         nyr_obj_u32(info, line) && nyr_obj_u32(info, (uint32_t)type_off) &&
+         nyr_obj_u32(info, (uint32_t)loc_off);
+}
+
+/*
+ * One DWARF v4 location-list entry pair: [start, end) -> DW_OP_fbreg.  Both
+ * bounds relocate against the function symbol, so list offsets use the same
+ * per-function addend convention as lexical-block low_pc.
+ */
+static bool ny_dbg_loc_entry(nyr_obj_buf_t *loc,
+                             nyr_native_debug_func_reloc_t **relocs,
+                             size_t *count, size_t *cap, size_t def_index,
+                             size_t start, size_t end, int fbreg,
+                             size_t *list_off) {
+  if (!loc || !relocs || !count || !cap || !list_off || end <= start)
+    return false;
+  if (*count + 2 > *cap) {
+    size_t want = *cap ? *cap * 2 : 32;
+    while (want < *count + 2)
+      want *= 2;
+    nyr_native_debug_func_reloc_t *grown =
+        realloc(*relocs, want * sizeof(**relocs));
+    if (!grown)
+      return false;
+    *relocs = grown;
+    *cap = want;
+  }
+  (void)relocs;
+  (void)count;
+  (void)cap;
+  (void)def_index;
+  *list_off = loc->len;
+  /*
+   * Bounds are compile-unit relative: consumers rebase them on the CU low_pc,
+   * which the relocation fixes up to the start of the emitted code.
+   */
+  if (!nyr_obj_u64(loc, (uint64_t)start) ||
+      !nyr_obj_u64(loc, (uint64_t)end))
+    return false;
+  nyr_obj_buf_t expr = {0};
+  bool ok = nyr_obj_u8(&expr, 0x91) && ny_obj_sleb128(&expr, (int64_t)fbreg);
+  if (ok)
+    ok = nyr_obj_u16(loc, (uint16_t)expr.len) &&
+         nyr_obj_emit(loc, expr.data, expr.len);
+  nyr_obj_free(&expr);
+  return ok && nyr_obj_u64(loc, 0) && nyr_obj_u64(loc, 0);
+}
+
+/*
+ * Build the DWARF v4 compile unit for the emitted line table.  Every emitted
+ * function gets a subprogram DIE so debuggers can name frames; each low_pc
+ * field is relocated against that function's symbol.  Parameters and locals
+ * become child DIEs located with DW_OP_fbreg from the rbp frame base.
  */
 static bool nyr_native_build_debug_info(
     const nyr_native_debug_line_t *lines, size_t line_count, size_t text_len,
-    nyr_obj_buf_t *info, nyr_obj_buf_t *abbrev, size_t *low_pc_reloc_offset,
-    size_t *base_def_index, char *err, size_t err_len) {
-  if (!lines || !line_count || !info || !abbrev || !low_pc_reloc_offset ||
-      !base_def_index)
+    const nyr_x64_obj_symbol_def_t *defs, size_t def_count,
+    const nyr_native_debug_var_t *vars, size_t var_count, nyr_obj_buf_t *info,
+    nyr_obj_buf_t *abbrev, nyr_obj_buf_t *loc, size_t *low_pc_reloc_offset,
+    size_t *base_def_index, nyr_native_debug_func_reloc_t **func_relocs,
+    size_t *func_reloc_count, nyr_native_debug_func_reloc_t **loc_relocs,
+    size_t *loc_reloc_count, char *err, size_t err_len) {
+  if (!lines || !line_count || !info || !abbrev || !loc ||
+      !low_pc_reloc_offset || !base_def_index || !func_relocs ||
+      !func_reloc_count || !loc_relocs || !loc_reloc_count ||
+      (var_count && !vars))
     return false;
+  *func_relocs = NULL;
+  *func_reloc_count = 0;
+  *loc_relocs = NULL;
+  *loc_reloc_count = 0;
   info->len = 0;
   abbrev->len = 0;
+  loc->len = 0;
   size_t first = 0;
   for (size_t i = 1; i < line_count; ++i)
     if (lines[i].offset < lines[first].offset)
@@ -719,36 +868,308 @@ static bool nyr_native_build_debug_info(
   const char *name = lines[first].file && lines[first].file[0]
                          ? lines[first].file
                          : "<source>";
+  char comp_dir[1024];
+  const char *slash = strrchr(name, '/');
+  size_t dir_len = slash ? (size_t)(slash - name) : 0;
+  if (dir_len == 0 || dir_len >= sizeof(comp_dir)) {
+    comp_dir[0] = '.';
+    comp_dir[1] = '\0';
+  } else {
+    memcpy(comp_dir, name, dir_len);
+    comp_dir[dir_len] = '\0';
+  }
 
   /*
-   * One compile-unit abbreviation: name, stmt_list, low_pc, high_pc, language.
+   * Compile unit (1), base type (2), subprogram (3), variable (4), formal
+   * parameter (5).  Names stay inline; types are CU-relative ref4 DIEs.
    */
   if (!ny_obj_uleb128(abbrev, 1) || !ny_obj_uleb128(abbrev, 0x11) ||
-      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !nyr_obj_u8(abbrev, 1) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x25) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x1b) ||
       !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x10) ||
       !ny_obj_uleb128(abbrev, 0x17) || !ny_obj_uleb128(abbrev, 0x11) ||
       !ny_obj_uleb128(abbrev, 0x01) || !ny_obj_uleb128(abbrev, 0x12) ||
       !ny_obj_uleb128(abbrev, 0x07) || !ny_obj_uleb128(abbrev, 0x13) ||
       !ny_obj_uleb128(abbrev, 0x05) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 2) || !ny_obj_uleb128(abbrev, 0x24) ||
+      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x0b) ||
+      !ny_obj_uleb128(abbrev, 0x0b) || !ny_obj_uleb128(abbrev, 0x3e) ||
+      !ny_obj_uleb128(abbrev, 0x0b) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 3) || !ny_obj_uleb128(abbrev, 0x2e) ||
+      !nyr_obj_u8(abbrev, 1) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x3f) ||
+      !ny_obj_uleb128(abbrev, 0x0c) || !ny_obj_uleb128(abbrev, 0x3b) ||
+      !ny_obj_uleb128(abbrev, 0x06) || !ny_obj_uleb128(abbrev, 0x11) ||
+      !ny_obj_uleb128(abbrev, 0x01) || !ny_obj_uleb128(abbrev, 0x12) ||
+      !ny_obj_uleb128(abbrev, 0x07) || !ny_obj_uleb128(abbrev, 0x40) ||
+      !ny_obj_uleb128(abbrev, 0x18) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 4) || !ny_obj_uleb128(abbrev, 0x34) ||
+      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x3b) ||
+      !ny_obj_uleb128(abbrev, 0x06) || !ny_obj_uleb128(abbrev, 0x49) ||
+      !ny_obj_uleb128(abbrev, 0x13) ||      !ny_obj_uleb128(abbrev, 0x02) ||
+      !ny_obj_uleb128(abbrev, 0x17) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 5) || !ny_obj_uleb128(abbrev, 0x05) ||
+      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x3b) ||
+      !ny_obj_uleb128(abbrev, 0x06) || !ny_obj_uleb128(abbrev, 0x49) ||
+      !ny_obj_uleb128(abbrev, 0x13) ||      !ny_obj_uleb128(abbrev, 0x02) ||
+      !ny_obj_uleb128(abbrev, 0x17) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 6) || !ny_obj_uleb128(abbrev, 0x0b) ||
+      !nyr_obj_u8(abbrev, 1) || !ny_obj_uleb128(abbrev, 0x11) ||
+      !ny_obj_uleb128(abbrev, 0x01) || !ny_obj_uleb128(abbrev, 0x12) ||
+      !ny_obj_uleb128(abbrev, 0x07) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 7) || !ny_obj_uleb128(abbrev, 0x13) ||
+      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x0b) ||
+      !ny_obj_uleb128(abbrev, 0x0b) || !ny_obj_uleb128(abbrev, 0x3c) ||
+      !ny_obj_uleb128(abbrev, 0x0c) || !ny_obj_uleb128(abbrev, 0) ||
       !ny_obj_uleb128(abbrev, 0) || !ny_obj_uleb128(abbrev, 0))
     goto oom;
 
   if (!nyr_obj_u32(info, 0) || !nyr_obj_u16(info, 4) || !nyr_obj_u32(info, 0) ||
-      !nyr_obj_u8(info, 8) || !ny_obj_uleb128(info, 1) ||
-      !nyr_obj_emit(info, name, strlen(name) + 1) || !nyr_obj_u32(info, 0))
+      !nyr_obj_u8(info, 8) ||      !ny_obj_uleb128(info, 1) ||
+      !nyr_obj_emit(info, name, strlen(name) + 1) ||
+      !nyr_obj_emit(info, "Nytrix native", 14) ||
+      !nyr_obj_emit(info, comp_dir, strlen(comp_dir) + 1) ||
+      !nyr_obj_u32(info, 0))
     goto oom;
   *low_pc_reloc_offset = info->len;
   if (!nyr_obj_u64(info, 0) ||
       !nyr_obj_u64(info, (uint64_t)(text_len - lines[first].offset)) ||
-      !nyr_obj_u16(info, 0x0002))
+      !nyr_obj_u16(info, 0x000c))
     goto oom;
   *base_def_index = lines[first].def_index;
+  const size_t cu_off = lines[first].offset;
+  /*
+   * Base types referenced by variable DIEs (CU-relative ref4 offsets).
+   */
+  size_t type_int = 0, type_f64 = 0, type_f32 = 0, type_str = 0;
+  struct {
+    const char *name;
+    int size;
+    int encoding;
+    size_t *offset;
+  } base_types[] = {
+      {"int", 8, 0x05, &type_int},
+      {"f64", 8, 0x04, &type_f64},
+      {"f32", 4, 0x04, &type_f32},
+      {"str", 8, 0x07, &type_str},
+  };
+  for (size_t t = 0; t < sizeof(base_types) / sizeof(base_types[0]); ++t) {
+    *(base_types[t].offset) = info->len;
+    if (!ny_obj_uleb128(info, 2) ||
+        !nyr_obj_emit(info, base_types[t].name,
+                      strlen(base_types[t].name) + 1) ||
+        !nyr_obj_u8(info, (uint8_t)base_types[t].size) ||
+        !nyr_obj_u8(info, (uint8_t)base_types[t].encoding))
+      goto oom;
+  }
+  /*
+   * Aggregate and `any` locals get a structure DIE named after their source
+   * type.  `any` is a tagged two-word handle, so its size is known; other
+   * aggregates are declared incomplete until field layout is recorded.
+   */
+  struct nyr_dbg_agg_type aggs[32];
+  size_t agg_count = 0;
+  for (size_t v = 0; v < var_count; ++v) {
+    const char *tn = vars[v].type_name;
+    if (vars[v].is_param == 2 || ny_dbg_scalar_type(tn))
+      continue;
+    bool seen = false;
+    for (size_t a = 0; a < agg_count; ++a)
+      if (strcmp(aggs[a].name, tn) == 0)
+        seen = true;
+    if (seen || agg_count >= sizeof(aggs) / sizeof(aggs[0]))
+      continue;
+    aggs[agg_count].name = tn;
+    aggs[agg_count].offset = info->len;
+    if (!ny_obj_uleb128(info, 7) ||
+        !nyr_obj_emit(info, tn, strlen(tn) + 1) ||
+        !nyr_obj_u8(info, (uint8_t)(strcmp(tn, "any") == 0 ? 16 : 0)) ||
+        !nyr_obj_u8(info, 1))
+      goto oom;
+    agg_count++;
+  }
+  size_t func_cap = 0;
+  size_t loc_cap = 0;
+  for (size_t i = 0; i < def_count; ++i) {
+    if (defs[i].is_data || defs[i].size == 0)
+      continue;
+    const char *fn = ny_native_debug_func_name(defs[i].name);
+    if (!fn || !fn[0])
+      continue;
+    if (*func_reloc_count == func_cap) {
+      size_t cap = func_cap ? func_cap * 2 : 16;
+      nyr_native_debug_func_reloc_t *grown =
+          realloc(*func_relocs, cap * sizeof(**func_relocs));
+      if (!grown)
+        goto oom;
+      *func_relocs = grown;
+      func_cap = cap;
+    }
+    uint32_t decl_line = 0;
+    for (size_t l = 0; l < line_count; ++l)
+      if (lines[l].def_index == i) {
+        decl_line = lines[l].line;
+        break;
+      }
+    if (!ny_obj_uleb128(info, 3) ||
+        !nyr_obj_emit(info, fn, strlen(fn) + 1) ||
+        !nyr_obj_u8(info, defs[i].is_local ? 0 : 1) ||
+        !nyr_obj_u32(info, decl_line))
+      goto oom;
+    (*func_relocs)[*func_reloc_count].offset = info->len;
+    (*func_relocs)[*func_reloc_count].def_index = i;
+    (*func_relocs)[*func_reloc_count].addend = 0;
+    *func_reloc_count += 1;
+    /*
+     * low_pc (relocated), high_pc, frame_base = rbp (DW_OP_reg6).
+     */
+    if (!nyr_obj_u64(info, 0) || !nyr_obj_u64(info, (uint64_t)defs[i].size) ||
+        !nyr_obj_u8(info, 1) || !nyr_obj_u8(info, 0x56))
+      goto oom;
+    /*
+     * Variables claimed by no lexical scope stay direct children.
+     */
+    for (size_t v = 0; v < var_count; ++v) {
+      const nyr_native_debug_var_t *dv = &vars[v];
+      if (!dv || dv->def_index != i || dv->is_param == 2 || !dv->name ||
+          !dv->name[0])
+        continue;
+      uint32_t vline = dv->decl_line ? dv->decl_line : decl_line;
+      /*
+       * Parameters belong to the function scope, never to a block.
+       */
+      if (dv->is_param != 1 &&
+          ny_dbg_var_scope(vars, var_count, i, vline) >= 0)
+        continue;
+      size_t vstart = ny_dbg_line_pc(lines, line_count, i, defs[i].off,
+                                     (int)vline, false);
+      if (vstart == SIZE_MAX || vstart >= defs[i].size)
+        vstart = 0;
+      size_t vbase = defs[i].off - cu_off;
+      size_t list_off = 0;
+      if (!ny_dbg_loc_entry(loc, loc_relocs, loc_reloc_count, &loc_cap, i,
+                            vbase + vstart, vbase + defs[i].size, dv->offset,
+                            &list_off))
+        goto oom;
+      if (!ny_dbg_emit_var(info, dv, type_int, type_f64, type_f32, type_str,
+                           aggs, agg_count, decl_line, list_off))
+        goto oom;
+    }
+    /*
+     * Lexical blocks: markers arrive in opening order, so a depth/end stack
+     * recreates the source nesting.  Each block's pc range comes from the
+     * function's own line records.
+     */
+    int open_depth[64];
+    int open_end[64];
+    int open_top = 0;
+    int marker = -1;
+    for (size_t v = 0; v < var_count; ++v) {
+      const nyr_native_debug_var_t *sc = &vars[v];
+      if (!sc || sc->def_index != i || sc->is_param != 2)
+        continue;
+      marker++;
+      while (open_top > 0 && ((int)sc->depth <= open_depth[open_top - 1] ||
+                              (int)sc->decl_line > open_end[open_top - 1])) {
+        if (!nyr_obj_u8(info, 0))
+          goto oom;
+        open_top--;
+      }
+      if (open_top >= 64)
+        continue;
+      size_t bstart = ny_dbg_line_pc(lines, line_count, i, defs[i].off,
+                                     (int)sc->decl_line, false);
+      size_t bend =
+          sc->end_line >= sc->decl_line
+              ? ny_dbg_line_pc(lines, line_count, i, defs[i].off,
+                               (int)sc->end_line, true)
+              : SIZE_MAX;
+      if (bstart == SIZE_MAX || bstart >= defs[i].size)
+        continue;
+      if (bend == SIZE_MAX || bend > defs[i].size || bend <= bstart)
+        bend = defs[i].size;
+      if (*func_reloc_count == func_cap) {
+        size_t cap = func_cap ? func_cap * 2 : 16;
+        nyr_native_debug_func_reloc_t *grown =
+            realloc(*func_relocs, cap * sizeof(**func_relocs));
+        if (!grown)
+          goto oom;
+        *func_relocs = grown;
+        func_cap = cap;
+      }
+      if (!ny_obj_uleb128(info, 6))
+        goto oom;
+      (*func_relocs)[*func_reloc_count].offset = info->len;
+      (*func_relocs)[*func_reloc_count].def_index = i;
+      (*func_relocs)[*func_reloc_count].addend = (int64_t)bstart;
+      *func_reloc_count += 1;
+      if (!nyr_obj_u64(info, 0) ||
+          !nyr_obj_u64(info, (uint64_t)(bend - bstart)))
+        goto oom;
+      open_depth[open_top] = (int)sc->depth;
+      open_end[open_top] = (int)sc->end_line;
+      open_top++;
+      for (size_t w = 0; w < var_count; ++w) {
+        const nyr_native_debug_var_t *dv = &vars[w];
+        if (!dv || dv->def_index != i || dv->is_param == 2 || !dv->name ||
+            !dv->name[0])
+          continue;
+        if (dv->is_param == 1)
+          continue;
+        uint32_t vline = dv->decl_line ? dv->decl_line : decl_line;
+        if (ny_dbg_var_scope(vars, var_count, i, vline) != marker)
+          continue;
+        size_t vbase = defs[i].off - cu_off;
+        size_t list_off = 0;
+        if (!ny_dbg_loc_entry(loc, loc_relocs, loc_reloc_count, &loc_cap, i,
+                              vbase + bstart, vbase + bend, dv->offset,
+                              &list_off))
+          goto oom;
+        if (!ny_dbg_emit_var(info, dv, type_int, type_f64, type_f32, type_str,
+                             aggs, agg_count, decl_line, list_off))
+          goto oom;
+      }
+    }
+    while (open_top > 0) {
+      if (!nyr_obj_u8(info, 0))
+        goto oom;
+      open_top--;
+    }
+    /*
+     * Ends this subprogram's children.
+     */
+    if (!nyr_obj_u8(info, 0))
+      goto oom;
+  }
+  /*
+   * Ends the compile unit's child list.
+   */
+  if (!nyr_obj_u8(info, 0))
+    goto oom;
   nyr_obj_patch_u32(info, 0, (uint32_t)(info->len - 4));
   return true;
 
 oom:
+  free(*func_relocs);
+  *func_relocs = NULL;
+  *func_reloc_count = 0;
+  free(*loc_relocs);
+  *loc_relocs = NULL;
+  *loc_reloc_count = 0;
   info->len = 0;
   abbrev->len = 0;
+  loc->len = 0;
   nyr_set_error(err, err_len, "DWARF compile unit emission failed");
   return false;
 }
@@ -888,6 +1309,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
     const nyr_x64_obj_reloc_t *relocs, size_t reloc_count,
     const nyr_x64_obj_symbol_def_t *defs, size_t def_count, const char *path,
     const nyr_native_debug_line_t *debug_lines, size_t debug_line_count,
+    const nyr_native_debug_var_t *debug_vars, size_t debug_var_count,
     char *err, size_t err_len) {
   if (!path || (code_len && !code) || (def_count && !defs)) {
     nyr_set_error(err, err_len, "x86-64 ELF object writer: missing input");
@@ -898,6 +1320,10 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   bool ok = false;
   const char *stage = "input setup";
   bool profile = getenv("NYTRIX_AOT_OBJECT_PROFILE") != NULL;
+  nyr_native_debug_func_reloc_t *debug_func_relocs = NULL;
+  nyr_native_debug_func_reloc_t *debug_loc_relocs = NULL;
+  size_t debug_loc_reloc_count = 0;
+  size_t debug_func_reloc_count = 0;
   clock_t stage_started = profile ? clock() : 0;
 #define NY_X64_ELF_PROFILE_STAGE(next_stage)                                   \
   do {                                                                         \
@@ -935,8 +1361,8 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
 
   const char shstr[] =
       "\0.text\0.rela.text\0.data\0.rela.data\0.debug_line\0.rela.debug_line"
-      "\0.debug_info\0.rela.debug_info\0.debug_abbrev\0.symtab\0.strtab\0"
-      ".shstrtab\0";
+      "\0.debug_info\0.rela.debug_info\0.debug_abbrev\0.debug_loc\0"
+      ".rela.debug_loc\0.symtab\0.strtab\0.shstrtab\0";
   const uint32_t sh_text = ny_elf_shstr_offset(shstr, sizeof(shstr), ".text");
   const uint32_t sh_rela_text =
       ny_elf_shstr_offset(shstr, sizeof(shstr), ".rela.text");
@@ -953,6 +1379,10 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       ny_elf_shstr_offset(shstr, sizeof(shstr), ".rela.debug_info");
   const uint32_t sh_debug_abbrev =
       ny_elf_shstr_offset(shstr, sizeof(shstr), ".debug_abbrev");
+  const uint32_t sh_debug_loc =
+      ny_elf_shstr_offset(shstr, sizeof(shstr), ".debug_loc");
+  const uint32_t sh_rela_debug_loc =
+      ny_elf_shstr_offset(shstr, sizeof(shstr), ".rela.debug_loc");
   const uint32_t sh_symtab =
       ny_elf_shstr_offset(shstr, sizeof(shstr), ".symtab");
   const uint32_t sh_strtab =
@@ -1112,6 +1542,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   nyr_obj_buf_t debug_line = {0};
   nyr_obj_buf_t debug_info = {0};
   nyr_obj_buf_t debug_abbrev = {0};
+  nyr_obj_buf_t debug_loc = {0};
   size_t debug_base_reloc = 0;
   size_t debug_base_def = 0;
   size_t debug_info_reloc = 0;
@@ -1127,8 +1558,11 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   NY_X64_ELF_PROFILE_STAGE("debug compile-unit construction");
   if (have_debug &&
       !nyr_native_build_debug_info(
-          debug_lines, debug_line_count, text_len, &debug_info, &debug_abbrev,
-          &debug_info_reloc, &debug_info_base_def, err, err_len))
+          debug_lines, debug_line_count, text_len, defs, def_count, debug_vars,
+          debug_var_count, &debug_info, &debug_abbrev, &debug_loc,
+          &debug_info_reloc, &debug_info_base_def, &debug_func_relocs,
+          &debug_func_reloc_count, &debug_loc_relocs, &debug_loc_reloc_count,
+          err, err_len))
     goto done;
   if (have_debug && debug_info_base_def >= def_count)
     goto done;
@@ -1182,6 +1616,9 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
     next_idx++; /* .rela.debug_info occupies sec_debug_info + 1 */
   if (have_debug)
     next_idx++; /* .debug_abbrev */
+  uint32_t sec_debug_loc = have_debug ? next_idx++ : 0u;
+  if (have_debug)
+    next_idx++; /* .rela.debug_loc */
   uint32_t symtab_idx = next_idx++;
   uint32_t strtab_idx = next_idx++;
   uint32_t shstrtab_idx = next_idx++;
@@ -1257,6 +1694,10 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   if (have_debug &&
       (!nyr_obj_emit(&file, debug_abbrev.data, debug_abbrev.len) ||
        !nyr_obj_pad_to(&file, 8)))
+    goto done;
+  size_t debug_loc_off = file.len;
+  if (have_debug && (!nyr_obj_emit(&file, debug_loc.data, debug_loc.len) ||
+                     !nyr_obj_pad_to(&file, 8)))
     goto done;
   NY_X64_ELF_PROFILE_STAGE("text relocation construction");
   size_t rela_off = file.len;
@@ -1342,12 +1783,37 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   size_t rela_debug_size = file.len - rela_debug_off;
   size_t rela_debug_info_off = file.len;
   if (have_debug) {
-    uint64_t info = ((uint64_t)(1u + (uint32_t)debug_info_base_def) << 32) | 1u;
-    if (!nyr_obj_u64(&file, debug_info_reloc) || !nyr_obj_u64(&file, info) ||
-        !nyr_obj_u64(&file, 0))
-      goto done;
+    if (debug_info_reloc != SIZE_MAX) {
+      uint64_t info =
+          ((uint64_t)(1u + (uint32_t)debug_info_base_def) << 32) | 1u;
+      if (!nyr_obj_u64(&file, debug_info_reloc) || !nyr_obj_u64(&file, info) ||
+          !nyr_obj_u64(&file, 0))
+        goto done;
+    }
+    for (size_t i = 0; i < debug_func_reloc_count; ++i) {
+      uint64_t finfo =
+          ((uint64_t)(1u + (uint32_t)debug_func_relocs[i].def_index) << 32) |
+          1u;
+      if (!nyr_obj_u64(&file, debug_func_relocs[i].offset) ||
+          !nyr_obj_u64(&file, finfo) ||
+          !nyr_obj_u64(&file, (uint64_t)debug_func_relocs[i].addend))
+        goto done;
+    }
   }
   size_t rela_debug_info_size = file.len - rela_debug_info_off;
+  size_t rela_debug_loc_off = file.len;
+  if (have_debug) {
+    for (size_t i = 0; i < debug_loc_reloc_count; ++i) {
+      uint64_t linfo =
+          ((uint64_t)(1u + (uint32_t)debug_loc_relocs[i].def_index) << 32) |
+          1u;
+      if (!nyr_obj_u64(&file, debug_loc_relocs[i].offset) ||
+          !nyr_obj_u64(&file, linfo) ||
+          !nyr_obj_u64(&file, (uint64_t)debug_loc_relocs[i].addend))
+        goto done;
+    }
+  }
+  size_t rela_debug_loc_size = file.len - rela_debug_loc_off;
   NY_X64_ELF_PROFILE_STAGE("symbol table construction");
   size_t local_def_count = 0;
   for (size_t i = 0; i < def_count; ++i)
@@ -1589,6 +2055,13 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
        !ny_elf64_write_sh(&file, sh_debug_abbrev, 1, 0, debug_abbrev_off,
                           debug_abbrev.len, 0, 0, 1, 0)))
     goto done;
+  if (have_debug &&
+      (!ny_elf64_write_sh(&file, sh_debug_loc, 1, 0, debug_loc_off,
+                          debug_loc.len, 0, 0, 8, 0) ||
+       !ny_elf64_write_sh(&file, sh_rela_debug_loc, 4, 0, rela_debug_loc_off,
+                          rela_debug_loc_size, symtab_idx, sec_debug_loc, 8,
+                          24)))
+    goto done;
   if (!ny_elf64_write_sh(&file, sh_symtab, 2, 0, symtab_off, symtab_size,
                          strtab_idx, 1u + (uint32_t)local_def_count, 8, 24) ||
       !ny_elf64_write_sh(&file, sh_strtab, 3, 0, strtab_off, strtab_size, 0, 0,
@@ -1628,9 +2101,12 @@ done:
   free(reloc_symbols);
   free(def_name_offs);
   free(reloc_name_offs);
+  free(debug_func_relocs);
   nyr_obj_free(&debug_line);
   nyr_obj_free(&debug_info);
   nyr_obj_free(&debug_abbrev);
+  nyr_obj_free(&debug_loc);
+  free(debug_loc_relocs);
   nyr_obj_free(&strtab);
   nyr_obj_free(&file);
   if (!ok && err && err_len > 0 && err[0] == '\0')
@@ -2379,8 +2855,8 @@ static bool nyr_x64_obj_build_c_bundle(
           size_t inst_offsets_len = 0;
           machine = nyr_x64_mach_append_function_debug(
               code, defs, def_count, relocs, reloc_count, &mach, target, symbol,
-              false, false, NULL, NULL, NULL, NULL, reason, sizeof(reason),
-              &inst_offsets, &inst_offsets_len);
+              false, false, NULL, NULL, NULL, NULL, NULL, NULL, NULL, reason,
+              sizeof(reason), &inst_offsets, &inst_offsets_len);
           int emitted =
               machine ? nyr_x64_obj_def_index(defs, *def_count, symbol) : -1;
           if (emitted >= 0)
@@ -2592,7 +3068,7 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
   if (ok)
     ok = ny_native_emit_elf64_x64_object_bundle_code(
         code.data, code.len, relocs, reloc_count, defs, def_count, path, NULL,
-        0, err, err_len);
+        0, NULL, 0, err, err_len);
   free(defs);
   free(relocs);
   nyr_obj_free(&code);
@@ -2627,7 +3103,8 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
     nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
-    size_t *debug_line_cap, char *err, size_t err_len);
+    size_t *debug_line_cap, nyr_native_debug_var_t **debug_vars,
+    size_t *debug_var_count, size_t *debug_var_cap, char *err, size_t err_len);
 
 static bool ny_native_x64_nir_requires_aggregate_fallback(
     const nyr_func_t *func, const ny_native_target_info_t *target) {
@@ -2853,7 +3330,9 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
     nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
-    size_t *debug_line_cap, char *err, size_t err_len) {
+    size_t *debug_line_cap, nyr_native_debug_var_t **debug_vars,
+    size_t *debug_var_count, size_t *debug_var_cap, char *err,
+    size_t err_len) {
   if (!rt_main || !target || !entry_symbol || !entry_symbol[0] || !code ||
       !defs || !def_count || !relocs || !reloc_count || (func_count && !funcs))
     return false;
@@ -2907,8 +3386,9 @@ static bool ny_native_x64_build_mixed_bundle_debug(
       machine = nyr_x64_mach_append_function_debug(
           code, defs, def_count, relocs, reloc_count, &mach, target, symbol,
           false, bare_syscalls, funcs ? &funcs[i] : NULL, debug_lines,
-          debug_line_count, debug_line_cap, reason, sizeof(reason),
-          &inst_offsets, &inst_offsets_len);
+          debug_line_count, debug_line_cap, debug_vars, debug_var_count,
+          debug_var_cap, reason, sizeof(reason), &inst_offsets,
+          &inst_offsets_len);
     if (machine) {
       int mdef = nyr_x64_obj_def_index(defs, *def_count, symbol);
       if (mdef >= 0)
@@ -2993,8 +3473,8 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     machine = nyr_x64_mach_append_function_debug(
         code, defs, def_count, relocs, reloc_count, &top_mach, target, entry,
         tag_return, bare_syscalls, rt_main, debug_lines, debug_line_count,
-        debug_line_cap, reason, sizeof(reason), &inst_offsets,
-        &inst_offsets_len);
+        debug_line_cap, debug_vars, debug_var_count, debug_var_cap, reason,
+        sizeof(reason), &inst_offsets, &inst_offsets_len);
   if (machine) {
     int mdef = nyr_x64_obj_def_index(defs, *def_count, entry);
     if (mdef >= 0)
@@ -3056,8 +3536,8 @@ bool nyr_native_x64_build_mixed_bundle(
     char *err, size_t err_len) {
   return ny_native_x64_build_mixed_bundle_debug(
       rt_main, funcs, func_names, func_count, target, entry_symbol, tag_return,
-      false, code, defs, def_count, relocs, reloc_count, NULL, NULL, NULL, err,
-      err_len);
+      false, code, defs, def_count, relocs, reloc_count, NULL, NULL, NULL, NULL,
+      NULL, NULL, err, err_len);
 }
 
 bool nyr_native_emit_elf64_object_from_nirs(
@@ -3080,11 +3560,15 @@ bool nyr_native_emit_elf64_object_from_nirs(
   nyr_native_debug_line_t *debug_lines = NULL;
   size_t debug_line_count = 0;
   size_t debug_line_cap = 0;
+  nyr_native_debug_var_t *debug_vars = NULL;
+  size_t debug_var_count = 0;
+  size_t debug_var_cap = 0;
   bool ok = ny_native_x64_build_mixed_bundle_debug(
       rt_main, funcs, func_names, func_count, target,
       entry_symbol ? entry_symbol : "rt_main", tag_return, bare_syscalls, &code,
       defs, &def_count, relocs, &reloc_count, &debug_lines, &debug_line_count,
-      &debug_line_cap, err, err_len);
+      &debug_line_cap, &debug_vars, &debug_var_count, &debug_var_cap, err,
+      err_len);
   if (ok && target && target->target == NY_NATIVE_TARGET_X86_64) {
     if (!debug_lines) {
       debug_line_cap = func_count + 1;
@@ -3150,7 +3634,9 @@ bool nyr_native_emit_elf64_object_from_nirs(
    */
   ok = ok && ny_native_emit_elf64_x64_object_bundle_code(
                  code.data, code.len, relocs, reloc_count, defs, def_count,
-                 path, debug_lines, debug_line_count, err, err_len);
+                 path, debug_lines, debug_line_count, debug_vars,
+                 debug_var_count, err, err_len);
+  nyr_native_debug_vars_free(debug_vars, debug_var_count);
   free(debug_lines);
   nyr_obj_free(&code);
   free(defs);
@@ -3258,7 +3744,7 @@ static bool nyr_native_emit_x64_object_from_nirs(
   bool built = ny_native_x64_build_mixed_bundle_debug(
       rt_main, funcs, func_names, func_count, target, entry_symbol, tag_return,
       false, &code, defs, &def_count, relocs, &reloc_count, &debug_lines,
-      &debug_line_count, &debug_line_cap, err, err_len);
+      &debug_line_count, &debug_line_cap, NULL, NULL, NULL, err, err_len);
   if (built && target && target->target == NY_NATIVE_TARGET_X86_64 &&
       !nyr_native_append_bundle_source_map(
           rt_main, funcs, func_names, func_count, target, entry_symbol, defs,

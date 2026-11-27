@@ -1,4 +1,6 @@
-/* Subscripts on complex pointers read and write the complex object at p + i. */
+/*
+ * Subscripts on complex pointers read and write the complex object at p + i.
+ */
 #include <complex.h>
 #include <stdio.h>
 double _Complex get(double _Complex *p, int i) { return p[i]; }

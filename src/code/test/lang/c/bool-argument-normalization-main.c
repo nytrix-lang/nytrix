@@ -1,4 +1,6 @@
-/* Host driver for bool-argument-normalization.c. */
+/*
+ * Host driver for bool-argument-normalization.c.
+ */
 #include <stdbool.h>
 bool g1(unsigned long); int g2(unsigned long); unsigned char g3(unsigned long); bool g4(unsigned long);
 int g5(unsigned long); int g7(unsigned long);

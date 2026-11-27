@@ -1,4 +1,6 @@
-/* Stores to narrow file-scope objects write only their own bytes, and float globals round-trip; neighbouring objects stay intact. */
+/*
+ * Stores to narrow file-scope objects write only their own bytes, and float globals round-trip; neighbouring objects stay intact.
+ */
 #include <stdio.h>
 static short a = 1;
 static unsigned short b = 7;

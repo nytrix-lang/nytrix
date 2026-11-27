@@ -1,4 +1,6 @@
-/* Compound assignment on complex objects and implicit complex width conversion in call arguments agree with GCC. */
+/*
+ * Compound assignment on complex objects and implicit complex width conversion in call arguments agree with GCC.
+ */
 #include <complex.h>
 #include <stdio.h>
 double _Complex f1(double _Complex a, double _Complex b) { a -= b; a *= 2; return a; }

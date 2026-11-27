@@ -721,7 +721,7 @@ fn _factor_flat_rec(any n, list flat) list {
 
 fn factor(any n, bool fdb=false, bool reserved=false) list {
    "Factor n into prime powers: [[p1, e1], [p2, e2], ...].
-   Uses the built-in schedule by default; fdb=true enables a FactorDB lookup.
+   Uses the built-in schedule by default ; fdb=true enables a FactorDB lookup.
    A residual composite may be returned when the local schedule is exhausted."
    def bigint nn = bigint_abs(Z(n))
    if bigint_lt(nn, Z(2)) { return [] }

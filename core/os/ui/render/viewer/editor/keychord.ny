@@ -131,18 +131,7 @@ fn event_chord(any data) str {
    out + (shifted_name.len > 0 ? shifted_name : _key_name(k))
 }
 
-fn _is_prefix(str chord) bool {
-   def p = chord + " "
-   def rows = commands.all_commands()
-   mut i = 0
-   while i < rows.len {
-      if str.startswith(commands.row_key(rows.get(i)), p) { return true }
-      i += 1
-   }
-   false
-}
-
-fn command_chord(dict st, any data) list {
+fn command_chord(dict st, any data, any context=nil) list {
    "Returns [next_state, command] where command can be a complete chord or empty while waiting for a suffix."
    def ch = event_chord(data)
    def prefix = to_str(st.get("prefix", ""))
@@ -150,7 +139,7 @@ fn command_chord(dict st, any data) list {
       return [clear(st), "cancel"]
    }
    def full = prefix.len > 0 ? prefix + " " + ch : ch
-   if _is_prefix(full) {
+   if commands.has_chord_prefix(full, context) {
       st["prefix"] = full
       st["timer"] = PREFIX_TIMEOUT
       return [st, ""]

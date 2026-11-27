@@ -1,4 +1,6 @@
-/* Stores into a local that only an inline-asm memory operand reads (lgdt) must survive dead-store elimination. */
+/*
+ * Stores into a local that only an inline-asm memory operand reads (lgdt) must survive dead-store elimination.
+ */
 struct desc_ptr { unsigned short size; unsigned long address; } __attribute__((packed));
 static inline void native_load_gdt(const struct desc_ptr *dtr) { asm volatile("lgdt %0" ::"m"(*dtr)); }
 extern unsigned long gdt_base(int);

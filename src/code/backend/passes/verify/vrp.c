@@ -395,7 +395,9 @@ static void vrp_range_union(vrp_range_t *dst, const vrp_range_t *a,
   dst->max = a->max > b->max ? a->max : b->max;
 }
 
-/* Strip COPY and additions/subtractions by values proven to equal zero. */
+/*
+ * Strip COPY and additions/subtractions by values proven to equal zero.
+ */
 static int vrp_resolve_zero_arith(const nyr_func_t *f, const int *defs,
                                   const vrp_range_t *ranges, size_t num_values,
                                   int v) {
@@ -511,7 +513,9 @@ static bool vrp_mem_op_supported(const nyr_inst_t *in, unsigned *width_out) {
       in->scalar_class == NYIR_SCALAR_F64)
     return false;
   *width_out = in->flags & VRP_MEM_WIDTH_MASK;
-  /* Disallow combined multi-width flags if malformed. */
+  /*
+   * Disallow combined multi-width flags if malformed.
+   */
   unsigned w = *width_out;
   if (w != 0 && (w & (w - 1u)) != 0)
     return false;
@@ -598,7 +602,9 @@ static void vrp_analyze_buf_roots(const nyr_func_t *f, const int *defs,
   for (size_t r = 0; r < bi->count; ++r)
     bi->val_root[bi->roots[r].root_val] = (int)r;
 
-  /* Propagate unique pointer root provenance across COPY and ADD_I64. */
+  /*
+   * Propagate unique pointer root provenance across COPY and ADD_I64.
+   */
   for (unsigned pass = 0; pass < 16; ++pass) {
     bool changed = false;
     for (size_t i = 0; i < f->len; ++i) {
@@ -650,7 +656,9 @@ static void vrp_analyze_buf_roots(const nyr_func_t *f, const int *defs,
       break;
   }
 
-  /* Verify non-escaping and uniform-width integer access for every use. */
+  /*
+   * Verify non-escaping and uniform-width integer access for every use.
+   */
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
     int slots[6] = {in->a, in->b, in->c, in->d, in->e, in->f};
@@ -721,7 +729,9 @@ static void vrp_buf_info_free(vrp_buf_info_t *bi) {
   memset(bi, 0, sizeof(*bi));
 }
 
-/* Prove nonnegativity and optional element alignment for an address offset. */
+/*
+ * Prove nonnegativity and optional element alignment for an address offset.
+ */
 static bool vrp_ptr_offset_safe(const nyr_func_t *f, const int *defs,
                                 const vrp_range_t *ranges, size_t num_values,
                                 int off_v, unsigned align_bytes,
@@ -783,7 +793,9 @@ static bool vrp_addr_chain_safe(const nyr_func_t *f, const int *defs,
   return false;
 }
 
-/* Recompute joined store+init value ranges for each valid buffer root. */
+/*
+ * Recompute joined store+init value ranges for each valid buffer root.
+ */
 static bool vrp_compute_buf_ranges(const nyr_func_t *f, const int *defs,
                                    const vrp_range_t *ranges, size_t num_values,
                                    vrp_buf_info_t *bi) {
@@ -813,8 +825,10 @@ static bool vrp_compute_buf_ranges(const nyr_func_t *f, const int *defs,
           in->a < 0 || (size_t)in->a >= num_values ||
           bi->val_root[in->a] != (int)r)
         continue;
-      /* Typed heap buffers carry metadata header words before index 0; verify
-       * nonnegative indices so header reads/writes can never be conflated. */
+      /*
+       * Typed heap buffers carry metadata header words before index 0; verify
+       * nonnegative indices so header reads/writes can never be conflated.
+       */
       if (!vrp_addr_chain_safe(f, defs, ranges, num_values, bi, in->a, (int)r,
                                align_bytes, root->is_tbuf)) {
         addrs_ok = false;
@@ -883,8 +897,10 @@ static bool vrp_compute_buf_ranges(const nyr_func_t *f, const int *defs,
   return any_changed;
 }
 
-/* Evaluate one NYIR instruction's output range from `ranges` (and optional
- * SCEV affines and tracked private buffer store ranges). */
+/*
+ * Evaluate one NYIR instruction's output range from `ranges` (and optional
+ * SCEV affines and tracked private buffer store ranges).
+ */
 static void vrp_eval_inst_range(const nyr_func_t *f, const int *defs,
                                 size_t num_values, const nyr_scev_info_t *scev,
                                 const vrp_range_t *ranges, vrp_affine_t *affines,

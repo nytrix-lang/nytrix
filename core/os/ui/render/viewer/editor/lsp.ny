@@ -14,7 +14,7 @@ module core.os.ui.render.viewer.editor.lsp(
    new, enabled_by_default, command_for, status, start, stop, restart, toggle_popups,
    ready, did_open, did_change, did_save, did_close, completion, hover, definition,
    references, rename, formatting, document_symbols, signature_help, code_actions,
-   workspace_symbols, execute_command, inlay_hints, semantic_tokens, decode_inlay_hints, decode_semantic_tokens, merge_semantic_tokens, pump, diagnostics_for, diagnostics_count,
+   workspace_symbols, execute_command, inlay_hints, semantic_tokens, decode_inlay_hints, code_lens, decode_code_lenses, folding_ranges, decode_folding_ranges, decode_semantic_tokens, merge_semantic_tokens, pump, diagnostics_for, diagnostics_count,
    diagnostics_text, diagnostics_from_check, output_name, uri_of, path_of,
    lsp_col, editor_col, strip_snippet, norm_path
 )
@@ -138,6 +138,8 @@ fn _client_caps() dict {
          "definition": {"linkSupport": true},
          "references": dict(0),
          "documentSymbol": {"hierarchicalDocumentSymbolSupport": true},
+         "codeLens": {"dynamicRegistration": false},
+         "foldingRange": {"lineFoldingOnly": true},
          "formatting": dict(0),
          "rename": {"prepareSupport": true},
          "codeAction": {"codeActionLiteralSupport": {"codeActionKind": {"valueSet": ["quickfix", "refactor", "source"]}}},
@@ -367,6 +369,18 @@ fn inlay_hints(dict st, str path, int start_line, int end_line, int end_col=0) d
    "Requests inlay hints in a half-open range, using server position units."
    def int version = int(st.get("docs", dict(0)).get(uri_of(path), 0))
    _request(st, "textDocument/inlayHint", {"textDocument": _doc_id(path), "range": {"start": _pos(start_line, 0), "end": _pos(end_line, end_col)}}, "inlay_hints", {"path": path, "version": version, "start_line": start_line, "end_line": end_line, "end_col": end_col})
+}
+
+fn folding_ranges(dict st, str path) dict {
+   "Requests folding ranges for a document; arrives as a `folding_ranges` event."
+   def int version = int(st.get("docs", dict(0)).get(uri_of(path), 0))
+   _request(st, "textDocument/foldingRange", {"textDocument": _doc_id(path)}, "folding_ranges", {"path": path, "version": version})
+}
+
+fn code_lens(dict st, str path) dict {
+   "Requests code lenses for a document; arrives as a `code_lenses` event."
+   def int version = int(st.get("docs", dict(0)).get(uri_of(path), 0))
+   _request(st, "textDocument/codeLens", {"textDocument": _doc_id(path)}, "code_lenses", {"path": path, "version": version})
 }
 
 fn workspace_symbols(dict st, str query) dict {
@@ -667,6 +681,51 @@ fn decode_inlay_hints(any res) list {
    out
 }
 
+fn decode_folding_ranges(any res) list {
+   "Normalizes folding ranges to inclusive zero-based line spans."
+   mut out = []
+   if !is_list(res) { return out }
+   for range in res {
+      if !is_dict(range) { continue }
+      def int start = int(range.get("startLine", -1))
+      def int end = int(range.get("endLine", -1))
+      if start < 0 || end <= start { continue }
+      mut dict item = {"start": start, "end": end, "kind": to_str(range.get("kind", ""))}
+      if range.contains("collapsedText") { item["text"] = to_str(range.get("collapsedText", "")) }
+      out = out.append(item)
+   }
+   out
+}
+
+fn decode_code_lenses(any res) list {
+   "Normalizes resolved code lenses, ranges and command payloads."
+   mut out = []
+   if !is_list(res) { return out }
+   for lens in res {
+      if !is_dict(lens) { continue }
+      def pos = _range(lens.get("range", dict(0)))
+      def any raw_cmd = lens.get("command", nil)
+      mut str title = ""
+      mut dict command = dict(0)
+      if is_dict(raw_cmd) {
+         title = to_str(raw_cmd.get("title", ""))
+         command = {"command": to_str(raw_cmd.get("command", "")), "arguments": raw_cmd.get("arguments", [])}
+      } elif is_str(raw_cmd) {
+         title = to_str(raw_cmd)
+         command = {"command": to_str(raw_cmd), "arguments": lens.get("arguments", [])}
+      }
+      if title.len <= 0 || to_str(command.get("command", "")).len <= 0 { continue }
+      mut dict item = {
+         "line": int(pos.get("line", 0)), "col": int(pos.get("col", 0)),
+         "end_line": int(pos.get("end_line", 0)), "end_col": int(pos.get("end_col", 0)),
+         "title": title, "command": command
+      }
+      if lens.contains("data") { item["data"] = lens.get("data") }
+      out = out.append(item)
+   }
+   out
+}
+
 fn decode_semantic_tokens(dict st, any res) list {
    "Decodes full relative semantic token data using the server legend."
    mut out = []
@@ -816,7 +875,7 @@ fn _response(dict st, dict m) list {
    def info = pending.get(key, dict(0))
    pending.remove(key)
    def kind = to_str(info.get("kind", ""))
-   if kind == "semantic_tokens" || kind == "inlay_hints" {
+   if kind == "semantic_tokens" || kind == "inlay_hints" || kind == "code_lenses" || kind == "folding_ranges" {
       def path = to_str(info.get("path", ""))
       def int version = int(info.get("version", 0))
       if version <= 0 || int(st.get("docs", dict(0)).get(uri_of(path), 0)) != version { return [] }
@@ -843,6 +902,8 @@ fn _response(dict st, dict m) list {
       "actions" -> { ev["actions"] = _actions(res) }
       "semantic_tokens" -> { ev["items"] = decode_semantic_tokens(st, res) }
       "inlay_hints" -> { ev["items"] = decode_inlay_hints(res) }
+      "code_lenses" -> { ev["items"] = decode_code_lenses(res) }
+      "folding_ranges" -> { ev["items"] = decode_folding_ranges(res) }
       _ -> { ev["result"] = res }
    }
    st["last"] = kind + " received"

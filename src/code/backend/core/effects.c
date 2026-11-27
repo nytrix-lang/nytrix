@@ -178,7 +178,9 @@ static const nyr_runtime_effect_entry_t nyr_runtime_effects[] = {
                           NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
     {"rt_bigint_sub", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                           NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
-    /* Fused by nyr_temp_recycle: may overwrite or free the dead `old`. */
+    /*
+     * Fused by nyr_temp_recycle: may overwrite or free the dead `old`.
+     */
     {"rt_bigint_add_into", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                                NYIR_EFFECT_WRITE_MEMORY |
                                NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},

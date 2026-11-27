@@ -659,6 +659,29 @@ typedef enum {
   NYIR_PARAM_I8,
 } nyr_param_type_t;
 
+/*
+ * Source-level variable facts for native DWARF.  Names live in the function's
+ * owned_symbols table, so they stay valid as long as the function does.
+ * Native emission is diagnostic-only metadata: passes may drop or renumber
+ * slots, in which case the backend omits the DIE rather than inventing one.
+ */
+typedef struct {
+  const char *name;
+  const char *type_name;
+  int slot;
+  int is_param;
+  /* Source line of the declaration. 0 until the lowering site reports it; the
+   * emitter then falls back to the first store/load line. */
+  int decl_line;
+} nyr_debug_var_t;
+
+/* Source scope line range for native DWARF lexical blocks. */
+typedef struct {
+  int depth;
+  int start_line;
+  int end_line;
+} nyr_debug_scope_t;
+
 typedef struct {
   nyr_inst_t *data;
   size_t len;
@@ -703,7 +726,29 @@ typedef struct {
   size_t owned_symbols_cap;
   /* C translation units: no value ever carries a runtime tag. */
   bool untagged_values;
+  /* Native DWARF variable facts; names are owned by owned_symbols. */
+  nyr_debug_var_t *debug_vars;
+  size_t debug_var_count;
+  size_t debug_var_cap;
+  /* Source scopes in opening order (nested blocks append on entry). */
+  nyr_debug_scope_t *debug_scopes;
+  size_t debug_scope_count;
+  size_t debug_scope_cap;
 } nyr_func_t;
+
+/* NYTRIX_DEBUG_LOCALS gates variable DIEs, matching --debug-locals. */
+bool nyr_debug_locals_enabled(void);
+bool nyr_ir_func_debug_var(nyr_func_t *f, const char *name,
+                           const char *type_name, int slot, bool is_param,
+                           int decl_line);
+bool nyr_ir_func_debug_var_line(nyr_func_t *f, int slot, int decl_line);
+bool nyr_ir_func_debug_var_type(nyr_func_t *f, int slot,
+                                const char *type_name);
+bool nyr_ir_func_debug_scope(nyr_func_t *f, int depth, int start_line,
+                             int end_line);
+/* True when `slot` names a source variable the debugger must be able to read.
+ * Optimizers keep such slots in memory instead of promoting them to SSA. */
+bool nyr_ir_func_debug_slot(const nyr_func_t *f, int slot);
 
 /* Copy a symbol into function-owned storage. The returned pointer remains
  * valid until nyr_ir_func_free and can be used for names exposed alongside it.

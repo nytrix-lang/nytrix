@@ -1,4 +1,6 @@
-/* Host driver for bool-store-paths.c: every _Bool store path yields 0 or 1. */
+/*
+ * Host driver for bool-store-paths.c: every _Bool store path yields 0 or 1.
+ */
 #include <stdbool.h>
 struct holder { bool flag; int pad; };
 int st_ptr(int), st_param_ptr(bool *, int), st_param_index(bool *, int);
@@ -16,7 +18,9 @@ typedef bool (*bool_fn_t)(bool);
 struct bool_typedef_ops { bool_fn_t take; };
 int st_indirect_global(int), st_indirect_typedef_param(bool_fn_t, int), st_indirect_typedef_local(int);
 int st_indirect_typedef_field(struct bool_typedef_ops *, int);
-/* The callees read the argument register as a GCC-built function would. */
+/*
+ * The callees read the argument register as a GCC-built function would.
+ */
 static bool take_bool(bool b) { return b; }
 static int mix_bool(int a, bool b, long c) { return a + b * 100 + (int)c; }
 int main(void) {
@@ -36,7 +40,9 @@ int main(void) {
        st_indirect_global(0x800) == 1 && st_indirect_typedef_param(take_bool, 0x1000) == 1 &&
        st_indirect_typedef_local(0x2000) == 1 &&
        st_indirect_typedef_field(&(struct bool_typedef_ops){take_bool}, 0x4000) == 1;
-  /* A zero value must still store 0. */
+  /*
+   * A zero value must still store 0.
+   */
   ok = ok && st_ptr(0) == 0 && st_global(0) == 0 && st_member(&h, 0) == 0;
   return !ok;
 }

@@ -76,8 +76,9 @@ def normal_ink = red_bounds(pixels, 24, 76)
 def spaced_ink = red_bounds(pixels, 76, 128)
 free(pixels)
 assert(int(normal_ink.get(1)) > int(normal_ink.get(0)), "unspaced text is visible: " + to_str(normal_ink) + " -> " + to_str(spaced_ink))
-assert(spaced_ink.get(0) == normal_ink.get(0) && int(spaced_ink.get(1)) == int(normal_ink.get(1)) + 16,
-   "the first glyph stays put and the second is drawn 16 px farther right: " + to_str(normal_ink) + " -> " + to_str(spaced_ink))
+def ink_shift = int(spaced_ink.get(1)) - int(normal_ink.get(1))
+assert(spaced_ink.get(0) == normal_ink.get(0) && ink_shift >= 16 && ink_shift <= 17,
+   "the first glyph stays put and the second advances by 16 px, within one raster pixel: " + to_str(normal_ink) + " -> " + to_str(spaced_ink))
 gfx.close_window()
 print("GUI-FLEX-TEXT-SPACING-OK")
 NY

@@ -154,9 +154,11 @@ static inline int64_t _bi_alloc_dst(size_t words, int64_t dst,
 }
 
 static int64_t _bi_from_i64(int64_t v);
-/* Forced inline: every arithmetic entry decodes one or two operands, and an
+/*
+ * Forced inline: every arithmetic entry decodes one or two operands, and an
  * out-of-line call keeps sign/limbs/words in memory across six saved
- * registers; that was a third of a 4-limb add. */
+ * registers; that was a third of a 4-limb add.
+ */
 static inline __attribute__((always_inline)) bool
 _bi_read_heap_limbs(int64_t v, int *sign, const uint64_t **limbs, size_t *words,
                     uint64_t small[1]);
@@ -582,7 +584,9 @@ static void _bn_words_mul(uint64_t *r, const uint64_t *a, size_t an,
    * instructions).
    */
   if (an == 4u && bn == 4u) {
-    /* Constant bounds: fully unrolled, the product stays in registers. */
+    /*
+     * Constant bounds: fully unrolled, the product stays in registers.
+     */
     uint64_t t[8] = {0};
     for (size_t i = 0; i < 4u; ++i) {
       uint64_t carry = 0;
@@ -3387,7 +3391,9 @@ _bi_try_add_heap_dst(int64_t a, int64_t b, int sub_b, int64_t dst,
   }
   int64_t result = 0;
   if (dst) {
-    /* In place: `dst` is a dead temporary distinct from both operands. */
+    /*
+     * In place: `dst` is a dead temporary distinct from both operands.
+     */
     if (capacity > dst_words)
       return false;
     result = dst;
@@ -4417,7 +4423,9 @@ static int64_t _bi_div_short_heap(int as, const uint64_t *al, size_t an, int bs,
     un[an] = carry;
   }
 
-  /* `dst`: a dead temporary (`div_into` / `div_into_loop`). */
+  /*
+   * `dst`: a dead temporary (`div_into` / `div_into_loop`).
+   */
   bool use_stack_q = dst && m + 1 > dst_words && m <= dst_words;
   uint64_t qstack[17];
   int64_t result = 0;
@@ -5117,7 +5125,9 @@ static __attribute__((noinline)) void _bi_small_cache_init(void) {
         all_ok = false;
         break;
       }
-      /* Mark header offset +16 (p - 16) as immortal singleton. */
+      /*
+       * Mark header offset +16 (p - 16) as immortal singleton.
+       */
       *(uint64_t *)((char *)(uintptr_t)p - 16) = 1ULL;
       g_bi_small_cache[v - BI_SMALL_CACHE_LO] = p;
     }

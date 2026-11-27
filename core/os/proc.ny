@@ -14,11 +14,12 @@ use core.os.fs as fs
 use core.os.sys as sys
 
 fn _num(any x) int { st.atoi(to_str(x)) }
+
 fn _field(list a, int i) int { _num(a.get(i, "0")) }
 
 fn read(str path, int limit=65536) str {
    "Reads at most `limit` bytes of `path` (works for /proc files that report
-   size 0); returns \"\" when it cannot be opened."
+   size 0) ; returns \"\" when it cannot be opened."
    if limit <= 0 { return "" }
    def opened = sys.sys_open(path, 0, 0)
    if !is_ok(opened) { return "" }
@@ -38,7 +39,7 @@ fn read(str path, int limit=65536) str {
 }
 
 fn kv(str text) dict {
-   "Parses `key: value` lines (/proc/meminfo, /proc/PID/status) into a dict
+   "Parses `key: value` lines(/proc/meminfo, /proc/PID/status) into a dict
    of stripped strings."
    mut out = {}
    def lines = st.split(text, "\n")
@@ -56,7 +57,7 @@ fn kv(str text) dict {
 
 fn kv_int(str text, str key, int fallback=-1) int {
    "Returns the leading decimal number after `key:` in `key: value` text,
-   without building a table; `fallback` when the key or number is missing."
+   without building a table ; `fallback` when the key or number is missing."
    def str prefix = key + ":"
    mut int pos = 0
    if st.find(text, prefix) != 0 {
@@ -80,7 +81,7 @@ fn kv_int(str text, str key, int fallback=-1) int {
 fn pid_stat(str line) list {
    "Parses one /proc/PID/stat line into
    [pid, comm, state, ppid, cpu_ticks(utime+stime), nice, threads,
-   start_ticks, vsize_bytes, last_cpu]; [] when malformed. The command name may
+   start_ticks, vsize_bytes, last_cpu] ; [] when malformed. The command name may
    contain spaces and parentheses, so it is cut at the last ')'."
    def a = st.find(line, "("), b = st.find_last(line, ")")
    if a < 0 || b <= a || b + 1 >= line.len { return [] }
@@ -136,7 +137,7 @@ fn net_counters() dict {
 
 fn disk_counters() dict {
    "Returns {device: [read_bytes, written_bytes, io_ms]} for whole block
-   devices in /proc/diskstats (partitions, loop and ram devices skipped)."
+   devices in /proc/diskstats(partitions, loop and ram devices skipped)."
    mut out = {}
    def devices = fs.list_dir("/sys/block")
    def lines = st.split(read("/proc/diskstats"), "\n")
@@ -171,8 +172,8 @@ fn users() dict {
 }
 
 fn sensors() list {
-   "Returns [label, reading] rows for hwmon temperatures (C), fans (RPM),
-   power (W) and batteries (capacity and status)."
+   "Returns [label, reading] rows for hwmon temperatures(C), fans(RPM),
+   power(W) and batteries(capacity and status)."
    mut rows = []
    def hw = fs.list_dir("/sys/class/hwmon")
    mut int i = 0
@@ -214,7 +215,7 @@ fn sensors() list {
 
 fn fs_capacity(str path) list {
    "Returns [total_bytes, available_bytes] of the filesystem holding `path`
-   (statfs); [-1, -1] when unavailable."
+   (statfs) ; [-1, -1] when unavailable."
    #if x86_64 || aarch64 {
       def ptr buf = malloc(256)
       if !buf { return [-1, -1] }
@@ -269,7 +270,7 @@ fn _sys_number(str path) f64 {
 
 fn gpus() list {
    "Returns [card, \"vendor:device\", busy_percent, vram_used, vram_total]
-   for each DRM card; unknown readings are -1."
+   for each DRM card ; unknown readings are -1."
    mut out = []
    def cards = sorted(fs.list_dir("/sys/class/drm"))
    mut int i = 0

@@ -2029,7 +2029,9 @@ size_t rt_temp_reuse_bytes(int64_t ptr, int64_t tag) {
       atomic_load_explicit(&g_rt_chunk0_end, memory_order_acquire);
   uintptr_t c_start =
       atomic_load_explicit(&g_rt_chunk0_start, memory_order_relaxed);
-  /* First chunk with the policy flags already settled: no lookup. */
+  /*
+   * First chunk with the policy flags already settled: no lookup.
+   */
   if (__builtin_expect(uptr - c_start < c_end - c_start && g_rc_enabled == 0 &&
                            g_sh_cap == 0,
                        1)) {

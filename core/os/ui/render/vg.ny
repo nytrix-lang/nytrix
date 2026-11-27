@@ -39,6 +39,10 @@
 ;;                source-over). Operators other than SOURCE_OVER draw
 ;;                premultiplied colors; an image pattern with translucent
 ;;                texels is treated as opaque-premultiplied there.
+;;   caching      cache_begin / cache_end retain the fill and stroke vertex
+;;                streams of a block across frames, keyed by an id and
+;;                revision. A cache hit replays the draw calls without
+;;                rebuilding paths; text must be drawn outside the block.
 module core.os.ui.render.vg(
    begin_frame, end_frame, save, restore, reset,
    stroke_color, fill_color, stroke_paint, fill_paint, stroke_width, miter_limit, line_cap, line_join,
@@ -49,7 +53,7 @@ module core.os.ui.render.vg(
    begin_path, move_to, line_to, bezier_to, quad_to, catmull_rom, bspline, arc_to, close_path, path_winding,
    arc, rect, rounded_rect, rounded_rect_varying, ellipse, circle, fill, stroke,
    font_face, text_align, text, text_bounds,
-   frame_stats, release,
+   frame_stats, release, cache_begin, cache_end,
    BUTT, ROUND, SQUARE, BEVEL, MITER, SOLID, HOLE, CCW, CW,
    ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, ALIGN_TOP, ALIGN_MIDDLE, ALIGN_BOTTOM, ALIGN_BASELINE,
    SOURCE_OVER, SOURCE_IN, SOURCE_OUT, ATOP, DESTINATION_OVER, DESTINATION_IN, DESTINATION_OUT,
@@ -134,12 +138,22 @@ mut int _stat_draws = 0
 mut int _stat_verts = 0
 mut int _stat_bakes = 0
 
+;; Retained fill/stroke streams: id -> {rev, buffers}. A buffer stores a copy
+;; of the vertex bytes plus the draw state that was active when it was built.
+mut any _cache = nil
+mut bool _cache_capture = false
+mut str _cache_id = ""
+mut int _cache_rev = 0
+mut any _cache_buffers = nil
+
 fn _init() any {
    if !is_list(_stack) { _stack = [] }
    if !is_list(_px) { _px = [] }
    if !is_list(_py) { _py = [] }
    if !is_list(_subs) { _subs = [] }
    if !is_dict(_paint_tex_cache) { _paint_tex_cache = dict(64) }
+   if !is_dict(_cache) { _cache = dict(16) }
+   if !is_list(_cache_buffers) { _cache_buffers = [] }
    if !is_list(_fill) { _fill = _solid([1.0, 1.0, 1.0, 1.0]) }
    if !is_list(_stroke) { _stroke = _solid([0.0, 0.0, 0.0, 1.0]) }
 }
@@ -327,9 +341,19 @@ fn _release_paint_textures() any {
 }
 
 fn release() any {
-   "Frees the gradient textures and the vertex buffer. Call before closing the window."
+   "Frees the gradient textures, cached canvas blocks and the vertex buffer. Call before closing the window."
    _init()
    _release_paint_textures()
+   if is_dict(_cache) {
+      for id in _cache.keys() {
+         def entry = _cache.get(id, nil)
+         if is_dict(entry) { _cache_free(entry) }
+      }
+   }
+   _cache = dict(16)
+   _cache_capture = false
+   _cache_buffers = []
+   _cache_id = ""
    if _vb { free(_vb) }
    _vb = 0
    _vb_cap, _vb_n = 0, 0
@@ -458,6 +482,17 @@ fn _quad(f64 x0, f64 y0, f64 c0, f64 x1, f64 y1, f64 c1, f64 x2, f64 y2, f64 c2,
 
 fn _stream_end() bool {
    if _vb_n <= 0 { return false }
+   if _cache_capture {
+      def ptr copy = malloc(_vb_n * 64)
+      if copy {
+         __copy_mem(copy, _vb, _vb_n * 64)
+         _cache_buffers = _cache_buffers.append({"ptr": copy, "count": _vb_n, "tex": int(_cur_texf), "comp": _comp, "sc": _sc_on, "sx": _sc_x, "sy": _sc_y, "sw": _sc_w, "sh": _sc_h})
+      }
+      _stat_draws += 1
+      _stat_verts += _vb_n
+      _vb_n = 0
+      return copy != 0
+   }
    if _sc_on { gfx.scissor_push(_sc_x, _sc_y, _sc_w, _sc_h) }
    def int tex = int(_cur_texf)
    if _comp != 0 { gfx.set_blend_mode(_comp) }
@@ -468,6 +503,62 @@ fn _stream_end() bool {
    _stat_verts += _vb_n
    _vb_n = 0
    ok
+}
+
+;; ---- retained canvas blocks -----------------------------------------------
+fn _cache_free(dict entry) any {
+   for buf in entry.get("buffers", []) {
+      def ptr p = buf.get("ptr", 0)
+      if p { free(p) }
+   }
+   0
+}
+
+fn _cache_replay(dict entry) any {
+   for buf in entry.get("buffers", []) {
+      def int n = int(buf.get("count", 0))
+      def ptr p = buf.get("ptr", 0)
+      if n <= 0 || !p { continue }
+      def bool sc = bool(buf.get("sc", false))
+      if sc { gfx.scissor_push(float(buf.get("sx", 0.0)), float(buf.get("sy", 0.0)), float(buf.get("sw", 0.0)), float(buf.get("sh", 0.0))) }
+      def int comp = int(buf.get("comp", 0))
+      if comp != 0 { gfx.set_blend_mode(comp) }
+      gfx.draw_vertices(p, n, int(buf.get("tex", -1)))
+      if comp != 0 { gfx.set_blend_mode(0) }
+      if sc { gfx.scissor_pop() }
+      _stat_draws += 1
+      _stat_verts += n
+   }
+   0
+}
+
+fn cache_begin(str id, int revision) bool {
+   "Starts a retained canvas block of fills and strokes. Returns true when the caller must draw it; a matching revision replays the cached streams and returns false. Keep paint, transform, alpha and scissor state identical across frames."
+   _init()
+   if _cache_capture { return true }
+   def entry = _cache.get(id, nil)
+   if is_dict(entry) && int(entry.get("rev", -1)) == revision {
+      _cache_replay(entry)
+      return false
+   }
+   if is_dict(entry) {
+      _cache_free(entry)
+      _cache = _cache.delete(id)
+   }
+   _cache_capture = true
+   _cache_id = id
+   _cache_rev = revision
+   _cache_buffers = []
+   true
+}
+
+fn cache_end() bool {
+   "Ends the block opened by cache_begin and retains its vertex streams for the next frame."
+   if !_cache_capture { return false }
+   _cache_capture = false
+   if _cache_id.len > 0 { _cache[_cache_id] = {"rev": _cache_rev, "buffers": _cache_buffers} }
+   _cache_buffers = []
+   true
 }
 
 ;; ---- frame and state ------------------------------------------------------

@@ -88,13 +88,14 @@ fn subscription_count(dict app) int {
 }
 
 fn publish_window_event(dict app, any event, fnptr update_fn) int {
-   "Publishes a polled window lifecycle event on the window.lifecycle topic. Selectors receive kind, window_id and data, and can filter by window_id. Call from the existing event loop."
+   "Publishes a polled lifecycle or file-drop event on the window.lifecycle topic. Selectors receive kind, window_id and data, and can filter by window_id. Call from the existing event loop."
    def kind = window_event.event_type(event)
    if kind != win.EVENT_WINDOW_MOVED && kind != win.EVENT_WINDOW_RESIZED &&
    kind != win.EVENT_WINDOW_REFRESH && kind != win.EVENT_WINDOW_MAXIMIZED &&
    kind != win.EVENT_WINDOW_MINIMIZED && kind != win.EVENT_WINDOW_RESTORED &&
    kind != win.EVENT_FOCUS_IN && kind != win.EVENT_FOCUS_OUT &&
-   kind != win.EVENT_SCALE_UPDATED && kind != win.EVENT_QUIT { return 0 }
+   kind != win.EVENT_SCALE_UPDATED && kind != win.EVENT_QUIT &&
+   kind != win.EVENT_DATA_DROP && kind != win.EVENT_DATA_DRAG { return 0 }
    def window_id = window_event.event_window_id(event)
    if window_id <= 0 { return 0 }
    publish(app, "window.lifecycle", {"kind": kind, "window_id": window_id, "data": window_event.event_data(event)}, update_fn)

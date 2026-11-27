@@ -32,6 +32,7 @@ mut row_sel = -1
 mut clicks = 0
 mut area_scroll = 0.0
 mut second_clicks = 0
+mut second_focus, disclosure_focus = "", ""
 mut mx, my = 0.0, 0.0
 
 fn note(str k) any { R[k] = gui.last_item_rect() }
@@ -78,9 +79,11 @@ fn ui() any {
    gui.end_window()
    if gui.begin_window("w2", "Second", 430.0, 10.0, 200.0, 480.0, {}) {
       if gui.button("b2", "Two", 100.0, 26.0) { second_clicks += 1 }
+      second_focus = gui.last_item_id()
       note("b2")
       gui.progress_bar("load", 0.4, "Load", 160.0)
       gui.collapsing_header("sem_disc", "More", true)
+      disclosure_focus = gui.last_item_id()
       amount = gui.drag_float("amount", "Amount", amount, 0.01, 0.0, 1.0, 2, 160.0)
       gui.color_edit4("sem_color", "Color", [0.2, 0.4, 0.6, 1.0])
    }
@@ -171,6 +174,11 @@ chk(!gui.accessibility_action("w::go", "set_value", 0), "accessibility rejects a
 chk(gui.accessibility_action("w::tx", "focus"), "accessibility tree accepts text field focus")
 frame()
 chk(gui.focused_id() == "w::tx", "accessibility focus reaches the immediate-mode widget")
+chk(gui.accessibility_action("w::tx", "set_value", "screen reader"), "accessibility tree advertises editable text value")
+frame()
+chk(txt == "screen reader", "accessibility text value action updates the immediate-mode field")
+txt = "ab"
+frame()
 gui.clear_focus()
 frame()
 
@@ -270,6 +278,16 @@ key(KEY_ENTER) frame()
 chk(clicks == 2, "Enter activates the focused button")
 key(KEY_ESCAPE) frame()
 chk(gui.focused_id() == "", "Escape clears keyboard focus")
+chk(gui.request_focus(second_focus), "the submitted handle can be retained and requested in another frame")
+frame()
+key(KEY_ENTER) frame()
+chk(gui.focused_id() == second_focus && second_clicks == 1 && clicks == 2, "requesting the handle sends keyboard activation to its owning window")
+key(KEY_TAB) frame() frame()
+chk(gui.focused_id() == disclosure_focus, "Tab stays in the requested window and skips the read-only progress bar")
+key(KEY_TAB, MOD_SHIFT) frame() frame()
+chk(gui.focused_id() == second_focus, "Shift-Tab returns to the retained focus handle")
+gui.clear_focus()
+second_clicks = 0
 
 ;; --- window chrome on the second window
 def w2 = gui.window_rect("w2")

@@ -1,4 +1,6 @@
-/* File-scope complex initializers such as 1.0 + 2.0 * I fold to constants and match GCC, in scalars and arrays. */
+/*
+ * File-scope complex initializers such as 1.0 + 2.0 * I fold to constants and match GCC, in scalars and arrays.
+ */
 #include <complex.h>
 #include <stdio.h>
 double _Complex a = 1.0 + 2.0 * I;

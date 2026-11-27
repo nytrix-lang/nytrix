@@ -1,4 +1,6 @@
-/* Host driver for scoped-once-loops.c: result and cleanup count per exit. */
+/*
+ * Host driver for scoped-once-loops.c: result and cleanup count per exit.
+ */
 extern int ends;
 int scope_normal(int *), scope_return(int *), scope_goto(int *);
 int scope_break(int *), scope_continue(int *);

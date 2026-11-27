@@ -1205,8 +1205,15 @@ bool nyr_mem2reg(nyr_func_t *f) {
   bool has_f64_promote = false;
   bool has_f32_promote = false;
   size_t requested_promotions = 0;
+  /*
+   * A slot named by a DWARF variable keeps its memory form: promoting it to
+   * SSA deletes the store the debugger reads, erasing the variable from the
+   * object while its DIE still claims a location. Only --debug-locals opts
+   * into this cost, and only for slots the frontend actually described.
+   */
   for (size_t l = 0; l < locals; ++l) {
-    if (!addr[l] && (has_load[l] || has_store[l])) {
+    if (!addr[l] && (has_load[l] || has_store[l]) &&
+        !nyr_ir_func_debug_slot(f, (int)l)) {
       promote[l] = true;
       requested_promotions++;
       if (types.local_f64 && types.local_f64[l])

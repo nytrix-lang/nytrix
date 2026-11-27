@@ -506,14 +506,18 @@ static void ifc_erase_dead_arm_label(nyr_func_t *f, int64_t label) {
   }
   if (at == SIZE_MAX || at == 0)
     return;
-  /* The block before the label must end in an unconditional terminator. */
+  /*
+   * The block before the label must end in an unconditional terminator.
+   */
   size_t prev = at;
   while (prev > 0 && f->data[prev - 1].op == NYIR_NOP)
     --prev;
   if (prev == 0 || (f->data[prev - 1].op != NYIR_BR &&
                     f->data[prev - 1].op != NYIR_RET))
     return;
-  /* Only NOPs may remain in the dead block. */
+  /*
+   * Only NOPs may remain in the dead block.
+   */
   for (size_t i = at + 1; i < f->len && f->data[i].op != NYIR_LABEL; ++i)
     if (f->data[i].op != NYIR_NOP)
       return;
@@ -1524,7 +1528,9 @@ static int ifc_unshare_bridge(nyr_func_t *f) {
       size_t hp = 0, tbr = 0;
       if (t == e || !ifc_split_arm_ok(f, &cfg, t, join, &hp, &tbr) || hp != x)
         continue;
-      /* X ends in BR_IF (to T or E) and then falls through or branches. */
+      /*
+       * X ends in BR_IF (to T or E) and then falls through or branches.
+       */
       size_t xend = cfg.block_end[x];
       while (xend > cfg.block_start[x] && f->data[xend - 1].op == NYIR_NOP)
         --xend;
@@ -1539,7 +1545,9 @@ static int ifc_unshare_bridge(nyr_func_t *f) {
                          (last->op == NYIR_BR_IF && last->imm == el);
       if (!fallthrough && !explicit_br)
         continue;
-      /* The join PHIs must name E exactly once. */
+      /*
+       * The join PHIs must name E exactly once.
+       */
       size_t first = cfg.block_start[join];
       if (f->data[first].op == NYIR_LABEL)
         ++first;
@@ -1560,7 +1568,9 @@ static int ifc_unshare_bridge(nyr_func_t *f) {
       int64_t fresh = nyr_fresh_label(f);
       if (fresh < 0)
         continue;
-      /* Grow the join PHIs first (allocation can fail). */
+      /*
+       * Grow the join PHIs first (allocation can fail).
+       */
       for (size_t i = first; i < cfg.block_end[join] && ok; ++i) {
         nyr_inst_t *phi = &f->data[i];
         if (phi->op == NYIR_NOP)
@@ -1594,8 +1604,10 @@ static int ifc_unshare_bridge(nyr_func_t *f) {
       size_t n = 0;
       nyr_inst_t seq[3];
       if (fallthrough) {
-        /* X: ...; br.if T  ->  ...; br.if T; Lnew: br J (X falls into Lnew;
-         * an explicit `br Lnew` would form its own block after the BR_IF). */
+        /*
+         * X: ...; br.if T  ->  ...; br.if T; Lnew: br J (X falls into Lnew;
+         * an explicit `br Lnew` would form its own block after the BR_IF).
+         */
         at = xend;
         seq[n++] = label;
         seq[n++] = to_join;
@@ -1654,7 +1666,9 @@ static int ifc_split_shared_join(nyr_func_t *f) {
             hq != hp)
           continue;
         int64_t lp = cfg.block_label[p], lq = cfg.block_label[q];
-        /* Every join PHI must name both arms exactly once. */
+        /*
+         * Every join PHI must name both arms exactly once.
+         */
         bool phis_ok = true;
         for (size_t i = first; i < phi_end && phis_ok; ++i) {
           const nyr_inst_t *phi = &f->data[i];
@@ -1667,8 +1681,10 @@ static int ifc_split_shared_join(nyr_func_t *f) {
           }
           phis_ok = seen_p == 1 && seen_q == 1 && phi->phi_incoming_len == np;
         }
-        /* Only PHIs whose two arm values differ need a PHI in the new
-         * join; the old join takes an identical value directly. */
+        /*
+         * Only PHIs whose two arm values differ need a PHI in the new
+         * join; the old join takes an identical value directly.
+         */
         size_t differing = 0;
         for (size_t i = first; i < phi_end && phis_ok; ++i) {
           const nyr_inst_t *phi = &f->data[i];
@@ -1820,13 +1836,17 @@ static int ifc_thread_forwarders(nyr_func_t *f) {
     if (pend == cfg.block_start[p] || f->data[pend - 1].op != NYIR_BR ||
         f->data[pend - 1].imm != cfg.block_label[e])
       continue;
-    /* P must not already reach X (a PHI would name P twice). */
+    /*
+     * P must not already reach X (a PHI would name P twice).
+     */
     bool p_to_x = false;
     for (size_t k = cfg.pred_offsets[x]; k < cfg.pred_offsets[x + 1]; ++k)
       p_to_x |= cfg.pred_blocks[k] == p;
     if (p_to_x)
       continue;
-    /* E's label must sit after an unconditional terminator. */
+    /*
+     * E's label must sit after an unconditional terminator.
+     */
     size_t prev = start;
     while (prev > 0 && f->data[prev - 1].op == NYIR_NOP)
       --prev;
@@ -1877,8 +1897,10 @@ bool nyr_if_convert(nyr_func_t *f) {
       return false;
     if (!splits || !changed)
       return true;
-    /* Drop the dead arm blocks first: their stale branches keep labels
-     * and predecessor edges alive and block the threading below. */
+    /*
+     * Drop the dead arm blocks first: their stale branches keep labels
+     * and predecessor edges alive and block the threading below.
+     */
     if (!nyr_dce(f))
       return false;
     for (int t = 0; t < 512 && ifc_thread_forwarders(f); ++t) {

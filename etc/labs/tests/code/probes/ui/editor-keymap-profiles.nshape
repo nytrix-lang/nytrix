@@ -10,6 +10,10 @@ shape editor_keymap_profiles {
   source ny <<'NY'
 use core
 use core.os.ui.render.viewer.editor.commands (rebind, unbind, user_bindings, parse_bindings, load_bindings_file, commands, all_commands, enabled, with_tag, by_id, id_for_chord, which_key, has_id, config, set_enabled, is_enabled, toggle, toggles, row_id, row_key, row_tag, keymap, set_keymap, keymap_names, bindings_for, describe_chord)
+use core.os.ui.render.viewer.editor.keychord as chord
+use core.os.ui.window.consts as key
+use core.os (pid, file_write, file_remove)
+use core.os.path as path
 
 assert(id_for_chord("C-SPC f s") == "save" && id_for_chord("C-c") == "copy" && id_for_chord("C-y") == "redo" && by_id("lsp-status").len > 0, "editor commands")
 mut cfg = config()
@@ -63,6 +67,24 @@ assert(!rebind("C-q", "no-such-command"), "unknown command rejected")
 def parsed = parse_bindings("# comment\nC-x C-k = kill-buffer\nbad line\nC-o =\n")
 assert(parsed.len == 2 && to_str(parsed.get(0).get(1, "")) == "kill-buffer" && to_str(parsed.get(1).get(1, "x")) == "", "binding file parser")
 assert(load_bindings_file("/nonexistent/keys") == -1, "missing file reported")
+def keys_path = path.join(path.temp_dir(), "nytrix-context-keys-" + to_str(pid()))
+defer { file_remove(keys_path) }
+file_write(keys_path, "C-q when selection && writable = cut\nC-q when selection && readonly = copy\nM-9 z when selection && !readonly = save\nC-c when readonly || scratch && selection = find\nM-8 when selection & writable = save\n")
+assert(load_bindings_file(keys_path) == 4, "only well-formed conditional bindings are loaded")
+def editable = {"selection": true, "writable": true, "readonly": false}
+def preview = {"selection": true, "writable": false, "readonly": true}
+assert(id_for_chord("C-q", editable) == "cut" && id_for_chord("C-q", preview) == "copy" && id_for_chord("C-q", {}) == "save",
+   "the same key dispatches by context and retains its unconditional fallback")
+assert(describe_chord("C-q", preview).contains("runs copy") && which_key("M-9", preview).len == 0 &&
+   which_key("M-9", editable).get(0).get(0) == "z", "help describes only active actions and suffixes")
+def pending = chord.command_chord(chord.empty_state(), {"key": key.KEY_9, "mods": key.MOD_ALT}, editable)
+def inactive = chord.command_chord(chord.empty_state(), {"key": key.KEY_9, "mods": key.MOD_ALT}, preview)
+assert(chord.pending(pending.get(0)) && !chord.pending(inactive.get(0)), "an inactive predicate does not consume a key as a prefix")
+def resolved = chord.command_chord(pending.get(0), {"key": key.KEY_Z}, editable)
+assert(id_for_chord(resolved.get(1), editable) == "save", "the conditional chord resolves its registered action")
+def overridden = chord.command_chord(chord.empty_state(), {"key": key.KEY_C, "mods": key.MOD_CONTROL}, preview)
+assert(!chord.pending(overridden.get(0)) && id_for_chord(overridden.get(1), preview) == "find" &&
+   id_for_chord("C-c", {"scratch": true}) == "copy", "an exact conditional action overrides the profile prefix and and binds before or")
 
 ;; Buffer switcher: the palette over an item list (C-x b).
 use core.os.ui.render.viewer.editor.palette as pal

@@ -82,7 +82,7 @@ fn centre(list r) list {
 
 def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
 ;; A .ny driver runs under the test compiler; anything else is executed
-;; directly (the Python reference helper is executable already).
+;; directly (non-.ny drivers are executable already).
 def str nyrun = common.env_trim("NYTRIX_TEST_NY_FULL_BIN")
 if nyrun.len == 0 { nyrun = "ny" }
 mut str driver_cmd = driver
@@ -297,7 +297,7 @@ fn centre(list r) list {
 
 def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
 ;; A .ny driver runs under the test compiler; anything else is executed
-;; directly (the Python reference helper is executable already).
+;; directly (non-.ny drivers are executable already).
 def str nyrun = common.env_trim("NYTRIX_TEST_NY_FULL_BIN")
 if nyrun.len == 0 { nyrun = "ny" }
 mut str driver_cmd = driver

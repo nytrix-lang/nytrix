@@ -33,7 +33,7 @@ fn _norm(str path) str {
 }
 
 fn command_for(str path) list {
-   "Adapter command: NY_EDITOR_DAP_ADAPTER (words, {file} = path), else ny-dap."
+   "Adapter command: NY_EDITOR_DAP_ADAPTER(words, {file} = path), else ny-dap."
    def raw = str.strip(env("NY_EDITOR_DAP_ADAPTER"))
    if raw.len > 0 {
       mut out = []
@@ -55,7 +55,7 @@ fn new() dict {
 }
 
 fn running(dict st) bool {
-   "True while a debug session is alive (running or stopped)."
+   "True while a debug session is alive(running or stopped)."
    def c = st.get("conn", nil)
    is_dict(c) && rpc.alive(c) && to_str(st.get("phase", "idle")) != "idle"
 }
@@ -111,10 +111,10 @@ fn launch(dict st, str program, list args=[], str cwd="", bool stop_on_entry=fal
    st["exit_code"] = -1
    st["launch_args"] = {"program": path, "args": args, "cwd": dir, "stopOnEntry": stop_on_entry, "stopAtBeginningOfMainSubprogram": stop_on_entry}
    _send(st, "initialize", {
-      "clientID": "nytrix-editor", "clientName": "Nytrix editor", "adapterID": "nytrix",
-      "linesStartAt1": true, "columnsStartAt1": true, "pathFormat": "path",
-      "supportsVariableType": true, "supportsRunInTerminalRequest": false
-   }, "initialize")
+         "clientID": "nytrix-editor", "clientName": "Nytrix editor", "adapterID": "nytrix",
+         "linesStartAt1": true, "columnsStartAt1": true, "pathFormat": "path",
+         "supportsVariableType": true, "supportsRunInTerminalRequest": false
+      }, "initialize")
    st["last"] = "debugger starting " + ospath.basename(path)
    st
 }
@@ -136,7 +136,6 @@ fn stop(dict st) dict {
 }
 
 ;; ---- breakpoints ---------------------------------------------------------
-
 fn breakpoints_for(dict st, str path) list {
    "0-based breakpoint lines of `path`, ascending."
    _as_list(st.get("breakpoints", dict(0)).get(_norm(path), []))
@@ -155,7 +154,7 @@ fn _set_lines(dict st, str path, list lines) dict {
 }
 
 fn set_breakpoint(dict st, str path, int line, bool on=true) dict {
-   "Adds or removes a breakpoint (live sessions are updated immediately)."
+   "Adds or removes a breakpoint(live sessions are updated immediately)."
    mut lines = breakpoints_for(st, path)
    if on && !lines.contains(line) { lines = lines.append(line) }
    if !on {
@@ -185,7 +184,6 @@ fn _send_breakpoints(dict st, str path) int {
 }
 
 ;; ---- run control -----------------------------------------------------------
-
 fn _thread_args(dict st) dict { {"threadId": int(st.get("thread", 1))} }
 
 fn _resume(dict st, str command) dict {
@@ -199,8 +197,11 @@ fn _resume(dict st, str command) dict {
 }
 
 fn continue_run(dict st) dict { "Resumes execution." _resume(st, "continue") }
+
 fn step_over(dict st) dict { "Steps over one line." _resume(st, "next") }
+
 fn step_in(dict st) dict { "Steps into a call." _resume(st, "stepIn") }
+
 fn step_out(dict st) dict { "Runs until the current function returns." _resume(st, "stepOut") }
 
 fn restart_frame(dict st) dict {
@@ -217,7 +218,6 @@ fn pause(dict st) dict {
 }
 
 ;; ---- inspection ------------------------------------------------------------
-
 fn stack(dict st) list {
    "Frames of the stopped thread: {id, name, path, line, col} (0-based line)."
    _as_list(st.get("frames", []))
@@ -253,7 +253,7 @@ fn variables(dict st) list {
 }
 
 fn expand(dict st, int ref) dict {
-   "Loads the children of a structured variable (its `ref`)."
+   "Loads the children of a structured variable(its `ref`)."
    if ref > 0 { _send(st, "variables", {"variablesReference": ref}, "variables", {"ref": ref}) }
    st
 }
@@ -267,7 +267,7 @@ fn evaluate(dict st, str expr, str context="repl") dict {
    st
 }
 
-fn output_text(dict st) str { "Program output (stdout/stderr)." to_str(st.get("output", "")) }
+fn output_text(dict st) str { "Program output(stdout/stderr)." to_str(st.get("output", "")) }
 
 fn console_text(dict st) str { "Adapter and debugger messages." to_str(st.get("console", "")) }
 
@@ -298,7 +298,6 @@ fn state_text(dict st) str {
 }
 
 ;; ---- message handling ------------------------------------------------------
-
 fn _frame_name(str raw) str {
    ;; Native symbols carry the internal-call prefix; show the source name.
    str.startswith(raw, "ny_fn_") ? str.str_slice(raw, 6, str.utf8_len(raw)) : raw
@@ -311,10 +310,10 @@ fn _frames(any body) list {
       if !is_dict(f) { continue }
       def src = f.get("source", dict(0))
       out = out.append({
-         "id": f.get("id", 0), "name": _frame_name(to_str(f.get("name", "?"))),
-         "path": is_dict(src) ? to_str(src.get("path", "")) : "",
-         "line": int(max(0, int(f.get("line", 1)) - 1)), "col": int(max(0, int(f.get("column", 1)) - 1))
-      })
+            "id": f.get("id", 0), "name": _frame_name(to_str(f.get("name", "?"))),
+            "path": is_dict(src) ? to_str(src.get("path", "")) : "",
+            "line": int(max(0, int(f.get("line", 1)) - 1)), "col": int(max(0, int(f.get("column", 1)) - 1))
+         })
    }
    out
 }

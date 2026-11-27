@@ -1,5 +1,7 @@
-/* A forced-inline callee with automatic arrays, inlined twice into one caller
-   and through a second static function. */
+/*
+ * A forced-inline callee with automatic arrays, inlined twice into one caller
+ * and through a second static function.
+ */
 static inline __attribute__((always_inline)) int sum_to(int n, int bias) {
   int a[8];
   int total = bias;

@@ -46,7 +46,9 @@ bool nyr_addr_base_reassoc(nyr_func_t *f) {
   int *defs = nyr_build_defs(f);
   if (!defs)
     return false;
-  /* Only addresses: values used solely as load/store address operands. */
+  /*
+   * Only addresses: values used solely as load/store address operands.
+   */
   size_t nv = (size_t)f->next_value;
   unsigned char *bad = calloc(nv, 1);
   unsigned char *used = calloc(nv, 1);
@@ -103,7 +105,9 @@ bool nyr_addr_base_reassoc(nyr_func_t *f) {
         base = bd->b;
       if (base < 0 || base == x || c > INT32_MAX || c < INT32_MIN)
         continue;
-      /* Frame bases already address as [rbp + x + slot] in the encoder. */
+      /*
+       * Frame bases already address as [rbp + x + slot] in the encoder.
+       */
       if (defs[base] >= 0 && (f->data[defs[base]].op == NYIR_ALLOCA ||
                               f->data[defs[base]].op == NYIR_ADDR_LOCAL))
         continue;
@@ -200,7 +204,9 @@ bool nyr_addr_base_reassoc(nyr_func_t *f) {
                       .imm = cands[i].disp,
                       .debug = d->debug};
       k.effects = nyr_inst_effects(&k);
-      /* The constant sits right before its user so the fold stays adjacent. */
+      /*
+       * The constant sits right before its user so the fold stays adjacent.
+       */
       ins[ins_n++] = (ab_insert_t){cands[i].at, k};
       d->a = sv;
       d->b = k.dst;

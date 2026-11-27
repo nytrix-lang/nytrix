@@ -246,7 +246,9 @@ bool nyr_and_branch_split(nyr_func_t *f) {
       if (andi->op != NYIR_AND_I64 || cfg.inst_block[and_at] != b ||
           abs_uses(f, br->a) != 1)
         continue;
-      /* Fall-through: a label-less block holding only `br exit`. */
+      /*
+       * Fall-through: a label-less block holding only `br exit`.
+       */
       size_t nb = b + 1;
       size_t nb_end = nyr_block_last_non_nop(f, &cfg, nb);
       if (cfg.block_label[nb] >= 0 || nb_end != cfg.block_start[nb] + 1 ||
@@ -317,7 +319,9 @@ bool nyr_and_branch_split(nyr_func_t *f) {
       }
       const nyr_inst_t *c1 = t1;
       int c2 = andi->b;
-      /* x = !c1, in place of the AND. */
+      /*
+       * x = !c1, in place of the AND.
+       */
       int x = andi->dst;
       nyr_inst_t inv = *c1;
       inv.dst = x;

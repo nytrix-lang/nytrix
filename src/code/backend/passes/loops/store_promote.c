@@ -116,7 +116,9 @@ static bool sp_invariant(const nyr_cfg_t *cfg, const int *defs, size_t h,
   return blk != h && blk != body;
 }
 
-/* Look through COPY retags: two copies of one pointer name one cell. */
+/*
+ * Look through COPY retags: two copies of one pointer name one cell.
+ */
 static int sp_root(const nyr_func_t *f, const int *defs, int v) {
   for (int depth = 0; depth < 8 && v >= 0 && v < f->next_value; ++depth) {
     int at = defs[v];
@@ -127,7 +129,9 @@ static int sp_root(const nyr_func_t *f, const int *defs, int v) {
   return v;
 }
 
-/* Splice `n` instructions at `at`. */
+/*
+ * Splice `n` instructions at `at`.
+ */
 static bool sp_splice(nyr_func_t *f, size_t at, const nyr_inst_t *ins,
                       size_t n) {
   if (!n)
@@ -158,18 +162,24 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
   if (h >= cfg.block_count || body >= cfg.block_count ||
       p >= cfg.block_count || h == body || p == h || p == body)
     goto out;
-  /* Header: exactly the preheader and the body as predecessors. */
+  /*
+   * Header: exactly the preheader and the body as predecessors.
+   */
   if (cfg.pred_offsets[h + 1] - cfg.pred_offsets[h] != 2)
     goto out;
   for (size_t k = cfg.pred_offsets[h]; k < cfg.pred_offsets[h + 1]; ++k)
     if (cfg.pred_blocks[k] != p && cfg.pred_blocks[k] != body)
       goto out;
-  /* Preheader: single successor, labelled. */
+  /*
+   * Preheader: single successor, labelled.
+   */
   if (cfg.succ_offsets[p + 1] - cfg.succ_offsets[p] != 1 ||
       cfg.block_label[p] < 0 || cfg.block_label[h] < 0 ||
       cfg.block_label[body] < 0)
     goto out;
-  /* Body: single predecessor (the header), back edge to the header. */
+  /*
+   * Body: single predecessor (the header), back edge to the header.
+   */
   if (cfg.pred_offsets[body + 1] - cfg.pred_offsets[body] != 1)
     goto out;
   size_t body_end = nyr_block_last_non_nop(f, &cfg, body);
@@ -177,7 +187,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
       f->data[body_end - 1].op != NYIR_BR ||
       f->data[body_end - 1].imm != cfg.block_label[h])
     goto out;
-  /* Header ends in br.if -> body; its fall-through is a lone br to exit. */
+  /*
+   * Header ends in br.if -> body; its fall-through is a lone br to exit.
+   */
   size_t h_end = nyr_block_last_non_nop(f, &cfg, h);
   if (h_end <= cfg.block_start[h] || f->data[h_end - 1].op != NYIR_BR_IF ||
       f->data[h_end - 1].imm != cfg.block_label[body] || h + 1 >= cfg.block_count)
@@ -200,7 +212,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
   int init_v = L->init_value, limit_v = L->limit_value;
   if (init_v < 0 || limit_v < 0)
     goto out;
-  /* Header contents: label, PHIs, pure scalar ops. */
+  /*
+   * Header contents: label, PHIs, pure scalar ops.
+   */
   for (size_t i = cfg.block_start[h]; i + 1 < h_end; ++i) {
     const nyr_inst_t *in = &f->data[i];
     if (in->op == NYIR_LABEL || in->op == NYIR_PHI || in->op == NYIR_NOP)
@@ -209,7 +223,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
         (nyr_effective_effects(in) & ~NYIR_EFFECT_MAY_TRAP))
       goto out;
   }
-  /* Body: find the cell and the other loads. */
+  /*
+   * Body: find the cell and the other loads.
+   */
   int cell = -1;
   int load_q[SP_MAX_LOADS];
   size_t nloads = 0;
@@ -262,7 +278,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
   }
   if (!cell_load)
     goto out;
-  /* No loop value escapes. */
+  /*
+   * No loop value escapes.
+   */
   for (size_t i = 0; i < f->len; ++i) {
     size_t blk = cfg.inst_block[i];
     if (blk == h || blk == body)
@@ -288,7 +306,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
     }
   }
 
-  /* ---- Rewrite ---- */
+  /*
+   * Rewrite
+   */
   int64_t base_label = nyr_fresh_label(f);
   int64_t lab_pp = base_label, lab_hp = base_label + 1,
           lab_bp = base_label + 2, lab_pn = base_label + 3;
@@ -308,7 +328,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
       map[f->data[i].dst] = f->next_value++;
   }
 #define SP_MAP(v) ((v) >= 0 && (v) < nv0 ? map[(v)] : (v))
-  /* Preheader dispatch: checks, br.if -> promoted copy, new label Pn. */
+  /*
+   * Preheader dispatch: checks, br.if -> promoted copy, new label Pn.
+   */
   {
     int eight = f->next_value++;
     if (!sp_push(&pre, sp_make(NYIR_CONST_I64, eight, -1, -1, 8)))
@@ -337,7 +359,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
         !sp_push(&pre, sp_make(NYIR_LABEL, -1, -1, -1, lab_pn)))
       goto oom;
   }
-  /* Promoted copy, appended after the function body. */
+  /*
+   * Promoted copy, appended after the function body.
+   */
   int acc_phi = f->next_value++;
   int acc0 = f->next_value++;
   {
@@ -361,7 +385,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
     if (in->op == NYIR_LABEL) {
       if (!sp_push(&tail, sp_make(NYIR_LABEL, -1, -1, -1, lab_hp)))
         goto oom;
-      /* The cell's PHI goes first among the PHIs. */
+      /*
+       * The cell's PHI goes first among the PHIs.
+       */
       nyr_inst_t phi = sp_make(NYIR_PHI, acc_phi, -1, -1, 0);
       phi.scalar_class = cell_load->scalar_class;
       phi.phi_incoming = malloc(2 * sizeof(*phi.phi_incoming));
@@ -395,7 +421,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
     if (!sp_push(&tail, c))
       goto oom;
   }
-  /* Exit path of the copy: write the cell back, then leave. */
+  /*
+   * Exit path of the copy: write the cell back, then leave.
+   */
   {
     nyr_inst_t st = sp_make(NYIR_STORE_I64, -1, cell, -1, 0);
     const nyr_inst_t *store_tmpl = NULL;
@@ -410,7 +438,9 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
         !sp_push(&tail, sp_make(NYIR_BR, -1, -1, -1, exit_label)))
       goto oom;
   }
-  /* Body copy: loads of the cell read the running value, stores update it. */
+  /*
+   * Body copy: loads of the cell read the running value, stores update it.
+   */
   int cur = acc_phi;
   for (size_t i = cfg.block_start[body]; i < body_end; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -447,12 +477,16 @@ static int sp_try(nyr_func_t *f, const nyr_scev_loop_t *L) {
   }
   tail.data[acc_phi_at].phi_incoming[1].value = cur;
 #undef SP_MAP
-  /* Header PHIs now see Pn instead of P. */
+  /*
+   * Header PHIs now see Pn instead of P.
+   */
   for (size_t i = cfg.block_start[h]; i < h_end; ++i)
     for (size_t k = 0; k < f->data[i].phi_incoming_len; ++k)
       if (f->data[i].phi_incoming[k].predecessor_label == lab_p)
         f->data[i].phi_incoming[k].predecessor_label = lab_pn;
-  /* Insert: tail at the end, dispatch at the preheader's tail. */
+  /*
+   * Insert: tail at the end, dispatch at the preheader's tail.
+   */
   size_t p_end = nyr_block_last_non_nop(f, &cfg, p);
   size_t p_at = p_end;
   if (p_end > cfg.block_start[p] && f->data[p_end - 1].op == NYIR_BR)

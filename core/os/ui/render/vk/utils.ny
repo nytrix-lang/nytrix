@@ -272,7 +272,7 @@ fn __vkr_push_line_sdf(any p, any x1, any y1, any x2, any y2, any thickness, any
 }
 
 @jit
-fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny, any nz) any {
+fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny, any nz, any tag=0, any clip_x=0.0, any clip_y=0.0, any clip_w=0.0, any clip_h=0.0) any {
    if !p { return 0 }
    __copy_mem(p, _quad_template, _VKR_VERT_STRIDE * 6)
    def x2, y2 = float(x) + float(w), float(y) + float(h)
@@ -285,6 +285,7 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv, nx, _VKR_OFF_NX)
    store32_f32(bv, ny, _VKR_OFF_NY)
    store32_f32(bv, nz, _VKR_OFF_NZ)
+   store32(bv, int(tag), _VKR_OFF_TEX)
    bv += _VKR_VERT_STRIDE
    store32_f32(bv, float(x), _VKR_OFF_X)
    store32_f32(bv, y2, _VKR_OFF_Y)
@@ -294,6 +295,7 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv, nx, _VKR_OFF_NX)
    store32_f32(bv, ny, _VKR_OFF_NY)
    store32_f32(bv, nz, _VKR_OFF_NZ)
+   store32(bv, int(tag), _VKR_OFF_TEX)
    bv += _VKR_VERT_STRIDE
    store32_f32(bv, x2, _VKR_OFF_X)
    store32_f32(bv, y2, _VKR_OFF_Y)
@@ -303,6 +305,7 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv, nx, _VKR_OFF_NX)
    store32_f32(bv, ny, _VKR_OFF_NY)
    store32_f32(bv, nz, _VKR_OFF_NZ)
+   store32(bv, int(tag), _VKR_OFF_TEX)
    bv += _VKR_VERT_STRIDE
    store32_f32(bv, x2, _VKR_OFF_X)
    store32_f32(bv, y2, _VKR_OFF_Y)
@@ -312,6 +315,7 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv, nx, _VKR_OFF_NX)
    store32_f32(bv, ny, _VKR_OFF_NY)
    store32_f32(bv, nz, _VKR_OFF_NZ)
+   store32(bv, int(tag), _VKR_OFF_TEX)
    bv += _VKR_VERT_STRIDE
    store32_f32(bv, x2, _VKR_OFF_X)
    store32_f32(bv, float(y), _VKR_OFF_Y)
@@ -321,6 +325,7 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv, nx, _VKR_OFF_NX)
    store32_f32(bv, ny, _VKR_OFF_NY)
    store32_f32(bv, nz, _VKR_OFF_NZ)
+   store32(bv, int(tag), _VKR_OFF_TEX)
    bv += _VKR_VERT_STRIDE
    store32_f32(bv, float(x), _VKR_OFF_X)
    store32_f32(bv, float(y), _VKR_OFF_Y)
@@ -332,6 +337,16 @@ fn __vkr_push_rect_sdf(any p, any x, any y, any w, any h, any c, any nx, any ny,
    store32_f32(bv,
       nz,
       _VKR_OFF_NZ)
+   store32(bv, int(tag), _VKR_OFF_TEX)
+   mut ci = 0
+   while ci < 6 {
+      def cv = p + ci * _VKR_VERT_STRIDE
+      store32_f32(cv, clip_x, _VKR_OFF_TX)
+      store32_f32(cv, clip_y, _VKR_OFF_TY)
+      store32_f32(cv, clip_w, _VKR_OFF_TZ)
+      store32_f32(cv, clip_h, _VKR_OFF_TW)
+      ci += 1
+   }
 }
 
 fn _check_debug_env() any {

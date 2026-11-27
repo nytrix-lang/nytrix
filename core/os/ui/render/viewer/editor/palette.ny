@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.viewer.editor.commands
 module core.os.ui.render.viewer.editor.palette(
    commands, matches, which_key,
-   state, open, open_items, items_mode, dismiss, is_open, query, index, set_index,
+   state, open, open_items, replace_results, items_mode, dismiss, is_open, query, index, set_index,
    scroll, visible, set_visible, scroll_by, visible_matches,
    state_matches, selected, handle_key, wants_choose, handle_char
 )
@@ -36,6 +36,7 @@ fn open(any st) any {
    st["index"] = 0
    st["scroll"] = 0
    st["items"] = []
+   st["results_ranked"] = false
    st["mode"] = ""
    st["choose"] = false
    return st
@@ -48,6 +49,15 @@ fn open_items(any st, list rows, str mode) any {
    st = open(st)
    st["items"] = rows
    st["mode"] = mode
+   return st
+}
+
+;; Replaces an item source's query results without applying palette fuzzy matching.
+fn replace_results(any st, list rows) any {
+   st["items"] = rows
+   st["results_ranked"] = true
+   st["index"] = 0
+   st["scroll"] = 0
    return st
 }
 
@@ -128,12 +138,21 @@ fn matches(str query, int limit=1000000) list {
 
 ;; Returns the result of the `state_matches` operation.
 fn state_matches(any st, int limit=1000000) list {
-   def q = str.lower(str.strip(query(st)))
    ;; Chosen with if/else: a `cond ? list : list` conditional read the item
    ;; list shifted by one row, so RET in the buffer picker ran the wrong row.
    mut any rows = st.get("items", [])
    if items_mode(st).len <= 0 || !is_list(rows) { rows = cmd.enabled(_cfg(st)) }
    mut out = []
+   if bool(st.get("results_ranked", false)) {
+      if rows.len <= limit { return rows }
+      mut i = 0
+      while i < limit {
+         out = out.append(rows.get(i))
+         i += 1
+      }
+      return out
+   }
+   def q = str.lower(str.strip(query(st)))
    out = _append_level(out, rows, q, 0, limit)
    out = _append_level(out, rows, q, 1, limit)
    out = _append_level(out, rows, q, 2, limit)

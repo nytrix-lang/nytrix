@@ -206,9 +206,13 @@ typedef struct {
    * `_Bool` object (or array of them): stores convert to 0 or 1.
    */
   bool is_bool;
-  /* Pointer to `_Bool`: stores through it convert to 0 or 1. */
+  /*
+   * Pointer to `_Bool`: stores through it convert to 0 or 1.
+   */
   bool pointee_bool;
-  /* Function-pointer object: bit i set when parameter i is a _Bool. */
+  /*
+   * Function-pointer object: bit i set when parameter i is a _Bool.
+   */
   uint64_t function_bool_params;
   /*
    * C_SEG_* qualifier on the object a global pointer addresses.
@@ -405,7 +409,9 @@ typedef struct {
   c_type_t indirect_result_type;
   const c_agg_type_t *indirect_result_agg;
   bool has_indirect_result_signature;
-  /* Parameters of the called function pointer that are _Bool (bit per index). */
+  /*
+   * Parameters of the called function pointer that are _Bool (bit per index).
+   */
   uint64_t indirect_bool_params;
   uint64_t last_function_pointer_bool_params;
   /*
@@ -461,7 +467,9 @@ typedef struct {
    * be safely inlined due to stack slot remapping issues with ALLOCA.
    */
   bool has_auto_arrays;
-  /* Shared cleanup trampolines for edges that leave the same scopes. */
+  /*
+   * Shared cleanup trampolines for edges that leave the same scopes.
+   */
   c_cleanup_cache_entry_t cleanup_cache[NYC_CLEANUP_CACHE_ENTRIES];
   size_t cleanup_cache_count;
   /*
@@ -1300,7 +1308,9 @@ static c_agg_type_t *c_complex_aggregate(c_type_t type);
 static c_value_t lower_complex_convert(c_parser_t *p, c_value_t operand,
                                        bool to_single);
 static bool emit_noreturn_marker(c_parser_t *p);
-/* Convert an integer or pointer value to the 0 or 1 of a C `_Bool`. */
+/*
+ * Convert an integer or pointer value to the 0 or 1 of a C `_Bool`.
+ */
 static int lower_bool_value(c_parser_t *p, int value) {
   int zero = emit_i64_constant(p, 0);
   return zero < 0 || value < 0 ? -1
@@ -4729,8 +4739,10 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
        is_double = false, is_long = false, is_long_long = false, is_int = false,
        is_void = false, is_char = false, is_short = false, is_complex = false,
        is_long_double = false;
-  /* The mask belongs to the type being parsed; an alias or a function-pointer
-     declarator sets it below. */
+  /*
+   * The mask belongs to the type being parsed; an alias or a function-pointer
+   * declarator sets it below.
+   */
   p->last_function_pointer_bool_params = 0;
   bool typeof_resolved = false;
   p->last_type_const = false;
@@ -5480,8 +5492,10 @@ static uint64_t function_pointer_bool_mask(c_parser_t *p, size_t start,
     else if (tok_is(p, at, "_Bool"))
       is_bool = true;
     else if (tok_is(p, at, "bool")) {
-      /* Only the standard spelling: other typedefs record a bool flag that
-         can be stale, and a wrong bit would turn a pointer into 0 or 1. */
+      /*
+       * Only the standard spelling: other typedefs record a bool flag that
+       * can be stale, and a wrong bit would turn a pointer into 0 or 1.
+       */
       const c_typedef_t *alias = find_typedef(p, p->tokens[at]);
       if (alias && alias->is_bool && !alias->is_array)
         is_bool = true;
@@ -8196,7 +8210,9 @@ static bool try_collect_char_array(c_parser_t *p, bool *matched) {
    */
   p->last_type_section = (ny_ctok_t){0};
   p->last_function_alias = (ny_ctok_t){0};
-  /* The alignment of a previous declaration must not leak into this one. */
+  /*
+   * The alignment of a previous declaration must not leak into this one.
+   */
   p->last_type_alignment = 0;
   bool is_external = false;
   bool is_const = false;

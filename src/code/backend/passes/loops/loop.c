@@ -2173,7 +2173,9 @@ static bool interchange_matmul_enabled(void) {
   return !disabled;
 }
 
-/* Strip COPY chains to a freshly allocated non-escaping tbuf/alloca root. */
+/*
+ * Strip COPY chains to a freshly allocated non-escaping tbuf/alloca root.
+ */
 static int interchange_fresh_alloc_root(const nyr_func_t *f, const int *defs,
                                         int v, bool *is_tbuf_out) {
   v = interchange_root_copy(f, defs, v);
@@ -2186,7 +2188,9 @@ static int interchange_fresh_alloc_root(const nyr_func_t *f, const int *defs,
       continue;
     }
     if (in->op == NYIR_ADD_I64 && in->a >= 0 && in->b >= 0) {
-      /* Follow whichever side is pointer-class or comes from an allocation. */
+      /*
+       * Follow whichever side is pointer-class or comes from an allocation.
+       */
       int ra = interchange_fresh_alloc_root(f, defs, in->a, is_tbuf_out);
       if (ra >= 0)
         return ra;
@@ -2208,7 +2212,9 @@ static int interchange_fresh_alloc_root(const nyr_func_t *f, const int *defs,
   return -1;
 }
 
-/* Verify a fresh root never escapes via calls, PHIs, stores, or non-ptr ops. */
+/*
+ * Verify a fresh root never escapes via calls, PHIs, stores, or non-ptr ops.
+ */
 static bool interchange_fresh_root_non_escaping(const nyr_func_t *f,
                                                 const int *defs, int root) {
   if (!f || !defs || root < 0 || root >= f->next_value)
@@ -2285,7 +2291,9 @@ static bool interchange_fresh_root_non_escaping(const nyr_func_t *f,
   return ok;
 }
 
-/* Compute affine byte coefficients of (outer_iv, inner_iv) in an expression. */
+/*
+ * Compute affine byte coefficients of (outer_iv, inner_iv) in an expression.
+ */
 static bool interchange_iv_linear_coeffs(const nyr_func_t *f, const int *defs,
                                          const nyr_cfg_t *cfg,
                                          const bool *outer_blocks, int val,
@@ -2458,7 +2466,9 @@ static nyr_inst_t interchange_make_inst(nyr_op_t op, int dst, int a, int b) {
   return in;
 }
 
-/* Collect pure backward slice inside `outer_blocks` computing `root_val`. */
+/*
+ * Collect pure backward slice inside `outer_blocks` computing `root_val`.
+ */
 static bool interchange_collect_addr_slice(const nyr_func_t *f, const int *defs,
                                            const nyr_cfg_t *cfg,
                                            const bool *outer_blocks,
@@ -2527,7 +2537,9 @@ static bool interchange_collect_addr_slice(const nyr_func_t *f, const int *defs,
   return true;
 }
 
-/* Clone `slice` replacing `outer_iv` with `new_iv`, appending into `out_insts`. */
+/*
+ * Clone `slice` replacing `outer_iv` with `new_iv`, appending into `out_insts`.
+ */
 static bool interchange_clone_slice(nyr_func_t *cand, const nyr_func_t *orig,
                                     const size_t *slice, size_t slice_len,
                                     int outer_iv, int new_iv, int orig_addr,
@@ -2583,7 +2595,9 @@ static bool interchange_apply_inserts(nyr_func_t *f,
     total += groups[g].count;
   if (!total || !nir_ensure_inst_space(f, total))
     return false;
-  /* Sort descending by insertion index to keep earlier indices intact. */
+  /*
+   * Sort descending by insertion index to keep earlier indices intact.
+   */
   for (size_t i = 1; i < ngroups; ++i) {
     interchange_insert_group_t key = groups[i];
     size_t j = i;
@@ -2697,7 +2711,9 @@ static bool interchange_try_reduction_nest(
       RED_REJECT("outer-extra-block");
   }
 
-  /* Verify outer header has only outer->iv PHI and inner preheader is pure. */
+  /*
+   * Verify outer header has only outer->iv PHI and inner preheader is pure.
+   */
   nyr_inst_t *outer_cmp = loop_cmp(f, cfg, defs, outer);
   nyr_inst_t *inner_cmp = loop_cmp(f, cfg, defs, inner);
   if (!outer_cmp || !inner_cmp)
@@ -2724,7 +2740,9 @@ static bool interchange_try_reduction_nest(
       RED_REJECT("inner-pre-op");
   }
 
-  /* Inner header must contain only inner->iv and one zero-init ADD reduction. */
+  /*
+   * Inner header must contain only inner->iv and one zero-init ADD reduction.
+   */
   size_t red_phi_idx = SIZE_MAX;
   int red_phi_dst = -1, red_next_val = -1;
   int64_t inner_latch_lbl = cfg->block_label[inner->latch_block];
@@ -2777,7 +2795,9 @@ static bool interchange_try_reduction_nest(
   if (interchange_root_copy(f, defs, term_val) == red_phi_dst)
     RED_REJECT("acc-self");
 
-  /* Outer latch (inner exit) must contain only ONE reduction store + IV step. */
+  /*
+   * Outer latch (inner exit) must contain only ONE reduction store + IV step.
+   */
   size_t st_c_idx = SIZE_MAX;
   for (size_t i = cfg->block_start[outer->latch_block];
        i < cfg->block_end[outer->latch_block]; ++i) {
@@ -2812,7 +2832,9 @@ static bool interchange_try_reduction_nest(
       !interchange_fresh_root_non_escaping(f, defs, c_root))
     RED_REJECT("c-root");
 
-  /* Check inner body effects, non-escaping defs, and stride profitability. */
+  /*
+   * Check inner body effects, non-escaping defs, and stride profitability.
+   */
   size_t before_unit = 0, after_unit = 0, before_large = 0, after_large = 0;
   size_t inv_ld_idx = SIZE_MAX;
   for (size_t b = 0; b < cfg->block_count; ++b) {
@@ -2886,14 +2908,18 @@ static bool interchange_try_reduction_nest(
   else if (c_new_s > 8)
     ++after_large;
 
-  /* Swap only when elimination of large inner strides strictly pays off. */
+  /*
+   * Swap only when elimination of large inner strides strictly pays off.
+   */
   if (before_large == 0 || after_large > 0 || after_unit <= before_unit)
     RED_REJECT("stride-profit");
   if (!interchange_iv_copies_do_not_escape(f, defs, cfg, inner_blocks, outer,
                                            inner))
     RED_REJECT("iv-escape");
 
-  /* Collect the pure address slice for `c[i, j]` inside `outer_blocks`. */
+  /*
+   * Collect the pure address slice for `c[i, j]` inside `outer_blocks`.
+   */
   size_t c_slice[64];
   size_t c_slice_len = 0;
   if (!interchange_collect_addr_slice(f, defs, cfg, outer_blocks, outer->iv,
@@ -2916,7 +2942,9 @@ static bool interchange_try_reduction_nest(
   int64_t outer_pre_lbl = cfg->block_label[outer->preheader_block];
   int64_t outer_hdr_lbl = cfg->block_label[outer->header_block];
 
-  /* Build zero-init pre-loop blocks to insert right after outer preheader. */
+  /*
+   * Build zero-init pre-loop blocks to insert right after outer preheader.
+   */
   nyr_inst_t pre_buf[128];
   size_t pre_n = 0;
   size_t pre_end = cfg->block_end[outer->preheader_block];
@@ -3011,7 +3039,9 @@ static bool interchange_try_reduction_nest(
   br_hdr.imm = outer_hdr_lbl;
   pre_buf[pre_n++] = br_hdr;
 
-  /* Build accumulation load+add+store replacement inside inner body (j loop). */
+  /*
+   * Build accumulation load+add+store replacement inside inner body (j loop).
+   */
   nyr_inst_t acc_pre_buf[72];
   size_t acc_pre_n = 0;
   int j_addr = -1;
@@ -3034,7 +3064,9 @@ static bool interchange_try_reduction_nest(
   st_j.scalar_class = NYIR_SCALAR_I64_RAW;
   st_j.effects = nyr_inst_effects(&st_j);
 
-  /* Swap IV uses inside inner loop body and rewrite accumulation + bounds. */
+  /*
+   * Swap IV uses inside inner loop body and rewrite accumulation + bounds.
+   */
   interchange_swap_body_ivs(&cand, defs, cfg, inner_blocks, outer, inner,
                             outer_cmp_idx, inner_cmp_idx);
   nyr_inst_t *cand_acc = &cand.data[acc_inst_idx];
@@ -3044,7 +3076,9 @@ static bool interchange_try_reduction_nest(
     cand_acc->b = cur_c;
   nyr_clear_derived_facts(cand_acc);
 
-  /* Update outer->iv preheader incoming label to z_done_lbl and swap limits. */
+  /*
+   * Update outer->iv preheader incoming label to z_done_lbl and swap limits.
+   */
   for (size_t i = cfg->block_start[outer->header_block];
        i < cfg->block_end[outer->header_block]; ++i) {
     nyr_inst_t *in = &cand.data[i];
@@ -3119,7 +3153,9 @@ static bool interchange_try_reduction_nest(
     nyr_ir_func_free(&cand);
     return false;
   }
-  /* Note z_phi.phi_incoming ownership was copied into cand->data; do not free. */
+  /*
+   * Note z_phi.phi_incoming ownership was copied into cand->data; do not free.
+   */
 
   char err[256] = {0};
   if (!nyr_ir_verify(&cand, err, sizeof(err))) {

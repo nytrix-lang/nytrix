@@ -1808,6 +1808,10 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
     nyr_local_t *l =
         v->is_decl ? nyr_bind_local_typed(b, name, is_f64, is_f32, is_cstr)
                    : nyr_add_local(b, name);
+    /* Declaration line anchors the DIE's scope and DW_AT_decl_line. */
+    if (l && v->is_decl && s->tok.line > 0 && b->options &&
+        b->options->debug_locals > 0)
+      (void)nyr_ir_func_debug_var_line(&b->nyir, l->slot, s->tok.line);
     if (l && i < v->exprs.len && v->exprs.data[i] &&
         !(declared_type && ny_native_type_name_is_any(declared_type)) &&
         nyr_expr_is_dict(b, v->exprs.data[i])) {
@@ -3566,6 +3570,8 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
       l->type_name = "bool";
       l->semantic_rep = NY_SEM_REP_RAW_INT;
     }
+    if (b->options && b->options->debug_locals > 0 && l->type_name)
+      (void)nyr_ir_func_debug_var_type(&b->nyir, l->slot, l->type_name);
     if (!nyr_store_local_value(b, l->slot, val))
       return false;
     /* A local list keeps its current logical length in a companion slot for
@@ -7642,6 +7648,22 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
     bool nested_scope = s != b->tail_body && !s->as.block.transparent;
     if (nested_scope)
       b->scope_depth++;
+    if (nested_scope && b->options && b->options->debug_locals > 0 &&
+        s->as.block.body.len > 0) {
+      int start_line = s->tok.line;
+      int end_line = start_line;
+      for (size_t bi = 0; bi < s->as.block.body.len; ++bi) {
+        const stmt_t *bs = s->as.block.body.data[bi];
+        if (!bs || bs->tok.line <= 0)
+          continue;
+        if (start_line <= 0)
+          start_line = bs->tok.line;
+        if (bs->tok.line > end_line)
+          end_line = bs->tok.line;
+      }
+      (void)nyr_ir_func_debug_scope(&b->nyir, (int)b->scope_depth, start_line,
+                                    end_line);
+    }
     size_t mark = s->as.block.transparent ? b->local_count : nyr_scope_mark(b);
     size_t defer_mark = b->defer_count;
     for (size_t i = 0; i < s->as.block.body.len; ++i) {

@@ -980,12 +980,27 @@ fn poll_events() any {
    def windows = dict_values(native_windows)
    def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
    if b == "x11" {
-      def display = _display_from_native_windows(windows)
-      if display && x11_backend.pending(display) == 0 { return 0 }
-      if windows.len > 0 {
-         def result = x11_backend.poll_display_events(windows)
+      ;; X11 windows may be backed by distinct Display connections. Polling
+      ;; only the first connection starves events for windows created on the
+      ;; others, so route each connection's own window list independently.
+      mut windows_by_display = dict(8)
+      for win in windows {
+         if !is_dict(win) { continue }
+         def display = win.get("display", 0)
+         if !display { continue }
+         def group = windows_by_display.get(display, [])
+         windows_by_display[display] = group.append(win)
+      }
+      def display_groups = dict_values(windows_by_display)
+      for group in display_groups {
+         if !is_list(group) || group.len == 0 { continue }
+         def display = group.get(0).get("display", 0)
+         if !display || x11_backend.pending(display) == 0 { continue }
+         def result = x11_backend.poll_display_events(group)
          def updated = result.get(0, dict(8))
-         platform_state._set_platform_dict("native_windows", _merge_native_window_updates(updated, native_windows))
+         mut current_windows = platform_state._get_platform_dict("native_windows", native_windows)
+         current_windows = _merge_native_window_updates(updated, current_windows)
+         platform_state._set_platform_dict("native_windows", current_windows)
          def _ignored_x11_events = _queue_native_events(result.get(1, []), 0, have_window_callbacks)
       }
       return 0

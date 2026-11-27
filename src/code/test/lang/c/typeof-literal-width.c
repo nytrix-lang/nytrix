@@ -1,4 +1,6 @@
-/* typeof of an integer literal follows its suffix and magnitude, so a long parameter keeps all 64 bits. */
+/*
+ * typeof of an integer literal follows its suffix and magnitude, so a long parameter keeps all 64 bits.
+ */
 long a1(__typeof(0L) a) { return a; }
 long a2(__typeof(1L) a) { return a; }
 unsigned long a3(__typeof(0UL) a) { return a; }

@@ -24,6 +24,22 @@ assert(fallback.len == 1 && int(fallback.get(0).get(0)) == syntax.TOK_COMMENT, "
 def hints = lsp.decode_inlay_hints([{"position": {"line": 1, "character": 3}, "label": [{"value": ": "}, {"value": "i32"}], "paddingLeft": true}])
 def hint = hints.get(0, dict(0))
 assert(hints.len == 1 && to_str(hint.get("label", "")) == ": i32" && bool(hint.get("padding_left", false)), "inlay label parts and padding")
+def lenses = lsp.decode_code_lenses([
+   {"range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}}, "command": {"title": "Run", "command": "nytrix.run", "arguments": [{"uri": "file:///tmp/a.ny", "line": 2}]}},
+   {"range": {"start": {"line": 4, "character": 1}, "end": {"line": 4, "character": 1}}, "command": "legacy.lens", "arguments": []},
+   {"range": {"start": {"line": 6, "character": 0}, "end": {"line": 6, "character": 0}}, "command": {"title": "Unresolved", "command": ""}},
+   {"range": {"start": {"line": 7, "character": 0}, "end": {"line": 7, "character": 0}}}
+])
+assert(lenses.len == 2, "resolved code lenses only")
+assert(int(lenses.get(0).get("line", -1)) == 2 && to_str(lenses.get(0).get("title", "")) == "Run" && to_str(lenses.get(0).get("command", dict(0)).get("command", "")) == "nytrix.run" && lenses.get(0).get("command", dict(0)).get("arguments", []).len == 1, "code lens range and command arguments")
+assert(to_str(lenses.get(1).get("command", dict(0)).get("command", "")) == "legacy.lens", "string code lens commands normalize")
+def folds = lsp.decode_folding_ranges([
+   {"startLine": 1, "endLine": 4, "kind": "region"},
+   {"startLine": 6, "endLine": 6},
+   {"startLine": -1, "endLine": 8},
+   {"startLine": 9, "endLine": 9, "collapsedText": "..."}
+])
+assert(folds.len == 1 && int(folds.get(0).get("start", -1)) == 1 && int(folds.get(0).get("end", -1)) == 4 && to_str(folds.get(0).get("kind", "")) == "region", "folding ranges normalize and reject empty spans")
 print("editor lsp tokens passed")
 NY
 }

@@ -1,4 +1,6 @@
-/* __builtin_popcount, popcountl and popcountll agree with GCC for edge and mixed bit patterns. */
+/*
+ * __builtin_popcount, popcountl and popcountll agree with GCC for edge and mixed bit patterns.
+ */
 #include <stdint.h>
 #include <stdio.h>
 __attribute__((noinline)) int pc32(unsigned x) { return __builtin_popcount(x); }

@@ -15,6 +15,34 @@ void nyr_obj_free(nyr_obj_buf_t *b) {
   b->len = b->cap = 0;
 }
 
+bool nyr_native_debug_var_append(nyr_native_debug_var_t **vars, size_t *count,
+                                 size_t *cap, nyr_native_debug_var_t var) {
+  if (!vars || !count || !cap || *count > *cap)
+    return false;
+  if (*count == *cap) {
+    if (*count == SIZE_MAX)
+      return false;
+    size_t next = *cap > SIZE_MAX / 2 ? *count + 1 : (*cap ? *cap * 2 : 16);
+    if (next < *count + 1 || next > SIZE_MAX / sizeof(**vars))
+      return false;
+    nyr_native_debug_var_t *grown = realloc(*vars, next * sizeof(**vars));
+    if (!grown)
+      return false;
+    *vars = grown;
+    *cap = next;
+  }
+  (*vars)[(*count)++] = var;
+  return true;
+}
+
+void nyr_native_debug_vars_free(nyr_native_debug_var_t *vars, size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    free((void *)vars[i].name);
+    free((void *)vars[i].type_name);
+  }
+  free(vars);
+}
+
 bool nyr_native_debug_line_append(nyr_native_debug_line_t **lines,
                                   size_t *count, size_t *cap,
                                   nyr_native_debug_line_t line) {

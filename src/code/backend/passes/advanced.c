@@ -6925,7 +6925,9 @@ bool nyr_dead_alloc_elim(nyr_func_t *f) {
         alloc->dst >= f->next_value)
       continue;
     int p = alloc->dst;
-    /* Classify every use; any unknown use keeps the allocation. */
+    /*
+     * Classify every use; any unknown use keeps the allocation.
+     */
     uint32_t seen = 0;
     bool ok = true;
     for (size_t i = 0; i < f->len && ok; ++i) {
@@ -6944,7 +6946,9 @@ bool nyr_dead_alloc_elim(nyr_func_t *f) {
       if (here != 1) {
         ok = false;
       } else if (in->op == NYIR_STORE_I64 && in->a == p) {
-        /* Storing into the block; the stored value must not be p. */
+        /*
+         * Storing into the block; the stored value must not be p.
+         */
         ok = !(in->flags & NYIR_INST_F_MEM_VOLATILE);
       } else if (in->op == NYIR_CMP_I64 &&
                  (in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE)) {
@@ -7015,7 +7019,9 @@ static int nyr_rc_strip(const nyr_func_t *f, const int *defs, int v) {
   return v;
 }
 
-/* `t` tests "x < L" (lower=true) or "x > H" (lower=false) for constant. */
+/*
+ * `t` tests "x < L" (lower=true) or "x > H" (lower=false) for constant.
+ */
 static bool nyr_rc_bound(const nyr_func_t *f, const int *defs, int t,
                          bool lower, int *x, int64_t *bound) {
   if (t < 0 || t >= f->next_value || defs[t] < 0)
@@ -7105,7 +7111,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
       f->data[i + 6].a = tv;
       i += 6;
       any = true;
-      /* defs indices after i shifted; rebuild before the next match. */
+      /*
+       * defs indices after i shifted; rebuild before the next match.
+       */
       free(defs);
       defs = nyr_build_defs(f);
       if (!defs)
@@ -7134,7 +7142,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
       int64_t lo = 0, hi = 0;
       if (!nyr_rc_bound(f, defs, f->data[abr].a, true, &x, &lo))
         continue;
-      /* The fallthrough block B: label-less, single predecessor A. */
+      /*
+       * The fallthrough block B: label-less, single predecessor A.
+       */
       size_t b = a + 1;
       if (b >= cfg.block_count || cfg.block_start[b] != cfg.block_end[a] ||
           cfg.pred_offsets[b + 1] - cfg.pred_offsets[b] != 1 ||
@@ -7168,7 +7178,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
       }
       if (!pure)
         continue;
-      /* Exit block X: PHIs must agree on the A and B edges. */
+      /*
+       * Exit block X: PHIs must agree on the A and B edges.
+       */
       size_t xb = SIZE_MAX;
       for (size_t k = 0; k < cfg.block_count; ++k)
         if (cfg.block_label[k] == f->data[abr].imm)
@@ -7181,7 +7193,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
         const nyr_inst_t *phi = &f->data[i];
         if (phi->op != NYIR_PHI)
           continue;
-        /* Unlabeled preds cannot be named; PHIs make the edges ambiguous. */
+        /*
+         * Unlabeled preds cannot be named; PHIs make the edges ambiguous.
+         */
         if (la < 0 || lb < 0) {
           phis_ok = false;
           break;
@@ -7202,7 +7216,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
         continue;
       if (!nir_ensure_inst_space(f, 5))
         break;
-      /* Plan: drop B's exit (and its now-dead compare), then rewrite A. */
+      /*
+       * Plan: drop B's exit (and its now-dead compare), then rewrite A.
+       */
       nyr_inst_t *bc = &f->data[defs[f->data[bbr].a]];
       (void)bc;
       for (size_t i = cfg.block_start[xb]; i < cfg.block_end[xb]; ++i) {
@@ -7225,7 +7241,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
       nyr_inst_t seq[6];
       seq[0] = base, seq[0].op = NYIR_CONST_I64, seq[0].dst = lov,
       seq[0].imm = lo;
-      /* Reuse the exact `x < L` constant so GVN can share `x - L`. */
+      /*
+       * Reuse the exact `x < L` constant so GVN can share `x - L`.
+       */
       int lconst = -1;
       {
         const nyr_inst_t *ac = &f->data[defs[old.a]];
@@ -7258,7 +7276,9 @@ bool nyr_range_check_fold(nyr_func_t *f) {
     nyr_refresh_metadata(f);
     any = true;
   }
-  /* The new `x - L` usually repeats the digit value computed below. */
+  /*
+   * The new `x - L` usually repeats the digit value computed below.
+   */
   return !any || (nyr_copy_prop(f) && nyr_gvn_pre(f));
 }
 

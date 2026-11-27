@@ -255,7 +255,9 @@ static bool arf_alloca_i64_bounds(const nyr_func_t *f, const int *defs,
     }
   }
 
-  /* Soundness: no pointer derived from root may be stored or escape. */
+  /*
+   * Soundness: no pointer derived from root may be stored or escape.
+   */
   int64_t lo = 0, hi = 0;
   for (size_t si = 0; si < store_n; ++si) {
     const nyr_inst_t *st = &f->data[stores[si]];
@@ -478,7 +480,9 @@ static bool arf_not_int64_min(const nyr_func_t *f, const int *defs,
   return hlo && lo > INT64_MIN;
 }
 
-/* a == select(slt x 0, sub 0 x, x): returns x, or -1. */
+/*
+ * a == select(slt x 0, sub 0 x, x): returns x, or -1.
+ */
 static int arf_abs_source(const nyr_func_t *f, const int *defs, int a) {
   if (a < 0 || a >= f->next_value || defs[a] < 0)
     return -1;
@@ -643,7 +647,9 @@ bool nyr_abs_range_fold(nyr_func_t *f) {
     return false;
   nyr_use_def_t uses = {0};
   bool uses_built = false;
-  /* Collect rewrites first; inserting shifts indices. */
+  /*
+   * Collect rewrites first; inserting shifts indices.
+   */
   arf_site_t *sites = NULL;
   size_t n = 0, cap = 0;
   for (size_t i = 0; i < f->len; ++i) {
@@ -774,7 +780,9 @@ bool nyr_abs_range_fold(nyr_func_t *f) {
       cmp->a = diff_v;
       cmp->b = lc_v;
       nyr_clear_derived_facts(cmp);
-      /* Keep diff_v adjacent to var_v's load so vector RHS load folding fires. */
+      /*
+       * Keep diff_v adjacent to var_v's load so vector RHS load folding fires.
+       */
       arf_ins_t d_ins = {
           .pos = sub_def,
           .count = 1,

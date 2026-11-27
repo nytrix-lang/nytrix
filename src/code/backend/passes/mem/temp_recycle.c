@@ -382,9 +382,11 @@ static bool tr_block_precedes_in_loop(const nyr_cfg_t *cfg, size_t header,
                                       size_t use_pos) {
   if (use_blk == cut_blk)
     return use_pos < cut_pos;
-  /* Start DFS/BFS from cut_blk's successors inside member \ {header}:
+  /*
+   * Start DFS/BFS from cut_blk's successors inside member \ {header}:
    * if use_blk is NOT reachable after cut_blk, then use_blk always runs
-   * strictly before cut_blk along iteration flow. */
+   * strictly before cut_blk along iteration flow.
+   */
   bool visited[256];
   size_t stack[256];
   if (cfg->block_count > 256)
@@ -528,7 +530,9 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
     size_t pre_tail = tr_block_tail_pos(f, cfg, pre);
     size_t latch_tail = tr_block_tail_pos(f, cfg, latch);
 
-    /* Case 2: scan PHIs in loop header `h`. */
+    /*
+     * Case 2: scan PHIs in loop header `h`.
+     */
     for (size_t i = cfg->block_start[h]; i < cfg->block_end[h]; ++i) {
       const nyr_inst_t *phi = &f->data[i];
       if (phi->op != NYIR_PHI || phi->dst < 0)
@@ -586,8 +590,10 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
       if (!unconditional && !conditional)
         continue;
 
-      /* Verify all in-loop uses of phi (via copy closure) borrow and precede
-       * latch_tail. */
+      /*
+       * Verify all in-loop uses of phi (via copy closure) borrow and precede
+       * latch_tail.
+       */
       tr_closure_t cl;
       if (!tr_collect_closure(f, ud, phi->dst, &cl))
         continue;
@@ -614,7 +620,9 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
       if (!uses_ok)
         continue;
 
-      /* Verify init_v and next_v dominate latch_tail. */
+      /*
+       * Verify init_v and next_v dominate latch_tail.
+       */
       if (!tr_value_dominates_point(cfg, defs, init_v, latch, latch_tail) ||
           !tr_value_dominates_point(cfg, defs, next_v, latch, latch_tail))
         continue;
@@ -636,7 +644,9 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
         int64_t unch_lbl = (upd_lbl == next_def->phi_incoming[0].predecessor_label)
                                ? next_def->phi_incoming[1].predecessor_label
                                : next_def->phi_incoming[0].predecessor_label;
-        /* Allocate owned_phi dst upfront to break circularity with owned_merge */
+        /*
+         * Allocate owned_phi dst upfront to break circularity with owned_merge
+         */
         owned_phi = f->next_value++;
         owned_merge = f->next_value++;
         (void)merge_upd_val;
@@ -677,7 +687,9 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
       }
     }
 
-    /* Case 3: overwritten global store st.i64 sym, fresh_prod inside loop L */
+    /*
+     * Case 3: overwritten global store st.i64 sym, fresh_prod inside loop L
+     */
     bool loop_calls_safe = true;
     for (size_t b = 0; b < cfg->block_count && loop_calls_safe; ++b) {
       if (!member[b])
@@ -731,8 +743,10 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
         if (!tr_value_dominates_point(cfg, defs, prod_v, latch, latch_tail))
           continue;
 
-        /* Ensure sym is only loaded/stored safely across function AND has 0
-         * loads and only this store inside loop L. */
+        /*
+         * Ensure sym is only loaded/stored safely across function AND has 0
+         * loads and only this store inside loop L.
+         */
         if (!tr_global_sym_safe_in_func(f, ud, defs, sym))
           continue;
         size_t sym_stores = 0, sym_loads = 0;
@@ -757,7 +771,9 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
         if (sym_loads != 0 || sym_stores != 1)
           continue;
 
-        /* Verify every use of prod only feeds `st` or borrows inside `b` < i. */
+        /*
+         * Verify every use of prod only feeds `st` or borrows inside `b` < i.
+         */
         tr_closure_t cl;
         if (!tr_collect_closure(f, ud, prod_v, &cl))
           continue;
@@ -775,7 +791,9 @@ static bool tr_collect_cases(nyr_func_t *f, const nyr_cfg_t *cfg,
         if (!prod_ok)
           continue;
 
-        /* Build guards against prod (and up to 2 dominating inputs if any) */
+        /*
+         * Build guards against prod (and up to 2 dominating inputs if any)
+         */
         int guards[4];
         size_t gc = 0;
         tr_add_guard(guards, &gc, prod_v, -1);
@@ -880,7 +898,9 @@ static bool tr_inst_uses(const nyr_inst_t *in, int v) {
   return false;
 }
 
-/* p plus every value that copies or forwards it, transitively. */
+/*
+ * p plus every value that copies or forwards it, transitively.
+ */
 static size_t tr_alias_set(const nyr_func_t *f, int p, int *set, size_t cap) {
   size_t n = 0;
   set[n++] = p;
@@ -988,7 +1008,9 @@ static size_t tr_fuse_into(nyr_func_t *f) {
     if (!into)
       continue;
     if (!loop) {
-      /* The guards must be exactly {n, a[, b]}. */
+      /*
+       * The guards must be exactly {n, a[, b]}.
+       */
       int g[3] = {fr->b, fr->imm >= 3 ? fr->c : fr->b,
                   fr->imm >= 4 ? fr->d : fr->b};
       int want[3] = {n, pr->a, binary ? pr->b : pr->a};

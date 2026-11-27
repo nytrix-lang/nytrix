@@ -1,6 +1,10 @@
-/* Every store of a non-zero integer to a _Bool must produce exactly 1. */
+/*
+ * Every store of a non-zero integer to a _Bool must produce exactly 1.
+ */
 #include <stdbool.h>
-/* Every store of a non-zero integer to a _Bool must produce exactly 1. */
+/*
+ * Every store of a non-zero integer to a _Bool must produce exactly 1.
+ */
 bool gb;
 bool garr[4];
 struct holder { bool flag; int pad; };

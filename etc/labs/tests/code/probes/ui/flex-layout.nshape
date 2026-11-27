@@ -151,6 +151,21 @@ assert(_near(flex.rect_of(wrap_result, "styled-wrap").get(3), 48.0) && wrap_comm
 for invalid_xml in ["<column><box/></row>", "<column><box/>", "<box/><box/>", "<box w='2' w='3'/>", "<box w=2/>", "<box =2/>"] {
    assert(is_nil(flex.from_xml(invalid_xml)), "malformed markup fails the whole layout")
 }
+def menu_tree = flex.from_xml("<menu id='file' action='file' w='120' h='30'>File<item action='new-file'>New</item><item id='save' action='save-file' shortcut='C-s' checked='true'>Save</item></menu>")
+assert(is_dict(menu_tree), "XML menus parse into a menu widget")
+def menu_commands = flex.render_commands(flex.solve(menu_tree, 120.0, 30.0))
+assert(menu_commands.len == 1 && menu_commands.get(0).get("type") == "menu", "XML menus emit one typed widget command")
+def menu_payload = menu_commands.get(0).get("data")
+assert(menu_payload.get("items").len == 2 && menu_payload.get("items").get(1).get("shortcut") == "C-s" && menu_payload.get("items").get(1).get("checked", false), "menu items keep shortcuts and checked state")
+assert(is_nil(flex.from_xml("<menu id='bad-menu'><item>No action</item></menu>")), "menu items require an action")
+def component_tree = flex.from_xml("<column gap='4'><component name='chip'><box class='bg-accent' w='20' h='10'/></component><use component='chip' id='chip-a' w='30'/></column>")
+assert(is_dict(component_tree), "component markup parses")
+def component_res = flex.solve(component_tree, 100.0, 60.0)
+assert(component_tree.get("children").len == 1 && _near(flex.rect_of(component_res, "chip-a").get(2), 30.0), "use overrides component root attributes and drops the definition")
+def slot_tree = flex.from_xml("<column><component name='panel'><column id='panel-body' pad='2'><slot/></column></component><use component='panel'><text id='slot-text'>hi</text></use></column>")
+assert(is_dict(slot_tree) && slot_tree.get("children").get(0).get("children").len == 1 && slot_tree.get("children").get(0).get("children").get(0).get("id") == "slot-text", "slot children replace the reusable component placeholder")
+assert(is_nil(flex.from_xml("<column><use component='missing'/></column>")), "unknown components fail the layout")
+assert(is_nil(flex.from_xml("<column><component name='loop'><use component='loop'/></component><use component='loop'/></column>")), "recursive components are rejected")
 def xml_path = ospath.join(ospath.temp_dir(), "ny-flex-watch-" + to_str(os.pid()) + ".xml")
 defer { os.file_remove(xml_path) }
 assert(is_ok(os.file_write(xml_path, "<box id='watched' w='12'/>")), "write watched XML")
@@ -202,7 +217,8 @@ def priority_result = flex.solve(priority_grid, 130.0, 45.0)
 def priority_cell = flex.rect_of(priority_result, "priority-cell")
 def priority_row = flex.rect_of(priority_result, "priority-row")
 def priority_auto = flex.rect_of(priority_result, "priority-auto")
-assert(_near(priority_cell.get(0), 0.0) && _near(priority_cell.get(2), 85.0) && _near(priority_row.get(0), 90.0) && _near(priority_auto.get(1), 25.0), "grid reserves explicit cells before row-only and automatic placement")
+assert(_near(priority_cell.get(0), 0.0) && _near(priority_cell.get(2), 85.0) && _near(priority_row.get(0), 90.0) && _near(priority_auto.get(1), 25.0),
+   "grid reserves explicit cells first: " + to_str([priority_cell, priority_row, priority_auto]))
 def minmax_grid = flex.grid("minmax-grid", ["minmax(100px, 2fr)", "1fr"], [
    flex.node({"id": "minmax-a", "w": "grow", "h": 20}), flex.node({"id": "minmax-b", "w": "grow", "h": 20})
 ], ["20px"], 0.0, 0.0, {"w": 300, "h": 20})
@@ -220,15 +236,41 @@ def span_last = flex.rect_of(span_result, "span-last")
 assert(_near(span_wide.get(2), 198.333333) && _near(span_last.get(0), 203.333333) && _near(span_last.get(2), 96.666667), "grid column spans combine weighted tracks and internal gaps")
 def collision_grid = flex.grid("collision-grid", [40, 40, 40], [
    flex.node({"id": "occupied", "grid_row": 1, "grid_column": 2, "w": "grow", "h": 20}),
-   flex.node({"id": "relocated", "grid_row": 1, "grid_column": 1, "grid_column_span": 2, "w": "grow", "h": 20}),
+   flex.node({"id": "overlap", "grid_row": 1, "grid_column": 1, "grid_column_span": 2, "w": "grow", "h": 20}),
    flex.node({"id": "after-span", "w": "grow", "h": 20})
 ], [20, 20], 5.0, 5.0)
 def collision_result = flex.solve(collision_grid, 130.0, 45.0)
 def occupied = flex.rect_of(collision_result, "occupied")
-def relocated = flex.rect_of(collision_result, "relocated")
+def overlap = flex.rect_of(collision_result, "overlap")
 def after_span = flex.rect_of(collision_result, "after-span")
-assert(_near(occupied.get(0), 45.0) && _near(occupied.get(1), 0.0), "a span cannot overwrite an occupied cell")
-assert(_near(relocated.get(1), 25.0) && _near(relocated.get(2), 85.0) && _near(after_span.get(0), 90.0) && _near(after_span.get(1), 25.0), "auto placement finds and reserves an entire span on one row")
+assert(_near(occupied.get(0), 45.0) && _near(overlap.get(1), 0.0) && _near(overlap.get(2), 85.0), "explicit spans overlap without losing either item")
+assert(_near(after_span.get(0), 90.0) && _near(after_span.get(1), 0.0), "auto placement honors the union of overlapping areas")
+def hits = flex.boxes_at(collision_result, 50.0, 10.0)
+assert(hits.get(1) == "occupied" && hits.get(2) == "overlap", "overlapping items hit-test in stable paint order")
+def rowspan_grid = flex.grid("row-span", [48, 48], [
+   flex.node({"id": "auto-top", "w": "grow", "h": "grow"}),
+   flex.node({"id": "auto-bottom", "w": "grow", "h": "grow"}),
+   flex.node({"id": "tall", "grid_row": 1, "grid_column": 1, "grid_row_span": 2, "w": "grow", "h": "grow"})
+], [18, 32], 6.0, 4.0)
+def rowspan = flex.solve(rowspan_grid, 102.0, 54.0)
+assert(_near(flex.rect_of(rowspan, "tall").get(3), 54.0), "row span includes unequal track heights and the internal gap")
+assert(_near(flex.rect_of(rowspan, "auto-top").get(0), 54.0) && _near(flex.rect_of(rowspan, "auto-bottom").get(0), 54.0) &&
+   _near(flex.rect_of(rowspan, "auto-bottom").get(1), 22.0), "automatic items avoid all rows occupied by a span")
+def intrinsic_grid = flex.grid("intrinsic", ["auto", "minmax(20px, 45px)", "1fr"], [
+   flex.text("intrinsic-single", "12345"),
+   flex.node({"id": "bounded", "w": "grow"}),
+   flex.node({"id": "remainder", "w": "grow"}),
+   flex.text("intrinsic-span", "12345678901", {"grid_column_span": 2})
+], [16, 16], 5.0)
+def intrinsic = flex.solve(intrinsic_grid, 180.0, 32.0)
+assert(_near(flex.rect_of(intrinsic, "intrinsic-single").get(2), 63.0) && _near(flex.rect_of(intrinsic, "bounded").get(2), 45.0) &&
+   _near(flex.rect_of(intrinsic, "remainder").get(2), 62.0), "shared intrinsic tracks absorb spanning content and capped tracks redistribute free space")
+def align_grid = flex.grid("alignment", [40], [
+   flex.node({"id": "aligned", "w": "25%", "h": 10, "justify_self": "end"})
+], [30], 0.0, 0.0, {"justify_content": "center", "align_content": "end", "align_items": "center"})
+def aligned = flex.rect_of(flex.solve(align_grid, 100.0, 70.0), "aligned")
+assert(_near(aligned.get(0), 60.0) && _near(aligned.get(1), 50.0) && _near(aligned.get(2), 10.0),
+   "track alignment, item alignment and item percentages use their respective boxes")
 def pct_grid = flex.grid("pct-grid", ["20%", "30%", "40%"], [
    flex.node({"id": "pct-span", "grid_column_span": 2, "w": "grow", "h": 20}),
    flex.node({"id": "pct-next", "w": "grow", "h": 20})
@@ -253,6 +295,50 @@ def combined_result = flex.solve(combined_grid, 250.0, 20.0)
 def combined_span = flex.rect_of(combined_result, "combined-span")
 def combined_next = flex.rect_of(combined_result, "combined-next")
 assert(_near(combined_span.get(2), 148.333333) && _near(combined_next.get(0), 153.333333) && _near(combined_next.get(2), 96.666667), "fixed and percentage bases are reserved before allocating fractional space within a span")
+;; Named and negative grid lines, dense and column-major auto flow, baseline
+;; groups, and min-content tracks.
+def named_grid = flex.grid("named-grid", ["[side] 40 [main]", "60 [end]"], [
+   flex.node({"id": "named-main", "grid_column": "main / end", "h": 10}),
+   flex.node({"id": "named-side", "grid_column": "side", "h": 10})
+], [10], 0.0, 0.0, {"w": 100, "h": 10})
+def named_res = flex.solve(named_grid, 100.0, 10.0)
+assert(_near(flex.rect_of(named_res, "named-main").get(0), 40.0) && _near(flex.rect_of(named_res, "named-main").get(2), 60.0), "grid places items between named lines")
+def neg_grid = flex.grid("neg-grid", [40, 60, 20], [
+   flex.node({"id": "neg-last", "grid_column": "-2 / -1", "h": 10})
+], [10], 0.0, 0.0, {"w": 120, "h": 10})
+def neg_res = flex.solve(neg_grid, 120.0, 10.0)
+assert(_near(flex.rect_of(neg_res, "neg-last").get(0), 100.0) && _near(flex.rect_of(neg_res, "neg-last").get(2), 20.0), "grid resolves negative line numbers from the end")
+fn flow_children() list {
+   [flex.node({"id": "flow-explicit", "grid_row": 1, "grid_column": 2, "w": "grow", "h": 10}),
+    flex.node({"id": "flow-wide", "grid_column_span": 2, "w": "grow", "h": 10}),
+    flex.node({"id": "flow-tail", "w": "grow", "h": 10}),
+    flex.node({"id": "flow-anchor", "grid_row": 3, "grid_column": 1, "w": "grow", "h": 10})]
+}
+def sparse_grid = flex.grid("sparse-grid", [40, 40], flow_children(), [10, 10, 10], 0.0, 0.0, {"w": 80, "h": 30})
+def sparse_res = flex.solve(sparse_grid, 80.0, 30.0)
+assert(_near(flex.rect_of(sparse_res, "flow-wide").get(1), 10.0) && _near(flex.rect_of(sparse_res, "flow-tail").get(0), 40.0) && _near(flex.rect_of(sparse_res, "flow-tail").get(1), 20.0), "sparse row flow continues past the previous auto item")
+def dense_grid = flex.grid("dense-grid", [40, 40], flow_children(), [10, 10, 10], 0.0, 0.0, {"w": 80, "h": 30, "grid_auto_flow": "row dense"})
+def dense_res = flex.solve(dense_grid, 80.0, 30.0)
+assert(_near(flex.rect_of(dense_res, "flow-tail").get(0), 0.0) && _near(flex.rect_of(dense_res, "flow-tail").get(1), 0.0), "dense flow backfills earlier holes")
+def column_grid = flex.grid("column-grid", [40, 40], [
+   flex.node({"id": "column-a", "w": "grow", "h": 10}),
+   flex.node({"id": "column-b", "w": "grow", "h": 10}),
+   flex.node({"id": "column-c", "w": "grow", "h": 10})
+], [10, 10, 10], 0.0, 0.0, {"w": 80, "h": 30, "grid_auto_flow": "column"})
+def column_res = flex.solve(column_grid, 80.0, 30.0)
+assert(_near(flex.rect_of(column_res, "column-b").get(0), 0.0) && _near(flex.rect_of(column_res, "column-b").get(1), 10.0) && _near(flex.rect_of(column_res, "column-c").get(1), 20.0), "column flow fills a column before advancing")
+def baseline_grid = flex.grid("baseline-grid", [50, 50], [
+   flex.text("baseline-big", "Hg", {"font_size": 32}),
+   flex.text("baseline-small", "x", {"font_size": 12})
+], ["fit"], 0.0, 0.0, {"w": 100, "h": 40, "align_items": "baseline"})
+def baseline_res = flex.solve(baseline_grid, 100.0, 40.0, {"styled": _styled_measure})
+assert(_near(flex.rect_of(baseline_res, "baseline-big").get(1), 0.0) && _near(flex.rect_of(baseline_res, "baseline-small").get(1), 16.0), "baseline alignment shares the first text baseline")
+def min_content_grid = flex.grid("min-content-grid", ["min-content", "1fr"], [
+   flex.text("min-wrap", "one two three", {"wrap": true}),
+   flex.node({"id": "min-fill", "w": "grow"})
+], ["20"], 0.0, 0.0, {"w": 120, "h": 20})
+def min_content_res = flex.solve(min_content_grid, 120.0, 20.0)
+assert(_near(flex.rect_of(min_content_res, "min-wrap").get(2), 40.0) && _near(flex.rect_of(min_content_res, "min-fill").get(0), 40.0), "min-content tracks use the widest word of wrapping text")
 def mover = flex.node({"id": "mover", "w": 12, "h": 12, "float": {"anchor": "tl", "x": 4, "y": 3}, "transition": {"spring": anim.spring(2.0, 1.0), "properties": ["x"]}})
 def motion_tree = flex.node({"id": "motion-root", "w": 120, "h": 40, "dir": "col"}, [mover])
 def motion_state = anim.animator()

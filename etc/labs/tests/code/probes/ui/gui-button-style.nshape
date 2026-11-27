@@ -274,6 +274,22 @@ while settle_frame < 80 {
    settle_frame += 1
 }
 assert(motion_mid > 39.9 && motion_mid < 40.1 && !gui.animation_busy(), "GUI animation API settles and clears redraw state")
+gui.begin_frame(0, 0, 240.0, 1100.0, 0.05)
+def overlay_closed = gui.overlay_offset("api-overlay", false, 12.0)
+assert(overlay_closed == 12.0, "a closed overlay rests at its entry offset")
+gui.begin_frame(0, 0, 240.0, 1100.0, 0.05)
+mut overlay_mid = gui.overlay_offset("api-overlay", true, 12.0)
+assert(overlay_mid == 12.0, "an opening overlay starts at its entry offset")
+gui.begin_frame(0, 0, 240.0, 1100.0, 0.05)
+overlay_mid = gui.overlay_offset("api-overlay", true, 12.0)
+assert(overlay_mid > 0.0 && overlay_mid < 12.0, "an opening overlay slides toward its resting place")
+mut overlay_frame = 0
+while overlay_frame < 80 {
+   gui.begin_frame(0, 0, 240.0, 1100.0, 0.05)
+   overlay_mid = gui.overlay_offset("api-overlay", true, 12.0)
+   overlay_frame += 1
+}
+assert(overlay_mid > -0.1 && overlay_mid < 0.5, "an opening overlay settles at zero offset")
 mx = float(rect.get(0)) + 10.0 my = float(rect.get(1)) + 10.0
 frame() frame()
 def green = sample()

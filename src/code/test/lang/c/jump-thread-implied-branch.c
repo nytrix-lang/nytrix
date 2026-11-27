@@ -1,5 +1,7 @@
-/* `if (ok) enter(); if (!ok) goto fail;` : the second test is decided by the
-   first on every path, so the entered path must not reach the failure exit. */
+/*
+ * `if (ok) enter(); if (!ok) goto fail;` : the second test is decided by the
+ * first on every path, so the entered path must not reach the failure exit.
+ */
 extern int check(long);
 extern int work(void);
 int implied(long p) {

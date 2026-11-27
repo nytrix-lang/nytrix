@@ -1138,22 +1138,34 @@ uint64_t ny_hash64_fast(const void *data, size_t len) {
   switch (len & 7) {
   case 7:
     v ^= (uint64_t)pos[6] << 48;
-    /* fallthrough */
+    /*
+     * fallthrough
+     */
   case 6:
     v ^= (uint64_t)pos[5] << 40;
-    /* fallthrough */
+    /*
+     * fallthrough
+     */
   case 5:
     v ^= (uint64_t)pos[4] << 32;
-    /* fallthrough */
+    /*
+     * fallthrough
+     */
   case 4:
     v ^= (uint64_t)pos[3] << 24;
-    /* fallthrough */
+    /*
+     * fallthrough
+     */
   case 3:
     v ^= (uint64_t)pos[2] << 16;
-    /* fallthrough */
+    /*
+     * fallthrough
+     */
   case 2:
     v ^= (uint64_t)pos[1] << 8;
-    /* fallthrough */
+    /*
+     * fallthrough
+     */
   case 1:
     v ^= (uint64_t)pos[0];
     h ^= ny_fasthash_mix(v);

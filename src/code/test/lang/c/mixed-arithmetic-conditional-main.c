@@ -1,4 +1,6 @@
-/* Host driver for mixed-arithmetic-conditional.c. */
+/*
+ * Host driver for mixed-arithmetic-conditional.c.
+ */
 double nyr_mixed_double(int);
 float nyr_mixed_float(int);
 double nyr_mixed_widen(int);

@@ -1,4 +1,6 @@
-/* A left shift by 32 before a sign-extending narrowing store is not folded away, on every route and level. */
+/*
+ * A left shift by 32 before a sign-extending narrowing store is not folded away, on every route and level.
+ */
 #include <stdint.h>
 #include <stdio.h>
 static int32_t g6 = 1167098989;

@@ -7,8 +7,9 @@ use core.common as common
 use core.str as str
 use core.math (max, min, ceil)
 use core.math.crypto.encoding.base as b64
-use core.os (exit, file_exists, file_read, file_write, ticks, msleep)
+use core.os (exit, file_exists, file_read, file_write, ticks, msleep, getcwd)
 use core.os.args as cli
+use core.os.subprocess (run_capture)
 use core.os.fs as osfs
 use core.os.path as ospath
 use core.os.ui.window.consts as key
@@ -400,6 +401,20 @@ _editor_values["semantic_lines"] = dict(0)
 _editor_values["inlay_path"] = ""
 _editor_values["inlay_requested_path"] = ""
 _editor_values["inlay_lines"] = dict(0)
+_editor_values["code_lens_path"] = ""
+_editor_values["code_lens_requested_path"] = ""
+_editor_values["code_lens_lines"] = dict(0)
+_editor_values["code_lens_rects"] = []
+_editor_values["fold_path"] = ""
+_editor_values["fold_requested_path"] = ""
+_editor_values["fold_ranges"] = []
+_editor_values["fold_collapsed"] = dict(0)
+_editor_values["fold_rects"] = []
+_editor_values["blame_on"] = false
+_editor_values["blame_path"] = ""
+_editor_values["blame_lines"] = dict(0)
+_editor_values["blame_hunks"] = dict(0)
+_editor_values["git_inline_runs"] = []
 _editor_values["lsp_auto"] = ""
 _editor_values["lsp_auto_at"] = 0
 _editor_values["ui_state"] = borrow(interact.new())
@@ -516,6 +531,7 @@ def probe_flags = {
    "MODELINE": _editor_probe("MODELINE"),
    "CHORD": _editor_probe("CHORD"),
    "FIND": _editor_probe("FIND"),
+   "BUFFER_SEARCH": _editor_probe("BUFFER_SEARCH"),
    "PALETTE": _editor_probe("PALETTE"),
    "WHICH_KEY": _editor_probe("WHICH_KEY"),
    "MULTICURSOR": _editor_probe("MULTICURSOR"),
@@ -523,6 +539,7 @@ def probe_flags = {
    "SCROLLBAR": _editor_probe("SCROLLBAR"),
    "GOTO": _editor_probe("GOTO"),
    "GIT": _editor_probe("GIT"),
+   "GIT_INLINE": _editor_probe("GIT_INLINE"),
    "TAB": _editor_probe("TAB"),
    "SELECT": _editor_probe("SELECT"),
    "TEXTGRID": _editor_probe("TEXTGRID"),
@@ -894,7 +911,8 @@ fn _palette_rect(f64 sw, f64 sh, int matches_len) list {
    def f64 h = PALETTE_HEADER_H + float(rows) * PALETTE_ROW_H + PALETTE_DETAIL_H + 6.0
    def f64 x0 = sw * 0.5 - w * 0.5
    def fit = _fit_rect(x0, y, w, h, sw, sh, margin)
-   [float(fit.get(0, x0)), float(fit.get(1, y)), float(fit.get(2, w)), float(fit.get(3, h)), rows]
+   def slide = gui.overlay_offset("ed_palette", true)
+   [float(fit.get(0, x0)), float(fit.get(1, y)) + slide, float(fit.get(2, w)), float(fit.get(3, h)), rows]
 }
 
 fn _palette_contains(dict lay, f64 mx, f64 my) bool {
@@ -924,15 +942,27 @@ fn _which_key_rect(f64 sw, f64 sh, int total) list {
       h = 42.0 + float(line_count) * WHICH_KEY_ROW_H + 8.0
    }
    def fit = _fit_rect(10.0, sh - h - 10.0, w, h, sw, sh, 8.0)
-   [float(fit.get(0, 10.0)), float(fit.get(1, sh - h - 10.0)), float(fit.get(2, w)), float(fit.get(3, h)), cols, visible]
+   def slide = gui.overlay_offset("ed_which_key", true)
+   [float(fit.get(0, 10.0)), float(fit.get(1, sh - h - 10.0)) + slide, float(fit.get(2, w)), float(fit.get(3, h)), cols, visible]
+}
+
+fn _keymap_context() any {
+   if !cmd.has_context_bindings() { return nil }
+   def b = ed.current_buffer(_editor_get("st"))
+   def bool readonly = bool(b.get("readonly", false))
+   def bool file = to_str(b.get("path", "")).len > 0
+   {"editor": true, "selection": _selection_any_valid(), "readonly": readonly, "writable": !readonly, "file": file, "scratch": !file}
 }
 
 fn _which_key_rows(str prefix) list {
-   if prefix == to_str(_editor_get("which_key_prefix")) && is_list(_editor_get("which_key_rows_cache")) { return _editor_get("which_key_rows_cache") }
+   def context = _keymap_context()
+   def int context_bits = !is_dict(context) ? 0 : 1 | (context.get("selection", false) ? 2 : 0) | (context.get("readonly", false) ? 4 : 0) | (context.get("file", false) ? 8 : 0)
+   if prefix == to_str(_editor_get("which_key_prefix")) && int(_editor_values.get("which_key_context", 0)) == context_bits && is_list(_editor_get("which_key_rows_cache")) { return _editor_get("which_key_rows_cache") }
    _editor_values["which_key_prefix"] = prefix
+   _editor_values["which_key_context"] = context_bits
    _editor_values["which_key_scroll"] = 0
    _editor_values["which_key_scroll_accum"] = 0.0
-   _editor_values["which_key_rows_cache"] = pal.which_key(prefix)
+   _editor_values["which_key_rows_cache"] = cmd.which_key(prefix, context)
    _editor_get("which_key_rows_cache")
 }
 
@@ -959,6 +989,17 @@ fn _touch_content() int {
    _editor_values["inlay_path"] = ""
    _editor_values["inlay_requested_path"] = ""
    _editor_values["inlay_lines"] = dict(0)
+   _editor_values["code_lens_path"] = ""
+   _editor_values["code_lens_requested_path"] = ""
+   _editor_values["code_lens_lines"] = dict(0)
+   _editor_values["fold_path"] = ""
+   _editor_values["fold_requested_path"] = ""
+   _editor_values["fold_ranges"] = []
+   _editor_values["fold_collapsed"] = dict(0)
+   _editor_values["blame_path"] = ""
+   _editor_values["blame_lines"] = dict(0)
+   _editor_values["blame_hunks"] = dict(0)
+   _editor_values["git_inline_runs"] = []
    _editor_values["syntax_cache_rev"] = -1
    _editor_values["width_cache_rev"] = -1
    _editor_values["outline_cache_rev"] = -1
@@ -1443,7 +1484,7 @@ fn _cache_append_project_ops(list rows, str prefix, list ops) list {
 }
 
 fn _restore_session_allowed() bool {
-   if common.env_truthy("NYTRIX_UI_REPLAY") { return false }
+   if common.env_truthy("NYTRIX_UI_REPLAY") || probe_flags.get("BUFFER_SEARCH", false) { return false }
    cli.args().len <= 1 && !probe_flags.get("INPUT", false) && !probe_flags.get("CONTEXT", false) && !probe_flags.get("TERMINAL", false) && !probe_flags.get("TERMINAL_DUMP", false) && !probe_flags.get("SYNTAX", false) && !probe_flags.get("NAV", false) && !probe_flags.get("UNDO", false) && !probe_flags.get("ESCAPE", false) && !probe_flags.get("MODELINE", false) && !probe_flags.get("CHORD", false) && !probe_flags.get("FIND", false) && !probe_flags.get("PALETTE", false) && !probe_flags.get("POPUPS", false) && !probe_flags.get("WHICH_KEY", false) && !probe_flags.get("MULTICURSOR", false) && !probe_flags.get("ZOOM", false) && !probe_flags.get("SCROLLBAR", false) && !probe_flags.get("GOTO", false) && !probe_flags.get("GIT", false) && !probe_flags.get("TAB", false) && !probe_flags.get("SELECT", false) && !probe_flags.get("TEXTGRID", false) && !probe_flags.get("IMAGE", false) && !probe_flags.get("BENCH", false)
 }
 
@@ -4159,7 +4200,11 @@ fn _place_cursor(dict lay, f64 x, f64 y) int {
    if lines.len <= 0 { return 0 }
    def top = float(lay.get("edit_y", 0.0)) + 14.0
    def bottom = float(lay.get("edit_y", 0.0)) + float(lay.get("edit_h", 0.0)) - 8.0
-   def row = min(max(ed.row_at(lay, min(max(y, top), bottom), int(_editor_get("st").get("scroll", 0))), 0), lines.len - 1)
+   def view = _fold_visible_indices(lines)
+   def int start = _fold_first_visible_at_or_after(view, int(_editor_get("st").get("scroll", 0)))
+   def int screen_row = max(0, ed.row_at(lay, min(max(y, top), bottom), 0))
+   def int view_row = min(max(0, start + screen_row), max(0, view.len - 1))
+   def int row = int(view.get(view_row, 0))
    def line = to_str(lines.get(row, ""))
    _editor_get("st")["cursor_line"] = row
    _editor_get("st")["cursor_col"] = _visual_col_at(line, row, x - _line_text_x(lay))
@@ -4170,9 +4215,35 @@ fn _place_cursor(dict lay, f64 x, f64 y) int {
    0
 }
 
+fn _run_code_lens(any lens) int {
+   if !is_dict(lens) { return 0 }
+   def cmd = lens.get("command", dict(0))
+   if !is_dict(cmd) || to_str(cmd.get("command", "")).len <= 0 { _status("code lens has no command") return 0 }
+   _editor_values["lsp_state"] = lsp.execute_command(_lsp(), to_str(cmd.get("command", "")), cmd.get("arguments", []))
+   _status("code lens: " + to_str(lens.get("title", "")))
+   0
+}
+
+fn _code_lens_click(f64 x, f64 y) bool {
+   def rects = _editor_get("code_lens_rects")
+   mut int i = 0
+   while i < rects.len {
+      def r = rects.get(i, [])
+      if is_list(r) && r.len >= 5 && widgets.hit(x, y, float(r.get(0)), float(r.get(1)), float(r.get(2)), float(r.get(3))) {
+         _run_code_lens(r.get(4, dict(0)))
+         return true
+      }
+      i += 1
+   }
+   false
+}
+
 fn _click_editor(dict lay, f64 x, f64 y) int {
-   def row = ed.row_at(lay, y, int(_editor_get("st").get("scroll", 0)))
    def lines = ed.current_lines(_editor_get("st"))
+   def view = _fold_visible_indices(lines)
+   def int start = _fold_first_visible_at_or_after(view, int(_editor_get("st").get("scroll", 0)))
+   def int screen_row = max(0, ed.row_at(lay, y, 0))
+   def row = int(view.get(start + screen_row, -1))
    if row < 0 || row >= lines.len { return 0 }
    ;; The gutter (line numbers) toggles breakpoints.
    if x >= float(lay.get("edit_x", 0.0)) && x < _line_text_x(lay) - 6.0 { return _dap_toggle_breakpoint(row) }
@@ -4296,6 +4367,8 @@ fn _lsp_flush_change() int {
    _editor_values["lsp_state"] = lsp.did_change(_lsp(), path, _current_text())
    _lsp_request_semantic(path)
    _lsp_request_inlay(path)
+   _lsp_request_code_lens(path)
+   _lsp_request_folding(path)
    0
 }
 
@@ -4312,6 +4385,22 @@ fn _lsp_request_inlay(str path) int {
    if !_lsp().get("caps", dict(0)).contains("inlayHintProvider") { return 0 }
    _editor_values["inlay_requested_path"] = path
    _editor_values["lsp_state"] = lsp.inlay_hints(_lsp(), path, 0, ed.current_lines(_editor_get("st")).len)
+   0
+}
+
+fn _lsp_request_code_lens(str path) int {
+   if path.len == 0 || !lsp.ready(_lsp()) || !_lsp().get("docs", dict(0)).contains(lsp.uri_of(path)) { return 0 }
+   if !_lsp().get("caps", dict(0)).contains("codeLensProvider") { return 0 }
+   _editor_values["code_lens_requested_path"] = path
+   _editor_values["lsp_state"] = lsp.code_lens(_lsp(), path)
+   0
+}
+
+fn _lsp_request_folding(str path) int {
+   if path.len == 0 || !lsp.ready(_lsp()) || !_lsp().get("docs", dict(0)).contains(lsp.uri_of(path)) { return 0 }
+   if !_lsp().get("caps", dict(0)).contains("foldingRangeProvider") { return 0 }
+   _editor_values["fold_requested_path"] = path
+   _editor_values["lsp_state"] = lsp.folding_ranges(_lsp(), path)
    0
 }
 
@@ -4381,10 +4470,30 @@ fn _lsp_probe_step() int {
 }
 
 @effects(all)
+fn _git_inline_probe(dict lay) int {
+   def int phase = int(_editor_values.get("git_inline_probe_phase", 0))
+   if int(_editor_get("frame_count")) > 240 { panic("git inline probe timed out") }
+   if phase == 0 {
+      _git_inline_toggle()
+      assert(bool(_editor_get("blame_on")), "git blame loads from the repository")
+      _editor_values["git_inline_probe_phase"] = 1
+   } elif phase == 1 {
+      def info = _editor_get("blame_lines").get("0", dict(0))
+      assert(_editor_get("blame_lines").len > 0 && to_str(info.get("author", "")).len > 0, "porcelain blame parsed")
+      assert(_editor_get("git_inline_runs").len > 0, "blame annotation rendered")
+      if _editor_get("blame_hunks").len > 0 { assert(int(_editor_get("git_hunk_bars")) > 0, "hunk bars rendered") }
+      print("EDITOR-GIT-INLINE-OK")
+      _editor_values["git_inline_probe_phase"] = 2
+      window.set_should_close(_editor_get("win"), true)
+   }
+   0
+}
+
+@effects(all)
 fn _inlay_live_probe(dict lay) int {
    def int phase = int(_editor_values.get("inlay_probe_phase", 0))
    if int(_editor_get("frame_count")) > 1200 { panic("live inlay probe timed out") }
-   if phase == 1 && _inlays_for_line(0).len == 0 { msleep(5) return 0 }
+   if phase == 1 && (_inlays_for_line(0).len == 0 || _editor_get("code_lens_rects").len == 0 || _editor_get("fold_ranges").len == 0 || _editor_get("fold_rects").len == 0) { msleep(5) return 0 }
    def fb = gfx.read_framebuffer()
    def int width = int(fb.get("width", 0))
    def int height = int(fb.get("height", 0))
@@ -4425,9 +4534,36 @@ fn _inlay_live_probe(dict lay) int {
          i += 4
       }
       assert(displayed, "live hint appears in the drawn text runs at its source position")
+      def lens_rects = _editor_get("code_lens_rects")
+      def lens0 = lens_rects.get(0, [])
+      def lens1 = lens_rects.get(1, [])
+      assert(lens_rects.len == 2 && to_str(lens0.get(4, dict(0)).get("title", "")) == "▶ Run" && to_str(lens1.get(4, dict(0)).get("title", "")) == "Debug", "live code lenses rendered and hit-testable")
+      assert(float(lens0.get(2, 0.0)) > 0.0 && float(lens0.get(1, -1.0)) >= _editor_row_y(float(lay.get("edit_y", 0.0)), 0) && float(lens0.get(1, 0.0)) < _editor_row_y(float(lay.get("edit_y", 0.0)), 1), "code lens is placed on its source row")
       assert(changed > 10 && _visual_prefix("def answer = 43", 0, 10) > _measure_prefix("def answer = 43", 10), "live hint changes the rendered line")
-      print("EDITOR-INLAY-LIVE-OK")
+      def folds = _editor_get("fold_ranges")
+      def markers = _editor_get("fold_rects")
+      def marker = markers.get(0, [])
+      assert(folds.len == 1 && int(folds.get(0).get("start", -1)) == 1 && int(folds.get(0).get("end", -1)) == 3 && markers.len == 1, "live folding range rendered in the gutter")
+      assert(_fold_rect_click(float(marker.get(0, 0.0)) + 2.0, float(marker.get(1, 0.0)) + 2.0), "fold marker routes a click to its range")
+      _editor_values["inlay_probe_phase"] = 10
+   } elif phase == 10 {
+      def lines = ed.current_lines(_editor_get("st"))
+      def view = _fold_visible_indices(lines)
+      assert(lines.len == 5 && view.len == 3 && _editor_get("fold_collapsed").contains("1"), "collapsed fold hides its body lines")
+      _fold_open_all()
+      _editor_values["inlay_probe_phase"] = 11
+   } elif phase == 11 {
+      def lines = ed.current_lines(_editor_get("st"))
+      def view = _fold_visible_indices(lines)
+      assert(view.len == lines.len && _editor_get("fold_collapsed").len == 0, "opening all folds restores every line")
+      def lens0 = _editor_get("code_lens_rects").get(0, [])
+      assert(_code_lens_click(float(lens0.get(0, 0.0)) + 2.0, float(lens0.get(1, 0.0)) + 2.0), "code lens rect routes a click to its command")
       _editor_values["inlay_probe_phase"] = 2
+   } elif phase == 2 {
+      if !termpane.is_open(_editor_get("term_state")) { msleep(5) return 0 }
+      assert(int(_editor_get("term_state").get("active", -1)) >= 0, "code lens process action opens a terminal")
+      print("EDITOR-INLAY-LIVE-OK")
+      _editor_values["inlay_probe_phase"] = 3
       _editor_values["lsp_state"] = lsp.stop(_lsp())
       window.set_should_close(_editor_get("win"), true)
    }
@@ -4492,6 +4628,8 @@ fn _lsp_pump() int {
       }
       if to_str(_editor_values.get("semantic_requested_path", "")) != path && int(_editor_get("lsp_dirty_at")) == 0 { _lsp_request_semantic(path) }
       if to_str(_editor_values.get("inlay_requested_path", "")) != path && int(_editor_get("lsp_dirty_at")) == 0 { _lsp_request_inlay(path) }
+      if to_str(_editor_values.get("code_lens_requested_path", "")) != path && int(_editor_get("lsp_dirty_at")) == 0 { _lsp_request_code_lens(path) }
+      if to_str(_editor_values.get("fold_requested_path", "")) != path && int(_editor_get("lsp_dirty_at")) == 0 { _lsp_request_folding(path) }
    }
    def auto = to_str(_editor_get("lsp_auto"))
    if auto.len > 0 && ticks() - int(_editor_get("lsp_auto_at")) >= 60000000 {
@@ -4517,7 +4655,7 @@ def LSP_TRACE = common.env_truthy("NY_EDITOR_LSP_TRACE")
 fn _lsp_event(dict e) int {
    def kind = to_str(e.get("kind", ""))
    if LSP_TRACE { eprint("[lsp] event " + kind + " " + to_str(e.get("text", e.get("request", "")))) }
-   if kind == "ready" { _editor_values["semantic_requested_path"] = "" _editor_values["inlay_requested_path"] = "" _status(to_str(_lsp().get("last", "lsp ready"))) }
+   if kind == "ready" { _editor_values["semantic_requested_path"] = "" _editor_values["inlay_requested_path"] = "" _editor_values["code_lens_requested_path"] = "" _editor_values["fold_requested_path"] = "" _status(to_str(_lsp().get("last", "lsp ready"))) }
    elif kind == "diagnostics" { _request_full_redraw(1) }
    elif kind == "semantic_tokens" {
       def path = to_str(e.get("path", ""))
@@ -4548,6 +4686,33 @@ fn _lsp_event(dict e) int {
          _request_full_redraw(1)
       }
    }
+   elif kind == "folding_ranges" {
+      def path = to_str(e.get("path", ""))
+      if path == _current_path() && int(_editor_get("lsp_dirty_at")) == 0 {
+         def ranges = e.get("items", [])
+         mut dict keep = dict(0)
+         def old = _editor_get("fold_collapsed")
+         for r in ranges { def key = to_str(int(r.get("start", 0))) if old.contains(key) { keep[key] = true } }
+         _editor_values["fold_path"] = path
+         _editor_values["fold_ranges"] = ranges
+         _editor_values["fold_collapsed"] = keep
+         _request_full_redraw(1)
+      }
+   }
+   elif kind == "code_lenses" {
+      def path = to_str(e.get("path", ""))
+      if path == _current_path() && int(_editor_get("lsp_dirty_at")) == 0 {
+         mut dict by_line = dict(32)
+         for lens in e.get("items", []) {
+            def key = to_str(int(lens.get("line", 0)))
+            by_line[key] = by_line.get(key, []).append(lens)
+         }
+         _editor_values["code_lens_path"] = path
+         _editor_values["code_lens_lines"] = by_line
+         _request_full_redraw(1)
+      }
+   }
+   elif kind == "command" { _lsp_command_result(e) }
    elif kind == "completion" { _lsp_show_completion(e) }
    elif kind == "hover" { _lsp_show_hover(e) }
    elif kind == "signature" { _lsp_show_signature(e) }
@@ -4592,6 +4757,36 @@ fn _lsp_request(str kind) int {
       _editor_values["lsp_state"] = lsp.code_actions(_lsp(), path, line, col)
    }
    _status(to_str(_lsp().get("last", "lsp")))
+   0
+}
+
+fn _lsp_command_result(dict e) int {
+   def action = e.get("result", nil)
+   if !is_dict(action) { _status("lsp command complete") return 0 }
+   def kind = to_str(action.get("kind", ""))
+   def save_uri = to_str(action.get("save", ""))
+   if save_uri.len > 0 && save_uri == lsp.uri_of(_current_path()) && bool(ed.current_buffer(_editor_get("st")).get("dirty", false)) { _save() }
+   if kind == "message" {
+      _status(to_str(action.get("text", "lsp command")))
+   } elif kind == "process" {
+      def cmd = to_str(action.get("command", ""))
+      mut argv = []
+      for arg in action.get("args", []) { argv = argv.append(to_str(arg)) }
+      if cmd.len > 0 {
+         def title = to_str(action.get("title", "command"))
+         _editor_values["term_state"] = termpane.open_command(_editor_get("term_state"), title, cmd, argv, "$ " + str.join([cmd].extend(argv), " ") + "\n")
+         _set_focus("terminal", false)
+         _status(title)
+      }
+   } elif kind == "debug" {
+      def cfg = action.get("configuration", dict(0))
+      def program = to_str(cfg.get("program", ""))
+      if program.len > 0 {
+         _editor_values["dap_state"] = dap.launch(_dap(), program, [], to_str(cfg.get("cwd", "")))
+         _editor_values["dap_panel"] = true
+         _status(dap.status(_dap()))
+      }
+   } else { _status("lsp command complete") }
    0
 }
 
@@ -4889,6 +5084,8 @@ fn _draw_diagnostics(dict lay) int {
    def lines = ed.current_lines(_editor_get("st"))
    def int scroll = int(_editor_get("st").get("scroll", 0))
    def int rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
+   def view = _fold_visible_indices(lines)
+   def int start = _fold_first_visible_at_or_after(view, scroll)
    def f64 text_x = _line_text_x(lay)
    def f64 edit_x = float(lay.get("edit_x", 0.0))
    def f64 right = edit_x + float(lay.get("edit_w", 0.0)) - 12.0
@@ -4901,16 +5098,17 @@ fn _draw_diagnostics(dict lay) int {
       i += 1
       def int sl = int(d.get("line", 0))
       def int el = int(max(sl, int(d.get("end_line", sl))))
-      if el < scroll || sl >= scroll + rows { continue }
       def int sev = int(d.get("severity", 1))
       def c = _diag_color(sev)
       mut int ln = int(max(sl, scroll))
-      while ln <= el && ln < scroll + rows && ln < lines.len {
+      while ln <= el && ln < lines.len {
+         def int sr = _fold_visible_index(view, ln) - start
+         if sr < 0 || sr >= rows { ln += 1 continue }
          def text = to_str(lines.get(ln, ""))
          def int a = ln == sl ? lsp.editor_col(_lsp(), text, int(d.get("col", 0))) : 0
          mut int b = ln == el ? lsp.editor_col(_lsp(), text, int(d.get("end_col", 0))) : str.utf8_len(text)
          if b <= a { b = a + 1 }
-         def f64 y = float(_editor_row_y(top, ln - scroll)) + float(ed.LINE_H) - 3.0
+         def f64 y = float(_editor_row_y(top, sr)) + float(ed.LINE_H) - 3.0
          def f64 x0 = text_x + _visual_prefix(text, ln, a)
          def f64 x1 = float(min(right, float(max(x0 + 6.0, text_x + _visual_prefix(text, ln, b)))))
          _draw_squiggle(x0, x1, y, c)
@@ -4924,10 +5122,11 @@ fn _draw_diagnostics(dict lay) int {
    for k in worst.keys() {
       def d = worst.get(k, dict(0))
       def int ln = int(d.get("line", 0))
-      if ln < scroll || ln >= scroll + rows { continue }
+      def int sr = _fold_visible_index(view, ln) - start
+      if sr < 0 || sr >= rows { continue }
       def int sev = int(d.get("severity", 1))
       def c = _diag_color(sev)
-      def f64 row_y = float(_editor_row_y(top, ln - scroll))
+      def f64 row_y = float(_editor_row_y(top, sr))
       ;; gutter dot
       _fill_rect(edit_x + 4.0, row_y + float(ed.LINE_H) * 0.5 - 3.0, 6.0, 6.0, c)
       ;; inline message after the code, faded, truncated to the pane
@@ -5157,13 +5356,17 @@ fn _draw_debug_gutter(dict lay) int {
    if bps.len <= 0 && !here { return 0 }
    def int scroll = int(_editor_get("st").get("scroll", 0))
    def int rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
+   def lines = ed.current_lines(_editor_get("st"))
+   def view = _fold_visible_indices(lines)
+   def int start = _fold_first_visible_at_or_after(view, scroll)
    def f64 top = float(lay.get("edit_y", 0.0))
    def f64 gx = float(lay.get("edit_x", 0.0))
    def f64 lh = float(ed.LINE_H)
    if here {
       def int ln = int(loc.get("line", 0))
-      if ln >= scroll && ln < scroll + rows {
-         def f64 y = float(_editor_row_y(top, ln - scroll))
+      def int sr = _fold_visible_index(view, ln) - start
+      if sr >= 0 && sr < rows {
+         def f64 y = float(_editor_row_y(top, sr))
          _fill_rect(gx, y, float(lay.get("edit_w", 0.0)), lh, gfx.color_alpha(C_EXEC, 0.10))
          _fill_rect(gx, y, 3.0, lh, C_EXEC)
       }
@@ -5172,8 +5375,9 @@ fn _draw_debug_gutter(dict lay) int {
    while i < bps.len {
       def int ln = int(bps.get(i, -1))
       i += 1
-      if ln < scroll || ln >= scroll + rows { continue }
-      def f64 y = float(_editor_row_y(top, ln - scroll))
+      def int sr = _fold_visible_index(view, ln) - start
+      if sr < 0 || sr >= rows { continue }
+      def f64 y = float(_editor_row_y(top, sr))
       def f64 d = float(min(9.0, lh - 8.0))
       ;; A rounded dot left of the line numbers: a cross of rects reads as a
       ;; circle at this size.
@@ -5282,6 +5486,10 @@ fn _run_command(str id) int {
    elif id == "run" { _run_current_file() }
    elif id == "check" { _check_current_file() }
    elif id == "format" { _format_current_file() }
+   elif id == "git-blame" { _git_inline_toggle() }
+   elif id == "fold-toggle" { _fold_toggle_at_cursor() }
+   elif id == "fold-close" { _fold_close_at_cursor() }
+   elif id == "fold-open-all" { _fold_open_all() }
    elif id == "debug" || id == "dap-debug" || id == "debug-start" { _dap_start() }
    elif id == "debug-stop" { _dap_stop() }
    elif id == "debug-pause" { _dap_step("pause") }
@@ -5304,6 +5512,7 @@ fn _run_command(str id) int {
    elif id == "refresh" { _editor_values["project_state"] = project.refresh_git(_editor_get("project_state")) _editor_get("st")["project_loaded"] = true _editor_get("st")["git_loaded"] = true _invalidate_project_definitions() _status("project refreshed") }
    elif id == "rename" { _start_rename(prompt.context_entry(_editor_get("context_state"))) }
    elif id == "find" { _find_open() }
+   elif id == "find-buffers" { _find_buffers_open() }
    elif id == "replace" { _find_replace_open() }
    elif id == "find-next" { _find_step(1) }
    elif id == "find-prev" { _find_step(-1) }
@@ -5441,7 +5650,7 @@ fn _run_command(str id) int {
       else { _editor_values["rename_state"] = prompt.rename_start(_editor_get("rename_state"), {"name": word, "action": "symbol", "rel": word}) }
    }
    else { _status("unknown command " + id) }
-   if id != "palette" && id != "switch-buffer" { _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state")) }
+   if id != "palette" && id != "switch-buffer" && id != "find-buffers" { _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state")) }
    0
 }
 
@@ -5479,11 +5688,126 @@ fn _switch_buffer_open() int {
    0
 }
 
+@inline
+fn _ascii_fold(int byte_value) int {
+   byte_value >= 65 && byte_value <= 90 ? byte_value + 32 : byte_value
+}
+
+fn _find_buffers_next(str line, str needle, int start) int {
+   def last = line.len - needle.len
+   mut i = start
+   while i <= last {
+      mut j = 0
+      while j < needle.len && _ascii_fold(load8(line, i + j)) == load8(needle, j) { j += 1 }
+      if j == needle.len { return i }
+      i += 1
+   }
+   -1
+}
+
+fn _find_buffers_column(str line, int byte_at) int {
+   "Maps a UTF-8 byte offset from the literal search to the editor's codepoint column."
+   mut int col = 0
+   mut int i = 0
+   def end = min(max(byte_at, 0), line.len)
+   while i < end {
+      def int b = load8(line, i) & 255
+      if b < 128 || b >= 192 { col += 1 }
+      i += 1
+   }
+   col
+}
+
+fn _find_buffers_refresh() int {
+   def ps = _editor_get("palette_state")
+   def q = to_str(str.lower(pal.query(ps)))
+   mut rows = []
+   def limit = 1000
+   if q.len > 0 {
+      def bs = _editor_get("st").get("buffers", [])
+      mut bi = 0
+      while bi < bs.len && rows.len < limit {
+         def b = bs.get(bi, {})
+         def name = to_str(b.get("name", "buffer"))
+         def path = _buffer_source_path(b)
+         def lines = b.get("lines", [])
+         mut li = 0
+         while li < lines.len && rows.len < limit {
+            def line = to_str(lines.get(li, ""))
+            if line.len >= q.len {
+               mut at = _find_buffers_next(line, q, 0)
+               while at >= 0 && rows.len < limit {
+                  def end = at + q.len
+                  def loc = to_str(li + 1) + ":" + to_str(_find_buffers_column(line, at) + 1)
+                  mut first = max(0, at - 12)
+                  while first < at && (load8(line, first) & 192) == 128 { first += 1 }
+                  mut stop = min(line.len, first + 76)
+                  while stop < line.len && (load8(line, stop) & 192) == 128 { stop -= 1 }
+                  def preview = str.strip(str.str_slice(line, _find_buffers_column(line, first), _find_buffers_column(line, stop))) + (stop < line.len ? "…" : "")
+                  rows = rows.append([name + ":" + loc + "  " + preview, "", "", path.len > 0 ? path : name, "search", bi, li, at, end])
+                  at = _find_buffers_next(line, q, end)
+               }
+            }
+            li += 1
+         }
+         bi += 1
+      }
+   }
+   _editor_values["palette_state"] = pal.replace_results(ps, rows)
+   0
+}
+
+fn _find_buffers_open() int {
+   _editor_values["palette_state"] = pal.open_items(_editor_get("palette_state"), [], "find-buffers")
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
+   _editor_values["find_state"] = find.dismiss(_editor_get("find_state"))
+   _completion_close()
+   _request_full_redraw(3)
+   _status("find in open buffers")
+   0
+}
+
+fn _find_buffers_choose(list row) int {
+   def st = _editor_get("st")
+   def bi = int(row.get(5, -1))
+   def li = int(row.get(6, -1))
+   def first, last = int(row.get(7, 0)), int(row.get(8, 0))
+   def buffers = st.get("buffers", [])
+   if bi < 0 || bi >= buffers.len { return _find_buffers_refresh() }
+   def lines = buffers.get(bi, {}).get("lines", [])
+   if li < 0 || li >= lines.len { return _find_buffers_refresh() }
+   def line = to_str(lines.get(li, ""))
+   def ps = _editor_get("palette_state")
+   def first_col = _find_buffers_column(line, first)
+   def last_col = _find_buffers_column(line, last)
+   if last > line.len || to_str(str.lower(str.str_slice(line, first_col, last_col))) != to_str(str.lower(pal.query(ps))) { return _find_buffers_refresh() }
+   _editor_values["palette_state"] = pal.dismiss(ps)
+   if bi == int(st.get("active", 0)) { _nav_push_current() }
+   _select_top_tab(bi)
+   _clear_selections()
+   mut dict active = _editor_get("st")
+   active["cursor_line"] = li
+   active["cursor_col"] = last_col
+   active["sel_a_line"] = li
+   active["sel_a_col"] = first_col
+   active["sel_b_line"] = li
+   active["sel_b_col"] = last_col
+   active["sel_active"] = true
+   _editor_values["st"] = active
+   _follow_cursor()
+   _nav_record_current()
+   _status(to_str(row.get(3, "")) + ":" + to_str(li + 1) + ":" + to_str(first + 1))
+   0
+}
+
 fn _palette_choose() int {
-   def row = pal.selected(_editor_get("palette_state"))
-   if row.len <= 0 { _status("no command") return 0 }
+   def ps = _editor_get("palette_state")
+   def mode = pal.items_mode(ps)
+   def row = pal.selected(ps)
+   if row.len <= 0 { _status(mode == "find-buffers" ? "no matches in open buffers" : "no command") return 0 }
+   if mode == "find-buffers" { return _find_buffers_choose(row) }
    def id = to_str(row.get(1, ""))
-   if pal.items_mode(_editor_get("palette_state")) == "buffers" && str.startswith(id, "buffer:") {
+   if mode == "buffers" && str.startswith(id, "buffer:") {
       _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
       _select_top_tab(int(str.atof(str.str_slice(id, 7, id.len))))
       _status("buffer " + to_str(ed.current_buffer(_editor_get("st")).get("name", "")))
@@ -5493,13 +5817,23 @@ fn _palette_choose() int {
 }
 
 fn _handle_palette_key(any data) int {
-   _editor_values["palette_state"] = pal.handle_key(_editor_get("palette_state"), data)
-   if pal.wants_choose(_editor_get("palette_state")) { _palette_choose() }
+   def ps = _editor_get("palette_state")
+   def searching = pal.items_mode(ps) == "find-buffers"
+   def previous = searching ? pal.query(ps) : ""
+   def next = pal.handle_key(ps, data)
+   _editor_values["palette_state"] = next
+   if searching && pal.query(next) != previous { _find_buffers_refresh() }
+   if pal.wants_choose(next) { _palette_choose() }
    0
 }
 
 fn _handle_palette_char(any data) int {
-   _editor_values["palette_state"] = pal.handle_char(_editor_get("palette_state"), data)
+   def ps = _editor_get("palette_state")
+   def searching = pal.items_mode(ps) == "find-buffers"
+   def previous = searching ? pal.query(ps) : ""
+   def next = pal.handle_char(ps, data)
+   _editor_values["palette_state"] = next
+   if searching && pal.query(next) != previous { _find_buffers_refresh() }
    0
 }
 
@@ -5679,13 +6013,13 @@ fn _buffer_edge(str edge, bool extend=false) int {
    _finish_selection_move(extend)
 }
 
-fn _handle_command(str ch) bool {
+fn _handle_command(str ch, any context) bool {
    if ch.len <= 0 {
       _status(chord.describe(_editor_get("chord_state")) + "-")
       return true
    }
    if ch == "cancel" { _editor_values["chord_state"] = chord.clear(_editor_get("chord_state")) _run_command("cancel") return true }
-   def id = cmd.id_for_chord(ch)
+   def id = cmd.id_for_chord(ch, context)
    if id.len <= 0 { return false }
    _run_command(id)
    true
@@ -5802,21 +6136,22 @@ fn _handle_key(any data) int {
       print("[editor:key] chord=" + key_chord + " key=" + to_str(int(data.get("key", -1))) + " mods=" + to_str(int(data.get("mods", data.get("mod", 0)))))
    }
    def had_prefix = chord.pending(_editor_get("chord_state"))
+   def context = _keymap_context()
    if SHOW_LAST_KEY || had_prefix { _editor_values["ui_state"] = interact.key_seen(_editor_get("ui_state"), key_chord) }
    ;; In the default keymap C-c copies at once; in Emacs it is a prefix.
-   if key_chord == "C-c" && !had_prefix && cmd.keymap() != "emacs" { _copy_selection_or_buffer() }
-   def res = chord.command_chord(_editor_get("chord_state"), data)
+   def res = chord.command_chord(_editor_get("chord_state"), data, context)
    _editor_values["chord_state"] = res.get(0)
    def resolved = to_str(res.get(1, ""))
+   if resolved == "" && key_chord == "C-c" && !had_prefix && cmd.keymap() != "emacs" && cmd.id_for_chord(key_chord, context) == "copy" { _copy_selection_or_buffer() }
    ;; C-h k: the next complete chord is described instead of run.
    if resolved.len > 0 && resolved != "cancel" && bool(_editor_values.get("describe_key", false)) {
       _editor_values["describe_key"] = false
-      _status(cmd.describe_chord(resolved))
+      _status(cmd.describe_chord(resolved, context))
       _suppress_char_from_key(data)
       return 0
    }
    if INPUT_TRACE { print("[editor:key] resolved=" + resolved + " prefix=" + chord.describe(_editor_get("chord_state"))) }
-   if _handle_command(resolved) {
+   if _handle_command(resolved, context) {
       _suppress_char_from_key(data)
       return 0
    }
@@ -5996,6 +6331,8 @@ fn _handle_mouse_press(dict lay, any data) int {
       return 0
    }
    if pane == "editor" {
+      if button == 0 && _fold_rect_click(mx, my) { return 0 }
+      if button == 0 && _code_lens_click(mx, my) { return 0 }
       if button == 0 && _alt(data) && _shift(data) {
          def lines_alt = ed.current_lines(_editor_get("st"))
          if lines_alt.len > 0 {
@@ -6371,7 +6708,7 @@ fn _handle_scroll(dict lay, any data) int {
       return 0
    }
    if _which_key_contains(_layout_sw(lay), _layout_sh(lay), mx, my) {
-      def rows_key = pal.which_key(chord.describe(_editor_get("chord_state")))
+      def rows_key = _which_key_rows(chord.describe(_editor_get("chord_state")))
       def rect_key = _which_key_rect(_layout_sw(lay), _layout_sh(lay), rows_key.len)
       def visible_key = int(rect_key.get(5, 1))
       _editor_values["which_key_scroll_accum"] = float(_editor_get("which_key_scroll_accum")) + (-dy * 3.0)
@@ -7477,19 +7814,21 @@ fn _color_picker_open() int {
    0
 }
 
-fn _draw_color_swatches_visible(list lines, int scroll, int rows, f64 text_x, f64 y, int draw_limit) int {
-   def swatches = colorpicker.swatches_visible(lines, scroll, rows, draw_limit)
+fn _draw_color_swatches_visible(list lines, list view, int start, int rows, f64 text_x, f64 y, int draw_limit) int {
+   def scroll = int(view.get(start, 0))
+   def swatches = colorpicker.swatches_visible(lines, scroll, max(rows, view.len - start), draw_limit)
    mut i = 0
    while i < swatches.len {
       def hit = swatches.get(i, {})
       def li = int(hit.get("line", -1))
-      if li >= scroll && li < lines.len {
+      def int sr = _fold_visible_index(view, li) - start
+      if sr >= 0 && sr < rows && li < lines.len {
          def line = _draw_line_text(to_str(lines.get(li, "")), draw_limit)
          def int start = int(min(max(int(hit.get("start", 0)), 0), line.len))
          def int stop = int(min(max(int(hit.get("end", start)), start), line.len))
          def hex = to_str(hit.get("hex", ""))
          if hex.len >= 7 && stop > start {
-            def f64 yy = _editor_row_y(y, li - scroll)
+            def f64 yy = _editor_row_y(y, sr)
             def f64 sx = text_x + _visual_prefix(line, li, start)
             def f64 ex = text_x + _visual_prefix(line, li, stop)
             def col = _hex_color(hex)
@@ -7571,23 +7910,21 @@ fn _draw_selection_for_line(str line, int li, f64 text_x, f64 y, list r) int {
    0
 }
 
-fn _draw_find_visible(list lines, int scroll, int rows, f64 text_x, f64 y) int {
+fn _draw_find_visible(list lines, list view, int start, int rows, f64 text_x, f64 y) int {
    if !find.is_open(_editor_get("find_state")) || find.count(_editor_get("find_state")) <= 0 { return 0 }
    def rs = find.results(_editor_get("find_state"))
    def active_idx = find.index(_editor_get("find_state"))
-   def last = scroll + rows
    mut i = 0
-   while i < rs.len && int(rs.get(i, {}).get("line", -1)) < scroll { i += 1 }
    while i < rs.len {
       def r = rs.get(i)
       def row = int(r.get("line", -1))
-      if row >= last { break }
-      if row >= scroll && row < lines.len {
+      def int sr = _fold_visible_index(view, row) - start
+      if sr >= 0 && sr < rows && row < lines.len {
          def line = to_str(lines.get(row, ""))
          def int a = int(min(max(int(r.get("start", 0)), 0), line.len))
          def int b = int(min(max(int(r.get("end", a)), a), line.len))
          if b > a {
-            def f64 yy = float(_editor_row_y(y, row - scroll))
+            def f64 yy = float(_editor_row_y(y, sr))
             def sx = text_x + _visual_prefix(line, row, a)
             def ex = text_x + _visual_prefix(line, row, b)
             _fill_rect(sx, yy - 2.0, max(4.0, ex - sx), float(ed.LINE_H), i == active_idx ? gfx.color_alpha(C_ACCENT, 0.52) : gfx.color_alpha(C_CYAN, 0.24))
@@ -7598,14 +7935,14 @@ fn _draw_find_visible(list lines, int scroll, int rows, f64 text_x, f64 y) int {
    0
 }
 
-fn _draw_minimap(dict lay, int rows, int scroll, int total) int {
+fn _draw_minimap(dict lay, int rows, int start, int total) int {
    if total <= rows { return 0 }
    def x = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) - 10.0
    def y = float(lay.get("edit_y", 0.0)) + 10.0
    def f64 h = float(lay.get("edit_h", 0.0)) - 20.0
    def f64 thumb_h = max(18.0, h * float(rows) / float(total))
-   def int max_scroll = max(1, total - rows)
-   def f64 thumb_y = y + (h - thumb_h) * float(scroll) / float(max_scroll)
+   def int max_start = max(1, total - rows)
+   def f64 thumb_y = y + (h - thumb_h) * float(start) / float(max_start)
    _fill_rect(x, y, 3.0, h, gfx.color_alpha(C_LINE, 0.65))
    _fill_rect(x - 1.0, thumb_y, 5.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.78))
    0
@@ -8030,15 +8367,373 @@ fn _draw_rail(dict lay) int {
    0
 }
 
-fn _sync_scroll(int rows, int total) int {
+fn _fold_collapsed_end(int start) int {
+   if !_editor_get("fold_collapsed").contains(to_str(start)) { return -1 }
+   for r in _editor_get("fold_ranges") {
+      if int(r.get("start", -1)) == start { return int(r.get("end", start)) }
+   }
+   -1
+}
+
+fn _fold_hidden_start(int line) int {
+   for r in _editor_get("fold_ranges") {
+      def int start = int(r.get("start", -1))
+      def int end = int(r.get("end", -1))
+      if _editor_get("fold_collapsed").contains(to_str(start)) && line > start && line <= end { return start }
+   }
+   -1
+}
+
+fn _fold_visible_indices(list lines) list {
+   mut out = []
+   mut int i = 0
+   while i < lines.len {
+      out = out.append(i)
+      def int end = _fold_collapsed_end(i)
+      i = end > i ? end + 1 : i + 1
+   }
+   out
+}
+
+fn _fold_visible_index(list view, int doc_line) int {
+   mut int i = 0
+   while i < view.len {
+      if int(view.get(i, -1)) == doc_line { return i }
+      if int(view.get(i, -1)) > doc_line { return -1 }
+      i += 1
+   }
+   -1
+}
+
+fn _fold_first_visible_at_or_after(list view, int doc_line) int {
+   mut int i = 0
+   while i < view.len {
+      if int(view.get(i, 0)) >= doc_line { return i }
+      i += 1
+   }
+   view.len
+}
+
+fn _fold_range_at(int line) dict {
+   mut best = dict(0)
+   for r in _editor_get("fold_ranges") {
+      def int start = int(r.get("start", -1))
+      def int end = int(r.get("end", -1))
+      if line >= start && line <= end {
+         if best.len == 0 || end - start < int(best.get("end", 0)) - int(best.get("start", 0)) { best = r }
+      }
+   }
+   best
+}
+
+fn _fold_apply(int start, bool collapse) int {
+   def key = to_str(start)
+   if collapse {
+      _editor_get("fold_collapsed")[key] = true
+   } else {
+      mut dict next = dict(0)
+      for k in _editor_get("fold_collapsed").keys() { if to_str(k) != key { next[k] = true } }
+      _editor_values["fold_collapsed"] = next
+   }
+   def int cursor = int(_editor_get("st").get("cursor_line", 0))
+   if collapse && cursor > start { _editor_get("st")["cursor_line"] = start _editor_get("st")["cursor_col"] = 0 }
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _follow_cursor()
+   _editor_values["visible_runs_cache_key"] = ""
+   _request_full_redraw(2)
+   0
+}
+
+fn _fold_toggle_at_cursor() int {
+   def r = _fold_range_at(int(_editor_get("st").get("cursor_line", 0)))
+   if r.len == 0 { _status("no fold here") return 0 }
+   def int start = int(r.get("start", 0))
+   def bool collapsed = _editor_get("fold_collapsed").contains(to_str(start))
+   _fold_apply(start, !collapsed)
+   _status(collapsed ? "fold opened" : "fold closed")
+}
+
+fn _fold_close_at_cursor() int {
+   def r = _fold_range_at(int(_editor_get("st").get("cursor_line", 0)))
+   if r.len == 0 { _status("no fold here") return 0 }
+   _fold_apply(int(r.get("start", 0)), true)
+   _status("fold closed")
+}
+
+fn _fold_open_all() int {
+   _editor_values["fold_collapsed"] = dict(0)
+   _editor_values["visible_runs_cache_key"] = ""
+   _request_full_redraw(2)
+   _status("folds opened")
+}
+
+fn _fold_rect_click(f64 x, f64 y) bool {
+   def rects = _editor_get("fold_rects")
+   mut int i = 0
+   while i < rects.len {
+      def r = rects.get(i, [])
+      if is_list(r) && r.len >= 5 && widgets.hit(x, y, float(r.get(0)), float(r.get(1)), float(r.get(2)), float(r.get(3))) {
+         def int start = int(r.get(4, -1))
+         _fold_apply(start, !_editor_get("fold_collapsed").contains(to_str(start)))
+         return true
+      }
+      i += 1
+   }
+   false
+}
+
+fn _sync_scroll(int rows, int total, list view=[]) int {
    def cursor = int(_editor_get("st").get("cursor_line", 0))
    mut scroll = int(_editor_get("st").get("scroll", 0))
-   def max_scroll = max(0, total - rows)
-   if bool(_editor_get("st").get("scroll_follow", true)) {
-      if cursor < scroll { scroll = cursor }
-      if cursor >= scroll + rows { scroll = cursor - rows + 1 }
+   if view.len <= 0 {
+      def max_scroll = max(0, total - rows)
+      if bool(_editor_get("st").get("scroll_follow", true)) {
+         if cursor < scroll { scroll = cursor }
+         if cursor >= scroll + rows { scroll = cursor - rows + 1 }
+      }
+      _editor_get("st")["scroll"] = min(max_scroll, max(0, scroll))
+      return 0
    }
-   _editor_get("st")["scroll"] = min(max_scroll, max(0, scroll))
+   mut int ci = _fold_visible_index(view, cursor)
+   if ci < 0 {
+      def int hidden = _fold_hidden_start(cursor)
+      if hidden >= 0 { _editor_get("st")["cursor_line"] = hidden _editor_get("st")["cursor_col"] = 0 ci = _fold_visible_index(view, hidden) }
+   }
+   if ci < 0 { ci = 0 }
+   mut int start = _fold_first_visible_at_or_after(view, scroll)
+   def max_start = max(0, view.len - rows)
+   if bool(_editor_get("st").get("scroll_follow", true)) {
+      if ci < start { start = ci }
+      if ci >= start + rows { start = ci - rows + 1 }
+   }
+   start = min(max_start, max(0, start))
+   _editor_get("st")["scroll"] = int(view.get(start, 0))
+   0
+}
+
+fn _code_lenses_for_line(int li) list {
+   if _current_path().len == 0 || _current_path() != to_str(_editor_values.get("code_lens_path", "")) { return [] }
+   _editor_values.get("code_lens_lines", dict(0)).get(to_str(li), [])
+}
+
+fn _queue_code_lenses(list runs, dict lay, list view, int start, int rows) list {
+   _editor_values["code_lens_rects"] = []
+   def path = _current_path()
+   if path.len == 0 || path != to_str(_editor_values.get("code_lens_path", "")) { return runs }
+   def int sf = int(_editor_get("font_small"))
+   def f64 top = float(lay.get("edit_y", 0.0))
+   def f64 text_x = _line_text_x(lay)
+   def f64 right_edge = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) - 20.0
+   def lines = ed.current_lines(_editor_get("st"))
+   def draw_limit = _line_limit(lay)
+   mut int i = 0
+   while i < rows && start + i < view.len {
+      def int li = int(view.get(start + i, -1))
+      if li < 0 { break }
+      def lenses = _code_lenses_for_line(li)
+      if lenses.len > 0 {
+         def yy = _editor_row_y(top, i)
+         def line = _draw_line_text(to_str(lines.get(li, "")), draw_limit)
+         mut f64 x = text_x + _visual_prefix(line, li, str.utf8_len(line)) + 12.0
+         for lens in lenses {
+            def title = to_str(lens.get("title", ""))
+            def label = _fit_chrome_text(sf, title, max(0.0, right_edge - x - 10.0))
+            if label.len <= 0 { break }
+            def f64 ww = _measure_ui(sf, label, 0.0) + 10.0
+            if x + ww > right_edge { break }
+            _fill_rect(x, yy + 2.0, ww, float(ed.LINE_H) - 4.0, gfx.color_alpha(C_CHIP, 0.48))
+            _stroke_rect(x, yy + 2.0, ww, float(ed.LINE_H) - 4.0, gfx.color_alpha(C_CYAN, 0.45), 1.0)
+            runs = _append_text_run(runs, label, x + 5.0, _row_text_y(sf, yy, ed.LINE_H), U_CYAN)
+            _editor_values["code_lens_rects"] = _editor_get("code_lens_rects").append([x, yy + 1.0, ww, float(ed.LINE_H) - 2.0, lens])
+            x += ww + 6.0
+         }
+      }
+      i += 1
+   }
+   runs
+}
+
+@effects(all)
+fn _git_inline_refresh() int {
+   def path = _current_path()
+   if path.len == 0 || !file_exists(path) { _status("save file before git blame") return 0 }
+   def root = project.root(_editor_get("project_state"))
+   if root.len == 0 { root = ospath.dirname(path) }
+   def int cursor = int(_editor_get("st").get("cursor_line", 0))
+   def int lo = max(1, cursor + 1 - 40)
+   def cap = run_capture(["git", "-C", root, "blame", "--line-porcelain", "-L", to_str(lo) + ",+160", "--", path], [], nil, false)
+   if int(cap.get("code", 1)) != 0 {
+      print("[git-inline] blame failed path=" + path + " root=" + root + " code=" + to_str(cap.get("code", -1)) + " err=" + to_str(cap.get("stderr", "")))
+      _status("git blame unavailable")
+      return 0
+   }
+   mut dict rows = dict(128)
+   mut str author = ""
+   mut str summary = ""
+   mut int current_line = 0
+   def blame_out = to_str(cap.get("stdout", ""))
+   mut int bpos = 0
+   while bpos <= blame_out.len {
+      mut int bend = bpos
+      while bend < blame_out.len && int(load8(blame_out, bend)) != 10 { bend += 1 }
+      def t = str.str_slice(blame_out, bpos, bend)
+      if t.len > 0 {
+         if int(load8(t, 0)) == 9 {
+            rows[to_str(current_line)] = {"author": author, "summary": summary}
+         } else {
+            def s1 = str.find(t, " ")
+            if s1 == 40 {
+               def rest = str.str_slice(t, s1 + 1, t.len)
+               def s2 = str.find(rest, " ")
+               if s2 > 0 {
+                  def rest2 = str.str_slice(rest, s2 + 1, rest.len)
+                  def s3 = str.find(rest2, " ")
+                  if s3 > 0 {
+                     def int n = int(str.str_slice(rest2, 0, s3))
+                     if n > 0 { current_line = n - 1 }
+                  }
+               }
+            }
+            if str.startswith(t, "author ") { author = str.strip(str.str_slice(t, 7, t.len)) }
+            elif str.startswith(t, "summary ") { summary = str.strip(str.str_slice(t, 8, t.len)) }
+         }
+      }
+      if bend >= blame_out.len { break }
+      bpos = bend + 1
+   }
+   if rows.len == 0 {
+      print("[git-inline] no blame rows path=" + path + " root=" + root)
+      _status("no blame for this file")
+      return 0
+   }
+   def diff = run_capture(["git", "-C", root, "diff", "--unified=0", "--no-color", "--", path], [], nil, false)
+   mut dict hunks = dict(32)
+   def diff_out = to_str(diff.get("stdout", ""))
+   mut int dpos = 0
+   while dpos <= diff_out.len {
+      mut int dend = dpos
+      while dend < diff_out.len && int(load8(diff_out, dend)) != 10 { dend += 1 }
+      def t = str.strip(str.str_slice(diff_out, dpos, dend))
+      if str.startswith(t, "@@") {
+         mut int old_count = 0
+         mut int new_start = 0
+         mut int new_count = 0
+         def minus = str.find(t, "-")
+         if minus >= 0 {
+            def after = str.str_slice(t, minus + 1, t.len)
+            def sp = str.find(after, " ")
+            def tok = sp >= 0 ? str.str_slice(after, 0, sp) : after
+            def comma = str.find(tok, ",")
+            old_count = comma >= 0 ? int(str.str_slice(tok, comma + 1, tok.len)) : 1
+         }
+         def plus = str.find(t, "+")
+         if plus >= 0 {
+            def after = str.str_slice(t, plus + 1, t.len)
+            def sp = str.find(after, " ")
+            def tok = sp >= 0 ? str.str_slice(after, 0, sp) : after
+            def comma = str.find(tok, ",")
+            new_start = int(comma >= 0 ? str.str_slice(tok, 0, comma) : tok)
+            new_count = comma >= 0 ? int(str.str_slice(tok, comma + 1, tok.len)) : 1
+         }
+         mut int i = 0
+         while i < new_count { hunks[to_str(new_start + i)] = old_count > 0 ? "M" : "A" i += 1 }
+         if new_count == 0 && old_count > 0 { hunks[to_str(new_start)] = "D" }
+      }
+      if dend >= diff_out.len { break }
+      dpos = dend + 1
+   }
+   _editor_values["blame_on"] = true
+   _editor_values["blame_path"] = path
+   _editor_values["blame_lines"] = rows
+   _editor_values["blame_hunks"] = hunks
+   _request_full_redraw(2)
+   0
+}
+
+fn _git_inline_toggle() int {
+   if bool(_editor_values.get("blame_on", false)) {
+      _editor_values["blame_on"] = false
+      _editor_values["blame_path"] = ""
+      _editor_values["blame_lines"] = dict(0)
+      _editor_values["blame_hunks"] = dict(0)
+      _editor_values["git_inline_runs"] = []
+      _status("git blame off")
+      return 0
+   }
+   _git_inline_refresh()
+   if bool(_editor_values.get("blame_on", false)) { _status("git blame on") }
+   0
+}
+
+fn _queue_git_inline(dict lay, int rows) list {
+   _editor_values["git_inline_runs"] = []
+   _editor_values["git_hunk_bars"] = 0
+   if !bool(_editor_get("blame_on")) || to_str(_editor_values.get("blame_path", "")) != _current_path() { return [] }
+   def lines = ed.current_lines(_editor_get("st"))
+   def view = _fold_visible_indices(lines)
+   def int scroll = int(_editor_get("st").get("scroll", 0))
+   mut int start = 0
+   while start < view.len && int(view.get(start, 0)) < scroll { start += 1 }
+   def f64 top = float(lay.get("edit_y", 0.0))
+   def f64 gx = float(lay.get("edit_x", 0.0)) + 1.0
+   mut int bars = 0
+   mut runs = []
+   def hunks = _editor_get("blame_hunks")
+   mut int si = 0
+   while si < rows && start + si < view.len {
+      def code = to_str(hunks.get(to_str(int(view.get(start + si, -1))), ""))
+      if code.len > 0 {
+         def color = code == "A" ? C_OK : (code == "M" ? C_WARN : C_DIAG_ERROR)
+         _fill_rect(gx, _editor_row_y(top, si) + 2.0, 2.0, float(ed.LINE_H) - 4.0, color)
+         bars += 1
+      }
+      si += 1
+   }
+   def int cursor = int(_editor_get("st").get("cursor_line", 0))
+   def int sr = _fold_visible_index(view, cursor) - start
+   if sr >= 0 && sr < rows {
+      def info = _editor_get("blame_lines").get(to_str(cursor), dict(0))
+      if info.len > 0 {
+         def author = to_str(info.get("author", ""))
+         def summary = to_str(info.get("summary", ""))
+         def label = author.len > 0 ? author + (summary.len > 0 ? " · " + summary : "") : "uncommitted"
+         def int sf = int(_editor_get("font_small"))
+         def fitted = _fit_chrome_text(sf, label, max(80.0, float(lay.get("edit_w", 0.0)) * 0.48))
+         if fitted.len > 0 {
+            def f64 lw = _measure_ui(sf, fitted, 0.0) + 12.0
+            def f64 bx = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) - lw - 14.0
+            def f64 yy = _editor_row_y(top, sr)
+            _fill_rect(bx, yy + 2.0, lw, float(ed.LINE_H) - 4.0, gfx.color_alpha(C_PANE_2, 0.92))
+            _stroke_rect(bx, yy + 2.0, lw, float(ed.LINE_H) - 4.0, gfx.color_alpha(C_LINE_2, 0.75), 1.0)
+            runs = _append_text_run(runs, fitted, bx + 6.0, _row_text_y(sf, yy, ed.LINE_H), U_DIM)
+         }
+      }
+   }
+   _editor_values["git_inline_runs"] = runs
+   _editor_values["git_hunk_bars"] = bars
+   runs
+}
+
+fn _queue_fold_markers(dict lay, list view, int start, int rows) int {
+   _editor_values["fold_rects"] = []
+   def ranges = _editor_get("fold_ranges")
+   if ranges.len <= 0 { return 0 }
+   def f64 top = float(lay.get("edit_y", 0.0))
+   def f64 gx = _line_text_x(lay) - 14.0
+   mut int i = 0
+   while i < rows && start + i < view.len {
+      def int doc = int(view.get(start + i, -1))
+      for r in ranges {
+         if int(r.get("start", -1)) != doc { continue }
+         def f64 yy = _editor_row_y(top, i)
+         def bool collapsed = _editor_get("fold_collapsed").contains(to_str(doc))
+         _fill_rect(gx - 4.0, yy + 2.0, 14.0, float(ed.LINE_H) - 4.0, gfx.color_alpha(C_PANE_2, 0.72))
+         _fill_rect(gx, yy + float(ed.LINE_H) * 0.5 - 1.0, 8.0, 2.0, C_MUTED)
+         if collapsed { _fill_rect(gx + 3.0, yy + float(ed.LINE_H) * 0.5 - 4.0, 2.0, 8.0, C_MUTED) }
+         _editor_values["fold_rects"] = _editor_get("fold_rects").append([gx - 6.0, yy + 1.0, 18.0, float(ed.LINE_H) - 2.0, doc])
+      }
+      i += 1
+   }
    0
 }
 
@@ -8050,7 +8745,10 @@ fn _draw_editor(dict lay, bool caret) int {
    def rows = ed.visible_rows(h)
    def cur_buf = ed.current_buffer(_editor_get("st"))
    def lines = ed.current_lines(_editor_get("st"))
-   _sync_scroll(rows, lines.len)
+   def view = _fold_visible_indices(lines)
+   _sync_scroll(rows, lines.len, view)
+   _editor_values["code_lens_rects"] = []
+   _editor_values["fold_rects"] = []
    _find_refresh_if_needed()
    _fill_rect(x, y, w, h, C_PANE)
    _stroke_rect(x, y, w, h, C_LINE, 1.0)
@@ -8060,6 +8758,7 @@ fn _draw_editor(dict lay, bool caret) int {
    def text_x = _line_text_x(lay)
    def filename = to_str(cur_buf.get("name", ""))
    def scroll = int(_editor_get("st").get("scroll", 0))
+   def int start_vis = _fold_first_visible_at_or_after(view, scroll)
    mut line_runs = []
    mut text_runs = []
    def show_numbers = bool(_editor_get("st").get("show_line_numbers", true))
@@ -8068,14 +8767,16 @@ fn _draw_editor(dict lay, bool caret) int {
    def big_file = _buffer_is_big(lines)
    def selection_ranges = _selection_ranges_active()
    def cursor_row = int(_editor_get("st").get("cursor_line", 0))
-   if cursor_row >= scroll && cursor_row < scroll + rows {
-      def cy0 = _editor_row_y(y, cursor_row - scroll)
+   def int cursor_screen = _fold_visible_index(view, cursor_row) - start_vis
+   if cursor_screen >= 0 && cursor_screen < rows {
+      def cy0 = _editor_row_y(y, cursor_screen)
       _fill_rect(x + 1.0, cy0, w - 2.0, ed.LINE_H, gfx.color_alpha(C_ACCENT, 0.10))
    }
-   if show_guides || selection_ranges.len > 0 {
+   if show_guides || selection_ranges.len > 0 || view.len != lines.len {
       mut i = 0
-      while i < rows && scroll + i < lines.len {
-         def li = scroll + i
+      while i < rows && start_vis + i < view.len {
+         def li = int(view.get(start_vis + i, -1))
+         if li < 0 { break }
          def yy = _editor_row_y(y, i)
          def baseline_y = _editor_row_baseline_y(yy)
          def text_y = _row_text_y_from_baseline(int(_editor_get("font_body")), baseline_y, ed.LINE_H)
@@ -8107,16 +8808,21 @@ fn _draw_editor(dict lay, bool caret) int {
       line_runs = _editor_get("visible_line_runs_cache")
       text_runs = _editor_get("visible_text_runs_cache")
    }
-   _draw_find_visible(lines, scroll, rows, text_x, y)
-   if !big_file { _draw_color_swatches_visible(lines, scroll, rows, text_x, y, draw_limit) }
+   _draw_find_visible(lines, view, start_vis, rows, text_x, y)
+   if !big_file { _draw_color_swatches_visible(lines, view, start_vis, rows, text_x, y, draw_limit) }
+   def lens_runs = _queue_code_lenses([], lay, view, start_vis, rows)
+   def blame_runs = _queue_git_inline(lay, rows)
+   _queue_fold_markers(lay, view, start_vis, rows)
    _flush_rects()
    if line_runs.len > 0 { gfx.draw_text_runs_flat(int(_editor_get("font_small")), line_runs, C_MUTED) }
    if text_runs.len > 0 { _draw_editor_body_runs(int(_editor_get("font_body")), text_runs) }
-   _draw_minimap(lay, rows, scroll, lines.len)
-   if caret && int(_editor_get("st").get("cursor_line", 0)) >= scroll && int(_editor_get("st").get("cursor_line", 0)) < scroll + rows {
-      def line = to_str(lines.get(int(_editor_get("st").get("cursor_line", 0)), ""))
-      def cx = text_x + _visual_prefix(line, int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)))
-      def cy = _editor_row_y(y, int(_editor_get("st").get("cursor_line", 0)) - scroll)
+   if lens_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), lens_runs) }
+   if blame_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), blame_runs) }
+   _draw_minimap(lay, rows, start_vis, view.len)
+   if caret && cursor_screen >= 0 && cursor_screen < rows {
+      def line = to_str(lines.get(cursor_row, ""))
+      def cx = text_x + _visual_prefix(line, cursor_row, int(_editor_get("st").get("cursor_col", 0)))
+      def cy = _editor_row_y(y, cursor_screen)
       _fill_rect(cx, cy + 1.0, 2.0, float(ed.LINE_H) - 2.0, C_ACCENT)
    }
    if caret && _extra_cursor_count() > 0 {
@@ -8124,11 +8830,12 @@ fn _draw_editor(dict lay, bool caret) int {
       mut ei = 0
       while ei < extras.len {
          def erow = _cursor_row(extras.get(ei))
-         if erow >= scroll && erow < scroll + rows {
+         def int escreen = _fold_visible_index(view, erow) - start_vis
+         if escreen >= 0 && escreen < rows {
             def eline = to_str(lines.get(erow, ""))
             def ecol = min(max(_cursor_col(extras.get(ei)), 0), eline.len)
             def ecx = text_x + _visual_prefix(eline, erow, ecol)
-            def ecy = _editor_row_y(y, erow - scroll)
+            def ecy = _editor_row_y(y, escreen)
             _fill_rect(ecx, ecy + 1.0, 2.0, float(ed.LINE_H) - 2.0, C_ACCENT_2)
          }
          ei += 1
@@ -8248,7 +8955,8 @@ fn _draw_find_bar(f64 sw, f64 sh) int {
    def f64 w0 = float(min(780.0, max(280.0, sw - 34.0)))
    def fit = _fit_rect(sw * 0.5 - w0 * 0.5, sh - bar_h - float(ed.STATUS_H) - 10.0, w0, bar_h, sw, sh, 8.0)
    def f64 w = float(fit.get(2, w0))
-   _gui_overlay_window("ed_find", float(fit.get(0, 8.0)), float(fit.get(1, 8.0)), w, float(fit.get(3, bar_h)))
+   def slide = gui.overlay_offset("ed_find", true)
+   _gui_overlay_window("ed_find", float(fit.get(0, 8.0)), float(fit.get(1, 8.0)) + slide, w, float(fit.get(3, bar_h)))
    def q = find.query(fs)
    def repl = find.replacement(fs)
    def field = find.active_field(fs)
@@ -8300,9 +9008,10 @@ fn _draw_palette(f64 sw, f64 sh) int {
    def int sel_idx = pal.index(ps)
    _gui_overlay_window("ed_palette", x, y, w, h)
    def q = pal.query(ps)
+   def searching = pal.items_mode(ps) == "find-buffers"
    def pos_label = matches.len > 0 ? to_str(min(matches.len, sel_idx + 1)) + "/" + to_str(matches.len) : "0/0"
    gui.layout_row([w - 110.0, 70.0], 8.0)
-   gui.text_colored("> " + (q.len > 0 ? q : "type a command"), q.len > 0 ? "text" : "text_dim")
+   gui.text_colored("> " + (q.len > 0 ? q : (searching ? "search open buffers" : "type a command")), q.len > 0 ? "text" : "text_dim")
    gui.text_colored(pos_label, "text_dim")
    gui.separator()
    mut int chosen = -1
@@ -8317,13 +9026,14 @@ fn _draw_palette(f64 sw, f64 sh) int {
       _probe_note_rect("pal_" + to_str(i))
       i += 1
    }
-   if matches.len == 0 { gui.text_colored("No commands", "warn") }
+   if matches.len == 0 && (!searching || q.len > 0) { gui.text_colored(searching ? "No matches" : "No commands", "warn") }
    if matches.len > 0 {
       def sel = matches.get(min(max(sel_idx, 0), matches.len - 1), [])
       gui.separator()
       gui.layout_row([w - 230.0, 190.0], 8.0)
-      gui.text_colored(widgets.preview(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")) + "   " + to_str(sel.get(3, "")), int((w - 230.0) / 9.0)), "accent")
-      gui.text_colored("Enter run  Tab next", "text_dim")
+      def detail = searching ? to_str(sel.get(3, "")) : to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")) + "   " + to_str(sel.get(3, ""))
+      gui.text_colored(widgets.preview(detail, int((w - 230.0) / 9.0)), "accent")
+      gui.text_colored(searching ? "Enter jump  Tab next" : "Enter run  Tab next", "text_dim")
    }
    gui.end_window()
    if chosen >= 0 {
@@ -8402,7 +9112,7 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
 
 fn _which_key_command_row(str prefix, str head) list {
    def full = str.strip(prefix + " " + head)
-   def id = cmd.id_for_chord(full)
+   def id = cmd.id_for_chord(full, _keymap_context())
    id.len > 0 ? cmd.by_id(id) : []
 }
 
@@ -8513,7 +9223,8 @@ fn _context_rect(f64 sw, f64 sh) list {
    def fit = _fit_rect(prompt.context_x(_editor_get("context_state")), prompt.context_y(_editor_get("context_state")), w, h, sw, sh, 8.0)
    _editor_get("context_state")["x"] = float(fit.get(0, 8.0))
    _editor_get("context_state")["y"] = float(fit.get(1, 8.0))
-   [float(fit.get(0, 8.0)), float(fit.get(1, 8.0)), w, float(max(84.0, h))]
+   def slide = gui.overlay_offset("ed_context", true)
+   [float(fit.get(0, 8.0)), float(fit.get(1, 8.0)) + slide, w, float(max(84.0, h))]
 }
 
 fn _context_contains(dict lay, f64 mx, f64 my) bool {
@@ -8587,6 +9298,10 @@ fn _probe_popups_step(int f) any {
    if f == 0 {
       _handle_key({"key": key.KEY_P, "mods": key.MOD_CONTROL | key.MOD_SHIFT})
       assert(pal.is_open(_editor_get("palette_state")), "palette opens")
+   } elif f == 1 {
+      _editor_values["probe_palette_slide_y"] = float(gui.window_rect("ed_palette").get(1, 0.0))
+   } elif f == 2 {
+      assert(float(gui.window_rect("ed_palette").get(1, 0.0)) < float(_editor_values.get("probe_palette_slide_y", 0.0)), "the palette slides into place")
    } elif f == 3 {
       assert(float(gui.window_rect("ed_palette").get(2, 0.0)) > 0.0, "palette is a toolkit window")
       _probe_click("pal_1")
@@ -8893,13 +9608,21 @@ fn _bench_text() str {
 }
 
 fn _initial_buffers() list {
-   if probe_flags.get("INLAY_LIVE", false) { return [ed.buffer("inlay-live.ny", "/tmp/ny-inlay-live.ny", "def answer = 43\n")] }
+   if probe_flags.get("GIT_INLINE", false) {
+      def p = ospath.join(getcwd(), "etc/labs/editor.ny")
+      match file_read(p) {
+         ok(raw) -> { return [ed.buffer("editor.ny", p, to_str(raw))] }
+         err(_) -> { return [ed.buffer("editor.ny", p, "")] }
+      }
+   }
+   if probe_flags.get("INLAY_LIVE", false) { return [ed.buffer("inlay-live.ny", "/tmp/ny-inlay-live.ny", "def answer = 43\nfn demo() {\n   answer\n}\n")] }
    if probe_flags.get("TERMINAL_DUMP", false) { return [ed.buffer("terminal-visual.ny", "", "use core\nprint(\"terminal visual probe\")\n")] }
    if probe_flags.get("TEXTGRID", false) { return [ed.buffer("textgrid.ny", "", "fn main() int {\n\tprint(\"grid\")\n   return 0\n}\n")] }
    if probe_flags.get("BENCH", false) || probe_flags.get("SCROLLBAR", false) { return [ed.buffer(probe_flags.get("BENCH", false) ? "bench.ny" : "scrollbar.ny", "", _bench_text())] }
    if probe_flags.get("ZOOM", false) { return [ed.buffer("zoom-test.ny", "", "use core\n")] }
    if probe_flags.get("GOTO", false) { return [ed.buffer("goto-test.ny", "", "use core\nfn local_target() int { return 1 }\nfn main() int {\n   local_target()\n   project_target()\n}\n")] }
    if probe_flags.get("MULTICURSOR", false) { return [ed.buffer("multi-cursor.ny", "", "aaa\nbbb\nccc")] }
+   if probe_flags.get("BUFFER_SEARCH", false) { return [ed.buffer("first.ny", "", "alpha"), ed.buffer("second.ny", "", "warmup\nα ALPHA alpha")] }
    if probe_flags.get("FIND", false) || probe_flags.get("PALETTE", false) || probe_flags.get("POPUPS", false) || probe_flags.get("WHICH_KEY", false) { return [ed.buffer("ui-probe.ny", "", PROBE_TEXT)] }
    if probe_flags.get("ESCAPE", false) { return [ed.buffer("escape-test.ny", "", "use core\n")] }
    if probe_flags.get("NAV", false) || probe_flags.get("TAB", false) { return [ed.buffer("nav-a.ny", "", "alpha"), ed.buffer("nav-b.ny", "", "beta")] }
@@ -9024,6 +9747,29 @@ if probe_flags.get("FIND", false) {
    assert(_current_text() == "one otw\notw otw", "regex replace all")
    _undo()
    assert(_current_text() == "one two\ntwo two", "replace undo")
+   window.set_should_close(_editor_get("win"), true)
+}
+
+if probe_flags.get("BUFFER_SEARCH", false) {
+   _handle_key({"key": key.KEY_F, "mods": key.MOD_CONTROL | key.MOD_SHIFT})
+   assert(pal.items_mode(_editor_get("palette_state")) == "find-buffers", "multi-buffer search opens from its keymap")
+   def query_text = "alpha"
+   mut query_byte = 0
+   while query_byte < query_text.len {
+      _handle_palette_char({"char": load8(query_text, query_byte), "mods": 0})
+      query_byte += 1
+   }
+   assert(_palette_matches().len == 3, "results include repeated matches and case variants in other buffers")
+   _handle_palette_char({"char": 122, "mods": 0})
+   assert(_palette_matches().len == 0, "literal query ignores fuzzy matches")
+   _handle_palette_key({"key": key.KEY_BACKSPACE, "mods": 0})
+   assert(_palette_matches().len == 3, "deleting the extra byte restores the result list")
+   _handle_palette_key({"key": key.KEY_DOWN, "mods": 0})
+   assert(pal.index(_editor_get("palette_state")) == 1, "Down selects the result in the other buffer")
+   _handle_palette_key({"key": key.KEY_ENTER, "mods": 0})
+   assert(int(_editor_get("st").get("active", -1)) == 1, "Enter switches to the selected result's buffer")
+   assert(int(_editor_get("st").get("cursor_line", -1)) == 1 && _selected_text_all() == "ALPHA", "jump selects the exact byte span in the other buffer")
+   print("EDITOR-MULTI-BUFFER-SEARCH-OK")
    window.set_should_close(_editor_get("win"), true)
 }
 
@@ -9486,6 +10232,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    if probe_flags.get("INLAY_LIVE", false) { gfx.request_frame_capture() }
    gfx.end_frame()
    if probe_flags.get("INLAY_LIVE", false) { _inlay_live_probe(lay) }
+   if probe_flags.get("GIT_INLINE", false) { _git_inline_probe(lay) }
    def t_end = FRAME_TRACE ? ticks() : 0
    if FRAME_HASH && !bool(_editor_get("frame_hash_done")) && int(_editor_get("frame_count")) >= FRAME_HASH_FRAME {
       def hash_line = ui_dump.framebuffer_hash_line()

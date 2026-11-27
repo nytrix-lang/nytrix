@@ -732,7 +732,9 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
           }
           if (emit)
             if (write(i == 0 ? STDOUT_FILENO : STDERR_FILENO, buf, emit) < 0) {
-              /* best-effort echo of child output */
+              /*
+               * best-effort echo of child output
+               */
             }
           seen += (uint64_t)got;
           if (breached) {

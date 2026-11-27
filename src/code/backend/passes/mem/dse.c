@@ -184,6 +184,11 @@ bool nyr_dead_store_elim(nyr_func_t *f) {
     }
     if (in->op != NYIR_STORE_LOCAL)
       continue;
+    /*
+     * Keep the last write a DWARF variable needs to stay readable.
+     */
+    if (nyr_ir_func_debug_slot(f, (int)slot))
+      continue;
     if (trace)
       local_candidates++;
     if (escaped[slot]) {
@@ -204,7 +209,8 @@ bool nyr_dead_store_elim(nyr_func_t *f) {
     for (size_t i = 0; i < f->len; ++i) {
       nyr_inst_t *in = &f->data[i];
       if (in->op != NYIR_STORE_LOCAL || in->imm < 0 ||
-          (size_t)in->imm >= count || escaped[in->imm])
+          (size_t)in->imm >= count || escaped[in->imm] ||
+          nyr_ir_func_debug_slot(f, (int)in->imm))
         continue;
       size_t block = cfg.inst_block[i];
       if (block < cfg.block_count && cfg.reachable[block] &&

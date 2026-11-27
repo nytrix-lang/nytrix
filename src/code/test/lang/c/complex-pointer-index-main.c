@@ -1,4 +1,6 @@
-/* Host driver for complex-pointer-index.c; its output is compared with complex-pointer-index.expected. */
+/*
+ * Host driver for complex-pointer-index.c; its output is compared with complex-pointer-index.expected.
+ */
 #include <complex.h>
 #include <stdio.h>
 double _Complex get(double _Complex *, int); void put(double _Complex *, int, double _Complex); double _Complex dot(double _Complex *, double _Complex *, int); float _Complex getf(float _Complex *, int);

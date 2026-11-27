@@ -5466,7 +5466,9 @@ static bool nyr_lower_scoped_body(nyr_builder_impl_t *b, const stmt_t *body) {
   if (!nyr_lower_stmt(b, body))
     return false;
   if (b->emitted_return) {
-    /* return/break/continue already ran the defers on this path */
+    /*
+     * return/break/continue already ran the defers on this path
+     */
     b->defer_count = defer_mark;
     return true;
   }
@@ -7251,6 +7253,11 @@ static nyr_local_t *nyr_bind_local_typed(nyr_builder_impl_t *b,
                      .dyn_tag_arg_slot = -1,
                      .syntax_ctx = b ? b->current_syntax_ctx : 0};
   b->local_count++;
+  if (b->options && b->options->debug_locals > 0)
+    (void)nyr_ir_func_debug_var(
+        &b->nyir, l->name,
+        is_f64 ? "f64" : (is_f32 ? "f32" : (is_cstr ? "str" : "int")),
+        l->slot, false, 0);
   return l;
 }
 
@@ -20309,6 +20316,8 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
     local->is_f64 = false;
     local->is_f32 = false;
     local->semantic_rep = NY_SEM_REP_TAGGED_DYNAMIC;
+    if (b->options && b->options->debug_locals > 0)
+      (void)nyr_ir_func_debug_var_type(&b->nyir, local->slot, "any");
     nyr_scalar_class_t producer_class = nyr_value_scalar_class(b, value);
     if (producer_class == NYIR_SCALAR_F32 ||
         producer_class == NYIR_SCALAR_F64) {

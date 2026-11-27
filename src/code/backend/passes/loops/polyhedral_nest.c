@@ -173,6 +173,9 @@ static bool trivial_br_block(const nyr_func_t *f, const nyr_cfg_t *cfg,
   const nyr_inst_t *term = &f->data[last - 1];
   if (term->op != NYIR_BR || term->imm < 0)
     return false;
+  for (size_t i = cfg->block_start[block]; i + 1 < last; ++i)
+    if (f->data[i].op != NYIR_LABEL && f->data[i].op != NYIR_NOP)
+      return false;
   size_t target = block_for_label(cfg, term->imm);
   if (target == SIZE_MAX || target == block)
     return false;
@@ -787,85 +790,24 @@ bool nyr_affine_nest(nyr_func_t *f) {
     nyr_scev_info_t info = {0};
     if (!nyr_scev_analyze(f, &info))
       return false;
-    bool fused = fuse_adjacent_pair(f, &info);
-    nyr_scev_free(&info);
-    if (!fused)
+    if (info.count < 2) {
+      nyr_scev_free(&info);
       break;
-  }
-  return true;
-}
-
-/*
- * Polyhedral-style loop tiling: insert loop-peel and trip-count
- * reduction metadata so downstream vectorization and unrolling can
- * use cache-friendly tile sizes.  For now, annotate counted loops
- * whose trip count exceeds a cache-line threshold with a tile-size
- * hint in the range field.
- *
- * Tile size heuristic: sqrt(L1_cache / element_size).  For i64
- * elements (8 bytes) and 32 KB L1: sqrt(32768/8) ≈ 64.
- * For i32 elements (4 bytes): sqrt(32768/4) ≈ 90.
- *
- * The annotation is advisory: downstream passes (loop_unroll,
- * loop_versioning) consume the range hints.
- *
- * References:
- *  Bondhugula, Hartono, Ramanujam, Sadayappan — "A Practical
- *   Automatic Polyhedral Parallelizer and Locality Optimizer"
- *   (PLDI 2008). §4.2: tiling for cache locality.
- *  Allen & Kennedy — Optimizing Compilers for Modern Architectures,
- *   Ch.7: loop tiling for register/cache blocking.
- *  Fog — Optimizing software in C++ (Vol.1), Ch.15: cache blocking.
- */
-bool nyr_polyhedral_tiling(nyr_func_t *f) {
-  if (!f || f->len == 0)
-    return true;
-  nyr_cfg_t cfg = {0};
-  int *defs = nyr_build_defs(f);
-  if (!defs || !nyr_cfg_build(f, &cfg)) {
-    free(defs);
-    nyr_cfg_free(&cfg);
-    return false;
-  }
-  nyr_scev_info_t info = {0};
-  if (!nyr_scev_analyze(f, &info)) {
-    free(defs);
-    nyr_cfg_free(&cfg);
-    return false;
-  }
-  /*
-   * Default tile size: sqrt(32KB / 8) = 64 for i64 elements.
-   */
-  const int64_t DEFAULT_TILE = 64;
-  for (size_t li = 0; li < info.count; ++li) {
-    const nyr_scev_loop_t *loop = &info.loops[li];
-    if (!loop->trip_count_known || loop->trip_count <= (uint64_t)DEFAULT_TILE)
-      continue;
-    /*
-     * Find the loop header and annotate with tile-size hint.
-     */
-    size_t h = loop->header_block;
-    for (size_t i = cfg.block_start[h]; i < cfg.block_end[h]; ++i) {
-      nyr_inst_t *in = &f->data[i];
-      /*
-       * Annotate the loop's comparison/branch with a range hint
-       * encoding the tile size.  The range field encodes
-       * [min, max] trip counts; set max to the tile size so
-       * unrolling can choose a tile-friendly factor.
-       */
-      if (in->op == NYIR_CMP_I64 && in->dst == loop->limit_value) {
-        in->range.min = 0;
-        in->range.max = DEFAULT_TILE;
-        break;
-      }
     }
+    nyr_func_t candidate = {0};
+    if (!nyr_ir_func_clone(f, &candidate)) {
+      nyr_scev_free(&info);
+      return false;
+    }
+    bool fused = fuse_adjacent_pair(&candidate, &info);
+    nyr_scev_free(&info);
+    char err[256];
+    if (!fused || !nyr_ir_verify(&candidate, err, sizeof(err))) {
+      nyr_ir_func_free(&candidate);
+      break;
+    }
+    nyr_ir_func_free(f);
+    *f = candidate;
   }
-  /*
-   * Pass contract: the boolean result reports success, not "changed".
-   * Annotating nothing (no long-running loops) is a normal outcome.
-   */
-  nyr_scev_free(&info);
-  free(defs);
-  nyr_cfg_free(&cfg);
   return true;
 }

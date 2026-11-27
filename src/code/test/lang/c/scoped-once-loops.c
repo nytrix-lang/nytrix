@@ -1,4 +1,6 @@
-/* Nested one-shot `done` loops (Linux scoped user access) run the body once and the cleanup once on every exit. */
+/*
+ * Nested one-shot `done` loops (Linux scoped user access) run the body once and the cleanup once on every exit.
+ */
 int ends;
 static void end_access(int *const *pointer) {
   (void)pointer;
