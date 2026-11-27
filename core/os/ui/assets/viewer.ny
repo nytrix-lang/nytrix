@@ -72,6 +72,8 @@ def list UI_FONT_CANDIDATES = [
 
 ;; Repository-managed asset cache. Environment roots take precedence.
 def list GLTF_ASSET_DEFAULT_ROOTS = [
+   "tmp/reference/assets/models/gltf/tests",
+   "tmp/reference/assets/models/gltf",
    "build/cache/assets/models"
 ]
 

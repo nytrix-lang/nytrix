@@ -5991,8 +5991,13 @@ fn _sync_camera_state_to_arrays() {
    camthreed[17] = _spdx
    camthreed[18] = _spdy
    camthreed[19] = _spd_z
-   cam[4] = _h_yaw
-   cam[5] = _h_pch
+   if !is_list(cam) || cam.len < 6 {
+      cam = camera_init([_cam_px, _cam_py, _cam_pz], _h_yaw, _h_pch)
+   }
+   if is_list(cam) && cam.len >= 6 {
+      cam[4] = _h_yaw
+      cam[5] = _h_pch
+   }
    _cam_px_cache, _cam_py_cache = _cam_px, _cam_py
    _cam_pz_cache = _cam_pz
 }
@@ -6085,14 +6090,23 @@ fn _sync_projection_from_camera() {
    def ty = float(tgt.get(1, _cam_py))
    def tz = float(tgt.get(2, _cam_pz - 1.0))
    _ui_set_update_stage("projection.camera-arrays")
-   mut g_pos = cam.get(0)
-   g_pos[0] = _cam_px
-   g_pos[1] = _cam_py
-   g_pos[2] = _cam_pz
-   mut g_tgt = cam.get(1)
-   g_tgt[0] = tx
-   g_tgt[1] = ty
-   g_tgt[2] = tz
+   if !is_list(cam) || cam.len < 2 {
+      cam = camera_init([_cam_px, _cam_py, _cam_pz], _h_yaw, _h_pch)
+   }
+   if is_list(cam) && cam.len >= 2 {
+      mut g_pos = cam.get(0, 0)
+      if is_list(g_pos) && g_pos.len >= 3 {
+         g_pos[0] = _cam_px
+         g_pos[1] = _cam_py
+         g_pos[2] = _cam_pz
+      }
+      mut g_tgt = cam.get(1, 0)
+      if is_list(g_tgt) && g_tgt.len >= 3 {
+         g_tgt[0] = tx
+         g_tgt[1] = ty
+         g_tgt[2] = tz
+      }
+   }
    _ui_set_update_stage("projection.matrix")
    _ui_update_projection(_cam_px, _cam_py, _cam_pz, tx, ty, tz)
 }
