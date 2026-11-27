@@ -7227,6 +7227,12 @@ static NY_TLS rt_sso_block_t *g_sso_strings = NULL;
  * complemented so a free slot never looks like a reference).
  */
 static NY_TLS rt_sso_slot_t *g_sso_free = NULL;
+/*
+ * Small-string arena blocks retired by exited worker threads. Kept alive until
+ * rt_cleanup_small_strings() so SSO strings stored in shared dicts, lists, or
+ * caches by a worker thread remain valid after the worker exits.
+ */
+static _Atomic(rt_sso_block_t *) g_retired_sso_strings = NULL;
 _Atomic uint64_t g_rt_sso_generation = 1;
 RT_TLS rt_sso_probe_cache_entry_t g_rt_sso_probe_cache[RT_SSO_PROBE_CACHE_SIZE];
 
@@ -7281,60 +7287,43 @@ void rt_cleanup_small_strings(void) {
     rt_fc_block_free(block, sizeof(*block));
     block = next;
   }
+  rt_sso_block_t *retired =
+      atomic_exchange_explicit(&g_retired_sso_strings, NULL,
+                               memory_order_acq_rel);
+  while (retired) {
+    rt_sso_block_t *next = retired->next;
+    rt_fc_block_free(retired, sizeof(*retired));
+    retired = next;
+  }
   atomic_fetch_add_explicit(&g_rt_sso_generation, 1, memory_order_release);
 }
 
 /*
- * Whether `v` addresses storage inside this thread's small-string arena. Only
- * the owning thread may release the arena, so a value that crosses a thread
- * boundary has to be copied out first, as
- * rt_thread_release_string_storage does.
- */
-static bool rt_sso_in_thread_storage(int64_t v) {
-  if (!v)
-    return false;
-  uintptr_t p = (uintptr_t)v;
-  for (rt_sso_block_t *block = g_sso_strings; block; block = block->next) {
-    uintptr_t base = (uintptr_t)block;
-    if (p >= base && p - base < sizeof(*block))
-      return true;
-  }
-  return false;
-}
-
-/*
- * Heap-backed string with no small-string arena involvement.
- */
-static int64_t rt_alloc_heap_string_len(const char *s, size_t len) {
-  if (!s || len > (SIZE_MAX >> 2))
-    return 0;
-  int64_t p = rt_malloc((int64_t)(((len + 1) << 1) | 1));
-  if (!p)
-    return 0;
-  *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
-  *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
-  memcpy((void *)(uintptr_t)p, s, len);
-  ((char *)(uintptr_t)p)[len] = '\0';
-  return p;
-}
-
-/*
- * Worker threads own a thread-local small-string arena plus intern table. The
- * main thread releases both through rt_runtime_cleanup, but a worker that
- * finishes would otherwise abandon them, which LeakSanitizer reports as a
- * per-thread leak. Copy an arena-owned result to the shared heap before the
- * arena is freed so the joining thread keeps a usable value.
+ * Worker threads own a thread-local small-string arena plus intern table.
+ * Strings allocated on a worker frequently escape into shared dicts, lists,
+ * or caches (not only the direct return value), so freeing the arena on
+ * worker exit would leave dangling SSO pointers. Release the thread-local
+ * intern table immediately and retire the arena blocks onto the global list
+ * freed by rt_cleanup_small_strings() at runtime shutdown.
  */
 int64_t rt_thread_release_string_storage(int64_t result) {
-  int64_t out = result;
-  if (rt_sso_in_thread_storage(result) && is_v_str(result)) {
-    size_t len = rt_tagged_str_len(result);
-    int64_t copy =
-        rt_alloc_heap_string_len((const char *)(uintptr_t)result, len);
-    out = copy ? copy : 0;
+  rt_str_intern_clear();
+  rt_sso_block_t *block = g_sso_strings;
+  g_sso_strings = NULL;
+  g_sso_free = NULL;
+  if (block) {
+    rt_sso_block_t *tail = block;
+    while (tail->next)
+      tail = tail->next;
+    rt_sso_block_t *head =
+        atomic_load_explicit(&g_retired_sso_strings, memory_order_relaxed);
+    do {
+      tail->next = head;
+    } while (!atomic_compare_exchange_weak_explicit(
+        &g_retired_sso_strings, &head, block, memory_order_release,
+        memory_order_relaxed));
   }
-  rt_cleanup_small_strings();
-  return out;
+  return result;
 }
 
 #define CALL_STACK_MAX 512

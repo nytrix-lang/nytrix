@@ -236,29 +236,34 @@ fn gltf_has_node_visibility(any gltf_data, any overrides=0) bool {
    }
    def g = gltf_data.get("gltf", 0)
    if !is_dict(g) { return false }
-   def key = shr._gltf_cache_key_from_data(gltf_data) + ":visibility"
-   if _gltf_visibility_flag_cache.contains(key) { return _gltf_visibility_flag_cache.get(key, false) ? true : false }
    def nodes = g.get("nodes", 0)
    def nodes_n = is_list(nodes) ? nodes.len : 0
+   def use_cache = nodes_n >= 64
+   def key = use_cache ? (shr._gltf_cache_key_from_data(gltf_data) + ":visibility") : ""
+   if use_cache && _gltf_visibility_flag_cache.contains(key) { return _gltf_visibility_flag_cache.get(key, false) ? true : false }
    mut ni = 0
    while ni < nodes_n {
       def node = nodes[ni]
       def exts = is_dict(node) ? node.get("extensions", 0) : 0
       if is_dict(exts) && is_dict(exts.get("KHR_node_visibility", 0)) {
-         _gltf_visibility_flag_cache = cache.cache_put_reset(shr._gltf_visibility_flag_cache,
-            key,
-            true,
-            shr._GLTF_CACHE_LIMIT_MED,
-            64)
+         if use_cache {
+            _gltf_visibility_flag_cache = cache.cache_put_reset(shr._gltf_visibility_flag_cache,
+               key,
+               true,
+               shr._GLTF_CACHE_LIMIT_MED,
+               64)
+         }
          return true
       }
       ni += 1
    }
-   _gltf_visibility_flag_cache = cache.cache_put_reset(shr._gltf_visibility_flag_cache,
-      key,
-      false,
-      shr._GLTF_CACHE_LIMIT_MED,
-      64)
+   if use_cache {
+      _gltf_visibility_flag_cache = cache.cache_put_reset(shr._gltf_visibility_flag_cache,
+         key,
+         false,
+         shr._GLTF_CACHE_LIMIT_MED,
+         64)
+   }
    false
 }
 

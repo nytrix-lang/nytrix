@@ -3538,7 +3538,21 @@ fn _apply_mat_record_to_part(any part, any mat_records) any {
    out["ext2_tex_word"] = ext2_tex_word
    out["bsdf_ext_slab"] = bsdf_ext_slab
    out["vc_mode"] = vc_mode
-   if rec.contains("double_sided") { out["double_sided"] = bool(rec.get("double_sided", out.get("double_sided", false))) }
+   if rec.contains("double_sided") {
+      def ds = bool(rec.get("double_sided", out.get("double_sided", false)))
+      out["double_sided"] = ds
+      def po = out.get("opts", 0)
+      if is_dict(po) {
+         po["double_sided"] = ds
+         if ds { po["no_cull"] = true }
+      }
+   }
+   if rec.contains("unlit") {
+      def ul = bool(rec.get("unlit", out.get("unlit", false)))
+      out["unlit"] = ul
+      def po = out.get("opts", 0)
+      if is_dict(po) { po["unlit"] = ul }
+   }
    out
 }
 
@@ -7414,7 +7428,7 @@ fn _scene_mesh_convert_stage(str gltf_path, dict gltf_data, any prefetched_raw_m
    def _tcache = ticks()
    def t_mesh0 = ticks()
    if diag_on { terminal.log("[gltf] stage: load geom cache or build mesh") }
-   mut mesh = is_dict(prefetched_raw_mesh) ? _clone_cached_mesh(prefetched_raw_mesh) : 0
+   mut any mesh = is_dict(prefetched_raw_mesh) ? _clone_cached_mesh(prefetched_raw_mesh) : nil
    def prefetched_mesh_hit = is_dict(mesh)
    if prefetched_mesh_hit {
       if diag_on { terminal.log("[gltf:prefetch] raw mesh hit in " + to_str(ui_profile.elapsed_ms(_tcache)) + "ms") }
@@ -7738,10 +7752,10 @@ fn load_scene_mesh(str gltf_path, str scene_name="Scene", any cam3d=0, any M_SP=
    def material_infos, mat_records = mat_stage.get("material_infos", []), mat_stage.get("mat_records", [])
    def node_perf_limit, t_mat_ms = int(mat_stage.get("node_perf_limit", 0)), float(mat_stage.get("mat_ms", 0.0))
    def mesh_stage = _scene_mesh_convert_stage(gltf_path, gltf_data, prefetched_raw_mesh, mat_records, morph_runtime_active, gpu_blocks_anim, diag_on, stage_trace, prof_on)
-   mut mesh = mesh_stage.get("mesh", 0)
+   mut any mesh = mesh_stage.get("mesh", nil)
    def t_mesh_ms = float(mesh_stage.get("mesh_ms", 0.0))
-   mut mesh_parts = 0
-   if is_dict(mesh) { mesh_parts = mesh.get("parts", 0) }
+   mut any mesh_parts = nil
+   if is_dict(mesh) { mesh_parts = mesh.get("parts", nil) }
    def ready_stage = _scene_mesh_parts_ready_stage(mesh, mesh_parts, mat_records, scene_name, diag_on, prof_on, _t1)
    if !bool(ready_stage.get("ok", false)) { return 0 }
    mesh = ready_stage.get("mesh", mesh)
