@@ -27,6 +27,7 @@ use core.os.ffi as ffi
       fn _c_wl_proxy_marshal_flags0(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags1(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags2(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1) ptr as "wl_proxy_marshal_flags"
+      fn _c_wl_proxy_marshal_flags_accept(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, u32 serial, ptr mime) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags3(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags4(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2, ptr arg3) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags5(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2, ptr arg3, ptr arg4) ptr as "wl_proxy_marshal_flags"
@@ -2109,6 +2110,16 @@ fn _data_device_enter(ptr data, ptr device, u32 serial, ptr surface, i32 x, i32 
    if !data { return 0 }
    store64_h(data, offer, _WG_DND_OFFER)
    store64_h(data, surface, _WG_DND_SURFACE)
+   ;; Accept URI lists before the compositor decides whether this surface can
+   ;; receive the offer. Wayland sends the drop only after a MIME is accepted.
+   if offer {
+      #linux {
+         _c_wl_proxy_marshal_flags_accept(
+            offer, 0, 0, int(get_proxy_version(offer)), 0,
+            serial, cstr("text/uri-list"),
+         )
+      }
+   }
    def win = dict_get(_windows, int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
