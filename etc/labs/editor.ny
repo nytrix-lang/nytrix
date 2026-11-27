@@ -6274,6 +6274,10 @@ fn _handle_mouse_press(dict lay, any data) int {
       else { _select_top_tab(idx_top) }
       return 0
    }
+   def top_h = float(lay.get("top", 0.0))
+   if button == 0 && top_h > 1.0 && my >= 0.0 && my < top_h {
+      if window.start_window_move(_editor_get("win")) { return 0 }
+   }
    def term_hit = _term_tab_hit(lay, mx, my)
    def term_action = to_str(term_hit.get("action", ""))
    if term_action.len > 0 {

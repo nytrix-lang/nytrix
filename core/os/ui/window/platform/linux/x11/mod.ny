@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.linux
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.linux.x11(available, get_backend_name, InputOutput, AllocNone, CWBackPixel, CWBorderPixel, CWColormap, CWEventMask, ShiftMask, LockMask, ControlMask, Mod1Mask, Mod2Mask, Mod4Mask, KeyPressMask, KeyReleaseMask, ButtonPressMask, ButtonReleaseMask, EnterWindowMask, LeaveWindowMask, PointerMotionMask, ExposureMask, FocusChangeMask, StructureNotifyMask, PropertyChangeMask, PropertyNewValue, WithdrawnState, NormalState, IconicState, IsViewable, XA_ATOM, XA_CARDINAL, PropModeReplace, PropModeAppend, MWM_HINTS_DECORATIONS, MWM_DECOR_ALL, PMinSize, PMaxSize, PAspect, SubstructureNotifyMask, SubstructureRedirectMask, NET_WM_STATE_REMOVE, NET_WM_STATE_ADD, NET_WM_STATE_TOGGLE, RRScreenChangeNotifyMask, RRCrtcChangeNotifyMask, RROutputChangeNotifyMask, Button1, Button2, Button3, Button4, Button5, Button6, Button7, NotifyGrab, NotifyUngrab, ClientMessage, ReparentNotify, ConfigureNotify, PropertyNotify, DestroyNotify, Expose, FocusIn, FocusOut, KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify, VisibilityNotify, SelectionClear, SelectionRequest, SelectionNotify, EnterNotify, LeaveNotify, translate_keysym, translate_scancode, get_window_property, get_window_state, is_window_iconified, get_cardinal_value, get_window_frame_size, get_window_size, property_has_atom, is_window_visible, is_window_maximized, is_window_floating, is_window_fullscreen, append_atom_property, remove_atom_property, send_client_message, send_wm_state_event, iconify_window, show_window, hide_window, update_normal_hints, set_window_size, set_size, set_window_size_limits, set_window_aspect_ratio, maximize_window, restore_window, set_window_floating, set_window_fullscreen, set_window_decorated, request_window_attention, set_clipboard, get_clipboard, set_primary_selection, get_primary_selection, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_x11_monitor, get_x11_adapter, get_video_mode, get_video_modes, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_cursor_pos, get_key_name, get_key_scancode, get_size, set_size, get_pos, set_pos, set_input_mode, get_input_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, translate_event, poll_window_events, poll_display_events, set_window_opacity, get_window_opacity, get_window_content_scale, set_window_resizable, post_empty_event, set_window_icon, focus_window, set_cursor_pos, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, INPUT_MODE_CURSOR, INPUT_MODE_STICKY_KEYS, INPUT_MODE_STICKY_MOUSE_BUTTONS, INPUT_MODE_LOCK_KEY_MODS, INPUT_MODE_RAW_MOUSE, CURSOR_MODE_NORMAL, CURSOR_MODE_HIDDEN, CURSOR_MODE_DISABLED, CURSOR_MODE_CAPTURED, wait_events, translate_state, create_basic_window, destroy_basic_window, set_title, set_window_icon, get_window_attrib, open_display, close_display, default_screen, root_window, default_visual, default_depth, intern_atom, create_colormap, create_window_raw, destroy_window_raw, map_window, unmap_window, next_event, pending, select_input, flush, sync, put_pixels, store_name, move_window, resize_window, set_wm_protocols, create_surface, get_gamma_ramp, set_gamma_ramp, vulkan_supported, vulkan_required_extensions, vulkan_get_surface_capabilities, xdnd_begin_drag, _handle_xdnd_status, _handle_xdnd_finished, set_video_mode, restore_video_mode, INVALID_CODEPOINT)
+module core.os.ui.window.platform.linux.x11(available, get_backend_name, InputOutput, AllocNone, CWBackPixel, CWBorderPixel, CWColormap, CWEventMask, ShiftMask, LockMask, ControlMask, Mod1Mask, Mod2Mask, Mod4Mask, KeyPressMask, KeyReleaseMask, ButtonPressMask, ButtonReleaseMask, EnterWindowMask, LeaveWindowMask, PointerMotionMask, ExposureMask, FocusChangeMask, StructureNotifyMask, PropertyChangeMask, PropertyNewValue, WithdrawnState, NormalState, IconicState, IsViewable, XA_ATOM, XA_CARDINAL, PropModeReplace, PropModeAppend, MWM_HINTS_DECORATIONS, MWM_DECOR_ALL, PMinSize, PMaxSize, PAspect, SubstructureNotifyMask, SubstructureRedirectMask, NET_WM_STATE_REMOVE, NET_WM_STATE_ADD, NET_WM_STATE_TOGGLE, RRScreenChangeNotifyMask, RRCrtcChangeNotifyMask, RROutputChangeNotifyMask, Button1, Button2, Button3, Button4, Button5, Button6, Button7, NotifyGrab, NotifyUngrab, ClientMessage, ReparentNotify, ConfigureNotify, PropertyNotify, DestroyNotify, Expose, FocusIn, FocusOut, KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify, VisibilityNotify, SelectionClear, SelectionRequest, SelectionNotify, EnterNotify, LeaveNotify, translate_keysym, translate_scancode, get_window_property, get_window_state, is_window_iconified, get_cardinal_value, get_window_frame_size, get_window_size, property_has_atom, is_window_visible, is_window_maximized, is_window_floating, is_window_fullscreen, append_atom_property, remove_atom_property, send_client_message, start_window_move, send_wm_state_event, iconify_window, show_window, hide_window, update_normal_hints, set_window_size, set_size, set_window_size_limits, set_window_aspect_ratio, maximize_window, restore_window, set_window_floating, set_window_fullscreen, set_window_decorated, request_window_attention, set_clipboard, get_clipboard, set_primary_selection, get_primary_selection, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_x11_monitor, get_x11_adapter, get_video_mode, get_video_modes, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_cursor_pos, get_key_name, get_key_scancode, get_size, set_size, get_pos, set_pos, set_input_mode, get_input_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, translate_event, poll_window_events, poll_display_events, set_window_opacity, get_window_opacity, get_window_content_scale, set_window_resizable, post_empty_event, set_window_icon, focus_window, set_cursor_pos, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, INPUT_MODE_CURSOR, INPUT_MODE_STICKY_KEYS, INPUT_MODE_STICKY_MOUSE_BUTTONS, INPUT_MODE_LOCK_KEY_MODS, INPUT_MODE_RAW_MOUSE, CURSOR_MODE_NORMAL, CURSOR_MODE_HIDDEN, CURSOR_MODE_DISABLED, CURSOR_MODE_CAPTURED, wait_events, translate_state, create_basic_window, destroy_basic_window, set_title, set_window_icon, get_window_attrib, open_display, close_display, default_screen, root_window, default_visual, default_depth, intern_atom, create_colormap, create_window_raw, destroy_window_raw, map_window, unmap_window, next_event, pending, select_input, flush, sync, put_pixels, store_name, move_window, resize_window, set_wm_protocols, create_surface, get_gamma_ramp, set_gamma_ramp, vulkan_supported, vulkan_required_extensions, vulkan_get_surface_capabilities, xdnd_begin_drag, _handle_xdnd_status, _handle_xdnd_finished, set_video_mode, restore_video_mode, INVALID_CODEPOINT)
 use core
 use core.mem
 use core.math (abs)
@@ -308,6 +308,7 @@ fn _next_cursor_id() int {
       fn _c_xcreate_colormap(ptr display, u64 window, ptr visual, i32 alloc) u64 as "XCreateColormap"
       fn _c_xcreate_window(ptr display, u64 parent, i32 x, i32 y, u32 width, u32 height, u32 border_width, i32 depth, u32 klass, ptr visual, u64 value_mask, ptr attributes) u64 as "XCreateWindow"
       fn _c_xselect_input(ptr display, u64 win, u64 event_mask) i32 as "XSelectInput"
+      fn _c_xsend_event(ptr display, u64 win, i32 propagate, i64 event_mask, ptr event) i32 as "XSendEvent"
       fn _c_xset_wm_protocols(ptr display, u64 win, ptr protocols, i32 count) i32 as "XSetWMProtocols"
       fn _c_xstore_name(ptr display, u64 win, ptr name) i32 as "XStoreName"
       fn _c_xchange_property(ptr display, u64 win, u64 property, u64 typ, i32 format, i32 mode, ptr data, i32 count) i32 as "XChangeProperty"
@@ -1342,9 +1343,40 @@ fn send_client_message(any display, any root, any win, any atom, int d0, int d1=
    store64_h(ev, d3, 80)
    store64_h(ev, d4, 88)
    def mask = bor(SubstructureNotifyMask, SubstructureRedirectMask)
-   def ok = XSendEvent(_x11_raw(display), _x11_raw(root), 0, mask, _x11_raw(ev)) != 0
+   def ok = _c_xsend_event(_x11_raw(display), _x11_raw(root), 0, mask, _x11_raw(ev)) != 0
    free(ev)
    ok
+}
+
+fn start_window_move(any win) bool {
+   "Requests an EWMH move using the current pointer position."
+   if !is_dict(win) { return false }
+   def display = win.get("display", 0)
+   def handle = win.get("handle", 0)
+   def root = win.get("root", 0)
+   if !display || !handle || !root { return false }
+   def root_ret = zalloc(8)
+   def root_x, root_y = zalloc(4), zalloc(4)
+   def child, win_x, win_y, mask = zalloc(8), zalloc(4), zalloc(4), zalloc(4)
+   if !root_ret || !root_x || !root_y || !child || !win_x || !win_y || !mask {
+      if root_ret { free(root_ret) }
+      if root_x { free(root_x) } if root_y { free(root_y) }
+      if child { free(child) } if win_x { free(win_x) }
+      if win_y { free(win_y) } if mask { free(mask) }
+      return false
+   }
+   def queried = _c_xquery_pointer(
+      _x11_raw(display), _x11_raw(root), root_ret, child, root_x, root_y, win_x, win_y, mask,
+   ) != 0
+   mut sent = false
+   if queried {
+      def atom = intern_atom(display, "_NET_WM_MOVERESIZE")
+      sent = send_client_message(display, root, handle, atom,
+         int(load32(root_x, 0)), int(load32(root_y, 0)), 8, 1, 1)
+      if sent { flush(display) }
+   }
+   free(root_ret) free(root_x) free(root_y) free(child) free(win_x) free(win_y) free(mask)
+   sent
 }
 
 fn send_wm_state_event(

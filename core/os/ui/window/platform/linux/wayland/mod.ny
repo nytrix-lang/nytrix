@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.linux
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, apply_buffer_scale, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, text_input_state, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
+module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, apply_buffer_scale, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, start_window_move, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, text_input_state, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -2341,6 +2341,26 @@ comptime template _wl_toplevel_action(name, doc, call_fn){
 comptime emit _wl_toplevel_action(iconify_window, "Iconify a native Wayland toplevel.", xdg_toplevel_set_minimized)
 comptime emit _wl_toplevel_action(maximize_window, "Maximize a native Wayland toplevel.", xdg_toplevel_set_maximized)
 comptime emit _wl_toplevel_action(restore_window, "Restore a native Wayland toplevel.", xdg_toplevel_unset_maximized)
+
+fn start_window_move(any win) bool {
+   "Starts a compositor-managed xdg_toplevel move using the last pointer-button serial."
+   if !is_dict(win) { return false }
+   def toplevel = win.get("xdg_toplevel", 0)
+   def globals = win.get("globals", 0)
+   if !toplevel || !globals { return false }
+   def state = globals.get("listener_state", 0)
+   if !state { return false }
+   def seat = load64_h(state, _WG_SEAT)
+   def serial = load64_h(state, _WG_POINTER_BUTTON_SERIAL)
+   if !seat || !serial { return false }
+   wl_proxy_marshal_flags_obj_u(
+      toplevel, 5, 0, int(get_proxy_version(toplevel)), 0, seat, int(serial),
+   )
+   def display = globals.get("handle", 0)
+   if !display { return false }
+   wl_display_flush(display)
+   true
+}
 
 fn _set_toplevel_size_limits(any toplevel, int min_w, int min_h, int max_w, int max_h) bool {
    if !toplevel { return false }

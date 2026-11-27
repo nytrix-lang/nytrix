@@ -1,0 +1,51 @@
+shape x11_custom_titlebar_move {
+  family "runtime-ui"
+  generator "embedded"
+  features [ui x11 window-manager client-decoration move]
+  template ny-test-case
+  flags "--native-only -O2 --no-progress"
+  timeout 60
+  expect compile_and_run
+  expect_stdout "X11-CUSTOM-MOVE-OK"
+  source ny <<'NY'
+use core
+use core.common as common
+use core.os.ui.window as window
+use core.os.ui.window.platform.linux.x11 as x11
+
+if common.env_trim("DISPLAY").len == 0 {
+   print("skip: set DISPLAY under Xvfb")
+   print("X11-CUSTOM-MOVE-OK")
+   exit(0)
+}
+;; In isolated Xvfb, own the root redirect mask as a tiny test WM so the test
+;; can inspect the exact EWMH message the native hook sends.
+def observer = x11.open_display()
+assert(observer, "open observer X11 connection")
+def win = window.open_window("custom titlebar move", 50, 50, 200, 100)
+assert(win && window.backend() == "x11", "X11 window opens")
+def root = x11.root_window(observer, x11.default_screen(observer))
+assert(x11.select_input(observer, root, x11.SubstructureRedirectMask) != 0, "select root window-manager events")
+x11.sync(observer, true)
+assert(window.start_window_move(win), "window manager accepts custom titlebar move request")
+x11.sync(observer)
+def ev = malloc(96)
+assert(ev, "allocate X11 event storage")
+def moveresize = x11.intern_atom(observer, "_NET_WM_MOVERESIZE")
+def expected_window = window.get_x11_window(win)
+mut received = false
+while x11.pending(observer) > 0 {
+   x11.next_event(observer, ev)
+   if load32(ev, 0) == x11.ClientMessage && load64_h(ev, 32) == expected_window &&
+      load64_h(ev, 40) == moveresize && load32(ev, 48) == 32 &&
+      load32(ev, 64) == 8 && load32(ev, 72) == 1 && load32(ev, 80) == 1 {
+      received = true
+   }
+}
+free(ev)
+assert(received, "window manager receives a correctly formed EWMH move request")
+window.close(win)
+x11.close_display(observer)
+print("X11-CUSTOM-MOVE-OK")
+NY
+}

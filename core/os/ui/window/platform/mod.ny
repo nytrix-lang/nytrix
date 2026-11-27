@@ -24,7 +24,7 @@ module core.os.ui.window.platform(
    get_win32_monitor, get_wgl_context, get_cocoa_window, get_nsgl_context, get_cocoa_monitor, get_cocoa_view,
    get_egl_display, get_egl_context, get_egl_surface, get_egl_config, get_osmesa_context,
    get_osmesa_color_buffer, get_osmesa_depth_buffer, get_window_monitor, set_window_monitor,
-   get_x11_selection_string, set_x11_selection_string, set_window_decorated, set_window_floating,
+   get_x11_selection_string, set_x11_selection_string, set_window_decorated, start_window_move, set_window_floating,
    set_window_resizable, get_clipboard, set_clipboard, text_input_start, text_input_stop,
    text_input_state, get_surface_support, joystick_present,
    get_joystick_axes, get_joystick_buttons, get_joystick_hats, get_joystick_name, get_joystick_guid,
@@ -1765,6 +1765,17 @@ comptime template _native_set2_all(name, x11_fn, win32_fn, cocoa_fn){
 }
 
 comptime emit _native_set1_all(set_window_decorated, x11_backend.set_window_decorated, win32_impl.set_window_decorated, cocoa_impl.set_window_decorated)
+
+fn start_window_move(any win) bool {
+   "Starts a native client-side window drag on supported Linux window systems."
+   if !win { return false }
+   def backend_name = _select_backend_name()
+   def native = _native_window(win)
+   if backend_name == "x11" { return x11_backend.start_window_move(native) }
+   if backend_name == "wayland" { return wayland_backend.start_window_move(native) }
+   false
+}
+
 comptime emit _native_set1_all(set_window_floating, x11_backend.set_window_floating, win32_impl.set_window_floating, cocoa_impl.set_window_floating)
 comptime emit _native_set1_all(set_window_resizable, x11_backend.set_window_resizable, win32_impl.set_window_resizable, cocoa_impl.set_window_resizable)
 
