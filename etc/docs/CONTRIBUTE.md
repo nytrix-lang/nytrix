@@ -381,7 +381,7 @@ Additional in-process compiler checks:
 ```bash
 build/release/ny-full --type-row-test
 build/release/ny-full --backend-test
-build/release/ny-full --backend-test passes/scalar/gvn_pre
+build/release/ny-full --backend-test passes/value/gvn_pre
 ```
 
 Backend regression drivers and shared support live under

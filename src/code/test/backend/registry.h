@@ -3,7 +3,7 @@
 #define NYR_BACKEND_TEST_H
 
 /* Run all compiler-linked backend regression tests, or select by relative
- * backend test path (for example `passes/scalar/cse`) or unique basename. */
+ * backend test path (for example `passes/value/cse`) or unique basename. */
 int nyr_backend_test_run(const char *name);
 
 #endif

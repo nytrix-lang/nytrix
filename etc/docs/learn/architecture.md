@@ -72,7 +72,7 @@ aligned when changing that boundary.
 These contributors' substrates sit under the layers above. Each entry names
 the owner file, its contract, and its wiring, grounded in the file headers.
 
-The equality-saturation engine in `src/code/backend/passes/scalar/egraph.c`
+The equality-saturation engine in `src/code/backend/passes/value/egraph.c`
 canonicalizes pure scalar integer arithmetic per basic block: e-classes over
 block values, a declarative rule pool applied to saturation (48 iterations,
 2048 nodes of fuel), and cost-directed extraction. Only pure ALU/COPY nodes

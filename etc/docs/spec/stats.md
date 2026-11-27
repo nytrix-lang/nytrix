@@ -2632,11 +2632,11 @@ Symbol LEAs now write directly into their assigned destination color, cutting `k
 
 ### E-graph saturator: hash-consing, batched rebuild, guarded arithmetic
 
-Kept the e-graph rewrite in `passes/scalar/egraph.c`: it buys compile time and two new correct rules, not code size on current fixtures. Interning scanned every node and congruence closure compared every pair each iteration, both quadratic, and the rule set only expressed unconditionally sound equalities. It now uses an open-addressing table keyed by `(op, imm, child classes)`, rebuilt when unions move canonical children, so `eg_intern` probes instead of scanning; `eg_rebuild` re-canonicalizes every root's child pointers and merges identical roots once per iteration, with union-find merging by rank, replacing the pairwise compare. A stale table entry after a late merge can only delay a merge, never invent one, since entries are matched on full structural equality. `eg_nonneg_roots` computes non-negativity as a fixpoint (one provably non-negative member, `and` inheriting from either operand, COPY forwarding), justifying `x / 2^k == x >> k` and `x % 2^k == x & (2^k-1)` only for `x >= 0` plus unconditional bitwise idempotence `x&x` and `x|x`. DIV/MOD are not e-nodes (`eg_inst_pure_scalar` rejects them as faulting), so the first guarded rule never fired until the regression ("non-negative div was not refined to a shift") forced per-instruction planning against the dividend's e-class and destination-keyed emission.
+Kept the e-graph rewrite in `passes/value/egraph.c`: it buys compile time and two new correct rules, not code size on current fixtures. Interning scanned every node and congruence closure compared every pair each iteration, both quadratic, and the rule set only expressed unconditionally sound equalities. It now uses an open-addressing table keyed by `(op, imm, child classes)`, rebuilt when unions move canonical children, so `eg_intern` probes instead of scanning; `eg_rebuild` re-canonicalizes every root's child pointers and merges identical roots once per iteration, with union-find merging by rank, replacing the pairwise compare. A stale table entry after a late merge can only delay a merge, never invent one, since entries are matched on full structural equality. `eg_nonneg_roots` computes non-negativity as a fixpoint (one provably non-negative member, `and` inheriting from either operand, COPY forwarding), justifying `x / 2^k == x >> k` and `x % 2^k == x & (2^k-1)` only for `x >= 0` plus unconditional bitwise idempotence `x&x` and `x|x`. DIV/MOD are not e-nodes (`eg_inst_pure_scalar` rejects them as faulting), so the first guarded rule never fired until the regression ("non-negative div was not refined to a shift") forced per-instruction planning against the dividend's e-class and destination-keyed emission.
 
 | check | result |
 | --- | --- |
-| `ny --backend-test=passes/scalar/egraph` | pass (incl. new guarded-div and idempotence cases) |
+| `ny --backend-test=passes/value/egraph` | pass (incl. new guarded-div and idempotence cases) |
 | randomized expression equivalence | 256 seeds, depth 24, unchanged |
 | `.text` for `knight`, `compose-local`, `unicode-identifiers`, `combs-test`, `eq-test` | byte-identical with the pass on, guarded rules off, and the pass off |
 | compile time, 120-op straight-line function | 543/549/550 ms vs 548/544/554 ms with the guarded rules off |
@@ -2697,7 +2697,7 @@ Reviewed `https://github.com/maxnut/scbe` before porting anything: 32,218 lines 
 
 | SCBE | Nytrix |
 | --- | --- |
-| `codegen/spiller.cpp`: replace one operand per instruction with a reserved register | `passes/scalar/regalloc.c` spills live segments with homes, rematerializes constants and recolors local evictions |
+| `codegen/spiller.cpp`: replace one operand per instruction with a reserved register | `passes/value/regalloc.c` spills live segments with homes, rematerializes constants and recolors local evictions |
 | `graph_color_regalloc.cpp`: Chaitin simplify/select/spill over a color graph, no coalescing | profile heat, loop depth, next-use and use-count eviction, tied-input affinity, dead-input coalescing, callee-save preference |
 | `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `passes/cfg/ssa.c`, run by DCE |
 | `IR/split_critical_edge.cpp`: split only when the target has phis | phi lowering via edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass |
@@ -2734,7 +2734,7 @@ Added nineteen fixtures to `etc/labs/tests/bench`, each an original Ny program p
 
 Parity: extracting each `source ny`/`source c` block, running `ny-full --native-only -O3 -run` and building with `cc -O2` gave 19 of 19 matching `checksum=` lines; the same files are found by the harness, e.g. `build/release/ny-test --bin build/release/ny-full --bench --pattern 'graphics/povray' --bench-run 1 --bench-warmup 0 --jobs 1 --bench-no-compare-llvm`. The corpus is 96 fixtures. Scope: one input per fixture, no timing claim, and Ny at `-O3` against C at `-O2` on a shared loaded host. Four silent source bugs were exposed: `i64buf_new` does not zero memory but C `calloc` does, so buffers are now explicitly initialized; an expression continues across a newline only inside unclosed parentheses, so a two-line sharpen expression without outer parentheses parsed as two statements and lost trailing subtractions (checksum `3579272` versus `2069072`); ping-pong stencil buffers must both be initialized because the second pass reads borders the first never writes; and Ny pointers are not indexable, so elements go through `i64buf_load`/`i64buf_store`.
 
-Two native x86-64 codegen changes were kept. `lower/machine.c` lowers a `rt_f64_to_i64` call with one f64 argument and a raw i64 result to `NYR_MACH_CONVERT`, so the encoder emits `cvttsd2si` instead of a call plus the xmm0 stack round trip; page-rank's object has two `cvttsd2si` and no `rt_f64_to_i64` relocation. `passes/scalar/copy_prop.c` makes copies established earlier in the same block available to later uses (program-order walk) and folds raw scalar copies into call arguments, which carry no ownership metadata; `hanoi` drops 36→29 NYIR instructions as seven `mov` temporaries feeding its two recursive calls disappear. Checksums agree on 41 sampled fixtures, and `copy`/`opt` sets show no new failures (four `opt` failures — `select-flag-preservation`, `loop-register-call-homes`, `kernel-list-alias-cow:entry_fill_preserves_observable_globals`, `nested-loop-specialize` — reproduce on the unmodified tree). With `NYTRIX_NATIVE_CACHE=0 NYTRIX_AOT_CACHE=0 --bench-run 9 --bench-warmup 2`, where "before" reverts `copy_prop.c`:
+Two native x86-64 codegen changes were kept. `lower/machine.c` lowers a `rt_f64_to_i64` call with one f64 argument and a raw i64 result to `NYR_MACH_CONVERT`, so the encoder emits `cvttsd2si` instead of a call plus the xmm0 stack round trip; page-rank's object has two `cvttsd2si` and no `rt_f64_to_i64` relocation. `passes/value/copy_prop.c` makes copies established earlier in the same block available to later uses (program-order walk) and folds raw scalar copies into call arguments, which carry no ownership metadata; `hanoi` drops 36→29 NYIR instructions as seven `mov` temporaries feeding its two recursive calls disappear. Checksums agree on 41 sampled fixtures, and `copy`/`opt` sets show no new failures (four `opt` failures — `select-flag-preservation`, `loop-register-call-homes`, `kernel-list-alias-cow:entry_fill_preserves_observable_globals`, `nested-loop-specialize` — reproduce on the unmodified tree). With `NYTRIX_NATIVE_CACHE=0 NYTRIX_AOT_CACHE=0 --bench-run 9 --bench-warmup 2`, where "before" reverts `copy_prop.c`:
 
 | fixture | before | after | NYR/LLVM before → after |
 | --- | --- | --- | --- |
@@ -3413,7 +3413,7 @@ suite run is wall noise, not a code change.
 
 ### vectorizer proof diagnostics (landed)
 
-`src/code/backend/passes/vector/loop_vectorize.c` threads a `const char **why`
+`src/code/backend/passes/value/loop_vectorize.c` threads a `const char **why`
 through `tbuf_address_parts`, `tbuf_affine_memory_safe` and
 `vector_memory_affine`, and the load/store rejection uses it, so a rejected access
 names the failed proof instead of "non-affine, aliasing, escaping, or out of
@@ -4399,7 +4399,7 @@ compiler. The still-open leads are:
   `mov r14d, 1`, the call-argument temporary takes rbx, and both parameters
   are stored to frame homes and reloaded immediately. `segment_color_limit`
   does not restrict these segments, so the callee-saved choice comes from
-  copy-affinity hints in `passes/scalar/regalloc.c`.
+  copy-affinity hints in `passes/value/regalloc.c`.
 - **Loop registers for buffer bases.** `sssp` NYC reloaded `dist`, `ev` and
   `ew` from stack homes on every access because boosted offset temporaries
   outranked them; fixed by `mach_loop_root_boost` (see the 2026-11-23 entry).
@@ -4936,7 +4936,7 @@ executables (`ny -O3 --native-backend x86_64 --run=none`,
 `NYTRIX_AOT_CACHE=0 NYTRIX_JIT_CACHE=0`), both switches below off vs on, over
 all 110 bench fixtures; every checksum matched.
 
-- **Address-only copy fold** (`passes/scalar/copy_prop.c`,
+- **Address-only copy fold** (`passes/value/copy_prop.c`,
   `NYTRIX_NO_ADDR_COPY_FOLD=1`). `mut ptr a = i64buf_new(N)` lowers to an
   `alloca` plus `mov v0 [abi=ptr]` retags, one per access site. The
   scalar-class contract kept each copy, and each took a home reloaded on every
@@ -5004,7 +5004,7 @@ at load 40-55.
   `B + (i2 - i1)`. With a non-constant difference it merges only when every
   use rebases (xz NYR's short match loops still pay +2.9% instructions,
   +0.7% time, for the preheader setup).
-- **Base reassociation** (`passes/scalar/addr_base.c`,
+- **Base reassociation** (`passes/value/addr_base.c`,
   `NYTRIX_NO_ADDR_BASE_REASSOC=1`): four or more adjacent `(B + C_k) + x`
   accesses in one block share `B + x` and fold `C_k` as displacements
   (revcomp's unrolled lane loop kept 16 bases and spilled 27). Two or three
@@ -5190,7 +5190,7 @@ geomean `-0.38%` instructions:u): `revcomp` NYR `4,840,016 -> 4,289,536`
   unsupported scalar consumer. Accepting `NYIR_DIV_I64` when `rewritten[user]`
   is set allows NYC `susan` to emit the AVX2 vectorized loop (`sum` div-const
   plus vectorized blend/clamping).
-- **Files**: `src/code/backend/passes/vector/loop_vectorize.c` (`lv_const_div_use_disabled`, `use_allowed`)
+- **Files**: `src/code/backend/passes/value/loop_vectorize.c` (`lv_const_div_use_disabled`, `use_allowed`)
 - **Switch**: `NYTRIX_NO_VEC_CONST_DIV_USE=1` (disables accepting `NYIR_DIV_I64` in `use_allowed`)
 - **Measured (build/gem A/B)**: `susan` NYC `21,429,809 -> 8,154,184` insns
   (`-61.95%`, `2.095 ms -> 1.233 ms`, `1.34x` vs C `918 us`), LLVM untouched
@@ -5207,7 +5207,7 @@ geomean `-0.38%` instructions:u): `revcomp` NYR `4,840,016 -> 4,289,536`
   Passing `defs`/`val_count` into `use_allowed()` and resolving `in->a`, `in->b`,
   and `reduction_term` via `vec_resolve_copy()` lets those NYR reductions
   vectorize cleanly into AVX2 loops (`vpaddq`/`vpmuludq`).
-- **Files**: `src/code/backend/passes/vector/loop_vectorize.c` (`lv_red_copy_use_disabled`, `use_allowed`)
+- **Files**: `src/code/backend/passes/value/loop_vectorize.c` (`lv_red_copy_use_disabled`, `use_allowed`)
 - **Switch**: `NYTRIX_NO_VEC_RED_COPY_USE=1` (disables `vec_resolve_copy` in `use_allowed`)
 - **Measured (build/gem A/B)**: `inline` NYR `934,109 -> 622,178` insns (`-33.4%`,
   `53.6 us -> 38.4 us`, `1.46x` vs C `26.3 us`); `call-chain` NYR `6,732,769 ->
@@ -5266,7 +5266,7 @@ geomean `-0.38%` instructions:u): `revcomp` NYR `4,840,016 -> 4,289,536`
   Canonicalizing raw `mul(cmp, x)` and `mul(cmp & 1, x)` to `select(cmp, x, 0)`
   at entry to `nyr_peephole` removes the masking `and.i64` and lets the
   vectorizer emit the AVX2 `vpcmpgtq` / `vblendvpd` stencil loop.
-- **Files**: `src/code/backend/passes/scalar/peephole.c` (`peep_mul_cmp_select_disabled`, `nir_extract_raw_cmp_bool`, `nir_fold_mul_cmp_select`)
+- **Files**: `src/code/backend/passes/value/peephole.c` (`peep_mul_cmp_select_disabled`, `nir_extract_raw_cmp_bool`, `nir_fold_mul_cmp_select`)
 - **Switch**: `NYTRIX_NO_MUL_CMP_SELECT=1` (disables `mul -> select` canonicalization)
 - **Measured (build/gem A/B)**: `susan` NYR `18,026,920 -> 7,864,190` insns
   (`-56.37%`, `2.027 ms -> 1.204 ms`, `1.36x` vs C `886 us`, beating LLVM
@@ -5296,7 +5296,7 @@ a build before the post-inline loop-global promotion (7e11aab7).
 
 Landed:
 
-- **Abs range fold** (`passes/scalar/abs_range_fold.c`,
+- **Abs range fold** (`passes/value/abs_range_fold.c`,
   `NYTRIX_NO_ABS_RANGE_FOLD=1`), C only: `select(x < 0, -x, x) < C` becomes
   `(x + C-1 + MIN) <s (2C-1 + MIN)`, i.e. `(x + C-1) <u (2C-1)`. Exact except
   at `x == INT64_MIN`, where C negation is undefined; Ny wraps and keeps the
@@ -5363,7 +5363,7 @@ full unroll), cd NYR (wrapping `-x` blocks the fold).
   loads, and `slp_try_reduce_quad_i64()` / `slp_pack_add_quad_i64()` pack
   interleaved `sum_words` reduction trees into AVX2 vector adds on both NYR
   and NYC routes.
-- **Files**: `src/code/backend/passes/vector/slp_vectorize.c`
+- **Files**: `src/code/backend/passes/value/slp_vectorize.c`
   (`slp_reduce_quad_disabled`, `slp_same_root`, `slp_pack_add_quad_i64`,
   `slp_try_reduce_quad_i64`)
 - **Switch**: `NYTRIX_NO_SLP_REDUCE_QUAD_I64=1` (disables commuted root
@@ -5406,7 +5406,7 @@ full unroll), cd NYR (wrapping `-x` blocks the fold).
   loop-body broadcast segments onto the already-materialized preheader colors
   across `MVEC_COLOR_WIDE_N`, eliminating all `4` per-iteration broadcast
   reloads inside `dgemm`'s 4x-unrolled inner kernel (`ymm8..ymm11`).
-- **Files**: `src/code/backend/passes/scalar/regalloc.c`
+- **Files**: `src/code/backend/passes/value/regalloc.c`
   (`regalloc_inv_vec_swap_disabled`, `has_carried_succ_for_vreg`,
   `block_vreg_is_unique`, `coalesce_segments`, `body_align_vector_color`,
   `carry_loop_invariant_vectors`)
@@ -5429,7 +5429,7 @@ full unroll), cd NYR (wrapping `-x` blocks the fold).
   (`bcast_zero_i64`) when already materialized in the same `preheader`,
   eliminating the `vmovdqu ymm15, YMMWORD PTR [rbp-0x1fd8]` spill reload from
   `cd`'s NYR inner loop (`ymm8..ymm12` all resident, `0` spills).
-- **Files**: `src/code/backend/passes/vector/loop_vectorize.c`
+- **Files**: `src/code/backend/passes/value/loop_vectorize.c`
   (`lv_dedup_const_bcast_disabled`, `lv_const_bcast_key`,
   `emit_i64_vector_accumulator`)
 - **Switch**: `NYTRIX_NO_VEC_DEDUP_CONST_BCAST=1` (emits a fresh per-operand
@@ -5489,7 +5489,7 @@ full unroll), cd NYR (wrapping `-x` blocks the fold).
   ops with `nyr_dce()` + `nyr_ir_verify()`. This eliminates both `vpaddq`s and
   the `K` broadcast register from `cd`'s NYC inner loop while keeping `vpsubq
   ymm, ymm, [rdi/rsi+r13*1]`.
-- **Files**: `src/code/backend/passes/scalar/abs_range_fold.c`
+- **Files**: `src/code/backend/passes/value/abs_range_fold.c`
   (`arf_hoist_disabled`, `arf_match_hoist`, `arf_make_const`, `arf_make_binop`,
   `arf_push_ins`, `arf_ins_cmp`, `nyr_abs_range_fold`)
 - **Switch**: `NYTRIX_NO_ABS_RANGE_HOIST=1` (disables invariant bias hoisting
@@ -5593,7 +5593,7 @@ Rejected:
   `ax, ay in [-1024, 1024]`, combining with bias hoisting (`e85ba7d9`) to
   reduce `cd`'s NYR inner loop to `9` instructions (`vpsubq [rbp+r13*1-...]`,
   `vpcmpgtq`, `vandpd`, `vpsubq`, with zero `vblendvpd`).
-- **Files**: `src/code/backend/passes/scalar/abs_range_fold.c`
+- **Files**: `src/code/backend/passes/value/abs_range_fold.c`
   (`arf_proven_disabled`, `arf_is_mult8`, `arf_intersect_lo`,
   `arf_intersect_hi`, `arf_find_zero_memset`, `arf_alloca_i64_bounds`,
   `arf_match_select_clamp`, `arf_trace_alloca_root`, `arf_val_bounds`,
