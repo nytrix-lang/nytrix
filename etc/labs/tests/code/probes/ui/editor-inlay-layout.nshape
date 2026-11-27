@@ -1,0 +1,27 @@
+shape editor_inlay_layout {
+  family "runtime-ui"
+  generator "embedded"
+  features ["ui", "editor", "inlay"]
+  template ny-test-case
+  flags "--native --run -O0 --no-progress"
+  timeout 600
+  expect compile_and_run
+  expect_stdout "EDITOR-INLAY-LAYOUT-OK"
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture(["env", "NY_UI_HEADLESS=1", "NY_EDITOR_PROBE_SYNTAX=1", "NYTRIX_UI_REPLAY=1",
+   "NYTRIX_UI_REPLAY_HASH=0", "NYTRIX_FIXTURE_FRAMES=3", compiler, "--native-only", "-O0", "etc/labs/editor.ny"], [], nil, false)
+def out = to_str(result.get("stdout", ""))
+assert(int(result.get("code", 127)) == 0, "editor inlay probe exits cleanly: " + out + to_str(result.get("stderr", "")))
+assert(out.contains("EDITOR-SYNTAX-PROBE-OK"), "editor inlay probe completed")
+def live = run_capture(["env", "NY_UI_HEADLESS=1", "NY_EDITOR_PROBE_INLAY_LIVE=1", "NYTRIX_UI_REPLAY=1",
+   "NYTRIX_UI_REPLAY_HASH=0", "NY_EDITOR_FRAME_HASH_FRAME=100000", "NYTRIX_FIXTURE_FRAMES=1500", compiler, "--native-only", "-O0", "etc/labs/editor.ny"], [], nil, false)
+def live_out = to_str(live.get("stdout", ""))
+assert(int(live.get("code", 127)) == 0, "live inlay probe exits cleanly: " + live_out + to_str(live.get("stderr", "")))
+assert(live_out.contains("EDITOR-INLAY-LIVE-OK"), "live server hint reaches rendered editor frame")
+print("EDITOR-INLAY-LAYOUT-OK")
+NY
+}

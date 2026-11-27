@@ -1,0 +1,29 @@
+shape editor_lsp_tokens {
+  family "ui/editor"
+  generator "embedded"
+  features ["ny", "editor", "lsp"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_stdout "editor lsp tokens passed"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor.lsp as lsp
+use core.math.parse.syntax as syntax
+def st = lsp.new()
+st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["variable", "function"], "tokenModifiers": ["declaration", "readonly"]}}}
+def tokens = lsp.decode_semantic_tokens(st, {"data": [0, 2, 3, 0, 1, 0, 4, 2, 1, 2, 2, 1, 5, 0, 3]})
+assert(tokens.len == 3 && int(tokens.get(1).get("col")) == 6 && int(tokens.get(2).get("line")) == 2 && int(tokens.get(2).get("col")) == 1, "relative semantic positions")
+assert(to_str(tokens.get(1).get("type")) == "function" && tokens.get(2).get("modifiers").len == 2, "semantic legend and modifiers")
+assert(lsp.decode_semantic_tokens(st, {"data": [0, 0, 1, 99, 0]}).len == 0 && lsp.decode_semantic_tokens(st, {"data": [1]}).len == 0, "invalid token data rejected")
+st["encoding"] = "utf-16"
+def merged = lsp.merge_semantic_tokens(st, "a😀b", [[syntax.TOK_COMMENT, 0, 6]], [{"col": 3, "length": 1, "type": "function"}])
+assert(merged.len == 2 && int(merged.get(0).get(1)) == 0 && int(merged.get(0).get(2)) == 5 && int(merged.get(1).get(0)) == syntax.TOK_FUNCTION && int(merged.get(1).get(1)) == 5, "semantic UTF-16 spans overlay lexical bytes")
+def fallback = lsp.merge_semantic_tokens(st, "abc", [[syntax.TOK_COMMENT, 0, 3]], [{"col": 0, "length": 2, "type": "unknown"}])
+assert(fallback.len == 1 && int(fallback.get(0).get(0)) == syntax.TOK_COMMENT, "unknown types preserve syntax")
+def hints = lsp.decode_inlay_hints([{"position": {"line": 1, "character": 3}, "label": [{"value": ": "}, {"value": "i32"}], "paddingLeft": true}])
+def hint = hints.get(0, dict(0))
+assert(hints.len == 1 && to_str(hint.get("label", "")) == ": i32" && bool(hint.get("padding_left", false)), "inlay label parts and padding")
+print("editor lsp tokens passed")
+NY
+}

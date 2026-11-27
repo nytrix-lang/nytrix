@@ -1,0 +1,61 @@
+shape editor_lsp_live {
+  family "ui/editor"
+  generator "embedded"
+  features ["ny", "editor", "lsp"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  timeout 180
+  expect compile_and_run
+  expect_stdout "editor lsp live passed"
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.ui.render.viewer.editor.lsp as lsp
+def path = "/tmp/ny-editor-lsp-live.ny"
+mut st = lsp.new()
+st = lsp.start(st, path, "def answer = 42\nfn demo() { answer }\n", "/tmp")
+mut int n = 0
+while !lsp.ready(st) && n < 500 { def events = lsp.pump(st) if events.len > 0 { n += 0 } os.msleep(10) n += 1 }
+assert(lsp.ready(st), "language server initializes with nested method token")
+assert(to_str(st.get("encoding", "")) == "utf-8", "server negotiates its byte position encoding")
+st = lsp.semantic_tokens(st, path)
+st = lsp.did_change(st, path, ";; é\ndef answer = 43\nfn demo() { answer }\n")
+st = lsp.semantic_tokens(st, path)
+st = lsp.inlay_hints(st, path, 0, 1)
+st = lsp.inlay_hints(st, path, 1, 2)
+st = lsp.inlay_hints(st, path, 1, 1, 10)
+st = lsp.inlay_hints(st, path, 1, 1, 11)
+mut tokens = []
+mut hints = []
+mut int token_events = 0
+mut bool got_hints = false
+mut bool empty_range = false
+mut bool before_end = false
+mut bool after_end = false
+n = 0
+while (token_events < 1 || !got_hints || !empty_range || !before_end || !after_end) && n < 500 {
+   for e in lsp.pump(st) {
+      if to_str(e.get("kind", "")) == "semantic_tokens" { token_events += 1 tokens = e.get("items", []) }
+      if to_str(e.get("kind", "")) == "inlay_hints" {
+         if int(e.get("start_line", -1)) == 0 { empty_range = e.get("items", []).len == 0 }
+         elif int(e.get("end_col", 0)) == 10 { before_end = e.get("items", []).len == 0 }
+         elif int(e.get("end_col", 0)) == 11 { after_end = e.get("items", []).len == 1 }
+         else { got_hints = true hints = e.get("items", []) }
+      }
+   }
+   os.msleep(10) n += 1
+}
+assert(token_events == 1 && tokens.len > 0, "current tokens received and stale response discarded")
+mut bool keyword = false
+mut bool unicode_comment = false
+for t in tokens {
+   if to_str(t.get("type", "")) == "keyword" { keyword = true }
+   if to_str(t.get("type", "")) == "comment" && int(t.get("line", -1)) == 0 && int(t.get("length", 0)) == 5 { unicode_comment = true }
+}
+assert(keyword && unicode_comment, "server legend and UTF-8 token length decoded")
+def hint = hints.get(0, dict(0))
+assert(empty_range && before_end && after_end && got_hints && hints.len > 0 && to_str(hint.get("label", "")) == ": int" && int(hint.get("line", -1)) == 1, "live inlay hint decoded in requested range")
+lsp.stop(st)
+print("editor lsp live passed")
+NY
+}

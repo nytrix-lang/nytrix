@@ -14,7 +14,7 @@ module core.os.ui.render.viewer.editor.lsp(
    new, enabled_by_default, command_for, status, start, stop, restart, toggle_popups,
    ready, did_open, did_change, did_save, did_close, completion, hover, definition,
    references, rename, formatting, document_symbols, signature_help, code_actions,
-   workspace_symbols, execute_command, pump, diagnostics_for, diagnostics_count,
+   workspace_symbols, execute_command, inlay_hints, semantic_tokens, decode_inlay_hints, decode_semantic_tokens, merge_semantic_tokens, pump, diagnostics_for, diagnostics_count,
    diagnostics_text, diagnostics_from_check, output_name, uri_of, path_of,
    lsp_col, editor_col, strip_snippet, norm_path
 )
@@ -26,6 +26,7 @@ use core.os (env, getcwd)
 use core.os.path as ospath
 use core.os.jsonrpc as rpc
 use core.os.ui.render.viewer.editor.tools as tools
+use core.math.parse.syntax as syntax
 
 fn _as_list(any v) list { is_list(v) ? v : [] }
 
@@ -56,7 +57,7 @@ fn enabled_by_default() bool {
 
 fn command_for(str path) list {
    "Server command for `path`: NY_EDITOR_LSP_<EXT>, NY_EDITOR_LSP_COMMAND, then
-   ny-lsp for Nytrix sources (other languages need an explicit command)."
+   ny-lsp for Nytrix sources(other languages need an explicit command)."
    if !enabled_by_default() { return [] }
    def per_ext = _argv_from_env("NY_EDITOR_LSP_" + _ext_key(path), path)
    if per_ext.len > 0 { return per_ext }
@@ -140,6 +141,10 @@ fn _client_caps() dict {
          "formatting": dict(0),
          "rename": {"prepareSupport": true},
          "codeAction": {"codeActionLiteralSupport": {"codeActionKind": {"valueSet": ["quickfix", "refactor", "source"]}}},
+         "inlayHint": {"dynamicRegistration": false},
+         "semanticTokens": {"dynamicRegistration": false, "requests": {"full": true}, "formats": ["relative"],
+            "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
+            "tokenModifiers": ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"]},
          "publishDiagnostics": {"relatedInformation": true}
       },
       "workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}, "configuration": true, "symbol": dict(0)},
@@ -148,7 +153,7 @@ fn _client_caps() dict {
 }
 
 fn start(dict st, str path, str text="", str root="") dict {
-   "Starts (or reuses) the server for `path` and opens the document."
+   "Starts(or reuses) the server for `path` and opens the document."
    def argv = command_for(path)
    if argv.len <= 0 {
       st["last"] = "no language server for " + ospath.basename(path)
@@ -182,10 +187,10 @@ fn start(dict st, str path, str text="", str root="") dict {
    st["queue"] = []
    st["pending"] = dict(8)
    st["init_id"] = rpc.request(conn, "initialize", {
-      "processId": nil, "rootUri": uri_of(dir), "rootPath": dir,
-      "workspaceFolders": [{"uri": uri_of(dir), "name": ospath.basename(dir)}],
-      "capabilities": _client_caps(), "clientInfo": {"name": "nytrix-editor"}
-   })
+         "processId": nil, "rootUri": uri_of(dir), "rootPath": dir,
+         "workspaceFolders": [{"uri": uri_of(dir), "name": ospath.basename(dir)}],
+         "capabilities": _client_caps(), "clientInfo": {"name": "nytrix-editor"}
+      })
    st["last"] = "lsp starting: " + str.join(argv, " ")
    if path.len > 0 { st = did_open(st, path, text) }
    st
@@ -269,7 +274,7 @@ fn _doc_id(str path) dict { {"uri": uri_of(path)} }
 fn _pos(int line, int col) dict { {"line": int(max(0, line)), "character": int(max(0, col))} }
 
 fn did_open(dict st, str path, str text) dict {
-   "Opens `path` with `text` on the server (starting it when needed)."
+   "Opens `path` with `text` on the server(starting it when needed)."
    if path.len <= 0 { return st }
    if !is_dict(_conn(st)) { return start(st, path, text) }
    def uri = uri_of(path)
@@ -352,6 +357,18 @@ fn document_symbols(dict st, str path) dict {
    _request(st, "textDocument/documentSymbol", {"textDocument": _doc_id(path)}, "symbols", {"path": path})
 }
 
+fn semantic_tokens(dict st, str path) dict {
+   "Requests full semantic tokens; responses use the server's advertised legend."
+   def version = int(st.get("docs", dict(0)).get(uri_of(path), 0))
+   _request(st, "textDocument/semanticTokens/full", {"textDocument": _doc_id(path)}, "semantic_tokens", {"path": path, "version": version})
+}
+
+fn inlay_hints(dict st, str path, int start_line, int end_line, int end_col=0) dict {
+   "Requests inlay hints in a half-open range, using server position units."
+   def int version = int(st.get("docs", dict(0)).get(uri_of(path), 0))
+   _request(st, "textDocument/inlayHint", {"textDocument": _doc_id(path), "range": {"start": _pos(start_line, 0), "end": _pos(end_line, end_col)}}, "inlay_hints", {"path": path, "version": version, "start_line": start_line, "end_line": end_line, "end_col": end_col})
+}
+
 fn workspace_symbols(dict st, str query) dict {
    "Searches symbols across the workspace; arrives as a `symbols` event."
    _request(st, "workspace/symbol", {"query": query}, "symbols", {"path": "", "query": query})
@@ -374,18 +391,17 @@ fn code_actions(dict st, str path, int line, int col, int end_line=-1, int end_c
 }
 
 fn execute_command(dict st, str command, list args=[]) dict {
-   "Runs a server command (for code actions that carry one)."
+   "Runs a server command(for code actions that carry one)."
    _request(st, "workspace/executeCommand", {"command": command, "arguments": args}, "command", dict(0))
 }
 
 ;; ---- column conversion ---------------------------------------------------
 ;; Editor columns count code points; servers count UTF-8 bytes or (by default)
 ;; UTF-16 code units.
-
 fn _cp_bytes(int lead) int { lead < 0x80 ? 1 : (lead < 0xE0 ? 2 : (lead < 0xF0 ? 3 : 4)) }
 
 fn lsp_col(dict st, str line_text, int col) int {
-   "Converts an editor (code point) column to the server's column unit."
+   "Converts an editor(code point) column to the server's column unit."
    def utf8 = to_str(st.get("encoding", "utf-16")) == "utf-8"
    mut int i = 0
    mut int cps = 0
@@ -400,7 +416,7 @@ fn lsp_col(dict st, str line_text, int col) int {
 }
 
 fn editor_col(dict st, str line_text, int col) int {
-   "Converts a server column to an editor (code point) column of `line_text`."
+   "Converts a server column to an editor(code point) column of `line_text`."
    def utf8 = to_str(st.get("encoding", "utf-16")) == "utf-8"
    mut int i = 0
    mut int cps = 0
@@ -415,9 +431,8 @@ fn editor_col(dict st, str line_text, int col) int {
 }
 
 ;; ---- response normalization ----------------------------------------------
-
 fn strip_snippet(str s) str {
-   "Turns snippet syntax ($1, ${2:name}, ${3|a,b|}) into plain text."
+   "Turns snippet syntax($1, ${2:name}, ${3|a,b|}) into plain text."
    if str.find(s, "$") < 0 { return s }
    mut out = ""
    mut int i = 0
@@ -522,11 +537,11 @@ fn _completion_items(any res) list {
       if int(it.get("insertTextFormat", 1)) == 2 { insert = strip_snippet(insert) }
       def detail = to_str(it.get("detail", ""))
       out = out.append({
-         "label": label, "detail": detail, "kind": _kind_name(int(it.get("kind", 0))),
-         "insert": insert, "doc": _markup(it.get("documentation", nil)),
-         "sort": to_str(it.get("sortText", label)), "filter": to_str(it.get("filterText", label)),
-         "edit": edit
-      })
+            "label": label, "detail": detail, "kind": _kind_name(int(it.get("kind", 0))),
+            "insert": insert, "doc": _markup(it.get("documentation", nil)),
+            "sort": to_str(it.get("sortText", label)), "filter": to_str(it.get("filterText", label)),
+            "edit": edit
+         })
    }
    out
 }
@@ -627,6 +642,118 @@ fn _actions(any res) list {
    out
 }
 
+fn decode_inlay_hints(any res) list {
+   "Normalizes hint labels and positions, retaining original hint data."
+   mut out = []
+   if !is_list(res) { return out }
+   for hint in res {
+      if !is_dict(hint) { continue }
+      def pos = hint.get("position", dict(0))
+      def any label = hint.get("label", nil)
+      mut text = ""
+      if is_list(label) { for part in label { if is_dict(part) { text = text + to_str(part.get("value", "")) } } }
+      elif is_str(label) { text = to_str(label) }
+      if text.len == 0 { continue }
+      mut dict item = dict(8)
+      item["line"] = int(pos.get("line", 0))
+      item["col"] = int(pos.get("character", 0))
+      item["label"] = text
+      item["kind"] = int(hint.get("kind", 0))
+      item["padding_left"] = bool(hint.get("paddingLeft", false))
+      item["padding_right"] = bool(hint.get("paddingRight", false))
+      item["raw"] = hint
+      out = out.append(item)
+   }
+   out
+}
+
+fn decode_semantic_tokens(dict st, any res) list {
+   "Decodes full relative semantic token data using the server legend."
+   mut out = []
+   if !is_dict(res) { return out }
+   def data = res.get("data", [])
+   if !is_list(data) || data.len % 5 != 0 { return out }
+   def provider = st.get("caps", dict(0)).get("semanticTokensProvider", dict(0))
+   def legend = is_dict(provider) ? provider.get("legend", dict(0)) : dict(0)
+   def types = legend.get("tokenTypes", [])
+   def modifiers = legend.get("tokenModifiers", [])
+   mut int line = 0
+   mut int col = 0
+   mut int i = 0
+   while i < data.len {
+      def int dl = int(data.get(i))
+      def int dc = int(data.get(i + 1))
+      def int len = int(data.get(i + 2))
+      def int typ = int(data.get(i + 3))
+      def int mask = int(data.get(i + 4))
+      if dl < 0 || dc < 0 || len <= 0 || typ < 0 || typ >= types.len || mask < 0 { return [] }
+      line += dl
+      col = dl == 0 ? col + dc : dc
+      mut names = []
+      mut int j = 0
+      while j < modifiers.len && j < 31 {
+         if (mask & (1 << j)) != 0 { names = names.append(to_str(modifiers.get(j))) }
+         j += 1
+      }
+      out = out.append({"line": line, "col": col, "length": len, "type": to_str(types.get(typ)), "modifiers": names})
+      i += 5
+   }
+   out
+}
+
+fn _semantic_kind(str typ) int {
+   case typ {
+      "namespace", "type", "class", "enum", "interface", "struct", "typeParameter" -> syntax.TOK_TYPE
+      "parameter" -> syntax.TOK_PARAM
+      "variable" -> syntax.TOK_VARIABLE
+      "property", "enumMember" -> syntax.TOK_PROPERTY
+      "function", "method", "macro" -> syntax.TOK_FUNCTION
+      "keyword", "modifier" -> syntax.TOK_KEYWORD
+      "comment" -> syntax.TOK_COMMENT
+      "string", "regexp" -> syntax.TOK_STRING
+      "number" -> syntax.TOK_NUMBER
+      "operator" -> syntax.TOK_OPERATOR
+      _ -> -1
+   }
+}
+
+fn merge_semantic_tokens(dict st, str line, list lexical, list semantic) list {
+   "Overlays one line's semantic spans on byte-based syntax tokens. LSP columns
+   and lengths use the negotiated encoding ; unrecognized types retain lexical colors."
+   mut spans = []
+   for token in semantic {
+      def int kind = _semantic_kind(to_str(token.get("type", "")))
+      if kind < 0 { continue }
+      def int col = int(token.get("col", 0))
+      def int len = int(token.get("length", 0))
+      if col < 0 || len <= 0 { continue }
+      def int a = editor_col(st, line, col)
+      def int b = editor_col(st, line, col + len)
+      def int start = str.str_slice(line, 0, a).len
+      def int end = str.str_slice(line, 0, b).len
+      if end > start { spans = spans.append([start, end, kind]) }
+   }
+   if spans.len == 0 { return lexical }
+   mut out = []
+   mut int pos = 0
+   mut int lex = 0
+   mut int sem = 0
+   mut int run_start = 0
+   mut int previous = -1
+   while pos < line.len {
+      while lex < lexical.len && int(lexical.get(lex).get(1, 0)) + int(lexical.get(lex).get(2, 0)) <= pos { lex += 1 }
+      while sem < spans.len && int(spans.get(sem).get(1, 0)) <= pos { sem += 1 }
+      mut int kind = int(syntax.TOK_TEXT)
+      if lex < lexical.len && int(lexical.get(lex).get(1, 0)) <= pos { kind = int(lexical.get(lex).get(0, syntax.TOK_TEXT)) }
+      if sem < spans.len && int(spans.get(sem).get(0, 0)) <= pos { kind = int(spans.get(sem).get(2, syntax.TOK_TEXT)) }
+      if previous >= 0 && kind != previous { out = out.append([previous, run_start, pos - run_start]) run_start = pos }
+      previous = kind
+      pos += _cp_bytes(load8(line, pos))
+   }
+   if previous >= 0 { out = out.append([previous, run_start, line.len - run_start]) }
+   out
+}
+
 fn _on_initialized(dict st, dict res) dict {
    def caps = res.get("capabilities", dict(0))
    st["caps"] = is_dict(caps) ? caps : dict(0)
@@ -689,6 +816,11 @@ fn _response(dict st, dict m) list {
    def info = pending.get(key, dict(0))
    pending.remove(key)
    def kind = to_str(info.get("kind", ""))
+   if kind == "semantic_tokens" || kind == "inlay_hints" {
+      def path = to_str(info.get("path", ""))
+      def int version = int(info.get("version", 0))
+      if version <= 0 || int(st.get("docs", dict(0)).get(uri_of(path), 0)) != version { return [] }
+   }
    if m.contains("error") {
       def msg = to_str(m.get("error", dict(0)).get("message", "request failed"))
       st["last"] = kind + ": " + msg
@@ -709,6 +841,8 @@ fn _response(dict st, dict m) list {
       "symbols" -> { ev["symbols"] = _symbols(res, 0, []) }
       "signature" -> { ev["signature"] = _signature(res) }
       "actions" -> { ev["actions"] = _actions(res) }
+      "semantic_tokens" -> { ev["items"] = decode_semantic_tokens(st, res) }
+      "inlay_hints" -> { ev["items"] = decode_inlay_hints(res) }
       _ -> { ev["result"] = res }
    }
    st["last"] = kind + " received"
@@ -717,7 +851,7 @@ fn _response(dict st, dict m) list {
 
 fn pump(dict st) list {
    "Processes everything the server sent since the last call and returns
-   normalized events. Call once per frame; never blocks."
+   normalized events. Call once per frame ; never blocks."
    def c = _conn(st)
    if !is_dict(c) { return [] }
    mut events = []
@@ -753,7 +887,6 @@ fn pump(dict st) list {
 }
 
 ;; ---- diagnostics -----------------------------------------------------------
-
 fn diagnostics_for(dict st, str path) list {
    "Server diagnostics last published for `path`."
    _as_list(st.get("diag_by_path", dict(0)).get(norm_path(path), []))
@@ -761,7 +894,7 @@ fn diagnostics_for(dict st, str path) list {
 
 fn diagnostics_count(dict st, str path, int severity=0) int {
    "Counts diagnostics for `path` (every file when empty), optionally of one
-   severity (1 error, 2 warning, 3 info, 4 hint)."
+   severity(1 error, 2 warning, 3 info, 4 hint)."
    mut int n = 0
    def by = st.get("diag_by_path", dict(0))
    for p in by.keys() {
@@ -772,7 +905,7 @@ fn diagnostics_count(dict st, str path, int severity=0) int {
 }
 
 fn diagnostics_from_check(dict check_res) list {
-   "Diagnostics parsed from `ny --check` output (used without a server)."
+   "Diagnostics parsed from `ny --check` output(used without a server)."
    def text = to_str(check_res.get("stdout", "")) + "\n" + to_str(check_res.get("stderr", ""))
    def lines = str.split(text, "\n")
    mut out = []
@@ -822,5 +955,13 @@ fn output_name(str path) str {
    st["encoding"] = "utf-8"
    assert(lsp_col(st, "aé𝄞b", 3) == 7, "utf8 col")
    assert(editor_col(st, "aé𝄞b", 7) == 3, "utf8 editor col")
+   st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["variable", "function"], "tokenModifiers": ["declaration", "readonly"]}}}
+   def tokens = decode_semantic_tokens(st, {"data": [0, 2, 3, 0, 1, 0, 4, 2, 1, 2, 2, 1, 5, 0, 3]})
+   assert(tokens.len == 3 && int(tokens.get(1).get("col")) == 6 && int(tokens.get(2).get("line")) == 2 && int(tokens.get(2).get("col")) == 1, "relative semantic positions")
+   assert(to_str(tokens.get(1).get("type")) == "function" && tokens.get(2).get("modifiers").len == 2, "semantic legend and modifier bits")
+   assert(decode_semantic_tokens(st, {"data": [0, 0, 1, 99, 0]}).len == 0 && decode_semantic_tokens(st, {"data": [1]}).len == 0, "invalid semantic data rejected")
+   st["docs"] = {uri_of("/tmp/test.ny"): 2}
+   st["pending"] = {"5": {"kind": "semantic_tokens", "path": "/tmp/test.ny", "version": 1}}
+   assert(_response(st, {"id": 5, "result": {"data": [0, 0, 1, 0, 0]}}).len == 0, "stale semantic response discarded")
    print("lsp client tests passed")
 }

@@ -394,6 +394,12 @@ _editor_values["lsp_popup"] = dict(0)
 _editor_values["dap_state"] = borrow(dap.new())
 _editor_values["dap_panel"] = true
 _editor_values["lsp_dirty_at"] = 0
+_editor_values["semantic_path"] = ""
+_editor_values["semantic_requested_path"] = ""
+_editor_values["semantic_lines"] = dict(0)
+_editor_values["inlay_path"] = ""
+_editor_values["inlay_requested_path"] = ""
+_editor_values["inlay_lines"] = dict(0)
 _editor_values["lsp_auto"] = ""
 _editor_values["lsp_auto_at"] = 0
 _editor_values["ui_state"] = borrow(interact.new())
@@ -501,6 +507,7 @@ def probe_flags = {
    "TERMINAL": _editor_probe("TERMINAL"),
    "TERMINAL_DUMP": _editor_probe("TERMINAL_DUMP"),
    "SYNTAX": _editor_probe("SYNTAX"),
+   "INLAY_LIVE": _editor_probe("INLAY_LIVE"),
    "LSP": _editor_probe("LSP"),
    "DAP": _editor_probe("DAP"),
    "NAV": _editor_probe("NAV"),
@@ -946,6 +953,12 @@ fn _clamp_which_key_scroll(int total, int visible) int {
 fn _touch_content() int {
    _request_full_redraw(2)
    _editor_values["content_rev"] = int(_editor_get("content_rev")) + (1)
+   _editor_values["semantic_path"] = ""
+   _editor_values["semantic_requested_path"] = ""
+   _editor_values["semantic_lines"] = dict(0)
+   _editor_values["inlay_path"] = ""
+   _editor_values["inlay_requested_path"] = ""
+   _editor_values["inlay_lines"] = dict(0)
    _editor_values["syntax_cache_rev"] = -1
    _editor_values["width_cache_rev"] = -1
    _editor_values["outline_cache_rev"] = -1
@@ -4149,7 +4162,7 @@ fn _place_cursor(dict lay, f64 x, f64 y) int {
    def row = min(max(ed.row_at(lay, min(max(y, top), bottom), int(_editor_get("st").get("scroll", 0))), 0), lines.len - 1)
    def line = to_str(lines.get(row, ""))
    _editor_get("st")["cursor_line"] = row
-   _editor_get("st")["cursor_col"] = ed.col_at(int(_editor_get("font_body")), line, x, _line_text_x(lay))
+   _editor_get("st")["cursor_col"] = _visual_col_at(line, row, x - _line_text_x(lay))
    _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _editor_get("st")["quit_prompt"] = false
@@ -4281,6 +4294,24 @@ fn _lsp_flush_change() int {
    def path = _current_path()
    if path.len <= 0 || !bool(_lsp().get("active", false)) { return 0 }
    _editor_values["lsp_state"] = lsp.did_change(_lsp(), path, _current_text())
+   _lsp_request_semantic(path)
+   _lsp_request_inlay(path)
+   0
+}
+
+fn _lsp_request_semantic(str path) int {
+   if path.len == 0 || !lsp.ready(_lsp()) || !_lsp().get("docs", dict(0)).contains(lsp.uri_of(path)) { return 0 }
+   if !_lsp().get("caps", dict(0)).contains("semanticTokensProvider") { return 0 }
+   _editor_values["semantic_requested_path"] = path
+   _editor_values["lsp_state"] = lsp.semantic_tokens(_lsp(), path)
+   0
+}
+
+fn _lsp_request_inlay(str path) int {
+   if path.len == 0 || !lsp.ready(_lsp()) || !_lsp().get("docs", dict(0)).contains(lsp.uri_of(path)) { return 0 }
+   if !_lsp().get("caps", dict(0)).contains("inlayHintProvider") { return 0 }
+   _editor_values["inlay_requested_path"] = path
+   _editor_values["lsp_state"] = lsp.inlay_hints(_lsp(), path, 0, ed.current_lines(_editor_get("st")).len)
    0
 }
 
@@ -4349,6 +4380,60 @@ fn _lsp_probe_step() int {
    0
 }
 
+@effects(all)
+fn _inlay_live_probe(dict lay) int {
+   def int phase = int(_editor_values.get("inlay_probe_phase", 0))
+   if int(_editor_get("frame_count")) > 1200 { panic("live inlay probe timed out") }
+   if phase == 1 && _inlays_for_line(0).len == 0 { msleep(5) return 0 }
+   def fb = gfx.read_framebuffer()
+   def int width = int(fb.get("width", 0))
+   def int height = int(fb.get("height", 0))
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   assert(width > 0 && height > 0 && !!pixels, "inlay probe reads framebuffer")
+   def int x0 = int(_line_text_x(lay) + _measure_prefix("def answer = 43", 10))
+   def int y0 = int(_editor_row_y(float(lay.get("edit_y", 0.0)), 0)) + 2
+   assert(x0 >= 0 && x0 + 90 < width && y0 >= 0 && y0 + 18 < height, "inlay probe region visible")
+   mut samples = []
+   mut int changed = 0
+   def baseline = _editor_values.get("inlay_probe_pixels", [])
+   mut int y = 0
+   while y < 18 {
+      mut int x = 0
+      while x < 90 {
+         def int pixel = int(load32(pixels, ((y0 + y) * width + x0 + x) * 4))
+         if phase == 0 { samples = samples.append(pixel) }
+         elif pixel != int(baseline.get(y * 90 + x, pixel)) { changed += 1 }
+         x += 1
+      }
+      y += 1
+   }
+   free(pixels)
+   if phase == 0 {
+      _editor_values["inlay_probe_pixels"] = samples
+      _editor_values["inlay_probe_phase"] = 1
+      _lsp_start()
+   } elif phase == 1 {
+      def hints = _inlays_for_line(0)
+      def hint = hints.get(0, dict(0))
+      assert(to_str(hint.get("label", "")) == ": int" && int(hint.get("col", -1)) == 10, "live server delivered the expected hint")
+      def runs = _editor_get("visible_text_runs_cache")
+      mut bool displayed = false
+      mut int i = 0
+      while i + 3 < runs.len {
+         if to_str(runs.get(i, "")) == " : int " && int(runs.get(i + 3, 0)) == 10006 &&
+            abs(float(runs.get(i + 1, 0.0)) - float(x0)) < 1.0 { displayed = true }
+         i += 4
+      }
+      assert(displayed, "live hint appears in the drawn text runs at its source position")
+      assert(changed > 10 && _visual_prefix("def answer = 43", 0, 10) > _measure_prefix("def answer = 43", 10), "live hint changes the rendered line")
+      print("EDITOR-INLAY-LIVE-OK")
+      _editor_values["inlay_probe_phase"] = 2
+      _editor_values["lsp_state"] = lsp.stop(_lsp())
+      window.set_should_close(_editor_get("win"), true)
+   }
+   0
+}
+
 fn _dap_probe_step() int {
    ;; NY_EDITOR_PROBE_DAP=1 NY_EDITOR_PROBE_DAP_BP=<1-based line>: breakpoint,
    ;; start, report the stop, step once, continue to the end.
@@ -4400,6 +4485,14 @@ fn _lsp_auto(str kind) int {
 
 fn _lsp_pump() int {
    if !is_dict(_lsp().get("conn", nil)) { return 0 }
+   def path = _current_path()
+   if lsp.ready(_lsp()) && path.len > 0 && !ed.current_buffer(_editor_get("st")).get("readonly", false) {
+      if !_lsp().get("docs", dict(0)).contains(lsp.uri_of(path)) {
+         _editor_values["lsp_state"] = lsp.did_open(_lsp(), path, _current_text())
+      }
+      if to_str(_editor_values.get("semantic_requested_path", "")) != path && int(_editor_get("lsp_dirty_at")) == 0 { _lsp_request_semantic(path) }
+      if to_str(_editor_values.get("inlay_requested_path", "")) != path && int(_editor_get("lsp_dirty_at")) == 0 { _lsp_request_inlay(path) }
+   }
    def auto = to_str(_editor_get("lsp_auto"))
    if auto.len > 0 && ticks() - int(_editor_get("lsp_auto_at")) >= 60000000 {
       _editor_values["lsp_auto"] = ""
@@ -4424,8 +4517,37 @@ def LSP_TRACE = common.env_truthy("NY_EDITOR_LSP_TRACE")
 fn _lsp_event(dict e) int {
    def kind = to_str(e.get("kind", ""))
    if LSP_TRACE { eprint("[lsp] event " + kind + " " + to_str(e.get("text", e.get("request", "")))) }
-   if kind == "ready" { _status(to_str(_lsp().get("last", "lsp ready"))) }
+   if kind == "ready" { _editor_values["semantic_requested_path"] = "" _editor_values["inlay_requested_path"] = "" _status(to_str(_lsp().get("last", "lsp ready"))) }
    elif kind == "diagnostics" { _request_full_redraw(1) }
+   elif kind == "semantic_tokens" {
+      def path = to_str(e.get("path", ""))
+      if path == _current_path() && int(_editor_get("lsp_dirty_at")) == 0 {
+         mut dict by_line = dict(128)
+         for token in e.get("items", []) {
+            def key = to_str(int(token.get("line", 0)))
+            by_line[key] = by_line.get(key, []).append(token)
+         }
+         _editor_values["semantic_path"] = path
+         _editor_values["semantic_lines"] = by_line
+         _editor_values["syntax_cache_rev"] = -1
+         _editor_values["visible_runs_cache_key"] = ""
+         _request_full_redraw(1)
+      }
+   }
+   elif kind == "inlay_hints" {
+      def path = to_str(e.get("path", ""))
+      if path == _current_path() && int(_editor_get("lsp_dirty_at")) == 0 {
+         mut dict by_line = dict(128)
+         for hint in e.get("items", []) {
+            def key = to_str(int(hint.get("line", 0)))
+            by_line[key] = by_line.get(key, []).append(hint)
+         }
+         _editor_values["inlay_path"] = path
+         _editor_values["inlay_lines"] = by_line
+         _editor_values["visible_runs_cache_key"] = ""
+         _request_full_redraw(1)
+      }
+   }
    elif kind == "completion" { _lsp_show_completion(e) }
    elif kind == "hover" { _lsp_show_hover(e) }
    elif kind == "signature" { _lsp_show_signature(e) }
@@ -4789,8 +4911,8 @@ fn _draw_diagnostics(dict lay) int {
          mut int b = ln == el ? lsp.editor_col(_lsp(), text, int(d.get("end_col", 0))) : str.utf8_len(text)
          if b <= a { b = a + 1 }
          def f64 y = float(_editor_row_y(top, ln - scroll)) + float(ed.LINE_H) - 3.0
-         def f64 x0 = text_x + _measure_prefix(text, a)
-         def f64 x1 = float(min(right, float(max(x0 + 6.0, text_x + _measure_prefix(text, b)))))
+         def f64 x0 = text_x + _visual_prefix(text, ln, a)
+         def f64 x1 = float(min(right, float(max(x0 + 6.0, text_x + _visual_prefix(text, ln, b)))))
          _draw_squiggle(x0, x1, y, c)
          ln += 1
       }
@@ -4810,7 +4932,7 @@ fn _draw_diagnostics(dict lay) int {
       _fill_rect(edit_x + 4.0, row_y + float(ed.LINE_H) * 0.5 - 3.0, 6.0, 6.0, c)
       ;; inline message after the code, faded, truncated to the pane
       def text = to_str(lines.get(ln, ""))
-      def f64 mx = text_x + _measure_prefix(text, str.utf8_len(text)) + 28.0
+      def f64 mx = text_x + _visual_prefix(text, ln, str.utf8_len(text)) + 28.0
       if mx < right - 40.0 {
          def msg = _fit_chrome_text(sf, str.str_replace(to_str(d.get("message", "")), "\n", "  "), right - mx)
          _fill_rect(mx - 10.0, row_y + 3.0, _measure_ui(sf, msg, 0.0) + 20.0, float(ed.LINE_H) - 6.0, gfx.color_alpha(c, 0.10))
@@ -4884,7 +5006,7 @@ fn _draw_lsp_popup(dict lay, f64 sw, f64 sh) int {
    def int row = int(pop.get("line", 0))
    def int scroll = int(_editor_get("st").get("scroll", 0))
    def line = to_str(lines.get(int(min(max(row, 0), max(0, lines.len - 1))), ""))
-   def f64 ax = _line_text_x(lay) + _measure_prefix(line, int(pop.get("col", 0)))
+   def f64 ax = _line_text_x(lay) + _visual_prefix(line, row, int(pop.get("col", 0)))
    def f64 row_y = float(_editor_row_y(float(lay.get("edit_y", 0.0)), int(max(0, row - scroll))))
    def f64 w = float(min(620.0, max(320.0, sw * 0.46)))
    def f64 pad = 12.0
@@ -5879,7 +6001,7 @@ fn _handle_mouse_press(dict lay, any data) int {
          if lines_alt.len > 0 {
             def row_alt = min(max(ed.row_at(lay, my, int(_editor_get("st").get("scroll", 0))), 0), lines_alt.len - 1)
             def line_alt = to_str(lines_alt.get(row_alt, ""))
-            _add_extra_cursor_at(row_alt, ed.col_at(int(_editor_get("font_body")), line_alt, mx, _line_text_x(lay)))
+            _add_extra_cursor_at(row_alt, _visual_col_at(line_alt, row_alt, mx - _line_text_x(lay)))
          }
          _editor_get("st")["drag_select"] = false
          return 0
@@ -6960,7 +7082,11 @@ fn _syntax_runs(str filename, str line, int li) list {
    }
    def key = _syntax_key(filename, li, line)
    if _editor_get("syntax_run_cache").contains(key) { return _editor_get("syntax_run_cache").get(key, []) }
-   def toks = _tokenize_line(filename, line, li)
+   mut toks = _tokenize_line(filename, line, li)
+   if _current_path() == to_str(_editor_values.get("semantic_path", "")) && filename == to_str(ed.current_buffer(_editor_get("st")).get("name", "")) {
+      def semantic = _editor_values.get("semantic_lines", dict(0)).get(to_str(li), [])
+      if semantic.len > 0 { toks = lsp.merge_semantic_tokens(_lsp(), line, toks, semantic) }
+   }
    mut runs = []
    ;; Tokenizers report byte offsets; slicing and x positions use code points.
    def int cp_len = str.utf8_len(line)
@@ -7130,6 +7256,49 @@ fn _append_center_run(list out, int font, str text, f64 cx, f64 y, int color) li
 
 fn _append_highlight_runs(list out, str filename, str line, int li, f64 x, f64 y, bool highlight=true) list {
    if _diff_buffer_name(filename) { return _append_diff_run(out, line, x, y) }
+   def hints = _inlays_for_line(li)
+   if hints.len > 0 {
+      mut result = out
+      def runs = highlight ? _syntax_runs(filename, line, li) : [[line, syntax.TOK_TEXT, 0.0]]
+      mut int col = 0
+      mut f64 added = 0.0
+      for run in runs {
+         def text = to_str(run.get(0, ""))
+         def int kind = int(run.get(1, syntax.TOK_TEXT))
+         def int count = str.utf8_len(text)
+         mut int c = 0
+         while c < count {
+            mut int next = count
+            for hint in hints {
+               def int at = _inlay_col(line, hint) - col
+               if at >= c && at < next { next = at }
+            }
+            if next > c {
+               result = result.append(str.str_slice(text, c, next)).append(x + _measure_prefix(line, col + c) + added).append(y).append(kind)
+               c = next
+            }
+            if c >= count { break }
+            for hint in hints {
+               if _inlay_col(line, hint) == col + c {
+                  def label = _inlay_label(hint)
+                  result = result.append(label).append(x + _measure_prefix(line, col + c) + added).append(y).append(10006)
+                  added += _inlay_width(hint)
+               }
+            }
+            result = result.append(str.str_slice(text, c, c + 1)).append(x + _measure_prefix(line, col + c) + added).append(y).append(kind)
+            c += 1
+         }
+         col += count
+      }
+      for hint in hints {
+         if _inlay_col(line, hint) == col {
+            def label = _inlay_label(hint)
+            result = result.append(label).append(x + _measure_prefix(line, col) + added).append(y).append(10006)
+            added += _inlay_width(hint)
+         }
+      }
+      return result
+   }
    if !highlight { return _append_plain_run(out, line, x, y) }
    def runs = _syntax_rel_runs(filename, line, li)
    if runs.len == 0 { return _append_plain_run(out, line, x, y) }
@@ -7242,6 +7411,56 @@ fn _measure_prefix(str line, int col) f64 {
    w
 }
 
+fn _inlays_for_line(int li) list {
+   if _current_path().len == 0 || _current_path() != to_str(_editor_values.get("inlay_path", "")) { return [] }
+   _editor_values.get("inlay_lines", dict(0)).get(to_str(li), [])
+}
+
+fn _inlay_label(dict hint) str {
+   (bool(hint.get("padding_left", false)) ? " " : "") + to_str(hint.get("label", "")) + (bool(hint.get("padding_right", false)) ? " " : "")
+}
+
+fn _inlay_col(str line, dict hint) int {
+   def int col = int(hint.get("col", -1))
+   if col < 0 || col > lsp.lsp_col(_lsp(), line, str.utf8_len(line)) { return -1 }
+   lsp.editor_col(_lsp(), line, col)
+}
+
+fn _inlay_width(dict hint) f64 {
+   def label = _inlay_label(hint)
+   _measure_ui(int(_editor_get("font_body")), label, float(str.utf8_len(label)) * float(_editor_get("FONT_BODY_ADV")))
+}
+
+fn _visual_prefix(str line, int li, int col) f64 {
+   mut f64 x = _measure_prefix(line, col)
+   for hint in _inlays_for_line(li) {
+      def int at = _inlay_col(line, hint)
+      if at >= 0 && at <= col { x += _inlay_width(hint) }
+   }
+   x
+}
+
+fn _visual_col_at(str line, int li, f64 target) int {
+   def hints = _inlays_for_line(li)
+   if hints.len == 0 { return ed.col_at(int(_editor_get("font_body")), line, target, 0.0) }
+   if target <= 0.0 { return 0 }
+   def int length = str.utf8_len(line)
+   mut int col = 0
+   while col <= length {
+      def f64 end = _visual_prefix(line, li, col)
+      mut f64 hint_width = 0.0
+      for hint in hints { if _inlay_col(line, hint) == col { hint_width += _inlay_width(hint) } }
+      if hint_width > 0.0 && target >= end - hint_width && target <= end { return col }
+      if col == length { return length }
+      def f64 next = _visual_prefix(line, li, col + 1)
+      mut f64 next_hints = 0.0
+      for hint in hints { if _inlay_col(line, hint) == col + 1 { next_hints += _inlay_width(hint) } }
+      if target < (end + next - next_hints) * 0.5 { return col }
+      col += 1
+   }
+   length
+}
+
 fn _hex_color(str hex) any {
    hex.len >= 7 ? gfx.color_hex(hex) : C_ACCENT
 }
@@ -7271,8 +7490,8 @@ fn _draw_color_swatches_visible(list lines, int scroll, int rows, f64 text_x, f6
          def hex = to_str(hit.get("hex", ""))
          if hex.len >= 7 && stop > start {
             def f64 yy = _editor_row_y(y, li - scroll)
-            def f64 sx = text_x + _measure_prefix(line, start)
-            def f64 ex = text_x + _measure_prefix(line, stop)
+            def f64 sx = text_x + _visual_prefix(line, li, start)
+            def f64 ex = text_x + _visual_prefix(line, li, stop)
             def col = _hex_color(hex)
             _fill_rect(sx, yy + float(ed.LINE_H) - 4.0, max(12.0, ex - sx), 2.0, gfx.color_alpha(col, 0.85))
             _fill_rect(sx - 13.0, yy + 3.0, 8.0, 8.0, col)
@@ -7301,7 +7520,7 @@ fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
    if row >= scroll && row < scroll + rows {
       def line = to_str(ed.current_lines(_editor_get("st")).get(row, ""))
       def f64 row_y = float(_editor_row_y(y0, row - scroll))
-      fit0 = _fit_rect(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(_editor_get("color_state"))) + 18.0, row_y + float(ed.LINE_H) + 2.0, w, h, sw, sh, 8.0)
+      fit0 = _fit_rect(_line_text_x(lay) + _visual_prefix(line, row, colorpicker.start(_editor_get("color_state"))) + 18.0, row_y + float(ed.LINE_H) + 2.0, w, h, sw, sh, 8.0)
    }
    _gui_overlay_window("ed_color", float(fit0.get(0, 8.0)), float(fit0.get(1, 8.0)), w, h)
    gui.text_colored(hex + "   " + colorpicker.rgb_label(hex), "text")
@@ -7346,8 +7565,8 @@ fn _draw_selection_for_line(str line, int li, f64 text_x, f64 y, list r) int {
    def a = li == sl ? sc : 0
    def b = li == el ? ec : line.len
    if b <= a { return 0 }
-   def sx = text_x + _measure_prefix(line, a)
-   def ex = text_x + _measure_prefix(line, b)
+   def sx = text_x + _visual_prefix(line, li, a)
+   def ex = text_x + _visual_prefix(line, li, b)
    _fill_rect(sx, y - 2.0, max(4.0, ex - sx), ed.LINE_H, gfx.color_alpha(C_SELECT, 0.70))
    0
 }
@@ -7369,8 +7588,8 @@ fn _draw_find_visible(list lines, int scroll, int rows, f64 text_x, f64 y) int {
          def int b = int(min(max(int(r.get("end", a)), a), line.len))
          if b > a {
             def f64 yy = float(_editor_row_y(y, row - scroll))
-            def sx = text_x + _measure_prefix(line, a)
-            def ex = text_x + _measure_prefix(line, b)
+            def sx = text_x + _visual_prefix(line, row, a)
+            def ex = text_x + _visual_prefix(line, row, b)
             _fill_rect(sx, yy - 2.0, max(4.0, ex - sx), float(ed.LINE_H), i == active_idx ? gfx.color_alpha(C_ACCENT, 0.52) : gfx.color_alpha(C_CYAN, 0.24))
          }
       }
@@ -7896,7 +8115,7 @@ fn _draw_editor(dict lay, bool caret) int {
    _draw_minimap(lay, rows, scroll, lines.len)
    if caret && int(_editor_get("st").get("cursor_line", 0)) >= scroll && int(_editor_get("st").get("cursor_line", 0)) < scroll + rows {
       def line = to_str(lines.get(int(_editor_get("st").get("cursor_line", 0)), ""))
-      def cx = text_x + _measure_prefix(line, int(_editor_get("st").get("cursor_col", 0)))
+      def cx = text_x + _visual_prefix(line, int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)))
       def cy = _editor_row_y(y, int(_editor_get("st").get("cursor_line", 0)) - scroll)
       _fill_rect(cx, cy + 1.0, 2.0, float(ed.LINE_H) - 2.0, C_ACCENT)
    }
@@ -7908,7 +8127,7 @@ fn _draw_editor(dict lay, bool caret) int {
          if erow >= scroll && erow < scroll + rows {
             def eline = to_str(lines.get(erow, ""))
             def ecol = min(max(_cursor_col(extras.get(ei)), 0), eline.len)
-            def ecx = text_x + _measure_prefix(eline, ecol)
+            def ecx = text_x + _visual_prefix(eline, erow, ecol)
             def ecy = _editor_row_y(y, erow - scroll)
             _fill_rect(ecx, ecy + 1.0, 2.0, float(ed.LINE_H) - 2.0, C_ACCENT_2)
          }
@@ -8129,7 +8348,7 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    def scroll = int(_editor_get("st").get("scroll", 0))
    def line = to_str(lines.get(min(max(row, 0), max(0, lines.len - 1)), ""))
    def visible_row = row - scroll
-   def base_x = _line_text_x(lay) + _measure_prefix(line, int(_editor_get("st").get("cursor_col", 0)))
+   def base_x = _line_text_x(lay) + _visual_prefix(line, row, int(_editor_get("st").get("cursor_col", 0)))
    def f64 base_y = float(_editor_row_y(float(lay.get("edit_y", 0.0)), max(0, visible_row))) + float(ed.LINE_H) + 4.0
    def int rows = int(min(items.len, 9))
    def int sel = int(_editor_get("completion_state").get("index", 0))
@@ -8674,6 +8893,7 @@ fn _bench_text() str {
 }
 
 fn _initial_buffers() list {
+   if probe_flags.get("INLAY_LIVE", false) { return [ed.buffer("inlay-live.ny", "/tmp/ny-inlay-live.ny", "def answer = 43\n")] }
    if probe_flags.get("TERMINAL_DUMP", false) { return [ed.buffer("terminal-visual.ny", "", "use core\nprint(\"terminal visual probe\")\n")] }
    if probe_flags.get("TEXTGRID", false) { return [ed.buffer("textgrid.ny", "", "fn main() int {\n\tprint(\"grid\")\n   return 0\n}\n")] }
    if probe_flags.get("BENCH", false) || probe_flags.get("SCROLLBAR", false) { return [ed.buffer(probe_flags.get("BENCH", false) ? "bench.ny" : "scrollbar.ny", "", _bench_text())] }
@@ -8948,6 +9168,29 @@ if probe_flags.get("SYNTAX", false) {
    def md_runs = _syntax_runs("readme.md", "fn main() int { return 1 }", 1)
    assert(_syntax_runs_text(md_runs) == "fn main() int { return 1 }", "markdown ny fence preserves line")
    assert(md_runs.len > 0 && int(md_runs.get(0, []).get(1, syntax.TOK_TEXT)) == int(syntax.TOK_KEYWORD), "markdown ny fence uses nytrix syntax")
+   _editor_get("st")["buffers"] = [ed.buffer("semantic.ny", "/tmp/semantic.ny", "thing")]
+   _editor_get("st")["active"] = 0
+   _editor_get("lsp_state")["encoding"] = "utf-8"
+   _lsp_event({"kind": "semantic_tokens", "path": "/tmp/semantic.ny", "items": [{"line": 0, "col": 0, "length": 5, "type": "function"}]})
+   def semantic_runs = _syntax_runs("semantic.ny", "thing", 0)
+   assert(semantic_runs.len == 1 && int(semantic_runs.get(0).get(1)) == int(syntax.TOK_FUNCTION), "semantic response changes visible syntax run")
+   _lsp_event({"kind": "inlay_hints", "path": "/tmp/semantic.ny", "items": [{"line": 0, "col": 2, "label": ": int", "padding_left": true, "padding_right": true}]})
+   def f64 before_hint = _measure_prefix("thing", 2)
+   def f64 after_hint = _visual_prefix("thing", 0, 2)
+   assert(after_hint > before_hint && _visual_col_at("thing", 0, (before_hint + after_hint) * 0.5) == 2, "inlay reserves space and maps pointer to source column")
+   assert(_visual_col_at("thing", 0, _visual_prefix("thing", 0, 4)) == 4, "pointer after hint maps to source column")
+   def virtual_runs = _append_highlight_runs([], "semantic.ny", "thing", 0, 0.0, 0.0)
+   assert(virtual_runs.len >= 12 && to_str(virtual_runs.get(0)) == "th" && to_str(virtual_runs.get(4)) == " : int " && int(virtual_runs.get(7)) == 10006, "inlay renders between source characters")
+   _editor_get("lsp_state")["encoding"] = "utf-16"
+   _editor_values["inlay_lines"] = {"0": [{"col": 3, "label": ": T"}, {"col": 4, "label": "!"}]}
+   def f64 unicode_before = _measure_prefix("a😀b", 2)
+   def f64 unicode_after = _visual_prefix("a😀b", 0, 2)
+   assert(unicode_after > unicode_before && _visual_col_at("a😀b", 0, (unicode_before + unicode_after) * 0.5) == 2, "UTF-16 hint position maps after emoji")
+   def f64 end_before = _visual_prefix("a😀b", 0, 2) + _measure_prefix("a😀b", 3) - _measure_prefix("a😀b", 2)
+   assert(_visual_prefix("a😀b", 0, 3) > end_before && _visual_col_at("a😀b", 0, end_before + 1.0) == 3, "end-of-line hint maps to final source column")
+   _touch_content()
+   assert(to_str(_editor_values.get("semantic_path", "")) == "", "editing clears stale semantic tokens")
+   assert(_inlays_for_line(0).len == 0, "editing clears stale inlays")
    _editor_get("st")["buffers"] = old_buffers
    _editor_get("st")["active"] = old_active
    mut big = []
@@ -8960,6 +9203,7 @@ if probe_flags.get("SYNTAX", false) {
    assert(_editor_get("visible_text_runs_cache").len > 3 && int(_editor_get("visible_text_runs_cache").get(3, -1)) == int(syntax.TOK_KEYWORD), "big file visible syntax stays highlighted")
    assert(to_str(colorpicker.scan_hex_literal("bg: #b6a0ff;", 6).get("hex", "")) == "#b6a0ff", "hex color literal scanner")
    assert(to_str(colorpicker.scan_hex_literal("fg: #acf;", 6).get("hex", "")) == "#aaccff", "short hex color literal scanner")
+   print("EDITOR-SYNTAX-PROBE-OK")
    window.set_should_close(_editor_get("win"), true)
 }
 
@@ -9239,7 +9483,9 @@ while !gfx.window_should_close(_editor_get("win")) {
    def t_flush = FRAME_TRACE ? ticks() : 0
    ui_dump.auto_dump_pre_frame(bool(_editor_get("auto_dump_done")), int(_editor_get("frame_count")), auto_dump_delay)
    if FRAME_HASH && int(_editor_get("frame_count")) + 1 >= FRAME_HASH_FRAME { gfx.request_frame_capture() }
+   if probe_flags.get("INLAY_LIVE", false) { gfx.request_frame_capture() }
    gfx.end_frame()
+   if probe_flags.get("INLAY_LIVE", false) { _inlay_live_probe(lay) }
    def t_end = FRAME_TRACE ? ticks() : 0
    if FRAME_HASH && !bool(_editor_get("frame_hash_done")) && int(_editor_get("frame_count")) >= FRAME_HASH_FRAME {
       def hash_line = ui_dump.framebuffer_hash_line()
