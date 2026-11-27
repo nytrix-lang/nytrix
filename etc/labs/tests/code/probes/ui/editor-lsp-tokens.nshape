@@ -10,6 +10,15 @@ shape editor_lsp_tokens {
 use core
 use core.os.ui.render.viewer.editor.lsp as lsp
 use core.math.parse.syntax as syntax
+
+fn merged_kind(list runs, int col) int {
+   for run in runs {
+      def int start = int(run.get(1, 0))
+      if col >= start && col < start + int(run.get(2, 0)) { return int(run.get(0, -1)) }
+   }
+   -1
+}
+
 def st = lsp.new()
 st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["variable", "function"], "tokenModifiers": ["declaration", "readonly"]}}}
 def tokens = lsp.decode_semantic_tokens(st, {"data": [0, 2, 3, 0, 1, 0, 4, 2, 1, 2, 2, 1, 5, 0, 3]})
@@ -21,6 +30,10 @@ def merged = lsp.merge_semantic_tokens(st, "a😀b", [[syntax.TOK_COMMENT, 0, 6]
 assert(merged.len == 2 && int(merged.get(0).get(1)) == 0 && int(merged.get(0).get(2)) == 5 && int(merged.get(1).get(0)) == syntax.TOK_FUNCTION && int(merged.get(1).get(1)) == 5, "semantic UTF-16 spans overlay lexical bytes")
 def fallback = lsp.merge_semantic_tokens(st, "abc", [[syntax.TOK_COMMENT, 0, 3]], [{"col": 0, "length": 2, "type": "unknown"}])
 assert(fallback.len == 1 && int(fallback.get(0).get(0)) == syntax.TOK_COMMENT, "unknown types preserve syntax")
+st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["event", "decorator", "label", "other", "method"]}}}
+def standard = lsp.decode_semantic_tokens(st, {"data": [0, 0, 3, 0, 0, 0, 4, 3, 1, 0, 0, 4, 3, 2, 0, 0, 4, 3, 3, 0, 0, 4, 3, 4, 0]})
+def standard_runs = lsp.merge_semantic_tokens(st, "abc def ghi jkl mno", [[syntax.TOK_COMMENT, 0, 19]], standard)
+assert(merged_kind(standard_runs, 1) == syntax.TOK_PROPERTY && merged_kind(standard_runs, 5) == syntax.TOK_DIRECTIVE && merged_kind(standard_runs, 9) == syntax.TOK_LABEL && merged_kind(standard_runs, 13) == syntax.TOK_TEXT && merged_kind(standard_runs, 17) == syntax.TOK_FUNCTION, "all remaining standard semantic token kinds overlay lexical colors")
 def hints = lsp.decode_inlay_hints([{"position": {"line": 1, "character": 3}, "label": [{"value": ": "}, {"value": "i32"}], "paddingLeft": true}])
 def hint = hints.get(0, dict(0))
 assert(hints.len == 1 && to_str(hint.get("label", "")) == ": i32" && bool(hint.get("padding_left", false)), "inlay label parts and padding")

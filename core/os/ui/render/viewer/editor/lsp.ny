@@ -765,9 +765,12 @@ fn _semantic_kind(str typ) int {
       "namespace", "type", "class", "enum", "interface", "struct", "typeParameter" -> syntax.TOK_TYPE
       "parameter" -> syntax.TOK_PARAM
       "variable" -> syntax.TOK_VARIABLE
-      "property", "enumMember" -> syntax.TOK_PROPERTY
+      "property", "enumMember", "event" -> syntax.TOK_PROPERTY
       "function", "method", "macro" -> syntax.TOK_FUNCTION
       "keyword", "modifier" -> syntax.TOK_KEYWORD
+      "decorator" -> syntax.TOK_DIRECTIVE
+      "label" -> syntax.TOK_LABEL
+      "other" -> syntax.TOK_TEXT
       "comment" -> syntax.TOK_COMMENT
       "string", "regexp" -> syntax.TOK_STRING
       "number" -> syntax.TOK_NUMBER
