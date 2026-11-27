@@ -8,6 +8,7 @@ shape vk_ascii_text_run {
   expect_stdout "VK-ASCII-TEXT-RUN"
   source ny <<'NY'
 use core
+use core.common as common
 use core.os.ui.render as gfx
 use core.os.ui.render.vk as vk
 
@@ -32,6 +33,7 @@ fn ink_columns(ptr pixels, int width, int height, int channel) list {
 assert(gfx.apply_backend_name("vk"), "select Vulkan renderer")
 def win = gfx.init_window(128, 80, "Vulkan text probe", 0, false, false, 1)
 if !win || !vk._get_device() {
+   assert(!common.env_truthy("NYTRIX_TEST_ALLOW_DISPLAY"), "Vulkan display fixture requires a real window: " + gfx.window_error())
    if win { gfx.close_window() }
    print("VK-ASCII-TEXT-RUN-SKIP: " + gfx.window_error())
 } else {
