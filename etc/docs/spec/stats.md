@@ -2697,7 +2697,7 @@ Reviewed `https://github.com/maxnut/scbe` before porting anything: 32,218 lines 
 
 | SCBE | Nytrix |
 | --- | --- |
-| `codegen/spiller.cpp`: replace one operand per instruction with a reserved register | `passes/alloc/regalloc.c` spills live segments with homes, rematerializes constants and recolors local evictions |
+| `codegen/spiller.cpp`: replace one operand per instruction with a reserved register | `passes/scalar/regalloc.c` spills live segments with homes, rematerializes constants and recolors local evictions |
 | `graph_color_regalloc.cpp`: Chaitin simplify/select/spill over a color graph, no coalescing | profile heat, loop depth, next-use and use-count eviction, tied-input affinity, dead-input coalescing, callee-save preference |
 | `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `passes/cfg/ssa.c`, run by DCE |
 | `IR/split_critical_edge.cpp`: split only when the target has phis | phi lowering via edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass |
@@ -4399,7 +4399,7 @@ compiler. The still-open leads are:
   `mov r14d, 1`, the call-argument temporary takes rbx, and both parameters
   are stored to frame homes and reloaded immediately. `segment_color_limit`
   does not restrict these segments, so the callee-saved choice comes from
-  copy-affinity hints in `passes/alloc/regalloc.c`.
+  copy-affinity hints in `passes/scalar/regalloc.c`.
 - **Loop registers for buffer bases.** `sssp` NYC reloaded `dist`, `ev` and
   `ew` from stack homes on every access because boosted offset temporaries
   outranked them; fixed by `mach_loop_root_boost` (see the 2026-11-23 entry).
@@ -5406,7 +5406,7 @@ full unroll), cd NYR (wrapping `-x` blocks the fold).
   loop-body broadcast segments onto the already-materialized preheader colors
   across `MVEC_COLOR_WIDE_N`, eliminating all `4` per-iteration broadcast
   reloads inside `dgemm`'s 4x-unrolled inner kernel (`ymm8..ymm11`).
-- **Files**: `src/code/backend/passes/alloc/regalloc.c`
+- **Files**: `src/code/backend/passes/scalar/regalloc.c`
   (`regalloc_inv_vec_swap_disabled`, `has_carried_succ_for_vreg`,
   `block_vreg_is_unique`, `coalesce_segments`, `body_align_vector_color`,
   `carry_loop_invariant_vectors`)
