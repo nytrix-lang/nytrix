@@ -268,6 +268,7 @@ layout POINT {
 
 mut _registered_classes = dict(4)
 mut _windows = dict(8)
+mut _pending_events_by_window = dict(8)
 mut _timer_frequency = 0
 mut _dpi_awareness_done = false
 mut _known_monitor_names = []
@@ -2648,7 +2649,10 @@ fn destroy_basic_window(any win) bool {
    def hwnd = _handle_from(win)
    if !hwnd { return false }
    DragAcceptFiles(hwnd, 0)
-   DestroyWindow(hwnd) != 0
+   def ok = DestroyWindow(hwnd) != 0
+   _windows = _windows.delete(hwnd)
+   _pending_events_by_window = _pending_events_by_window.delete(hwnd)
+   ok
 }
 
 fn show_window(any win, int cmd=8) bool {
@@ -3358,18 +3362,23 @@ fn pump_window_messages(any hwnd=0, int max_messages=512) list {
 }
 
 fn poll_window_events(any win, int max_messages=512) list {
-   "Polls and translates Win32 messages for a backend window."
+   "Drains the shared Win32 queue once and returns messages owned by this window."
    if !available() || !win || !is_dict(win) { return [win, []] }
-   wait_messages(0)
-   def messages = pump_window_messages(0, max_messages)
-   def res = translate_messages(win, messages)
-   win = res.get(0, win)
-   mut events = res.get(1, [])
-   def synced = _sync_special_key_releases(win, events)
-   win, events = synced.get(0, win), synced.get(1, events)
-   win = _recenter_disabled_cursor(win)
-   win = _apply_cursor_handle(win)
-   [win, events]
+   def handle = int(win.get("handle", 0))
+   if !handle { return [win, []] }
+   _windows[handle] = win
+   def result = poll_all_window_events(dict_values(_windows), max_messages)
+   def updated_windows = result.get(0, dict(8))
+   def events_by_handle = result.get(1, dict(8))
+   _windows = updated_windows
+   def handles = dict_keys(events_by_handle)
+   for owner_handle in handles {
+      def queued = _pending_events_by_window.get(owner_handle, [])
+      _pending_events_by_window[owner_handle] = queued.extend(events_by_handle.get(owner_handle, []))
+   }
+   mut events = _pending_events_by_window.get(handle, [])
+   _pending_events_by_window = _pending_events_by_window.delete(handle)
+   [_windows.get(handle, win), events]
 }
 
 fn poll_all_window_events(list windows, int max_messages=512) list {

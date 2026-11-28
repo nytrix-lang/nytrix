@@ -160,7 +160,11 @@ fn _native_value_eq(any a, any b) bool {
 
 fn _native_window(any win) any {
    if is_dict(win) {
-      if get(win, "display", 0) && get(win, "handle", 0) { return win }
+      if get(win, "handle", 0) {
+         if get(win, "display", 0) { return win }
+         def backend_name = _select_backend_name()
+         if backend_name == "win32" || backend_name == "cocoa" { return win }
+      }
    }
    def handle = _native_handle(win)
    if !handle { return 0 }
@@ -1110,7 +1114,7 @@ fn poll_events_for_window(any win) list {
    if b == "win32" {
       _poll_joysticks_if_needed()
       def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
-      def native = native_windows.get(handle, 0)
+      def native = native_windows.get(handle, is_dict(win) ? win : 0)
       def result = win32_impl.poll_window_events(native)
       def updated = result.get(0, native)
       def raw = result.get(1, [])
@@ -1134,7 +1138,7 @@ fn poll_events_for_window(any win) list {
    if b == "cocoa" {
       _poll_joysticks_if_needed()
       def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
-      def native = native_windows.get(handle, 0)
+      def native = native_windows.get(handle, is_dict(win) ? win : 0)
       def result = cocoa_impl.poll_window_events(native)
       def updated = result.get(0, native)
       def raw = result.get(1, [])
