@@ -633,6 +633,20 @@ RT_DEF("__tag", rt_tag, 1, "fn __tag(v)", "Tags a raw integer.")
 RT_DEF("__untag", rt_untag, 1, "fn __untag(v)", "Untags a Nytrix value.")
 RT_DEF("__ffi_untag_ptr", rt_ffi_untag_ptr, 1, "fn __ffi_untag_ptr(v)",
        "Returns the raw address represented by a native pointer handle.")
+RT_DEF("__cocoa_text_install", rt_cocoa_text_install, 1,
+       "fn __cocoa_text_install(cls) bool", "Installs AppKit text responder methods.")
+RT_DEF("__cocoa_text_enable", rt_cocoa_text_enable, 5,
+       "fn __cocoa_text_enable(view, x, y, w, h) bool", "Enables AppKit text input.")
+RT_DEF("__cocoa_text_disable", rt_cocoa_text_disable, 1,
+       "fn __cocoa_text_disable(view) bool", "Cancels AppKit text composition.")
+RT_DEF("__cocoa_text_enabled", rt_cocoa_text_enabled, 1,
+       "fn __cocoa_text_enabled(view) bool", "Queries AppKit text input state.")
+RT_DEF("__cocoa_text_marked", rt_cocoa_text_marked, 1,
+       "fn __cocoa_text_marked(view) str", "Returns the current AppKit marked text.")
+RT_DEF("__cocoa_text_take", rt_cocoa_text_take, 1,
+       "fn __cocoa_text_take(view)", "Takes the next AppKit text input event.")
+RT_DEF("__cocoa_text_forget", rt_cocoa_text_forget, 1,
+       "fn __cocoa_text_forget(view) bool", "Releases AppKit text input state.")
 RT_DEF("__is_nil", rt_is_nil, 1, "fn __is_nil(v) bool",
        "Checks if value is the nil immediate.")
 RT_DEF("__is_int", rt_is_int, 1, "fn __is_int(v) bool",

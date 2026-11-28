@@ -1,0 +1,79 @@
+shape cocoa-text-input {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "cocoa", "ime"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3"
+  expect_stdout "COCOA-TEXT-INPUT-OK"
+  source ny <<'NY'
+use core
+use core.mem (cstr)
+use core.os.ui.window.platform.cocoa as cocoa
+use core.os.ui.window.consts as kinds
+
+#macos {
+   #link "objc"
+   layout TestRange { u64 location, u64 length }
+   extern {
+      fn send_mark(ptr view, ptr sel, ptr value, TestRange selected, TestRange replaced) as "objc_msgSend"
+      fn send_commit(ptr view, ptr sel, ptr value, TestRange replaced) as "objc_msgSend"
+   }
+   fn make_string(str text) any {
+      cocoa.objc_msgSend_ptr(cocoa.get_class("NSString"), cocoa.get_selector("stringWithUTF8String:"), cstr(text))
+   }
+   fn verify_text_input() {
+      def pool = cocoa.create_autorelease_pool()
+      assert(cocoa.shared_application(), "native AppKit application")
+      def first = cocoa.create_basic_window("First IME", 100, 80, 0, 0, kinds.WINDOW_HIDE)
+      def second = cocoa.create_basic_window("Second IME", 100, 80, 0, 0, kinds.WINDOW_HIDE)
+      assert(first.get("handle", 0) && second.get("handle", 0), "two hidden windows")
+      assert(cocoa.text_input_enable(first, [4, 8, 2, 16]), "first text client enabled")
+      assert(cocoa.text_input_enable(second, [6, 12, 2, 16]), "second text client enabled")
+      def view = cocoa.get_cocoa_view(second)
+      def selected = malloc(16)
+      def replaced = malloc(16)
+      store_layout(selected, "TestRange", 3, 0)
+      store_layout(replaced, "TestRange", 0, 0)
+      ;; Native UTF-16 cursor 3 follows A + surrogate pair, i.e. UTF-8 byte 5.
+      send_mark(view, cocoa.get_selector("setMarkedText:selectedRange:replacementRange:"), make_string("A😀é"), selected, replaced)
+      assert(cocoa.text_input_state(second).get("shown_preedit", "") == "A😀é", "per-view marked text")
+      assert(cocoa.text_input_state(first).get("shown_preedit", "") == "", "no cross-window composition")
+      for event in cocoa.poll_window_events(first).get(1, []) {
+         assert(event.get(0) != kinds.EVENT_TEXT_PREEDIT, "first receives no second-window text")
+      }
+      mut marked = false
+      for event in cocoa.poll_window_events(second).get(1, []) {
+         if event.get(0) == kinds.EVENT_TEXT_PREEDIT {
+            def data = event.get(3)
+            marked = data.get("text") == "A😀é" && int(data.get("cursor")) == 5
+         }
+      }
+      assert(marked, "UTF-16 preedit cursor normalized to UTF-8 bytes")
+      send_commit(view, cocoa.get_selector("insertText:replacementRange:"), make_string("é"), replaced)
+      mut cleared, committed = false, false
+      for event in cocoa.poll_window_events(second).get(1, []) {
+         if event.get(0) == kinds.EVENT_TEXT_PREEDIT { cleared = event.get(3).get("text") == "" }
+         if event.get(0) == kinds.EVENT_KEY_CHAR { committed = int(event.get(3).get("char")) == 233 }
+      }
+      assert(cleared && committed, "commit clears preedit and emits Unicode character")
+      send_mark(view, cocoa.get_selector("setMarkedText:selectedRange:replacementRange:"), make_string("test"), selected, replaced)
+      assert(cocoa.text_input_disable(second), "disable native text client")
+      assert(!cocoa.text_input_state(second).get("wanted", true), "composition disabled")
+      assert(cocoa.text_input_state(second).get("shown_preedit", "") == "", "disable clears marked text")
+      assert(cocoa.text_input_state(first).get("wanted", false), "other window remains enabled")
+      free(selected)
+      free(replaced)
+      cocoa.destroy_basic_window(second)
+      cocoa.destroy_basic_window(first)
+      cocoa.drain_autorelease_pool(pool)
+   }
+} #else {
+   fn verify_text_input() { assert(false, "native Cocoa host required") }
+} #endif
+
+if to_str(__env_get("NY_TEST_ELM_PLATFORM")) == "cocoa" { verify_text_input() }
+else { print("Skipped: set NY_TEST_ELM_PLATFORM=cocoa on a native Mac") }
+print("COCOA-TEXT-INPUT-OK")
+NY
+}

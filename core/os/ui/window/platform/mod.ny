@@ -1801,20 +1801,26 @@ fn get_clipboard(any win) str {
 }
 
 fn text_input_start(any win, any rect=0) bool {
-   "Starts input-method composition for the window(Wayland zwp_text_input_v3); rect is the caret box [x, y, w, h] in window coordinates. Returns false where the backend has no input-method protocol."
-   if _select_backend_name() != "wayland" { return false }
+   "Starts input-method composition for the window (Wayland zwp_text_input_v3 or AppKit NSTextInputClient); rect is the caret box [x, y, w, h] in window coordinates. Returns false where the backend has no input-method protocol."
+   def b = _select_backend_name()
+   if b == "cocoa" { return cocoa_impl.text_input_enable(_native_window(win), rect) }
+   if b != "wayland" { return false }
    wayland_backend.text_input_enable(_native_window(win), rect)
 }
 
 fn text_input_stop(any win) bool {
    "Stops input-method composition for the window."
-   if _select_backend_name() != "wayland" { return false }
+   def b = _select_backend_name()
+   if b == "cocoa" { return cocoa_impl.text_input_disable(_native_window(win)) }
+   if b != "wayland" { return false }
    wayland_backend.text_input_disable(_native_window(win))
 }
 
 fn text_input_state(any win) dict {
    "Returns the backend's text-input state(wanted, focused, shown_preedit)."
-   if _select_backend_name() != "wayland" { return dict(4) }
+   def b = _select_backend_name()
+   if b == "cocoa" { return cocoa_impl.text_input_state(_native_window(win)) }
+   if b != "wayland" { return dict(4) }
    wayland_backend.text_input_state(_native_window(win))
 }
 

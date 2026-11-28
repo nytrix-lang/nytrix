@@ -12,6 +12,8 @@
 #include <dlfcn.h>
 #endif
 
+#include "cocoa_input.h"
+
 #if UINTPTR_MAX == 0xffffffff
 #define NY_NATIVE_RET0(fn) (int64_t)((intptr_t (*)(void))(fn))()
 #define NY_NATIVE_RET1(fn, a0)                            \

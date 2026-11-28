@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, start_window_move, start_file_drag, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
+module core.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, start_window_move, start_file_drag, text_input_enable, text_input_disable, text_input_state, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -1276,10 +1276,14 @@ fn _translate_event(any event) any {
             "mod": mods,
             "mods": mods
          }
-         def nsstr = objc_msgSend_ptr(event, get_selector("characters"))
-         if nsstr {
-            def utf8 = objc_msgSend_ptr(nsstr, get_selector("UTF8String"))
-            if utf8 { _push_utf8_char_events(next_win, utf8, mods) }
+         ;; When the native text client owns input, keyDown: interprets the
+         ;; event and supplies marked/committed text. Do not emit raw duplicates.
+         if !__cocoa_text_enabled(get_cocoa_view(next_win)) {
+            def nsstr = objc_msgSend_ptr(event, get_selector("characters"))
+            if nsstr {
+               def utf8 = objc_msgSend_ptr(nsstr, get_selector("UTF8String"))
+               if utf8 { _push_utf8_char_events(next_win, utf8, mods) }
+            }
          }
          return [EVENT_KEY_PRESSED, next_win, 0, data]
       }
@@ -1390,6 +1394,8 @@ fn _window_delegate_did_resign_key(any self, any sel, any notification) any {
    def win = _find_window_by_handle(hwnd)
    if win {
       _release_drag_event(hwnd)
+      text_input_disable(win)
+      _drain_text_events(win)
       _push_event(win, EVENT_FOCUS_OUT, 0)
    }
 }
@@ -1417,21 +1423,46 @@ fn _window_delegate_did_move(any self, any sel, any notification) any {
    _push_event(next_win, EVENT_WINDOW_MOVED, [nx, ny])
 }
 
-fn _ime_insert_text(any self, any sel, any string_obj, any replacement_range) any {
-   "NSTextInputClient insertText:replacementRange: — pushes EVENT_KEY_CHAR for each codepoint."
-   if !string_obj { return 0 }
-   def cs = objc_msgSend_ptr(string_obj, get_selector("UTF8String"))
-   if !cs { return 0 }
-   def hwnd = _last_key_window()
-   def win = _find_window_by_handle(hwnd)
-   if win { _push_utf8_char_events(win, cs) }
+fn text_input_enable(any win, any rect=0) bool {
+   "Enables the AppKit text responder and updates its caret rectangle."
+   if !available() { return false }
+   def view = get_cocoa_view(win)
+   if !view || !_content_text_client { return false }
+   def r = if is_list(rect) && rect.len >= 4 { rect } else { [0, 0, 1, 1] }
+   bool(__cocoa_text_enable(view, int(r.get(0, 0)), int(r.get(1, 0)), max(1, int(r.get(2, 1))), max(1, int(r.get(3, 1)))))
 }
 
-fn _last_key_window() any {
-   "Returns the NSWindow that currently has keyboard focus."
-   def app = shared_application()
-   if !app { return 0 }
-   objc_msgSend_ptr(app, get_selector("keyWindow"))
+fn text_input_disable(any win) bool {
+   "Cancels the AppKit marked text and disables composition."
+   if !available() { return false }
+   def view = get_cocoa_view(win)
+   if !view { return false }
+   bool(__cocoa_text_disable(view))
+}
+
+fn text_input_state(any win) dict {
+   "Returns the AppKit text-input state for the specific window."
+   if !available() { return dict(4) }
+   def view = get_cocoa_view(win)
+   if !view { return dict(4) }
+   def hwnd = _handle_from(win)
+   {"wanted": bool(__cocoa_text_enabled(view)), "focused": objc_msgSend_i64(hwnd, get_selector("isKeyWindow")) != 0,
+    "shown_preedit": to_str(__cocoa_text_marked(view))}
+}
+
+fn _drain_text_events(any win) any {
+   def view = get_cocoa_view(win)
+   if !view { return 0 }
+   mut event = __cocoa_text_take(view)
+   while is_list(event) && event.len >= 3 {
+      def text = to_str(event.get(1, ""))
+      if int(event.get(0, 0)) == 0 {
+         _push_event(win, EVENT_TEXT_PREEDIT, {"text": text, "cursor": int(event.get(2, -1))})
+      } else {
+         _push_utf8_char_events(win, cstr(text))
+      }
+      event = __cocoa_text_take(view)
+   }
 }
 
 fn _drag_enter(ptr self, ptr sel, ptr sender) u64 {
@@ -1520,7 +1551,6 @@ fn create_window_delegate() any {
       _ny_class_addMethod(cls, get_selector("windowDidResignKey:"), _window_delegate_did_resign_key, cstr("v@:@"))
       _ny_class_addMethod(cls, get_selector("windowDidChangeBackingProperties:"), _window_delegate_did_change_backing, cstr("v@:@"))
       _ny_class_addMethod(cls, get_selector("windowDidMove:"), _window_delegate_did_move, cstr("v@:@"))
-      _ny_class_addMethod(cls, get_selector("insertText:replacementRange:"), _ime_insert_text, cstr("v@:@{NSRange=QQ}"))
       _ny_class_addMethod(cls, get_selector("draggingSession:sourceOperationMaskForDraggingContext:"), _dragging_source_mask, cstr("Q@:@Q"))
       _ny_objc_registerClassPair(cls)
       _delegate_class = cls
@@ -1529,6 +1559,7 @@ fn create_window_delegate() any {
 }
 
 mut _content_class = 0
+mut _content_text_client = false
 
 fn _create_content_view(any hwnd) any {
    if !_content_class {
@@ -1537,6 +1568,7 @@ fn _create_content_view(any hwnd) any {
       _ny_class_addMethod(cls, get_selector("draggingEntered:"), _drag_enter, cstr("Q@:@"))
       _ny_class_addMethod(cls, get_selector("draggingUpdated:"), _drag_updated, cstr("Q@:@"))
       _ny_class_addMethod(cls, get_selector("performDragOperation:"), _drag_performed, cstr("c@:@"))
+      _content_text_client = bool(__cocoa_text_install(cls))
       _ny_objc_registerClassPair(cls)
       _content_class = cls
    }
@@ -2231,6 +2263,11 @@ fn destroy_basic_window(any win) bool {
    if !hwnd { return false }
    win = _restore_display_mode(win)
    _release_drag_event(hwnd)
+   def view = get_cocoa_view(win)
+   if view {
+      __cocoa_text_disable(view)
+      __cocoa_text_forget(view)
+   }
    _windows = _windows.set(hwnd, 0)
    objc_msgSend_ptr(hwnd, get_selector("setDelegate:"), 0)
    objc_msgSend_ptr(hwnd, get_selector("orderOut:"), 0)
@@ -2322,6 +2359,7 @@ fn poll_window_events(any win, int max_events=64) list {
       send_event(ev)
       drained += 1
    }
+   _drain_text_events(win)
    def handle = win.get("handle", 0)
    mut out = []
    mut remaining = []
