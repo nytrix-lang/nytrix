@@ -7,6 +7,7 @@
 #include "code/backend/lower/machine.h"
 #include "code/backend/mach/object.h"
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -781,10 +782,12 @@ static bool ny_dbg_emit_var(nyr_obj_buf_t *info,
       }
   }
   uint32_t line = dv->decl_line ? dv->decl_line : fallback_line;
-  return ny_obj_uleb128(info, dv->is_param ? 5 : 4) &&
+  bool unavailable = dv->offset == INT_MIN;
+  return ny_obj_uleb128(info, unavailable ? (dv->is_param ? 9 : 8)
+                                          : (dv->is_param ? 5 : 4)) &&
          nyr_obj_emit(info, dv->name, strlen(dv->name) + 1) &&
          nyr_obj_u32(info, line) && nyr_obj_u32(info, (uint32_t)type_off) &&
-         nyr_obj_u32(info, (uint32_t)loc_off);
+         (unavailable || nyr_obj_u32(info, (uint32_t)loc_off));
 }
 
 /*
@@ -932,6 +935,18 @@ static bool nyr_native_build_debug_info(
       !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x0b) ||
       !ny_obj_uleb128(abbrev, 0x0b) || !ny_obj_uleb128(abbrev, 0x3c) ||
       !ny_obj_uleb128(abbrev, 0x0c) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 8) || !ny_obj_uleb128(abbrev, 0x34) ||
+      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x3b) ||
+      !ny_obj_uleb128(abbrev, 0x06) || !ny_obj_uleb128(abbrev, 0x49) ||
+      !ny_obj_uleb128(abbrev, 0x13) || !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 0) ||
+      !ny_obj_uleb128(abbrev, 9) || !ny_obj_uleb128(abbrev, 0x05) ||
+      !nyr_obj_u8(abbrev, 0) || !ny_obj_uleb128(abbrev, 0x03) ||
+      !ny_obj_uleb128(abbrev, 0x08) || !ny_obj_uleb128(abbrev, 0x3b) ||
+      !ny_obj_uleb128(abbrev, 0x06) || !ny_obj_uleb128(abbrev, 0x49) ||
+      !ny_obj_uleb128(abbrev, 0x13) || !ny_obj_uleb128(abbrev, 0) ||
       !ny_obj_uleb128(abbrev, 0) || !ny_obj_uleb128(abbrev, 0))
     goto oom;
 
@@ -1058,7 +1073,8 @@ static bool nyr_native_build_debug_info(
         vstart = 0;
       size_t vbase = defs[i].off - cu_off;
       size_t list_off = 0;
-      if (!ny_dbg_loc_entry(loc, loc_relocs, loc_reloc_count, &loc_cap, i,
+      if (dv->offset != INT_MIN &&
+          !ny_dbg_loc_entry(loc, loc_relocs, loc_reloc_count, &loc_cap, i,
                             vbase + vstart, vbase + defs[i].size, dv->offset,
                             &list_off))
         goto oom;
@@ -1132,7 +1148,8 @@ static bool nyr_native_build_debug_info(
           continue;
         size_t vbase = defs[i].off - cu_off;
         size_t list_off = 0;
-        if (!ny_dbg_loc_entry(loc, loc_relocs, loc_reloc_count, &loc_cap, i,
+        if (dv->offset != INT_MIN &&
+            !ny_dbg_loc_entry(loc, loc_relocs, loc_reloc_count, &loc_cap, i,
                               vbase + bstart, vbase + bend, dv->offset,
                               &list_off))
           goto oom;

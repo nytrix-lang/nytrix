@@ -21064,11 +21064,11 @@ bool nyr_x64_mach_append_function_debug(
     for (size_t i = 0; i < source->debug_var_count; ++i) {
       const nyr_debug_var_t *dv = &source->debug_vars[i];
       int mapped = nyr_x64_debug_local_frame_slot(&enc, source, dv->slot);
-      if (mapped < 0)
-        continue;
-      int off = nyr_x64_debug_frame_offset(&enc, (size_t)mapped);
-      if (off == INT_MIN)
-        continue;
+      int off = mapped < 0 ? INT_MIN
+                           : nyr_x64_debug_frame_offset(&enc, (size_t)mapped);
+      /* Keep the source declaration when optimization removed its storage.
+       * DWARF's variable DIE without a location lets debuggers report it as
+       * optimized out while retaining its name, type and declaration line. */
       uint32_t line = dv->decl_line > 0 ? (uint32_t)dv->decl_line : 0;
       for (size_t j = 0; line == 0 && j < source->len; ++j) {
         const nyr_inst_t *in = &source->data[j];

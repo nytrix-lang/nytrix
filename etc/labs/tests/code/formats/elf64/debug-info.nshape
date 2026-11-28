@@ -84,6 +84,13 @@ if have_cc {
     def opt_link = run_capture(["cc", debug, "-o", exe, "-L", lib_dir, "-lnytrixrt",
                                 "-Wl,-rpath," + lib_dir, "-lm", "-ldl", "-lpthread"], [], nil, false)
     assert(int(opt_link.get("code", 127)) == 0, "optimized debug object links with the runtime: " + to_str(opt_link.get("stderr", "")))
+    def opt_dump = run_capture(["readelf", "--debug-dump=info", debug], [], nil, false)
+    def opt_text = to_str(opt_dump.get("stdout", ""))
+    assert(int(opt_dump.get("code", 127)) == 0 && opt_text.contains("sum") && opt_text.contains("DW_TAG_variable"), "optimized-away locals keep source DIEs")
+    def gdb_opt_sum = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":3",
+                                   "-ex", "run", "-ex", "next", "-ex", "print sum", exe], [], nil, false)
+    def gdb_opt_sum_text = to_str(gdb_opt_sum.get("stdout", "")) + to_str(gdb_opt_sum.get("stderr", ""))
+    assert(gdb_opt_sum_text.contains("sum") && gdb_opt_sum_text.contains("optimized out"), "gdb identifies an optimized-away local as unavailable: " + gdb_opt_sum_text)
   }
 }
 
