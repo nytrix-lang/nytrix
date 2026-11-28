@@ -61,7 +61,7 @@ module core.os.ui.render(
    texture_try_load_cached_ex, texture_upload_image_ex, texture_create_rgba,
    texture_destroy, texture_bind, texture_bind_default,
    texture_last_created_id, texture_count,
-   texture_size, draw_texture, create_cubemap, FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST,
+   texture_size, draw_texture, draw_sprite, draw_underline, draw_squiggly_underline, create_cubemap, FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST,
    FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_first, font_at_size, font_destroy,
    font_allow_color_fallback, _font_get, font_prepare, draw_text, draw_text_3d, measure_text,
    font_line_height, font_ascent, mesh_load, mesh_create, mesh_create_cpu,
@@ -6095,6 +6095,34 @@ fn draw_rect_tex_uv(
    if _backend == BACKEND_VK { lib_vkr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    if _backend == BACKEND_GL { lib_glr.draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a) return true }
    false
+}
+
+fn draw_sprite(int tex_id, f64 x, f64 y, f64 w, f64 h, f64 u1=0.0, f64 v1=0.0, f64 u2=1.0, f64 v2=1.0, any tint=WHITE) bool {
+   "Draws a texture region into a destination rectangle, with normalized UV bounds and optional tint."
+   if tex_id <= 0 || w <= 0.0 || h <= 0.0 || u2 <= u1 || v2 <= v1 { return false }
+   return draw_rect_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2,
+      _color_at(tint, 0, 1.0), _color_at(tint, 1, 1.0), _color_at(tint, 2, 1.0), _color_at(tint, 3, 1.0))
+}
+
+fn draw_underline(f64 x, f64 y, f64 width, f64 thickness, any color=WHITE) bool {
+   "Draws a solid horizontal underline centered on y."
+   if width <= 0.0 || thickness <= 0.0 { return false }
+   return draw_rect(x, y - thickness * 0.5, width, thickness, color)
+}
+
+fn draw_squiggly_underline(f64 x, f64 y, f64 width, f64 amplitude=2.0, f64 period=6.0, f64 thickness=1.0, any color=WHITE) bool {
+   "Draws a tessellated wavy underline, useful for spelling and diagnostic marks."
+   if width <= 0.0 || period <= 0.0 || thickness <= 0.0 { return false }
+   mut points = []
+   def step = max(1.0, period / 8.0)
+   mut px = 0.0
+   while px < width {
+      def py = y + amplitude * sin((px / period) * 6.283185307179586)
+      points = points + [[x + px, py]]
+      px = min(width, px + step)
+   }
+   points = points + [[x + width, y + amplitude * sin((width / period) * 6.283185307179586)]]
+   return draw_polyline(points, color, thickness)
 }
 
 fn draw_shader_rect(f64 x, f64 y, f64 w, f64 h, any pipe_override, any pc_ptr=0, int pc_size=0, int pc_offset=64) bool {

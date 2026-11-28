@@ -21,6 +21,8 @@ assert(gfx.draw_path_outline([[34.0, 32.0], [54.0, 32.0], [54.0, 54.0], [34.0, 5
 assert(gfx.draw_path_cubic([4.0, 56.0], [16.0, 42.0], [32.0, 64.0], [48.0, 48.0], [0.0, 0.0, 1.0, 1.0], 3.0, 32), "stroke cubic Bezier path")
 assert(gfx.draw_path_quadratic([50.0, 6.0], [58.0, 16.0], [50.0, 26.0], [1.0, 0.0, 1.0, 1.0], 3.0, 24), "stroke quadratic Bezier path")
 assert(gfx.draw_path_commands([["M", 52.0, 2.0], ["L", 62.0, 2.0], ["Q", 62.0, 12.0, 57.0, 12.0], ["C", 54.0, 12.0, 50.0, 9.0, 52.0, 2.0], ["Z"]], [1.0, 0.0, 1.0, 1.0], 1.0, true, 12), "fill a closed quadratic/cubic command path")
+assert(gfx.draw_underline(2.0, 60.0, 12.0, 2.0, [0.0, 1.0, 0.0, 1.0]), "draw a solid underline")
+assert(gfx.draw_squiggly_underline(18.0, 60.0, 18.0, 2.0, 6.0, 1.5, [0.0, 0.0, 0.0, 1.0]), "draw a squiggly underline")
 assert(gfx.end_frame(), "present frame")
 def frame = gfx.read_framebuffer()
 def ptr pixels = __ffi_untag_ptr(frame.get("data", 0))
@@ -36,6 +38,7 @@ def int quadratic_red = load8(pixels, (16 * 64 + 54) * 4) & 255
 def int quadratic_blue = load8(pixels, (16 * 64 + 54) * 4 + 2) & 255
 def int command_red = load8(pixels, (7 * 64 + 57) * 4) & 255
 def int command_blue = load8(pixels, (7 * 64 + 57) * 4 + 2) & 255
+def int underline_green = load8(pixels, (60 * 64 + 8) * 4 + 1) & 255
 free(pixels)
 assert(filled > 220, "concave fill covers the L arm")
 assert(notch > 245, "concave fill leaves the notch transparent")
@@ -44,6 +47,7 @@ assert(clipped_inside > 200 && clipped_inside_r < 40 && clipped_outside_r > 245,
 assert(cubic_blue > 180, "cubic curve reaches the sampled framebuffer point")
 assert(quadratic_red > 180 && quadratic_blue > 180, "quadratic curve reaches the sampled framebuffer point")
 assert(command_red > 180 && command_blue > 180, "closed command path fills its curve-bounded interior")
+assert(underline_green > 180, "solid underline renders in the framebuffer")
 gfx.close_window()
 print("UI-PATH-PRIMITIVES-OK")
 NY
