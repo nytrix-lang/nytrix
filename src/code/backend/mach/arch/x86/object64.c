@@ -20955,6 +20955,33 @@ static int nyr_x64_debug_frame_offset(const nyr_x64_mach_enc_t *e,
   return -((int)(e->cs_slots * 8u + off + 8));
 }
 
+/* Resolve a source local through the machine instruction generated for its
+ * load/store. Optimizers can renumber or remove NYIR local slots, so the
+ * source slot number is not necessarily a machine frame index. */
+static int nyr_x64_debug_local_frame_slot(const nyr_x64_mach_enc_t *e,
+                                          const nyr_func_t *source,
+                                          int source_slot) {
+  if (!e || !e->mach || !source || source_slot < 0)
+    return -1;
+  for (size_t i = 0; i < source->len; ++i) {
+    const nyr_inst_t *in = &source->data[i];
+    if ((in->op != NYIR_LOAD_LOCAL && in->op != NYIR_STORE_LOCAL) ||
+        in->imm != source_slot)
+      continue;
+    for (size_t j = 0; j < e->mach->inst_len; ++j) {
+      const nyr_mach_inst_t *mi = &e->mach->insts[j];
+      if (mi->source_pc != i)
+        continue;
+      const nyr_mach_operand_t *frame =
+          in->op == NYIR_STORE_LOCAL ? &mi->dst : &mi->src0;
+      if (frame->kind == NYR_MACH_OPERAND_FRAME &&
+          frame->as.frame_index < e->mach->frame_slot_len)
+        return (int)frame->as.frame_index;
+    }
+  }
+  return -1;
+}
+
 bool nyr_x64_mach_append_function_debug(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
@@ -21034,16 +21061,10 @@ bool nyr_x64_mach_append_function_debug(
   }
   if (source && debug_vars && debug_var_count && debug_var_cap &&
       source->debug_var_count > 0) {
-    /*
-     * The machine form allocates one frame slot per NYIR local id, so a debug
-     * slot's home sits at that same index. Ids beyond the real frame belong to
-     * hidden or dropped slots and stay undescribed rather than aliasing a
-     * neighbour's value.
-     */
     for (size_t i = 0; i < source->debug_var_count; ++i) {
       const nyr_debug_var_t *dv = &source->debug_vars[i];
-      int mapped = dv->slot;
-      if (mapped < 0 || (enc.mach && (size_t)mapped >= enc.mach->frame_slot_len))
+      int mapped = nyr_x64_debug_local_frame_slot(&enc, source, dv->slot);
+      if (mapped < 0)
         continue;
       int off = nyr_x64_debug_frame_offset(&enc, (size_t)mapped);
       if (off == INT_MIN)
@@ -21071,7 +21092,7 @@ bool nyr_x64_mach_append_function_debug(
       if (!nyr_native_debug_var_append(
               debug_vars, debug_var_count, debug_var_cap,
               (nyr_native_debug_var_t){*def_count, name, type_name, off, line,
-                                       is_param ? 1u : 0u})) {
+                                       is_param ? 1u : 0u, 0, 0})) {
         free(name);
         free(type_name);
       }

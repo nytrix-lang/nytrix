@@ -1192,6 +1192,8 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
       dst->owned_symbols || dst->owned_symbols_len || dst->owned_symbols_cap ||
       dst->param_types || dst->param_abi || dst->param_count ||
       dst->source_param_widths || dst->source_param_count ||
+      dst->debug_vars || dst->debug_var_count || dst->debug_var_cap ||
+      dst->debug_scopes || dst->debug_scope_count || dst->debug_scope_cap ||
       dst->has_symbol_calls || dst->return_aggregate_size ||
       dst->return_aggregate_classes[0] || dst->return_aggregate_classes[1] ||
       dst->i386_regparm || dst->i386_wide_params ||
@@ -1204,6 +1206,12 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
       (src->param_count && !src->param_types) ||
       (src->param_abi && !src->param_count) ||
       (src->source_param_count && !src->source_param_widths) ||
+      src->debug_var_count > src->debug_var_cap ||
+      src->debug_var_cap > SIZE_MAX / sizeof(*src->debug_vars) ||
+      (src->debug_var_cap && !src->debug_vars) ||
+      src->debug_scope_count > src->debug_scope_cap ||
+      src->debug_scope_cap > SIZE_MAX / sizeof(*src->debug_scopes) ||
+      (src->debug_scope_cap && !src->debug_scopes) ||
       src->owned_symbols_len > src->owned_symbols_cap ||
       src->owned_symbols_cap > SIZE_MAX / sizeof(*src->owned_symbols) ||
       (src->owned_symbols_cap && !src->owned_symbols))
@@ -1254,6 +1262,47 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
   dst->return_aggregate_classes[1] = src->return_aggregate_classes[1];
   dst->i386_regparm = src->i386_regparm;
   dst->i386_wide_params = src->i386_wide_params;
+  if (src->debug_var_count) {
+    dst->debug_vars = calloc(src->debug_var_count, sizeof(*dst->debug_vars));
+    if (!dst->debug_vars) {
+      nyr_ir_func_free(dst);
+      return false;
+    }
+    dst->debug_var_cap = src->debug_var_count;
+    for (size_t i = 0; i < src->debug_var_count; ++i) {
+      dst->debug_vars[i] = src->debug_vars[i];
+      if (src->debug_vars[i].name) {
+        dst->debug_vars[i].name =
+            nyr_func_own_symbol_copy(dst, src->debug_vars[i].name);
+        if (!dst->debug_vars[i].name) {
+          dst->debug_var_count = i;
+          nyr_ir_func_free(dst);
+          return false;
+        }
+      }
+      if (src->debug_vars[i].type_name) {
+        dst->debug_vars[i].type_name =
+            nyr_func_own_symbol_copy(dst, src->debug_vars[i].type_name);
+        if (!dst->debug_vars[i].type_name) {
+          dst->debug_var_count = i + 1;
+          nyr_ir_func_free(dst);
+          return false;
+        }
+      }
+      dst->debug_var_count = i + 1;
+    }
+  }
+  if (src->debug_scope_count) {
+    dst->debug_scopes = malloc(src->debug_scope_count * sizeof(*dst->debug_scopes));
+    if (!dst->debug_scopes) {
+      nyr_ir_func_free(dst);
+      return false;
+    }
+    memcpy(dst->debug_scopes, src->debug_scopes,
+           src->debug_scope_count * sizeof(*dst->debug_scopes));
+    dst->debug_scope_count = src->debug_scope_count;
+    dst->debug_scope_cap = src->debug_scope_count;
+  }
   if (src->source_param_count) {
     if (!src->source_param_widths) {
       nyr_ir_func_free(dst);

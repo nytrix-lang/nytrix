@@ -23,7 +23,7 @@ def debug = base + "-debug.o"
 def exe = base + ".exe"
 defer { file_remove(src) file_remove(plain) file_remove(debug) file_remove(exe) }
 
-file_write(src, "fn add(int a, int b) int {\n  def sum = a + b\n  sum\n}\nfn pick(int n) int {\n  if n > 0 {\n    def big = n * 2\n    big\n  } else {\n    def small = 0 - n\n    small\n  }\n}\nprint(add(20, 22) + pick(3))\n")
+file_write(src, "@noinline\nfn add(int a, int b) int {\n  def sum = a + b\n  sum\n}\nfn pick(int n) int {\n  if n > 0 {\n    def big = n * 2\n    big\n  } else {\n    def small = 0 - n\n    small\n  }\n}\nfn aggregate() int {\n  def values = [4, 5]\n  def record = {\"sum\": 42}\n  values.len + record.len\n}\nprint(add(20, 22) + pick(3) + aggregate())\n")
 
 def plain_build = run_capture([compiler, "--native-only", "-O0", "-g", "-emit-only", "-o", plain, src], [], nil, false)
 assert(int(plain_build.get("code", 127)) == 0, "debug object builds: " + to_str(plain_build.get("stderr", "")))
@@ -44,6 +44,7 @@ def debug_text = to_str(debug_dump.get("stdout", ""))
 assert(int(debug_dump.get("code", 127)) == 0, "readelf reads the debug-locals object")
 assert(debug_text.contains("DW_TAG_base_type") && debug_text.contains("DW_AT_decl_line"), "base types and decl lines are present")
 assert(debug_text.contains("DW_TAG_formal_parameter"), "parameters get DIEs")
+assert(debug_text.contains("DW_TAG_structure_type") && debug_text.contains("list<int>") && debug_text.contains("dict"), "aggregate locals retain their source type names")
 assert(debug_text.contains("DW_AT_location"), "parameters and locals carry locations")
 assert(debug_text.contains("DW_AT_frame_base") && debug_text.contains("DW_OP_reg6"), "subprograms declare the rbp frame base")
 assert(debug_text.contains("DW_AT_producer") && debug_text.contains("DW_AT_comp_dir"), "compile unit names its producer and directory")
@@ -70,14 +71,19 @@ if have_cc {
                            "-ex", "run", "-ex", "print n", exe], [], nil, false)
     def gdb_text = to_str(gdb.get("stdout", "")) + to_str(gdb.get("stderr", ""))
     assert(gdb_text.contains("pick") && gdb_text.contains("$1 = 3"), "gdb breaks on the source line and reads the argument: " + gdb_text)
-    def gdb_loc = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":2",
+    def gdb_loc = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":3",
                                "-ex", "run", "-ex", "print a", exe], [], nil, false)
     def gdb_loc_text = to_str(gdb_loc.get("stdout", "")) + to_str(gdb_loc.get("stderr", ""))
     assert(gdb_loc_text.contains("$1 = 20"), "gdb reads a parameter through its location list: " + gdb_loc_text)
-    def gdb_sum = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":2",
+    def gdb_sum = run_capture(["gdb", "-batch", "-ex", "set pagination off", "-ex", "break " + src + ":3",
                                "-ex", "run", "-ex", "next", "-ex", "print sum", exe], [], nil, false)
     def gdb_sum_text = to_str(gdb_sum.get("stdout", "")) + to_str(gdb_sum.get("stderr", ""))
     assert(gdb_sum_text.contains("$1 = 42"), "gdb reads a declared local kept for debug info: " + gdb_sum_text)
+    def gdb_opt = run_capture([compiler, "--native-only", "-O3", "-g", "--debug-locals", "-emit-only", "-o", debug, src], [], nil, false)
+    assert(int(gdb_opt.get("code", 127)) == 0, "optimized debug-locals object builds: " + to_str(gdb_opt.get("stderr", "")))
+    def opt_link = run_capture(["cc", debug, "-o", exe, "-L", lib_dir, "-lnytrixrt",
+                                "-Wl,-rpath," + lib_dir, "-lm", "-ldl", "-lpthread"], [], nil, false)
+    assert(int(opt_link.get("code", 127)) == 0, "optimized debug object links with the runtime: " + to_str(opt_link.get("stderr", "")))
   }
 }
 
