@@ -33,6 +33,10 @@ use core.os.ffi as ffi
       fn _c_wl_proxy_marshal_flags3(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags4(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2, ptr arg3) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags5(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2, ptr arg3, ptr arg4) ptr as "wl_proxy_marshal_flags"
+      fn _c_wl_shm_create_pool(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr new_id, i32 fd, i32 size) ptr as "wl_proxy_marshal_flags"
+      fn _c_wl_shm_pool_create_buffer(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr new_id, i32 offset, i32 width, i32 height, i32 stride, u32 format) ptr as "wl_proxy_marshal_flags"
+      fn _c_wl_surface_damage(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, i32 x, i32 y, i32 width, i32 height) ptr as "wl_proxy_marshal_flags"
+      fn _c_wl_surface_damage(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, i32 x, i32 y, i32 width, i32 height) ptr as "wl_proxy_marshal_flags"
       fn wl_proxy_destroy(ptr proxy) any
       fn wl_proxy_add_listener(ptr proxy, ptr implementation, ptr data) i32
       fn wl_display_connect(ptr name) ptr
@@ -80,6 +84,8 @@ use core.os.ffi as ffi
    }
    extern "" {
       fn close(i32 fd) i32
+      fn memfd_create(ptr name, u32 flags) i32
+      fn ftruncate(i32 fd, i64 length) i32
       fn wl_close_fd(i32 fd) i32 as "close"
       fn mmap(ptr addr, u64 length, i32 prot, i32 flags, i32 fd, i64 offset) ptr
       fn munmap(ptr addr, u64 length) i32
@@ -295,6 +301,8 @@ use core.os.ffi as ffi
       "Stub for non-Linux file descriptor control."
       -1
    }
+   fn memfd_create(..._args) int { -1 }
+   fn ftruncate(..._args) int { -1 }
 }
 
 fn _is_debug() bool { ui_debug.debug_enabled() }
@@ -465,6 +473,7 @@ mut _clipboard_source = 0
 mut _wl_data_source_iface = 0
 mut _cursor_theme = 0
 mut _cursor_surface = 0
+mut dict _custom_cursor_resources = dict(8)
 mut _wl_client_lib = 0
 
 comptime table WaylandScancodeKey {
@@ -986,7 +995,9 @@ def XKB_STATE_MODS_LATCHED = 2
 def XKB_STATE_MODS_LOCKED = 4
 def XKB_STATE_LAYOUT_EFFECTIVE = 1
 def PROT_READ = 0x1
+def PROT_READ_WRITE = 0x3
 def MAP_PRIVATE = 0x02
+def MAP_SHARED = 0x01
 
 comptime template _wl_marshal_flags_wrap0(name){
    fn ${name}(any proxy, int opcode, any interface, int version, any flags) any {
@@ -1043,6 +1054,21 @@ comptime emit _wl_marshal_flags_wrap2(wl_proxy_marshal_flags_s_fd)
 comptime emit _wl_marshal_flags_wrap0(wl_proxy_marshal_flags_void)
 comptime emit _wl_marshal_flags_wrap1(wl_proxy_marshal_flags_u)
 comptime emit _wl_marshal_flags_wrap4(wl_proxy_marshal_flags_registry_bind)
+
+fn _wl_shm_create_pool(any shm, int fd, int size) any {
+   #linux { return _c_wl_shm_create_pool(shm, 0, _wl_shm_pool_interface_local, int(get_proxy_version(shm)), 0, 0, fd, size) }
+   #else { return 0 } #endif
+}
+
+fn _wl_shm_pool_create_buffer(any pool, int width, int height, int stride) any {
+   #linux { return _c_wl_shm_pool_create_buffer(pool, 0, _wl_buffer_interface_local, int(get_proxy_version(pool)), 0, 0, 0, width, height, stride, 0) }
+   #else { return 0 } #endif
+}
+
+fn _wl_surface_damage(any surface, int width, int height) any {
+   #linux { return _c_wl_surface_damage(surface, 2, 0, int(get_proxy_version(surface)), 0, 0, 0, width, height) }
+   #else { return 0 } #endif
+}
 
 fn _wl_proxy_marshal_new_id0(any proxy, int opcode, any interface) any {
    if !proxy || !interface { return 0 }
@@ -1996,6 +2022,120 @@ fn _ensure_cursor_surface(any globals) any {
    _cursor_surface
 }
 
+fn _cursor_image_pixels(any image) any {
+   if !is_dict(image) { return 0 }
+   image.get("pixels_ptr", image.get("pixels", image.get("data", 0)))
+}
+
+fn _cursor_pixel_byte(any pixels, int index) int {
+   if is_list(pixels) || is_tuple(pixels) { return int(pixels.get(index, 0)) }
+   if is_ptr(pixels) || is_str(pixels) || is_bytes(pixels) { return load8(pixels, index) }
+   0
+}
+
+fn _destroy_custom_cursor_native(any cursor) any {
+   if !is_dict(cursor) { return 0 }
+   def buffer = cursor.get("wl_buffer", 0)
+   def map = cursor.get("mapping", 0)
+   def map_size = int(cursor.get("mapping_size", 0))
+   def listener = cursor.get("release_listener", 0)
+   def pool = cursor.get("wl_pool", 0)
+   if buffer {
+      _ = wl_proxy_marshal_flags_void(buffer, 0, 0, int(get_proxy_version(buffer)), 1)
+      _custom_cursor_resources = _custom_cursor_resources.delete(int(buffer))
+   }
+   if pool { _ = wl_proxy_marshal_flags_void(pool, 1, 0, int(get_proxy_version(pool)), 1) }
+   if map && map_size > 0 { _ = munmap(map, map_size) }
+   if listener { free(listener) }
+   cursor["wl_buffer"] = 0
+   cursor["wl_pool"] = 0
+   cursor["mapping"] = 0
+   cursor["release_listener"] = 0
+   cursor["destroy_pending"] = false
+   0
+}
+
+fn _cursor_buffer_release(ptr data, ptr buffer) any {
+   if !buffer { return 0 }
+   mut cursor = _custom_cursor_resources.get(int(buffer), 0)
+   if !is_dict(cursor) { return 0 }
+   cursor["released"] = true
+   if cursor.get("destroy_pending", false) { _destroy_custom_cursor_native(cursor) }
+   0
+}
+
+fn _ensure_custom_cursor_buffer(any cursor, any globals) bool {
+   if !is_dict(cursor) || !is_dict(globals) { return false }
+   if cursor.get("wl_buffer", 0) { return true }
+   if cursor.get("destroy_pending", false) { return false }
+   def image = cursor.get("image", 0)
+   if !is_dict(image) { return false }
+   def width = int(image.get("width", image.get("w", 0)))
+   def height = int(image.get("height", image.get("h", 0)))
+   def pixels = _cursor_image_pixels(image)
+   def stride = width * 4
+   def bytes = stride * height
+   if width <= 0 || height <= 0 || width > 256 || height > 256 || !pixels { return false }
+   if (is_str(pixels) || is_bytes(pixels) || is_list(pixels) || is_tuple(pixels)) && pixels.len < bytes { return false }
+   def shm = globals.get("shm", 0)
+   if !shm { return false }
+   def fd = memfd_create(cstr("nytrix-wayland-cursor"), 1)
+   if fd < 0 { return false }
+   if ftruncate(fd, bytes) != 0 { wl_close_fd(fd) return false }
+   def mapping = mmap(0, bytes, PROT_READ_WRITE, MAP_SHARED, fd, 0)
+   if int(mapping) == -1 {
+      wl_close_fd(fd)
+      return false
+   }
+   mut i = 0
+   while i < width * height {
+      def src = i * 4
+      def r = _cursor_pixel_byte(pixels, src) & 255
+      def g = _cursor_pixel_byte(pixels, src + 1) & 255
+      def b = _cursor_pixel_byte(pixels, src + 2) & 255
+      def a = _cursor_pixel_byte(pixels, src + 3) & 255
+      store8(mapping, (b * a) / 255, src)
+      store8(mapping, (g * a) / 255, src + 1)
+      store8(mapping, (r * a) / 255, src + 2)
+      store8(mapping, a, src + 3)
+      i += 1
+   }
+   def pool = _wl_shm_create_pool(shm, fd, bytes)
+   wl_close_fd(fd)
+   if !pool { munmap(mapping, bytes) return false }
+   def buffer = _wl_shm_pool_create_buffer(pool, width, height, stride)
+   if !buffer {
+      _ = wl_proxy_marshal_flags_void(pool, 1, 0, int(get_proxy_version(pool)), 1)
+      munmap(mapping, bytes)
+      return false
+   }
+   def listener = zalloc(8)
+   if !listener {
+      _ = wl_proxy_marshal_flags_void(buffer, 0, 0, int(get_proxy_version(buffer)), 1)
+      _ = wl_proxy_marshal_flags_void(pool, 1, 0, int(get_proxy_version(pool)), 1)
+      munmap(mapping, bytes)
+      return false
+   }
+   store64_h(listener, _cursor_buffer_release, 0)
+   if wl_proxy_add_listener(buffer, listener, buffer) != 0 {
+      free(listener)
+      _ = wl_proxy_marshal_flags_void(buffer, 0, 0, int(get_proxy_version(buffer)), 1)
+      _ = wl_proxy_marshal_flags_void(pool, 1, 0, int(get_proxy_version(pool)), 1)
+      munmap(mapping, bytes)
+      return false
+   }
+   cursor["wl_buffer"] = buffer
+   cursor["wl_pool"] = pool
+   cursor["mapping"] = mapping
+   cursor["mapping_size"] = bytes
+   cursor["release_listener"] = listener
+   cursor["width"] = width
+   cursor["height"] = height
+   cursor["released"] = false
+   _custom_cursor_resources[int(buffer)] = cursor
+   true
+}
+
 fn _wl_cursor_shape_names(int shape) list {
    case shape {
       ARROW_CURSOR -> ["default", "left_ptr", "arrow"]
@@ -2038,7 +2178,13 @@ fn create_standard_cursor(int shape) dict {
 }
 
 fn destroy_cursor(any cursor) bool {
-   "Destroys a cursor dict(theme-owned cursors are freed with the theme)."
+   "Destroys a cursor dict and releases its shared-memory buffer after the compositor releases it."
+   if !is_dict(cursor) { return true }
+   if cursor.get("wl_buffer", 0) && !cursor.get("released", false) {
+      cursor["destroy_pending"] = true
+      return true
+   }
+   _destroy_custom_cursor_native(cursor)
    true
 }
 
@@ -2056,17 +2202,28 @@ fn set_cursor(any win, any cursor) any {
       wl_proxy_marshal_flags_full_set_cursor(pointer, serial, 0, 0, 0)
       return win
    }
+   if is_dict(cursor) && to_str(cursor.get("type", "standard")) == "custom" {
+      def surf = _ensure_cursor_surface(globals)
+      if surf && _ensure_custom_cursor_buffer(cursor, globals) {
+         def buffer = cursor.get("wl_buffer", 0)
+         def width, height = int(cursor.get("width", 0)), int(cursor.get("height", 0))
+         wl_proxy_marshal_flags_obj_ii(surf, WL_SURFACE_ATTACH, 0, int(get_proxy_version(surf)), 0, buffer, 0, 0)
+         _wl_surface_damage(surf, width, height)
+         _wl_proxy_marshal_void(surf, WL_SURFACE_COMMIT)
+         wl_proxy_marshal_flags_full_set_cursor(pointer, serial, surf,
+            max(0, min(width - 1, int(cursor.get("xhot", 0)))),
+            max(0, min(height - 1, int(cursor.get("yhot", 0)))))
+         cursor["released"] = false
+         def display = globals.get("display", globals.get("handle", 0))
+         if display { wl_display_flush(display) }
+         return win
+      }
+      _dbgu("custom cursor SHM upload failed; using the standard arrow cursor")
+   }
    def theme = _ensure_cursor_theme(globals)
    def surf  = _ensure_cursor_surface(globals)
    if !theme || !surf { return win }
    mut cur_shape = cursor.get("shape", ARROW_CURSOR)
-   if is_dict(cursor) && to_str(cursor.get("type", "standard")) == "custom" {
-      ;; Raw custom cursor upload requires wl_shm buffer plumbing.  Do not
-      ;; silently reinterpret custom cursor data as shape 0; use a stable arrow
-      ;; fallback and leave an explicit debug breadcrumb instead.
-      _dbgu("custom cursor requested; falling back to standard arrow cursor")
-      cur_shape = ARROW_CURSOR
-   }
    def wl_cur = _wl_cursor_for_shape(theme, cur_shape)
    if !wl_cur { return win }
    def image_count = load32(wl_cur, 0)

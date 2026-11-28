@@ -1,0 +1,47 @@
+shape wayland_custom_cursor {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui wayland cursor rgba shm]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3"
+  expect compile_and_run
+  expect_stdout "CUSTOM-CURSOR-OK"
+  source ny <<'NY'
+use core
+use core.os (msleep)
+use core.os.ui.window as window
+
+if window.backend() != "wayland" {
+   print("CUSTOM-CURSOR-OK skipped")
+} else {
+   window.window_hint(window.CLIENT_API, window.NO_API)
+   def win = window.open_window("Wayland custom cursor probe", 0, 0, 160, 100)
+   assert(win && window.backend() == "wayland", "open native Wayland window")
+   def pixels = [255, 0, 0, 128, 0, 255, 0, 255,
+                 0, 0, 255, 255, 255, 255, 255, 0]
+   mut dict cursor_image = dict(3)
+   cursor_image["width"] = 2
+   cursor_image["height"] = 2
+   cursor_image["pixels"] = pixels
+   mut any cursor = window.create_cursor(cursor_image, 1, 1)
+   assert(is_dict(cursor) && to_str(cursor.get("type", "")) == "custom", "create an RGBA custom cursor")
+   window.set_cursor(win, cursor)
+   def mapping = cursor.get("mapping", 0)
+   assert(cursor.get("wl_buffer", 0) && mapping, "upload a wl_shm cursor buffer")
+   assert(load8(mapping, 0) == 0 && load8(mapping, 1) == 0 && load8(mapping, 2) == 128 && load8(mapping, 3) == 128,
+      "convert RGBA to premultiplied BGRA for Wayland SHM")
+   assert(int(cursor.get("xhot", -1)) == 1 && int(cursor.get("yhot", -1)) == 1, "preserve cursor hotspot")
+   window.poll_events()
+   window.set_cursor(win, 0)
+   mut int i = 0
+   while i < 20 && !cursor.get("released", false) {
+      window.poll_events()
+      msleep(5)
+      i += 1
+   }
+   window.destroy_cursor(cursor)
+   window.close(win)
+   print("CUSTOM-CURSOR-OK wayland")
+}
+NY
+}
