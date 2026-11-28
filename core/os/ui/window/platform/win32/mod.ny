@@ -3411,6 +3411,36 @@ fn poll_all_window_events(list windows, int max_messages=512) list {
       mut evs = events_by_handle.get(handle, [])
       def synced = _sync_special_key_releases(win, evs)
       win, evs = synced.get(0, win), synced.get(1, evs)
+      ;; MoveWindow/ShowWindow can deliver WM_SIZE synchronously to the native
+      ;; window procedure, before the thread queue is polled. Reconcile live
+      ;; client and state values here so those transitions still reach callers.
+      def live_size = get_size(win)
+      def live_w, live_h = int(live_size.get(0, 0)), int(live_size.get(1, 0))
+      if live_w > 0 && live_h > 0 &&
+      (live_w != int(win.get("w", 0)) || live_h != int(win.get("h", 0))) {
+         win = win.set("w", live_w)
+         win = win.set("h", live_h)
+         mut data = dict(4)
+         data = data.set("w", live_w)
+         data = data.set("h", live_h)
+         evs = _push_event(evs, ui_consts.EVENT_WINDOW_RESIZED, win, data)
+      }
+      def maximized = is_window_maximized(win)
+      def was_maximized = !!win.get("maximized", false)
+      if maximized && !was_maximized {
+         evs = _push_event(evs, ui_consts.EVENT_WINDOW_MAXIMIZED, win, 0)
+      } elif !maximized && was_maximized {
+         evs = _push_event(evs, ui_consts.EVENT_WINDOW_RESTORED, win, 0)
+      }
+      win = win.set("maximized", maximized)
+      def iconified = is_window_iconified(win)
+      def was_iconified = !!win.get("iconified", false)
+      if iconified && !was_iconified {
+         evs = _push_event(evs, ui_consts.EVENT_WINDOW_MINIMIZED, win, 0)
+      } elif !iconified && was_iconified {
+         evs = _push_event(evs, ui_consts.EVENT_WINDOW_RESTORED, win, 0)
+      }
+      win = win.set("iconified", iconified)
       win = _recenter_disabled_cursor(win)
       win = _apply_cursor_handle(win)
       updated_windows[handle] = win
