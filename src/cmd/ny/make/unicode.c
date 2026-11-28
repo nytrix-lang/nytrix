@@ -17,8 +17,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <process.h>
+#include <io.h>
+#define getpid _getpid
+#define unlink _unlink
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -154,6 +161,30 @@ static bool file_ok_hash(const char *path, const char *want_hex) {
  */
 static char *read_ucd_member(const char *zip_path, const char *member,
                              size_t *len) {
+#ifdef _WIN32
+  /* Windows ships tar.exe, which can stream a ZIP member without requiring
+   * POSIX fork/exec support in this optional table generator. */
+  char command[PATH_MAX * 2 + 256];
+  int command_len = snprintf(command, sizeof(command),
+                             "tar -xOf \"%s\" \"%s\"", zip_path, member);
+  if (command_len < 0 || (size_t)command_len >= sizeof(command)) return NULL;
+  FILE *pipe = _popen(command, "rb");
+  if (!pipe) return NULL;
+  strbuf b;
+  sb_init(&b);
+  char buf[65536];
+  for (;;) {
+    size_t n = fread(buf, 1, sizeof(buf), pipe);
+    if (n) sb_append(&b, buf, n);
+    if (n < sizeof(buf)) break;
+  }
+  bool read_error = ferror(pipe) != 0;
+  int status = _pclose(pipe);
+  if (read_error || status != 0) { free(b.data); return NULL; }
+  if (len) *len = b.len;
+  if (!b.data) { b.data = xstrdup(""); b.len = 0; }
+  return b.data;
+#else
   int fds[2];
   if (pipe(fds) != 0) return NULL;
   pid_t pid = fork();
@@ -180,6 +211,7 @@ static char *read_ucd_member(const char *zip_path, const char *member,
   if (len) *len = b.len;
   if (!b.data) { b.data = xstrdup(""); b.len = 0; }
   return b.data;
+#endif
 }
 
 static int cmp_seq_entry(const void *a, const void *b) {
