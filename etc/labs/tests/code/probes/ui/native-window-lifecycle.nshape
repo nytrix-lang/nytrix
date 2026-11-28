@@ -1,0 +1,53 @@
+shape native-window-lifecycle {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "win32", "cocoa"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-backend=llvm --jit -O0; --native-backend=llvm --jit -O3"
+  expect_stdout "NATIVE-WINDOW-LIFECYCLE-OK"
+  source ny <<'NY'
+use core
+use core.os (msleep)
+use core.os.ui.window as window
+use core.os.ui.window.consts as event_kind
+
+def target = to_str(__env_get("NY_TEST_ELM_PLATFORM"))
+if target == "win32" || target == "cocoa" {
+   window.window_hint(window.CLIENT_API, window.NO_API)
+   def first = window.open_window("First", 0, 0, 80, 50)
+   defer { window.close(first) }
+   def second = window.open_window("Second", 100, 0, 80, 50)
+   defer { window.close(second) }
+   assert(window.backend() == target && window.id(first) && window.id(second), "two native windows on the requested backend")
+   def first_id, second_id = window.id(first), window.id(second)
+   window.maximize(first)
+   window.maximize(second)
+   mut seen_first, seen_second = false, false
+   mut attempts = 0
+   while attempts < 100 && !(seen_first && seen_second) {
+      window.poll_events()
+      mut event = window.check_event(first)
+      while event {
+         if window.event_type(event) == event_kind.EVENT_WINDOW_MAXIMIZED && window.event_window_id(event) == first_id {
+            seen_first = true
+         }
+         event = window.check_event(first)
+      }
+      event = window.check_event(second)
+      while event {
+         if window.event_type(event) == event_kind.EVENT_WINDOW_MAXIMIZED && window.event_window_id(event) == second_id {
+            seen_second = true
+         }
+         event = window.check_event(second)
+      }
+      msleep(5)
+      attempts += 1
+   }
+   assert(seen_first && seen_second, "native maximize events retain each source window ID")
+} else {
+   print("Skipped: set NY_TEST_ELM_PLATFORM under a native display")
+}
+print("NATIVE-WINDOW-LIFECYCLE-OK")
+NY
+}
