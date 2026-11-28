@@ -3455,6 +3455,13 @@ fn poll_all_window_events(list windows, int max_messages=512) list {
       updated_windows[handle] = win
       events_by_handle[handle] = evs
    }
+   def pending_handles = dict_keys(_pending_events_by_window)
+   for handle in pending_handles {
+      def queued = _pending_events_by_window.get(handle, [])
+      def fresh = events_by_handle.get(handle, [])
+      events_by_handle[handle] = queued.extend(fresh)
+   }
+   _pending_events_by_window = dict(8)
    [updated_windows, events_by_handle]
 }
 
