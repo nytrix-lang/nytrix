@@ -5747,7 +5747,10 @@ fn _find_buffers_refresh() int {
                   mut stop = min(line.len, first + 76)
                   while stop < line.len && (load8(line, stop) & 192) == 128 { stop -= 1 }
                   def preview = str.strip(str.str_slice(line, _find_buffers_column(line, first), _find_buffers_column(line, stop))) + (stop < line.len ? "…" : "")
-                  rows = rows.append([name + ":" + loc + "  " + preview, "", "", path.len > 0 ? path : name, "search", bi, li, at, end])
+                  ;; Palette rows are heterogeneous `any` lists; box the numeric
+                  ;; coordinates explicitly so the selected result retains its
+                  ;; buffer and byte offsets when the row is read back.
+                  rows = rows.append([name + ":" + loc + "  " + preview, "", "", path.len > 0 ? path : name, "search", __box_i64(bi), __box_i64(li), __box_i64(at), __box_i64(end)])
                   at = _find_buffers_next(line, q, end)
                }
             }
