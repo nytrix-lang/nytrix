@@ -36,7 +36,7 @@ fn update(any model, any event) any {
    sizes
 }
 
-def target = __env_get("NY_TEST_ELM_PLATFORM")
+def target = to_str(__env_get("NY_TEST_ELM_PLATFORM"))
 if target == "x11" || target == "wayland" || target == "win32" || target == "cocoa" {
    window.window_hint(window.CLIENT_API, window.NO_API)
    def first = window.open_window("First", 0, 0, 80, 50)
