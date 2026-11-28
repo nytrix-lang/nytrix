@@ -1,6 +1,7 @@
 shape font_lcd_coverage {
   family "probe-suite"
   generator "regression"
+  flags_matrix "--native-only -O0; --native-only -O3"
   features ["ny", "font", "freetype", "lcd", "subpixel"]
   template ny-test-case
   expect compile_and_run
@@ -35,7 +36,6 @@ while i < w * h {
    i += 1
 }
 assert(visible && differing, "LCD channels carry independent subpixel coverage")
-free(pixels)
 font.unload(info)
 def ui_font_id = ui.font_load_lcd("etc/assets/fonts/jetbrains.ttf", 18, ui.FONT_FILTER_NEAREST, "A")
 assert(ui_font_id > 0, "LCD-enabled UI font loads")
@@ -49,6 +49,27 @@ def glyph_pair = glyph_items.get(0, [])
 def glyph_entry = glyph_pair.get(1, 0)
 def lcd_bitmap = glyph_entry ? glyph_entry.get("bitmap", 0) : 0
 assert(is_dict(lcd_bitmap) && lcd_bitmap.get("is_lcd", false), "resolved UI glyph uses LCD raster")
+def atlas = lcd_bitmap.get("atlas", nil)
+def uv = lcd_bitmap.get("uv", [])
+assert(is_dict(atlas) && uv.len == 4, "LCD glyph is packed in a real atlas region")
+def atlas_width = int(atlas.get("width"))
+def atlas_height = int(atlas.get("height"))
+def atlas_pixels = atlas.get("cpu_buf", 0)
+assert(atlas_pixels, "LCD atlas has CPU pixels")
+def atlas_x = int(float(uv.get(0)) * float(atlas_width) + 0.5)
+def atlas_y = int(float(uv.get(1)) * float(atlas_height) + 0.5)
+assert(atlas_x >= 0 && atlas_x + w <= atlas_width && atlas_y >= 0 && atlas_y + h <= atlas_height, "LCD atlas glyph is in bounds")
+mut row = 0
+while row < h {
+   mut col = 0
+   while col < w {
+      def atlas_offset = ((atlas_y + row) * atlas_width + atlas_x + col) * 4
+      assert(load32(atlas_pixels, atlas_offset) == load32(pixels, (row * w + col) * 4), "atlas preserves each LCD coverage channel")
+      col += 1
+   }
+   row += 1
+}
+free(pixels)
 ui.font_destroy(ui_font_id)
 print("FONT-LCD-COVERAGE-OK")
 NY

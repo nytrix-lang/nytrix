@@ -2539,7 +2539,7 @@ fn _font_try_resolve_fallback_chain(
 fn _font_prepare_bitmap_for_atlas(
    int font_id,
    dict font_obj,
-   any bm,
+   dict bm,
    int cp,
    f64 raster_os,
    int atlas_size,
