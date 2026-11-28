@@ -28,7 +28,7 @@ module core.os.ui.render(
    init_window, init_mock_surface, close_window, set_active_window, render_init,
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
-   draw_triangles, draw_path, draw_path_outline, draw_polyline, draw_triangle, draw_quad, draw_rect,
+   draw_triangles, draw_triangles_clipped, draw_path, draw_path_outline, draw_polyline, draw_triangle, draw_quad, draw_rect,
    draw_pixel, draw_pixel_v, draw_line_v, draw_line_ex, draw_line_strip,
    draw_rect_v, draw_rect_rec, draw_rect_pro, draw_rect_lines, draw_rect_lines_ex,
    draw_rect_gradient_v, draw_rect_gradient_h, draw_rect_gradient_ex,
@@ -5352,6 +5352,74 @@ fn draw_triangles(list vertices, any color) bool {
       i += 1
    }
    _draw_triangles_impl(verts, tri_count)
+}
+
+fn _clip_polygon_edge(list polygon, int edge, f64 bound) list {
+   if polygon.len == 0 { return [] }
+   mut out = []
+   def int n = polygon.len
+   mut prev = polygon[n - 1]
+   mut prev_coord = edge < 2 ? float(prev.get(0, 0.0)) : float(prev.get(1, 0.0))
+   mut prev_inside = edge == 0 ? prev_coord >= bound : edge == 1 ? prev_coord <= bound : edge == 2 ? prev_coord >= bound : prev_coord <= bound
+   mut i = 0
+   while i < n {
+      def curr = polygon[i]
+      def curr_coord = edge < 2 ? float(curr.get(0, 0.0)) : float(curr.get(1, 0.0))
+      def curr_inside = edge == 0 ? curr_coord >= bound : edge == 1 ? curr_coord <= bound : edge == 2 ? curr_coord >= bound : curr_coord <= bound
+      if curr_inside != prev_inside {
+         def den = curr_coord - prev_coord
+         if abs(den) > 0.0000001 {
+            def t = (bound - prev_coord) / den
+            out = out.append([
+               float(prev.get(0, 0.0)) + (float(curr.get(0, 0.0)) - float(prev.get(0, 0.0))) * t,
+               float(prev.get(1, 0.0)) + (float(curr.get(1, 0.0)) - float(prev.get(1, 0.0))) * t,
+               float(prev.get(2, 0.0)) + (float(curr.get(2, 0.0)) - float(prev.get(2, 0.0))) * t
+            ])
+         }
+      }
+      if curr_inside { out = out.append(curr) }
+      prev, prev_coord, prev_inside = curr, curr_coord, curr_inside
+      i += 1
+   }
+   out
+}
+
+fn draw_triangles_clipped(list vertices, any color, any clip) bool {
+   "Draws triangles clipped to the per-call rectangle `clip` [x, y, w, h] by clipping their geometry before GPU submission."
+   if !is_list(vertices) || !is_list(clip) || clip.len < 4 { return false }
+   def x0, y0 = float(clip.get(0, 0.0)), float(clip.get(1, 0.0))
+   def x1, y1 = x0 + max(0.0, float(clip.get(2, 0.0))), y0 + max(0.0, float(clip.get(3, 0.0)))
+   if x1 <= x0 || y1 <= y0 { return false }
+   mut flat = vertices
+   if vertices.len > 0 && is_list(vertices[0]) && vertices[0].len >= 3 && is_list(vertices[0][0]) {
+      flat = []
+      mut ti = 0
+      while ti < vertices.len {
+         def tri = vertices[ti]
+         if is_list(tri) && tri.len >= 3 {
+            flat = flat.append(tri[0]).append(tri[1]).append(tri[2])
+         }
+         ti += 1
+      }
+   }
+   if flat.len < 3 { return false }
+   mut clipped = []
+   mut base = 0
+   while base + 2 < flat.len {
+      mut poly = [_to_v3(flat[base]), _to_v3(flat[base + 1]), _to_v3(flat[base + 2])]
+      poly = _clip_polygon_edge(poly, 0, x0)
+      poly = _clip_polygon_edge(poly, 1, x1)
+      poly = _clip_polygon_edge(poly, 2, y0)
+      poly = _clip_polygon_edge(poly, 3, y1)
+      mut pi = 1
+      while pi + 1 < poly.len {
+         clipped = clipped.append([poly[0], poly[pi], poly[pi + 1]])
+         pi += 1
+      }
+      base += 3
+   }
+   if clipped.len == 0 { return false }
+   draw_triangles(clipped, color)
 }
 
 fn _path_cross(any a, any b, any c) f64 {

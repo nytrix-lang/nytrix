@@ -16,6 +16,7 @@ assert(win, "software window")
 assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin frame")
 gfx.set_ortho_2d(0.0, 64.0, 64.0, 0.0)
 assert(gfx.draw_path([[8.0, 8.0], [48.0, 8.0], [48.0, 24.0], [24.0, 24.0], [24.0, 48.0], [8.0, 48.0]], [1.0, 0.0, 0.0, 1.0]), "triangulate concave L contour")
+assert(gfx.draw_triangles_clipped([[[0.0, 0.0], [60.0, 0.0], [30.0, 60.0]]], [0.0, 1.0, 0.0, 1.0], [28.0, 26.0, 20.0, 20.0]), "clip triangle geometry to this draw's rectangle")
 assert(gfx.draw_path_outline([[34.0, 32.0], [54.0, 32.0], [54.0, 54.0], [34.0, 54.0]], [0.0, 0.0, 1.0, 1.0], 2.0), "stroke closed path")
 assert(gfx.end_frame(), "present frame")
 def frame = gfx.read_framebuffer()
@@ -24,10 +25,14 @@ assert(pixels, "framebuffer readback")
 def int filled = load8(pixels, (40 * 64 + 16) * 4) & 255
 def int notch = load8(pixels, (40 * 64 + 40) * 4) & 255
 def int outline = load8(pixels, (32 * 64 + 44) * 4 + 2) & 255
+def int clipped_inside = load8(pixels, (30 * 64 + 32) * 4 + 1) & 255
+def int clipped_inside_r = load8(pixels, (30 * 64 + 32) * 4) & 255
+def int clipped_outside_r = load8(pixels, (30 * 64 + 24) * 4) & 255
 free(pixels)
 assert(filled > 220, "concave fill covers the L arm")
 assert(notch > 245, "concave fill leaves the notch transparent")
 assert(outline > 180, "closed path outline renders")
+assert(clipped_inside > 200 && clipped_inside_r < 40 && clipped_outside_r > 245, "triangle pixels stop at its per-call clip bounds")
 gfx.close_window()
 print("UI-PATH-PRIMITIVES-OK")
 NY
