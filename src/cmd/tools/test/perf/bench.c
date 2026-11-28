@@ -7,6 +7,16 @@
 #endif
 
 #include "perf.h"
+#ifdef _WIN32
+#include "base/ui.h"
+
+int ny_perf_bench_main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    nyt_err("ny-perf", "benchmark evidence collection is not available on Windows");
+    return 2;
+}
+#else
 #include "base/args.h"
 #include "base/json.h"
 #include "base/util.h"
@@ -1027,3 +1037,4 @@ static void discover_fixtures_recursive(const char *dir, const char *base, char 
     }
     closedir(d);
 }
+#endif
