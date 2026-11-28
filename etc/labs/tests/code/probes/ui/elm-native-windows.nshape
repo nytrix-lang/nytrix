@@ -48,9 +48,8 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
    def second_id = window.id(second)
    def app = elm.new(dict(4))
    elm.subscribe(app, "window.lifecycle", lifecycle_message)
-   if target == "x11" {
-      ;; X11 resize requests are asynchronous; verify native ConfigureNotify
-      ;; delivery independently for each display connection.
+   if target != "wayland" {
+      ;; Native resize requests report through each platform's real event path.
       assert(platform.set_size(first, 115, 70), "resize the first native window")
       assert(platform.set_size(second, 155, 90), "resize the second native window")
    } else {
@@ -66,7 +65,7 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
       elm.publish_window_event(app, se, update)
       elm.publish_window_event(app, fe, update)
       def sizes = elm.model(app)
-      if target == "x11" {
+      if target != "wayland" {
          if int(sizes.get(to_str(first_id), 0)) == 115 && int(sizes.get(to_str(second_id), 0)) == 155 { break }
       } elif sizes.get(to_str(first_id) + ":maximized", false) && sizes.get(to_str(second_id) + ":maximized", false) { break }
       msleep(5)

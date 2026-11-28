@@ -11,6 +11,7 @@ use core
 use core.os (msleep)
 use core.os.ui.window as window
 use core.os.ui.window.consts as event_kind
+use core.os.ui.window.platform as platform
 
 def target = to_str(__env_get("NY_TEST_ELM_PLATFORM"))
 if target == "win32" || target == "cocoa" {
@@ -21,22 +22,22 @@ if target == "win32" || target == "cocoa" {
    defer { window.close(second) }
    assert(window.backend() == target && window.id(first) && window.id(second), "two native windows on the requested backend")
    def first_id, second_id = window.id(first), window.id(second)
-   window.maximize(first)
-   window.maximize(second)
+   assert(platform.set_size(first, 115, 70), "resize the first native window")
+   assert(platform.set_size(second, 155, 90), "resize the second native window")
    mut seen_first, seen_second = false, false
    mut attempts = 0
    while attempts < 100 && !(seen_first && seen_second) {
       window.poll_events()
       mut event = window.check_event(first)
       while event {
-         if window.event_type(event) == event_kind.EVENT_WINDOW_MAXIMIZED && window.event_window_id(event) == first_id {
+         if window.event_type(event) == event_kind.EVENT_WINDOW_RESIZED && window.event_window_id(event) == first_id && int(window.event_data(event).get("w", 0)) == 115 {
             seen_first = true
          }
          event = window.check_event(first)
       }
       event = window.check_event(second)
       while event {
-         if window.event_type(event) == event_kind.EVENT_WINDOW_MAXIMIZED && window.event_window_id(event) == second_id {
+         if window.event_type(event) == event_kind.EVENT_WINDOW_RESIZED && window.event_window_id(event) == second_id && int(window.event_data(event).get("w", 0)) == 155 {
             seen_second = true
          }
          event = window.check_event(second)
@@ -44,7 +45,7 @@ if target == "win32" || target == "cocoa" {
       msleep(5)
       attempts += 1
    }
-   assert(seen_first && seen_second, "native maximize events retain each source window ID")
+   assert(seen_first && seen_second, "native resize events retain each source window ID")
 } else {
    print("Skipped: set NY_TEST_ELM_PLATFORM under a native display")
 }
