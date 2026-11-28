@@ -39,6 +39,15 @@ def NSFloatingWindowLevel = 3
 def NSMainMenuWindowLevel = 24
 def NSBitmapFormatAlphaNonpremultiplied = 2
 
+;; NSRect is a four-double aggregate, not four scalar parameters. In
+;; particular the x86-64 Darwin ABI passes it in memory.
+layout CocoaRect {
+   f64 x,
+   f64 y,
+   f64 width,
+   f64 height
+}
+
 fn available() bool {
    "Runs the available operation."
    #macos { return true } #else { return false } #endif
@@ -86,9 +95,10 @@ fn _load_cocoa_frameworks() bool {
       fn _objc_msgSend_arg_f64(ptr target, ptr op, f64 arg) ptr as "objc_msgSend"
       fn _objc_msgSend_size(ptr target, ptr op, f64 w, f64 h) ptr as "objc_msgSend"
       fn _objc_msgSend_ptr_point(ptr target, ptr op, ptr arg, f64 x, f64 y) ptr as "objc_msgSend"
-      fn _objc_msgSend_rect_ptr(ptr target, ptr op, f64 x, f64 y, f64 w, f64 h, ptr arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_rect_ptr(ptr target, ptr op, CocoaRect rect, ptr arg) ptr as "objc_msgSend"
+      fn _objc_msgSend_rect_display(ptr target, ptr op, CocoaRect rect, i8 display) as "objc_msgSend"
       fn _objc_msgSend_bitmap_init(ptr target, ptr op, ptr planes, i64 pixels_wide, i64 pixels_high, i64 bits_per_sample, i64 samples_per_pixel, i8 has_alpha, i8 is_planar, ptr color_space_name, u64 bitmap_format, i64 bytes_per_row, i64 bits_per_pixel) ptr as "objc_msgSend"
-      fn _objc_msgSend_rect_u64_i64_i8(ptr target, ptr op, f64 x, f64 y, f64 w, f64 h, u64 style, i64 backing, i8 do_defer) ptr as "objc_msgSend"
+      fn _objc_msgSend_rect_u64_i64_i8(ptr target, ptr op, CocoaRect rect, u64 style, i64 backing, i8 do_defer) ptr as "objc_msgSend"
       fn _objc_msgSend_i64(ptr target, ptr op) i64 as "objc_msgSend"
       fn _objc_msgSend_i64_arg(ptr target, ptr op, i64 arg) i64 as "objc_msgSend"
       fn _objc_msgSend_i64_sel(ptr target, ptr op, ptr arg) i64 as "objc_msgSend"
@@ -278,13 +288,27 @@ fn objc_msgSend_bitmap_init(any target, any op, ptr planes, i64 pixels_wide, i64
 
 fn objc_msgSend_rect_u64_i64_i8(any target, any op, any x, any y, any w, any h, u64 style, i64 backing, i8 do_defer) any {
    "Runs the objc msgSend rect u64 i64 i8 operation."
-   #macos { return _objc_msgSend_rect_u64_i64_i8(target, op, x, y, w, h, style, backing, do_defer) }
+   #macos {
+      def rect = malloc(32)
+      if !rect { return 0 }
+      store_layout(rect, "CocoaRect", float(x), float(y), float(w), float(h))
+      def result = _objc_msgSend_rect_u64_i64_i8(target, op, rect, style, backing, do_defer)
+      free(rect)
+      return result
+   }
    0
 }
 
 fn objc_msgSend_rect_ptr(any target, any op, any x, any y, any w, any h, ptr arg=0) any {
    "Sends an Objective-C message with an NSRect and object argument."
-   #macos { return _objc_msgSend_rect_ptr(target, op, float(x), float(y), float(w), float(h), arg) }
+   #macos {
+      def rect = malloc(32)
+      if !rect { return 0 }
+      store_layout(rect, "CocoaRect", float(x), float(y), float(w), float(h))
+      def result = _objc_msgSend_rect_ptr(target, op, rect, arg)
+      free(rect)
+      return result
+   }
    0
 }
 
@@ -719,9 +743,10 @@ fn start_window_move(any win) bool {
    "Starts an AppKit window drag using the active mouse-down event."
    if !available() { return false }
    def hwnd = if is_dict(win) { win.get("handle", 0) } else { win }
-   def event = current_event()
-   if !hwnd || !event { return false }
+   def event = _take_drag_event(hwnd)
+   if !event { return false }
    objc_msgSend_ptr(hwnd, get_selector("performWindowDragWithEvent:"), event)
+   objc_msgSend(event, get_selector("release"))
    true
 }
 
@@ -731,8 +756,10 @@ fn start_file_drag(any win, str uri_list) bool {
    def hwnd = win.get("handle", 0)
    def view = objc_msgSend_ptr(hwnd, get_selector("contentView"))
    def source = win.get("delegate", 0)
-   def event = current_event()
-   if !hwnd || !view || !source || !event { return false }
+   if !hwnd || !view || !source { return false }
+   def event = _take_drag_event(hwnd)
+   if !event { return false }
+   defer { objc_msgSend(event, get_selector("release")) }
    def pool = create_autorelease_pool()
    def items = objc_msgSend(get_class("NSMutableArray"), get_selector("array"))
    if !items { drain_autorelease_pool(pool) return false }
@@ -743,18 +770,14 @@ fn start_file_drag(any win, str uri_list) bool {
       def uri_obj = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(uri))
       def url = objc_msgSend_ptr(get_class("NSURL"), get_selector("URLWithString:"), uri_obj)
       if !url { continue }
-      def path = objc_msgSend_ptr(url, get_selector("path"))
-      if !path { continue }
-      def paths = objc_msgSend_ptr(get_class("NSArray"), get_selector("arrayWithObject:"), path)
-      def legacy_file_type = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSFilenamesPboardType"))
-      def writer = objc_msgSend_ptr(objc_msgSend(get_class("NSPasteboardItem"), get_selector("alloc")), get_selector("init"))
-      if !writer || !paths || !legacy_file_type { continue }
-      objc_msgSend_ptr_ptr(writer, get_selector("setPropertyList:forType:"), paths, legacy_file_type)
+      if !objc_msgSend_i64(url, get_selector("isFileURL")) { continue }
+      ;; NSURL implements NSPasteboardWriting and publishes the native file URL.
       def item = objc_msgSend_ptr(objc_msgSend(get_class("NSDraggingItem"), get_selector("alloc")),
-         get_selector("initWithPasteboardWriter:"), writer)
+         get_selector("initWithPasteboardWriter:"), url)
       if !item { continue }
       objc_msgSend_rect_ptr(item, get_selector("setDraggingFrame:contents:"), 0.0, 0.0, 1.0, 1.0, 0)
       objc_msgSend_ptr(items, get_selector("addObject:"), item)
+      objc_msgSend(item, get_selector("release"))
       added += 1
    }
    if added == 0 {
@@ -1117,6 +1140,21 @@ fn post_event(any event, bool at_start=true) bool {
 
 mut _windows = dict(8)
 mut _pending_events = []
+mut _drag_events = dict(8)
+
+fn _release_drag_event(any hwnd) any {
+   def event = _drag_events.get(hwnd, 0)
+   if event { objc_msgSend(event, get_selector("release")) }
+   _drag_events = _drag_events.delete(hwnd)
+}
+
+fn _take_drag_event(any hwnd) any {
+   ;; The application can request a drag after polling has dispatched the
+   ;; mouse-down. Keep that event alive, and never reuse another window's.
+   def event = _drag_events.get(hwnd, 0)
+   _drag_events = _drag_events.delete(hwnd)
+   event
+}
 mut _known_display_ids = []
 mut _displays_initialized = false
 
@@ -1200,12 +1238,17 @@ fn _translate_event(any event) any {
    match type {
       1, 3, 25 -> {
          def btn = (type == 1) ? 0 : (type == 3) ? 1 : int(objc_msgSend_i64(event, get_selector("buttonNumber")))
+         if type == 1 {
+            _release_drag_event(hwnd)
+            _drag_events = _drag_events.set(hwnd, objc_msgSend(event, get_selector("retain")))
+         }
          mut next_win = win.set(f"mouse_button_{btn}", true)
          _windows = _windows.set(hwnd, next_win)
          return [EVENT_MOUSE_BUTTON_PRESSED, next_win, 0, btn]
       }
       2, 4, 26 -> {
          def btn = (type == 2) ? 0 : (type == 4) ? 1 : int(objc_msgSend_i64(event, get_selector("buttonNumber")))
+         if type == 2 { _release_drag_event(hwnd) }
          mut next_win = win.set(f"mouse_button_{btn}", false)
          _windows = _windows.set(hwnd, next_win)
          return [EVENT_MOUSE_BUTTON_RELEASED, next_win, 0, btn]
@@ -1345,7 +1388,10 @@ fn _window_delegate_did_become_key(any self, any sel, any notification) any {
 fn _window_delegate_did_resign_key(any self, any sel, any notification) any {
    def hwnd = objc_msgSend_ptr(notification, get_selector("object"))
    def win = _find_window_by_handle(hwnd)
-   if win { _push_event(win, EVENT_FOCUS_OUT, 0) }
+   if win {
+      _release_drag_event(hwnd)
+      _push_event(win, EVENT_FOCUS_OUT, 0)
+   }
 }
 
 fn _window_delegate_did_change_backing(any self, any sel, any notification) any {
@@ -1388,14 +1434,15 @@ fn _last_key_window() any {
    objc_msgSend_ptr(app, get_selector("keyWindow"))
 }
 
-fn _drag_enter(any self, any sel, any sender) int {
-   "NSDraggingDestination draggingEntered: — accept copy operation."
-   1
+fn _drag_enter(ptr self, ptr sel, ptr sender) u64 {
+   "NSDraggingDestination draggingEntered: — accept copy only if offered."
+   if !_drag_destination_window(sender) { return 0 }
+   band(objc_msgSend_i64(sender, get_selector("draggingSourceOperationMask")), 1)
 }
 
-fn _drag_updated(any self, any sel, any sender) int {
-   "NSDraggingDestination draggingUpdated: — keep accepting copy."
-   1
+fn _drag_updated(ptr self, ptr sel, ptr sender) u64 {
+   "NSDraggingDestination draggingUpdated: — keep accepting offered copy."
+   _drag_enter(self, sel, sender)
 }
 
 fn _drag_destination_window(any sender) any {
@@ -1405,36 +1452,54 @@ fn _drag_destination_window(any sender) any {
    _find_window_by_handle(hwnd)
 }
 
-fn _drag_performed(any self, any sel, any sender) bool {
+fn _drag_performed(ptr self, ptr sel, ptr sender) i8 {
    "NSDraggingDestination performDragOperation: — reads pasteboard, pushes EVENT_DROP."
-   if !sender { return false }
+   if !sender { return 0 }
+   def win = _drag_destination_window(sender)
+   if !win { return 0 }
    def pb = objc_msgSend_ptr(sender, get_selector("draggingPasteboard"))
-   if !pb { return false }
-   def fn_type = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSFilenamesPboardType"))
-   def items = objc_msgSend_ptr(pb, get_selector("propertyListForType:"), fn_type)
+   if !pb { return 0 }
+   def url_classes = objc_msgSend_ptr(get_class("NSArray"), get_selector("arrayWithObject:"), get_class("NSURL"))
+   def urls = objc_msgSend_ptr_ptr(pb, get_selector("readObjectsForClasses:options:"), url_classes, 0)
    mut paths = []
-   if items {
-      def count = objc_msgSend_i64(items, get_selector("count"))
-      mut idx = 0
-      while idx < count {
-         def item = objc_msgSend_ptr_i64_arg(items, get_selector("objectAtIndex:"), idx)
-         if item {
-            def cs = objc_msgSend_ptr(item, get_selector("UTF8String"))
+   if urls {
+      mut i = 0
+      def count = objc_msgSend_i64(urls, get_selector("count"))
+      while i < count {
+         def url = objc_msgSend_ptr_i64_arg(urls, get_selector("objectAtIndex:"), i)
+         if url && objc_msgSend_i64(url, get_selector("isFileURL")) {
+            def path = objc_msgSend(url, get_selector("path"))
+            def cs = objc_msgSend(path, get_selector("UTF8String"))
             if cs { paths = paths.append(to_str(cs)) }
          }
-         idx += 1
+         i += 1
       }
    }
-   def win = _drag_destination_window(sender)
-   if win && paths.len > 0 {
+   if paths.len == 0 {
+      def fn_type = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSFilenamesPboardType"))
+      def items = objc_msgSend_ptr(pb, get_selector("propertyListForType:"), fn_type)
+      if items {
+         def count = objc_msgSend_i64(items, get_selector("count"))
+         mut idx = 0
+         while idx < count {
+            def item = objc_msgSend_ptr_i64_arg(items, get_selector("objectAtIndex:"), idx)
+            if item {
+               def cs = objc_msgSend_ptr(item, get_selector("UTF8String"))
+               if cs { paths = paths.append(to_str(cs)) }
+            }
+            idx += 1
+         }
+      }
+   }
+   if paths.len > 0 {
       mut data = dict(8)
       data = data.set("paths", paths)
       _push_event(win, EVENT_DATA_DROP, data)
    }
-   paths.len > 0
+   paths.len > 0 ? 1 : 0
 }
 
-fn _dragging_source_mask(any self, any sel, any session, any context) int {
+fn _dragging_source_mask(ptr self, ptr sel, ptr session, u64 context) u64 {
    "NSDraggingSource sourceOperationMaskForDraggingContext: — advertise copy."
    1
 }
@@ -1456,14 +1521,36 @@ fn create_window_delegate() any {
       _ny_class_addMethod(cls, get_selector("windowDidChangeBackingProperties:"), _window_delegate_did_change_backing, cstr("v@:@"))
       _ny_class_addMethod(cls, get_selector("windowDidMove:"), _window_delegate_did_move, cstr("v@:@"))
       _ny_class_addMethod(cls, get_selector("insertText:replacementRange:"), _ime_insert_text, cstr("v@:@{NSRange=QQ}"))
-      _ny_class_addMethod(cls, get_selector("draggingEntered:"), _drag_enter, cstr("Q@:@"))
-      _ny_class_addMethod(cls, get_selector("draggingUpdated:"), _drag_updated, cstr("Q@:@"))
-      _ny_class_addMethod(cls, get_selector("performDragOperation:"), _drag_performed, cstr("c@:@"))
       _ny_class_addMethod(cls, get_selector("draggingSession:sourceOperationMaskForDraggingContext:"), _dragging_source_mask, cstr("Q@:@Q"))
       _ny_objc_registerClassPair(cls)
       _delegate_class = cls
    }
    cls
+}
+
+mut _content_class = 0
+
+fn _create_content_view(any hwnd) any {
+   if !_content_class {
+      def cls = _ny_objc_allocateClassPair(get_class("NSView"), cstr("NytrixContentView"), 0)
+      if !cls { return 0 }
+      _ny_class_addMethod(cls, get_selector("draggingEntered:"), _drag_enter, cstr("Q@:@"))
+      _ny_class_addMethod(cls, get_selector("draggingUpdated:"), _drag_updated, cstr("Q@:@"))
+      _ny_class_addMethod(cls, get_selector("performDragOperation:"), _drag_performed, cstr("c@:@"))
+      _ny_objc_registerClassPair(cls)
+      _content_class = cls
+   }
+   def view = objc_msgSend(objc_msgSend(_content_class, get_selector("alloc")), get_selector("init"))
+   if !view { return 0 }
+   def types = objc_msgSend(get_class("NSMutableArray"), get_selector("array"))
+   for type in ["public.file-url", "NSFilenamesPboardType"] {
+      def name = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(type))
+      objc_msgSend_ptr(types, get_selector("addObject:"), name)
+   }
+   objc_msgSend_ptr(view, get_selector("registerForDraggedTypes:"), types)
+   objc_msgSend_ptr(hwnd, get_selector("setContentView:"), view)
+   objc_msgSend(view, get_selector("release"))
+   view
 }
 
 fn get_window_content_scale(any win) f64 {
@@ -1514,9 +1601,15 @@ fn _cocoa_window_style_from_flags(int flags) int {
 
 fn _cocoa_set_frame(any hwnd, any x, any y, any w, any h) bool {
    if !available() || !hwnd { return false }
-   objc_msgSend_rect_u64_i64_i8(hwnd, get_selector("setFrame:display:"),
-      float(x), float(y), float(w), float(h), 1, 1, 0)
-   true
+   #macos {
+      def rect = malloc(32)
+      if !rect { return false }
+      store_layout(rect, "CocoaRect", float(x), float(y), float(w), float(h))
+      _objc_msgSend_rect_display(hwnd, get_selector("setFrame:display:"), rect, 1)
+      free(rect)
+      return true
+   }
+   false
 }
 
 fn _cocoa_apply_style(any hwnd, int style) bool {
@@ -1870,10 +1963,9 @@ fn show_window(any win) bool {
    def hwnd = win.get("handle", 0)
    if !hwnd { return false }
    def pool = create_autorelease_pool()
-   _windows = _windows.set(hwnd, 0)
-   objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0)
-   def next_win = win.set("visible", true)
+   def next_win = _windows.get(hwnd, win).set("visible", true)
    _windows = _windows.set(hwnd, next_win)
+   objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0)
    drain_autorelease_pool(pool)
    true
 }
@@ -2101,14 +2193,11 @@ fn create_basic_window(str title, int width, int height, int x=0, int y=0, int f
       def delegate_cls = create_window_delegate()
       delegate = objc_msgSend(objc_msgSend(delegate_cls, get_selector("alloc")), get_selector("init"))
       objc_msgSend_ptr(hwnd, get_selector("setDelegate:"), delegate)
+      _create_content_view(hwnd)
       objc_msgSend_ptr_i64(hwnd, get_selector("setAcceptsMouseMovedEvents:"), 1)
       if band(flags, WINDOW_TRANSPARENT) { objc_msgSend_i64_arg(hwnd, get_selector("setOpaque:"), 0) }
       if band(flags, WINDOW_FLOATING) { objc_msgSend_i64_arg(hwnd, get_selector("setLevel:"), NSFloatingWindowLevel) }
-      if !band(flags, WINDOW_HIDE) { objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0) }
-      if band(flags, WINDOW_MINIMIZE) { objc_msgSend_ptr(hwnd, get_selector("miniaturize:"), 0) }
-      if band(flags, WINDOW_MAXIMIZE) { objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
    }
-   drain_autorelease_pool(pool)
    def win = {
       "handle": hwnd,
       "title": to_str(title),
@@ -2125,8 +2214,14 @@ fn create_basic_window(str title, int width, int height, int x=0, int y=0, int f
       "visible": !band(flags, WINDOW_HIDE),
       "delegate": delegate
    }
-   _windows = _windows.set(hwnd, win)
-   win
+   if hwnd {
+      _windows = _windows.set(hwnd, win)
+      if !band(flags, WINDOW_HIDE) { objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0) }
+      if band(flags, WINDOW_MINIMIZE) { objc_msgSend_ptr(hwnd, get_selector("miniaturize:"), 0) }
+      if band(flags, WINDOW_MAXIMIZE) { objc_msgSend_ptr(hwnd, get_selector("zoom:"), 0) }
+   }
+   drain_autorelease_pool(pool)
+   _windows.get(hwnd, win)
 }
 
 fn destroy_basic_window(any win) bool {
@@ -2135,6 +2230,7 @@ fn destroy_basic_window(any win) bool {
    def hwnd = win.get("handle", 0)
    if !hwnd { return false }
    win = _restore_display_mode(win)
+   _release_drag_event(hwnd)
    _windows = _windows.set(hwnd, 0)
    objc_msgSend_ptr(hwnd, get_selector("setDelegate:"), 0)
    objc_msgSend_ptr(hwnd, get_selector("orderOut:"), 0)

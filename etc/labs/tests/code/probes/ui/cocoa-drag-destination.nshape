@@ -1,0 +1,41 @@
+shape cocoa-drag-destination {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "cocoa", "drag-drop"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3"
+  expect_stdout "COCOA-DRAG-DESTINATION-OK"
+  source ny <<'NY'
+use core
+use core.mem (cstr)
+use core.os.ui.window.platform.cocoa as cocoa
+use core.os.ui.window.consts as flags
+
+if to_str(__env_get("NY_TEST_ELM_PLATFORM")) == "cocoa" {
+   assert(cocoa.available(), "native Cocoa host required")
+   def pool = cocoa.create_autorelease_pool()
+   defer { cocoa.drain_autorelease_pool(pool) }
+   assert(cocoa.shared_application(), "AppKit application")
+   def win = cocoa.create_basic_window("Drop destination", 120, 80, 0, 0, flags.WINDOW_HIDE)
+   assert(win && win.get("handle", 0), "hidden NSWindow")
+   defer { cocoa.destroy_basic_window(win) }
+   def view = cocoa.get_cocoa_view(win)
+   assert(view, "native content view")
+   for method in ["draggingEntered:", "draggingUpdated:", "performDragOperation:"] {
+      assert(cocoa.objc_msgSend_ptr(view, cocoa.get_selector("respondsToSelector:"), cocoa.get_selector(method)), "destination implements " + method)
+   }
+   def types = cocoa.objc_msgSend(view, cocoa.get_selector("registeredDraggedTypes"))
+   assert(types, "registered pasteboard types")
+   for name in ["public.file-url", "NSFilenamesPboardType"] {
+      def str_obj = cocoa.objc_msgSend_ptr(cocoa.get_class("NSString"), cocoa.get_selector("stringWithUTF8String:"), cstr(name))
+      assert(cocoa.objc_msgSend_ptr(types, cocoa.get_selector("containsObject:"), str_obj), "registered " + name)
+   }
+   assert(!cocoa.start_window_move(win), "window move requires a retained mouse-down")
+   assert(!cocoa.start_file_drag(win, "file:///tmp/example"), "file drag requires a retained mouse-down")
+} else {
+   print("Skipped: set NY_TEST_ELM_PLATFORM=cocoa on a native Mac")
+}
+print("COCOA-DRAG-DESTINATION-OK")
+NY
+}
