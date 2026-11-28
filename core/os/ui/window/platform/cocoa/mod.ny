@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, start_window_move, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
+module core.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, start_window_move, start_file_drag, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -86,6 +86,7 @@ fn _load_cocoa_frameworks() bool {
       fn _objc_msgSend_arg_f64(ptr target, ptr op, f64 arg) ptr as "objc_msgSend"
       fn _objc_msgSend_size(ptr target, ptr op, f64 w, f64 h) ptr as "objc_msgSend"
       fn _objc_msgSend_ptr_point(ptr target, ptr op, ptr arg, f64 x, f64 y) ptr as "objc_msgSend"
+      fn _objc_msgSend_rect_ptr(ptr target, ptr op, f64 x, f64 y, f64 w, f64 h, ptr arg) ptr as "objc_msgSend"
       fn _objc_msgSend_bitmap_init(ptr target, ptr op, ptr planes, i64 pixels_wide, i64 pixels_high, i64 bits_per_sample, i64 samples_per_pixel, i8 has_alpha, i8 is_planar, ptr color_space_name, u64 bitmap_format, i64 bytes_per_row, i64 bits_per_pixel) ptr as "objc_msgSend"
       fn _objc_msgSend_rect_u64_i64_i8(ptr target, ptr op, f64 x, f64 y, f64 w, f64 h, u64 style, i64 backing, i8 do_defer) ptr as "objc_msgSend"
       fn _objc_msgSend_i64(ptr target, ptr op) i64 as "objc_msgSend"
@@ -278,6 +279,12 @@ fn objc_msgSend_bitmap_init(any target, any op, ptr planes, i64 pixels_wide, i64
 fn objc_msgSend_rect_u64_i64_i8(any target, any op, any x, any y, any w, any h, u64 style, i64 backing, i8 do_defer) any {
    "Runs the objc msgSend rect u64 i64 i8 operation."
    #macos { return _objc_msgSend_rect_u64_i64_i8(target, op, x, y, w, h, style, backing, do_defer) }
+   0
+}
+
+fn objc_msgSend_rect_ptr(any target, any op, any x, any y, any w, any h, ptr arg=0) any {
+   "Sends an Objective-C message with an NSRect and object argument."
+   #macos { return _objc_msgSend_rect_ptr(target, op, float(x), float(y), float(w), float(h), arg) }
    0
 }
 
@@ -712,6 +719,47 @@ fn start_window_move(any win) bool {
    if !hwnd || !event { return false }
    objc_msgSend_ptr(hwnd, get_selector("performWindowDragWithEvent:"), event)
    true
+}
+
+fn start_file_drag(any win, str uri_list) bool {
+   "Starts an AppKit file drag from the current pointer event using text/uri-list entries."
+   if !available() || !is_dict(win) || uri_list.len == 0 { return false }
+   def hwnd = win.get("handle", 0)
+   def view = objc_msgSend_ptr(hwnd, get_selector("contentView"))
+   def source = win.get("delegate", 0)
+   def event = current_event()
+   if !hwnd || !view || !source || !event { return false }
+   def pool = create_autorelease_pool()
+   def items = objc_msgSend(get_class("NSMutableArray"), get_selector("array"))
+   if !items { drain_autorelease_pool(pool) return false }
+   mut added = 0
+   for line in str.split(uri_list, "\n") {
+      def uri = str.strip(to_str(line))
+      if uri.len == 0 || str.startswith(uri, "#") { continue }
+      def uri_obj = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr(uri))
+      def url = objc_msgSend_ptr(get_class("NSURL"), get_selector("URLWithString:"), uri_obj)
+      if !url { continue }
+      def path = objc_msgSend_ptr(url, get_selector("path"))
+      if !path { continue }
+      def paths = objc_msgSend_ptr(get_class("NSArray"), get_selector("arrayWithObject:"), path)
+      def legacy_file_type = objc_msgSend_ptr(get_class("NSString"), get_selector("stringWithUTF8String:"), cstr("NSFilenamesPboardType"))
+      def writer = objc_msgSend_ptr(objc_msgSend(get_class("NSPasteboardItem"), get_selector("alloc")), get_selector("init"))
+      if !writer || !paths || !legacy_file_type { continue }
+      objc_msgSend_ptr_ptr(writer, get_selector("setPropertyList:forType:"), paths, legacy_file_type)
+      def item = objc_msgSend_ptr(objc_msgSend(get_class("NSDraggingItem"), get_selector("alloc")),
+         get_selector("initWithPasteboardWriter:"), writer)
+      if !item { continue }
+      objc_msgSend_rect_ptr(item, get_selector("setDraggingFrame:contents:"), 0.0, 0.0, 1.0, 1.0, 0)
+      objc_msgSend_ptr(items, get_selector("addObject:"), item)
+      added += 1
+   }
+   if added == 0 {
+      drain_autorelease_pool(pool)
+      return false
+   }
+   def session = objc_msgSend_ptr_ptr_ptr(view, get_selector("beginDraggingSessionWithItems:event:source:"), items, event, source)
+   drain_autorelease_pool(pool)
+   !!session
 }
 
 fn set_clipboard(any win, any s) bool {
@@ -1382,6 +1430,11 @@ fn _drag_performed(any self, any sel, any sender) bool {
    paths.len > 0
 }
 
+fn _dragging_source_mask(any self, any sel, any session, any context) int {
+   "NSDraggingSource sourceOperationMaskForDraggingContext: — advertise copy."
+   1
+}
+
 mut _delegate_class = 0
 
 fn create_window_delegate() any {
@@ -1402,6 +1455,7 @@ fn create_window_delegate() any {
       _ny_class_addMethod(cls, get_selector("draggingEntered:"), _drag_enter, cstr("Q@:@"))
       _ny_class_addMethod(cls, get_selector("draggingUpdated:"), _drag_updated, cstr("Q@:@"))
       _ny_class_addMethod(cls, get_selector("performDragOperation:"), _drag_performed, cstr("c@:@"))
+      _ny_class_addMethod(cls, get_selector("draggingSession:sourceOperationMaskForDraggingContext:"), _dragging_source_mask, cstr("Q@:@Q"))
       _ny_objc_registerClassPair(cls)
       _delegate_class = cls
    }

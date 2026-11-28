@@ -1776,8 +1776,11 @@ fn start_window_move(any win) bool {
 fn start_file_drag(any win, str uri_list) bool {
    "Starts a native file drag from win using a CRLF-separated text/uri-list."
    if !win || uri_list.len == 0 { return false }
-   if _select_backend_name() != "wayland" { return false }
-   wayland_backend.start_file_drag(_native_window(win), uri_list)
+   def b = _select_backend_name()
+   def native = _native_window(win)
+   if b == "wayland" { return wayland_backend.start_file_drag(native, uri_list) }
+   if b == "cocoa" { return cocoa_impl.start_file_drag(native, uri_list) }
+   false
 }
 
 comptime emit _native_set1_all(set_window_floating, x11_backend.set_window_floating, win32_impl.set_window_floating, cocoa_impl.set_window_floating)
