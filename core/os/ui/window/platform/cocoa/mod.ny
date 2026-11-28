@@ -707,7 +707,11 @@ fn set_gamma_ramp(any monitor, any ramp) bool {
 }
 
 fn focus_window(any win) bool {
-   "Runs the focus window operation."
+   "Makes this Cocoa window the key window."
+   if !available() { return false }
+   def hwnd = _handle_from(win)
+   if !hwnd { return false }
+   objc_msgSend_ptr(hwnd, get_selector("makeKeyAndOrderFront:"), 0)
    true
 }
 
@@ -2044,10 +2048,7 @@ fn set_pos(any win, int x, int y) bool {
    if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
    if !hwnd { return false }
-   def current = _get_nswindow_rect(win, "frame")
-   def w = current.get(2)
-   def h = current.get(3)
-   objc_msgSend_rect_u64_i64_i8(hwnd, get_selector("setFrame:display:"), float(x), float(y), float(w), float(h), 1, 1, 0)
+   objc_msgSend_size(hwnd, get_selector("setFrameOrigin:"), float(x), float(y))
    true
 }
 
@@ -2065,10 +2066,7 @@ fn set_size(any win, int w, int h) bool {
    if !available() || !win || !is_dict(win) { return false }
    def hwnd = win.get("handle", 0)
    if !hwnd { return false }
-   def current = _get_nswindow_rect(win, "frame")
-   def x = current.get(0)
-   def y = current.get(1)
-   objc_msgSend_rect_u64_i64_i8(hwnd, get_selector("setFrame:display:"), float(x), float(y), float(w), float(h), 1, 1, 0)
+   objc_msgSend_size(hwnd, get_selector("setContentSize:"), float(w), float(h))
    true
 }
 
@@ -2223,6 +2221,9 @@ fn poll_window_events(any win, int max_events=64) list {
          def ev_win = translated.get(1, 0)
          if ev_win { _push_event(ev_win, translated.get(0, 0), translated.get(3, 0)) }
       }
+      ;; AppKit still owns native controls, window chrome, the responder chain
+      ;; and drag sessions. Translating an event does not dispatch it.
+      send_event(ev)
       drained += 1
    }
    def handle = win.get("handle", 0)
