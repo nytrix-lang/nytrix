@@ -4115,8 +4115,12 @@ skip_compilation:
    * length/index calls jump into stale compiler memory.
    */
   if (opt->native_backend == NY_NATIVE_BACKEND_LLVM && cg.module &&
-      opt->run_jit && !opt->run_aot && !native_cache_entry)
-    ny_jit_define_runtime_trampolines(cg.module);
+      opt->run_jit && !opt->run_aot) {
+#ifndef _WIN32
+    if (!native_cache_entry)
+#endif
+      ny_jit_define_runtime_trampolines(cg.module);
+  }
   if (opt->native_backend != NY_NATIVE_BACKEND_LLVM)
     ny_type_pipeline_persist_native_facts(&prog, &cg, parse_name);
   if (opt->native_tier_report) {
