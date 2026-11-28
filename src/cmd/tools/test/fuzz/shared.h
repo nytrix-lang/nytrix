@@ -4,7 +4,9 @@
 
 #include "core.h"
 
+#ifndef _WIN32
 #include <dirent.h>
+#endif
 #include <stdlib.h>
 #include <sys/stat.h>
 
