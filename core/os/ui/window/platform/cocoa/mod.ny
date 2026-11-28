@@ -1260,7 +1260,16 @@ fn _window_delegate_did_resize(any self, any sel, any notification) any {
    def win = _find_window_by_handle(hwnd)
    if !win { return 0 }
    def size = get_size(win)
-   _push_event(win, EVENT_WINDOW_RESIZED, size)
+   def zoomed = objc_msgSend_i64(hwnd, get_selector("isZoomed")) != 0
+   def was_zoomed = !!win.get("maximized", false)
+   mut next_win = win.set("w", size.get(0, win.get("w", 0)))
+   next_win = next_win.set("h", size.get(1, win.get("h", 0)))
+   next_win = next_win.set("maximized", zoomed)
+   _windows = _windows.set(hwnd, next_win)
+   if zoomed != was_zoomed {
+      _push_event(next_win, zoomed ? EVENT_WINDOW_MAXIMIZED : EVENT_WINDOW_RESTORED, 0)
+   }
+   _push_event(next_win, EVENT_WINDOW_RESIZED, size)
 }
 
 fn _window_delegate_did_miniaturize(any self, any sel, any notification) any {
@@ -2054,6 +2063,7 @@ fn create_basic_window(str title, int width, int height, int x=0, int y=0, int f
       "resizable": !band(flags, WINDOW_NO_RESIZE),
       "floating": !!band(flags, WINDOW_FLOATING),
       "fullscreen": !!band(flags, WINDOW_FULLSCREEN),
+      "maximized": !!band(flags, WINDOW_MAXIMIZE),
       "visible": !band(flags, WINDOW_HIDE),
       "delegate": delegate
    }
