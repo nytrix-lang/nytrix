@@ -1,0 +1,20 @@
+shape win32_ui_platform_cross_compile {
+  family "runtime-native"
+  generator "native"
+  features [native object coff x86_64 win32 ui platform]
+  template ny-test-case
+  flags "--native-backend=llvm --host-triple=x86_64-w64-windows-gnu --native-abi=win64 --nyr-verify -emit-only -o /tmp/nytrix-native-coff64-win32-ui-platform.obj"
+  expect compile_and_run
+  source ny <<'NY'
+use core.os.ui.window as window
+use core.os.ui.window.platform as platform
+
+window.window_hint(window.CLIENT_API, window.NO_API)
+def win = window.open_window("Win32 UI cross compile", 0, 0, 120, 80)
+if win {
+   platform.set_size(window.id(win), 160, 100)
+   window.close(win)
+}
+window.backend()
+NY
+}

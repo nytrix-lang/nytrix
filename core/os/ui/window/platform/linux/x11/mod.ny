@@ -410,6 +410,8 @@ fn _next_cursor_id() int {
       fn XRRSetCrtcGamma(ptr display, u64 crtc, ptr gamma) any
    }
 } #else {
+   ;; Keep the shared platform facade compilable for non-Linux targets. The
+   ;; public X11 backend reports unavailable there, so these calls are dead.
    fn _c_xopen_display(..._args) any { 0 }
    fn _c_xdefault_screen(..._args) any { 0 }
    fn _c_xroot_window(..._args) any { 0 }
@@ -418,6 +420,7 @@ fn _next_cursor_id() int {
    fn _c_xcreate_colormap(..._args) any { 0 }
    fn _c_xcreate_window(..._args) any { 0 }
    fn _c_xselect_input(..._args) any { 0 }
+   fn _c_xsend_event(..._args) i32 { 0 }
    fn _c_xset_wm_protocols(..._args) any { 0 }
    fn _c_xstore_name(..._args) any { 0 }
    fn _c_xchange_property(..._args) any { 0 }
@@ -433,6 +436,9 @@ fn _next_cursor_id() int {
    fn _c_xchange_window_attributes(..._args) any { 0 }
    fn _c_xget_window_attributes(..._args) any { 0 }
    fn _c_xtranslate_coordinates(..._args) any { 0 }
+   fn _c_xconvert_selection(..._args) i32 { 0 }
+   fn _c_xdelete_property(..._args) i32 { 0 }
+   fn _c_xget_window_property(..._args) i32 { 0 }
    fn _c_xget_input_focus(..._args) any { 0 }
    fn _c_xquery_pointer(..._args) any { 0 }
    fn _c_xflush(..._args) any { 0 }
