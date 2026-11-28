@@ -1,0 +1,119 @@
+shape wayland-file-drop {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "wayland", "xdnd", "file-drop"]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  timeout 180
+  expect compile_and_run
+  expect_stdout "WAYLAND-FILE-DROP-OK"
+  source ny <<'NY'
+;; Run under private headless Sway with SWAYSOCK and NY_WAYLAND_SEAT_DRIVER
+;; pointing at its IPC socket and etc/labs/ytool.ny. The virtual seat presses
+;; the source window, moves while
+;; held, and releases; the app starts a real wl_data_source from that press.
+use core
+use core.common as common
+use core.os (file_write, file_read, file_remove, file_exists, temp_dir, msleep, now_ms)
+use core.os.subprocess (run_capture)
+use core.os.ui.window as window
+use core.os.ui.window.consts as event_kind
+use core.os.ui.render as gfx
+
+def str display = common.env_trim("WAYLAND_DISPLAY")
+def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
+def str sway_socket = common.env_trim("SWAYSOCK")
+if display.len == 0 || driver.len == 0 || sway_socket.len == 0 {
+   print("skip: set WAYLAND_DISPLAY, SWAYSOCK, and NY_WAYLAND_SEAT_DRIVER under headless Sway")
+} else {
+   def str ny = common.env_trim("NYTRIX_TEST_NY_FULL_BIN")
+   if ny.len == 0 { ny = "build/release/ny-full" }
+   mut str driver_cmd = driver
+   if driver.len > 3 && slice(driver, driver.len - 3, driver.len) == ".ny" { driver_cmd = ny + " " + driver }
+      mut str source_ny = ny
+      if source_ny.len >= 7 && slice(source_ny, source_ny.len - 7, source_ny.len) == "ny-full" {
+         source_ny = slice(source_ny, 0, source_ny.len - 7) + "ny"
+      }
+   def probe = run_capture(["/bin/sh", "-c", driver_cmd + " probe"], [], nil, false)
+   if int(probe.get("code", 1)) != 0 {
+      print("skip: compositor has no ytool virtual seat")
+   } else {
+      gfx.apply_backend_name("vk")
+      def win = gfx.init_window(500, 320, "Wayland drop target", window.WINDOW_ALLOW_DND, false, true, 1)
+      if !win || window.backend() != "wayland" || gfx.get_backend_type() == gfx.BACKEND_MOCK {
+         if win { gfx.close_window() }
+         print("skip: compositor has no usable Vulkan surface")
+      } else {
+         mut int frame = 0
+         while frame < 4 {
+            if gfx.begin_frame_clear([0.08, 0.08, 0.08, 1.0]) { gfx.end_frame() }
+            frame += 1
+         }
+         def str dir = temp_dir()
+         def str payload_path = dir + "/ny-wayland-drop.txt"
+         def str script = dir + "/ny-wayland-drop.script"
+         def str source_log = dir + "/ny-wayland-drop-source.log"
+         def str ready = dir + "/ny-wayland-drop-source.ready"
+         file_write(payload_path, "Wayland drop payload\n")
+         mut any positioned_target = run_capture(["swaymsg", "-t", "get_tree"], [], nil, false)
+         def int target_ready_deadline = now_ms() + 60000
+         while !to_str(positioned_target.get("stdout", "")).contains("Wayland drop target") && now_ms() < target_ready_deadline {
+            msleep(100)
+            positioned_target = run_capture(["swaymsg", "-t", "get_tree"], [], nil, false)
+         }
+         assert(to_str(positioned_target.get("stdout", "")).contains("Wayland drop target"), "Sway tree contains the mapped drop target")
+         positioned_target = run_capture(["swaymsg", "[title=\"Wayland drop target\"] floating enable, resize set width 500 height 320, move position 40 80"], [], nil, false)
+         assert(to_str(positioned_target.get("stdout", "")).contains("\"success\": true"), "Sway positions the drop target: " + to_str(positioned_target.get("stdout", "")))
+         def source_cmd = "NY_WAYLAND_DROP_FILE=" + payload_path + " NY_WAYLAND_DROP_READY=" + ready + " " + source_ny + " --native-only -O0 etc/labs/tests/code/probes/ui/wayland-file-drop-source.ny > " + source_log + " 2>&1 &"
+         run_capture(["sh", "-c", source_cmd], [], nil, false)
+         def int source_deadline = now_ms() + 60000
+         while !file_exists(ready) && now_ms() < source_deadline { msleep(10) }
+         if !file_exists(ready) {
+            def source_start_log = file_read(source_log)
+            panic("second Wayland client did not map the drag source: " + (is_ok(source_start_log) ? to_str(unwrap(source_start_log)) : "no process log"))
+         }
+         mut any source_tree = run_capture(["swaymsg", "-t", "get_tree"], [], nil, false)
+         def int placement_deadline = now_ms() + 60000
+         while !to_str(source_tree.get("stdout", "")).contains("Wayland drop source") && now_ms() < placement_deadline {
+            msleep(100)
+            source_tree = run_capture(["swaymsg", "-t", "get_tree"], [], nil, false)
+         }
+         assert(to_str(source_tree.get("stdout", "")).contains("Wayland drop source"), "Sway tree contains the mapped drag source")
+         mut any positioned_source = run_capture(["swaymsg", "[title=\"Wayland drop source\"] floating enable, resize set width 500 height 320, move position 650 80"], [], nil, false)
+         while !to_str(positioned_source.get("stdout", "")).contains("\"success\": true") && now_ms() < placement_deadline {
+            msleep(100)
+            positioned_source = run_capture(["swaymsg", "[title=\"Wayland drop source\"] floating enable, resize set width 500 height 320, move position 650 80"], [], nil, false)
+         }
+         assert(to_str(positioned_source.get("stdout", "")).contains("\"success\": true"), "Sway positions the drag source: " + to_str(positioned_source.get("stdout", positioned_source.get("stderr", ""))))
+         file_write(script, "move 850 200\ndown\nsleep 0.2\nmove 250 200\nsleep 0.2\nup\n")
+         run_capture(["sh", "-c", driver_cmd + " run " + script + " >/dev/null 2>&1 &"], [], nil, false)
+         mut any dropped = nil
+         def int end = now_ms() + 5000
+         while is_nil(dropped) && now_ms() < end {
+            if gfx.begin_frame_clear([0.08, 0.08, 0.08, 1.0]) { gfx.end_frame() }
+            window.poll_events()
+            mut any e = window.check_event(win)
+            while !is_nil(e) && !(is_int(e) && int(e) == 0) {
+               def int typ = window.event_type(e)
+               if typ == event_kind.EVENT_DATA_DROP {
+                  dropped = window.event_data(e)
+               }
+               e = window.check_event(win)
+            }
+            if is_nil(dropped) { msleep(10) }
+         }
+         def paths = is_dict(dropped) ? dropped.get("paths", []) : []
+         def source_result = file_read(source_log)
+         def source_output = is_ok(source_result) ? to_str(unwrap(source_result)) : ""
+         gfx.close_window()
+         file_remove(payload_path)
+         file_remove(script)
+         file_remove(ready)
+         assert(source_output.len > 0 && !source_output.contains("panic"), "Wayland source client starts the native file drag: " + source_output)
+         assert(is_list(paths) && paths.len == 1 && to_str(paths.get(0)) == payload_path, "Wayland transfers the URI list through EVENT_DATA_DROP: " + to_str(dropped))
+      }
+   }
+}
+print("WAYLAND-FILE-DROP-OK")
+NY
+}

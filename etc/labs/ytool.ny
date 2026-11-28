@@ -1661,12 +1661,15 @@ fn seat_move(int x, int y) {
 
 fn seat_click(int x, int y) {
    seat_move(x, y)
-   wl_send(PTR, 2, b_u32(b_u32(b_u32([], now32()), 0x110), 1))
+   seat_button(1)
+   seat_button(0)
+   wl_pump(0.05)
+}
+
+fn seat_button(int pressed) {
+   wl_send(PTR, 2, b_u32(b_u32(b_u32([], now32()), 0x110), pressed != 0 ? 1 : 0))
    wl_send(PTR, 4, [])
    wl_pump(0.05)
-   wl_send(PTR, 2, b_u32(b_u32(b_u32([], now32()), 0x110), 0))
-   wl_send(PTR, 4, [])
-   wl_pump(0.1)
 }
 
 ;; ---------------------------------------------------------------------- ime
@@ -1720,6 +1723,10 @@ fn run_step(str line) {
       seat_move(step_num(args, 0), step_num(args, 1))
    } elif cmd == "click" {
       seat_click(step_num(args, 0), step_num(args, 1))
+   } elif cmd == "down" {
+      seat_button(1)
+   } elif cmd == "up" {
+      seat_button(0)
    } elif cmd == "type" {
       seat_type(rest)
    } elif cmd == "key" {
@@ -1940,7 +1947,7 @@ fn yt_env() int {
 
 fn yt_wayland_dispatch(int at) int {
    if at >= argc() {
-      eprint("wayland: expected a command (probe|run|type|key|move|click)")
+      eprint("wayland: expected a command (probe|run|type|key|move|click|down|up)")
       return 2
    }
    def str sub = str(argv(at))
@@ -1971,6 +1978,8 @@ fn yt_wayland_dispatch(int at) int {
       if at + 2 >= argc() { eprint("click requires X Y") return 2 }
       return yt_script("click " + str(argv(at + 1)) + " " + str(argv(at + 2)))
    }
+   if sub == "down" { return yt_script("down") }
+   if sub == "up" { return yt_script("up") }
    if sub == "sleep" {
       if at + 1 >= argc() { eprint("sleep requires SECONDS") return 2 }
       return yt_script("sleep " + str(argv(at + 1)))

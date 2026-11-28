@@ -16,6 +16,7 @@ use core.os.ui.window.platform.linux.x11.keymap as x11_keymap
 use core.os.ui.window.platform.linux.joystick as linux_joystick
 use core.common as common
 use core.os.ui.debug as ui_debug
+use core.os.ui.window.platform.linux.x11.common as linux_ui_common
 use core.os.ffi as ffi
 
 #linux {
@@ -28,6 +29,7 @@ use core.os.ffi as ffi
       fn _c_wl_proxy_marshal_flags1(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags2(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags_accept(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, u32 serial, ptr mime) ptr as "wl_proxy_marshal_flags"
+      fn _c_wl_proxy_marshal_flags_set_actions(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, u32 actions, u32 preferred) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags3(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags4(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2, ptr arg3) ptr as "wl_proxy_marshal_flags"
       fn _c_wl_proxy_marshal_flags5(ptr proxy, i32 opcode, ptr interface, u32 version, u32 flags, ptr arg0, ptr arg1, ptr arg2, ptr arg3, ptr arg4) ptr as "wl_proxy_marshal_flags"
@@ -86,6 +88,7 @@ use core.os.ffi as ffi
       fn wl_read(i32 fd, ptr buf, u64 count) i64 as "read"
       fn strdup(ptr s) ptr
       fn wl_write(i32 fd, ptr buf, u64 count) i64 as "write"
+      fn wl_fcntl(i32 fd, i32 cmd, i32 flags) i32 as "fcntl"
    }
 } #else {
    fn wl_proxy_marshal_flags(..._args) any {
@@ -288,6 +291,10 @@ use core.os.ffi as ffi
       "Writes write."
       0
    }
+   fn wl_fcntl(..._args) int {
+      "Stub for non-Linux file descriptor control."
+      -1
+   }
 }
 
 fn _is_debug() bool { ui_debug.debug_enabled() }
@@ -414,7 +421,12 @@ def _WG_PENDING_Y = 548
 def _WG_PENDING_BUTTON = 552
 def _WG_PENDING_ACTION = 556
 def _WG_REPEAT_CHAR = 560
-def _WG_SIZE = 568
+def _WG_DND_READ_FD = 568
+def _WG_DND_READ_BUFFER = 576
+def _WG_DND_READ_LEN = 584
+def _WG_DND_READ_SURFACE = 592
+def _WG_DND_READ_OFFER = 600
+def _WG_SIZE = 608
 def _WRS_HANDLE = 0
 def _WRS_WIDTH = 8
 def _WRS_HEIGHT = 16
@@ -2075,7 +2087,10 @@ fn _ensure_data_source_iface() any {
    if !_wl_data_source_iface {
       _wl_data_source_iface = _create_interface("wl_data_source", 3,
          [["offer", "s", 0], ["destroy", "", 0], ["set_actions", "u", 0]],
-         [["target", "?s", 0], ["send", "sh", 0], ["cancelled", "", 0]])
+         [
+            ["target", "?s", 0], ["send", "sh", 0], ["cancelled", "", 0],
+            ["dnd_drop_performed", "", 0], ["dnd_finished", "", 0], ["action", "u", 0],
+         ])
    }
    _wl_data_source_iface
 }
@@ -2088,6 +2103,15 @@ fn _data_source_send(ptr data, ptr source, ptr mime_type, i32 fd) any {
    if n > 0 { wl_write(int(fd), cstr(_clipboard_text), int(n)) }
    wl_close_fd(int(fd))
 }
+
+fn _data_source_target(ptr data, ptr source, ptr mime_type) any {
+   ;; The source has one MIME type; negotiation is confirmed by the receiver.
+   0
+}
+
+fn _data_source_event(ptr data, ptr source) any { 0 }
+
+fn _data_source_action(ptr data, ptr source, u32 action) any { 0 }
 
 fn _data_source_cancelled(ptr data, ptr source) any {
    if source && source == _clipboard_source {
@@ -2114,6 +2138,13 @@ fn _data_device_enter(ptr data, ptr device, u32 serial, ptr surface, i32 x, i32 
    ;; receive the offer. Wayland sends the drop only after a MIME is accepted.
    if offer {
       #linux {
+         if get_proxy_version(offer) >= 3 {
+            ;; V3 sources advertise their permitted actions; the receiver must
+            ;; select COPY before the compositor can complete the negotiation.
+            _c_wl_proxy_marshal_flags_set_actions(
+               offer, 4, 0, int(get_proxy_version(offer)), 0, 1, 1,
+            )
+         }
          _c_wl_proxy_marshal_flags_accept(
             offer, 0, 0, int(get_proxy_version(offer)), 0,
             serial, cstr("text/uri-list"),
@@ -2162,23 +2193,70 @@ fn _data_device_drop(ptr data, ptr device) any {
    if wayland_pipe(fds) != 0 { free(fds) return 0 }
    def rfd, wfd = int(load32(fds, 0)), int(load32(fds, 4))
    free(fds)
+   if wl_fcntl(rfd, 4, 2048) < 0 {
+      wl_close_fd(rfd)
+      wl_close_fd(wfd)
+      return 0
+   }
    wl_proxy_marshal_flags_s_fd(offer, 1, 0, int(get_proxy_version(offer)), 0, cstr("text/uri-list"), wfd)
    wl_close_fd(wfd)
+   def buf = malloc(65536)
+   if !buf {
+      wl_close_fd(rfd)
+      return 0
+   }
+   memset(buf, 0, 65536)
+   store64_h(data, rfd, _WG_DND_READ_FD)
+   store64_h(data, buf, _WG_DND_READ_BUFFER)
+   store64_h(data, 0, _WG_DND_READ_LEN)
+   store64_h(data, surface, _WG_DND_READ_SURFACE)
+   store64_h(data, offer, _WG_DND_READ_OFFER)
    if display { wl_display_flush(display) }
-   def buf = malloc(4096)
-   if !buf { wl_close_fd(rfd) return 0 }
-   memset(buf, 0, 4096)
-   def n = wl_read(rfd, buf, 4095)
-   wl_close_fd(rfd)
+   0
+}
+
+fn _data_device_poll_drop(ptr data) any {
+   if !data { return 0 }
+   def fd = int(load64_h(data, _WG_DND_READ_FD))
+   def buf = load64_h(data, _WG_DND_READ_BUFFER)
+   if fd < 0 || !buf { return 0 }
+   def used = int(load64_h(data, _WG_DND_READ_LEN))
+   if used >= 65535 { used = 65534 }
+   def n = wl_read(fd, buf + used, 65535 - used)
    if n > 0 {
-      def text = to_str(buf)
+      used += int(n)
+      store64_h(data, used, _WG_DND_READ_LEN)
+      return 0
+   }
+   if n < 0 { return 0 }
+   store8(buf, 0, used)
+   def offer = load64_h(data, _WG_DND_READ_OFFER)
+   def surface = load64_h(data, _WG_DND_READ_SURFACE)
+   def win = dict_get(_windows, int(surface), 0)
+   if win && is_dict(win) && used > 0 {
       mut ev = dict(8)
-      ev = ev.set("text", text)
+      def str payload = str.cstr_to_str(buf)
+      ev = ev.set("text", payload)
+      ev = ev.set("paths", linux_ui_common.parseUriList(payload))
       _push_event(win, EVENT_DATA_DROP, ev)
    }
+   if offer {
+      if get_proxy_version(offer) >= 3 {
+         wl_proxy_marshal_flags_ptr(offer, 3, 0, int(get_proxy_version(offer)), 0, 0)
+      }
+      wl_proxy_marshal_flags_ptr(offer, 2, 0, int(get_proxy_version(offer)), 0, 0)
+      destroy_proxy(offer)
+   }
+   wl_close_fd(fd)
    free(buf)
-   wl_proxy_marshal_flags_ptr(offer, 3, 0, int(get_proxy_version(offer)), 0, 0)
+   store64_h(data, -1, _WG_DND_READ_FD)
+   store64_h(data, 0, _WG_DND_READ_BUFFER)
+   store64_h(data, 0, _WG_DND_READ_LEN)
+   store64_h(data, 0, _WG_DND_READ_SURFACE)
+   store64_h(data, 0, _WG_DND_READ_OFFER)
    store64_h(data, 0, _WG_DND_OFFER)
+   store64_h(data, 0, _WG_DND_SURFACE)
+   0
 }
 
 fn _install_data_device_listener(any state) bool {
@@ -2221,11 +2299,14 @@ fn set_clipboard(any win, any text) bool {
    def iface = _ensure_data_source_iface()
    def source = wl_proxy_marshal_flags_ptr(manager, 0, iface, int(get_proxy_version(manager)), 0, 0)
    if !source { return false }
-   def src_listener = zalloc(24)
+   def src_listener = zalloc(48)
    if !src_listener { destroy_proxy(source) return false }
-   store64_h(src_listener, 0, 0)
+   store64_h(src_listener, _data_source_target, 0)
    store64_h(src_listener, _data_source_send, 8)
    store64_h(src_listener, _data_source_cancelled, 16)
+   store64_h(src_listener, _data_source_event, 24)
+   store64_h(src_listener, _data_source_cancelled, 32)
+   store64_h(src_listener, _data_source_action, 40)
    wl_proxy_add_listener(source, src_listener, 0)
    wl_proxy_marshal_flags_str(source, 0, 0, int(get_proxy_version(source)), 0, cstr("text/plain;charset=utf-8"))
    wl_proxy_marshal_flags_str(source, 0, 0, int(get_proxy_version(source)), 0, cstr("text/plain"))
@@ -2256,11 +2337,14 @@ fn start_file_drag(any win, str uri_list) bool {
    }
    def source = _wl_proxy_marshal_new_id0(manager, 0, _ensure_data_source_iface())
    if !source { return false }
-   def listener = zalloc(24)
+   def listener = zalloc(48)
    if !listener { destroy_proxy(source) return false }
-   store64_h(listener, 0, 0)
+   store64_h(listener, _data_source_target, 0)
    store64_h(listener, _data_source_send, 8)
    store64_h(listener, _data_source_cancelled, 16)
+   store64_h(listener, _data_source_event, 24)
+   store64_h(listener, _data_source_cancelled, 32)
+   store64_h(listener, _data_source_action, 40)
    if wl_proxy_add_listener(source, listener, 0) != 0 {
       free(listener)
       destroy_proxy(source)
@@ -3321,6 +3405,7 @@ fn poll_window_events(any win, int max_events=64) list {
    def globals = win.get("globals", 0)
    def state = globals ? globals.get("listener_state", 0) : 0
    if state {
+      _data_device_poll_drop(state)
       _pointer_flush_frame(state)
       _synthesize_key_repeat(win, state)
    }
@@ -3622,6 +3707,7 @@ fn bootstrap_globals(any display) any {
       destroy_registry(registry)
       return false
    }
+   store64_h(state, -1, _WG_DND_READ_FD)
    def listener = zalloc(16)
    if !listener {
       free(state)
