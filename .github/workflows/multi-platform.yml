@@ -5,10 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Run: checks only, tests, benchmarks, or tests + benchmarks"
+        description: "Run: checks only, tests, benchmarks, tests + benchmarks, or focused native UI fixtures"
         type: choice
         default: checks
-        options: [checks, tests, benchmarks, full]
+        options: [checks, tests, benchmarks, full, ui]
       platform:
         description: "Platform: each selected host builds natively"
         type: choice
@@ -76,6 +76,8 @@ jobs:
       CI_SAMPLES: ${{ inputs.samples || '3' }}
       CI_OPT: ${{ inputs.optimization || 'O3' }}
       NYTRIX_TEST_DIAG_DIR: build/ci/diagnostics
+      NY_TEST_ELM_PLATFORM: ${{ inputs.mode == 'ui' && (matrix.platform == 'windows' && 'win32' || matrix.platform == 'macos' && 'cocoa' || 'x11') || '' }}
+      NYTRIX_TEST_ALLOW_DISPLAY: ${{ inputs.mode == 'ui' && matrix.platform == 'ubuntu' && '1' || '0' }}
     steps:
       # Toolchain: no emulators or cross-compiler packages.
       - name: Check out source and version history
@@ -114,6 +116,7 @@ jobs:
       # single fixture.
       - name: Build native compiler and run the full check gate
         id: checks
+        if: env.CI_MODE != 'ui'
         env:
           # Each fixture child runs under this address-space cap so one runaway
           # compile cannot exhaust a 16 GiB runner.
@@ -134,10 +137,24 @@ jobs:
         run: C:/msys64/usr/bin/bash.exe -lc 'pacman --noconfirm -S --needed mingw-w64-ucrt-x86_64-gdb'
       - name: Run fixtures and optional failure replay
         id: tests
-        if: env.CI_MODE == 'tests' || env.CI_MODE == 'full'
+        if: env.CI_MODE == 'tests' || env.CI_MODE == 'full' || env.CI_MODE == 'ui'
         env:
           NYTRIX_TEST_USE_STD_BC: ${{ inputs.pattern != '' && '0' || 'auto' }}
         run: |
+          if [[ "$CI_MODE" == ui ]]; then
+            pattern="${CI_PATTERN:-elm-native-windows.nshape}"
+            args=(--no-stdlib --cold --no-debug-failures --pattern "$pattern")
+            if [[ "${{ matrix.platform }}" == ubuntu ]]; then
+              set +e
+              xvfb-run -a ./make -j 1 test "${args[@]}" 2>&1 | tee build/ci/tests.log
+              rc=${PIPESTATUS[0]}
+              exit "$rc"
+            fi
+            set +e
+            ./make -j 1 test "${args[@]}" 2>&1 | tee build/ci/tests.log
+            rc=${PIPESTATUS[0]}
+            exit "$rc"
+          fi
           args=(--with-stdlib)
           if [[ "$CI_COLD" == true ]]; then args+=(--cold); else args+=(--no-cold); fi
           if [[ "$CI_REPLAY" == true ]]; then args+=(--with-replay); else args+=(--no-debug-failures); fi
