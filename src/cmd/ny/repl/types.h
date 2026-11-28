@@ -16,6 +16,8 @@ typedef struct {
   ny_doc_entry *data;
   size_t len;
   size_t cap;
+  size_t *name_slots;
+  size_t name_slot_cap;
 } doc_list_t;
 
 #endif

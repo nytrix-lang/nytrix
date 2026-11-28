@@ -9,6 +9,7 @@
 #include "cmd/ny/repl/priv.h"
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,20 +95,86 @@ static char *repl_doc_qualified_name(const char *prefix, const char *name) {
   return out;
 }
 
-static int doclist_find_name(const doc_list_t *dl, const char *name) {
+static uint64_t doclist_name_hash(const char *name) {
+  uint64_t hash = UINT64_C(14695981039346656037);
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p) {
+    hash ^= *p;
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash;
+}
+
+static size_t doclist_find_index(const doc_list_t *dl, const char *name) {
   if (!dl || !name || !*name)
-    return 0;
+    return SIZE_MAX;
+  if (dl->name_slots && dl->name_slot_cap) {
+    size_t mask = dl->name_slot_cap - 1;
+    size_t slot = (size_t)doclist_name_hash(name) & mask;
+    while (dl->name_slots[slot]) {
+      size_t index = dl->name_slots[slot] - 1;
+      if (dl->data[index].name && strcmp(dl->data[index].name, name) == 0)
+        return index;
+      slot = (slot + 1) & mask;
+    }
+    return SIZE_MAX;
+  }
   for (size_t i = 0; i < dl->len; ++i) {
     if (dl->data[i].name && strcmp(dl->data[i].name, name) == 0)
-      return 1;
+      return i;
   }
-  return 0;
+  return SIZE_MAX;
+}
+
+static int doclist_index_ensure(doc_list_t *dl, size_t projected_len) {
+  if (!dl)
+    return 0;
+  if (dl->name_slots && projected_len < dl->name_slot_cap - dl->name_slot_cap / 3)
+    return 1;
+  if (!dl->name_slots && projected_len < 256)
+    return 1;
+  size_t cap = dl->name_slot_cap ? dl->name_slot_cap : 512;
+  while (projected_len >= cap - cap / 3) {
+    if (cap > SIZE_MAX / 2)
+      return 0;
+    cap *= 2;
+  }
+  size_t *slots = calloc(cap, sizeof(*slots));
+  if (!slots) {
+    free(dl->name_slots);
+    dl->name_slots = NULL;
+    dl->name_slot_cap = 0;
+    return 0;
+  }
+  size_t mask = cap - 1;
+  for (size_t i = 0; i < dl->len; ++i) {
+    if (!dl->data[i].name)
+      continue;
+    size_t slot = (size_t)doclist_name_hash(dl->data[i].name) & mask;
+    while (slots[slot])
+      slot = (slot + 1) & mask;
+    slots[slot] = i + 1;
+  }
+  free(dl->name_slots);
+  dl->name_slots = slots;
+  dl->name_slot_cap = cap;
+  return 1;
+}
+
+static void doclist_index_insert(doc_list_t *dl, size_t index) {
+  if (!dl || !dl->name_slots || !dl->name_slot_cap || index >= dl->len ||
+      !dl->data[index].name)
+    return;
+  size_t mask = dl->name_slot_cap - 1;
+  size_t slot = (size_t)doclist_name_hash(dl->data[index].name) & mask;
+  while (dl->name_slots[slot])
+    slot = (slot + 1) & mask;
+  dl->name_slots[slot] = index + 1;
 }
 
 static int doclist_has_module_docs(const doc_list_t *dl, const char *name) {
   if (!dl || !name || !*name)
     return 0;
-  if (doclist_find_name(dl, name))
+  if (doclist_find_index(dl, name) != SIZE_MAX)
     return 1;
   size_t name_len = strlen(name);
   for (size_t i = 0; i < dl->len; ++i) {
@@ -124,26 +191,26 @@ void doclist_set(doc_list_t *dl, const char *name, const char *doc,
                  const char *def, const char *src, int kind) {
   if (!dl || !name)
     return;
-  for (size_t i = 0; i < dl->len; ++i) {
-    if (dl->data[i].name && dl->data[i].name[0] == name[0] &&
-        strcmp(dl->data[i].name, name) == 0) {
-      if (doc) {
-        free(dl->data[i].doc);
-        dl->data[i].doc = ny_strdup(doc);
-      }
-      if (def) {
-        free(dl->data[i].def);
-        dl->data[i].def = ny_strdup(def);
-      }
-      if (src) {
-        free(dl->data[i].src);
-        dl->data[i].src = ny_strdup(src);
-      }
-      if (kind != 0)
-        dl->data[i].kind = kind;
-      return;
+  size_t found = doclist_find_index(dl, name);
+  if (found != SIZE_MAX) {
+    size_t i = found;
+    if (doc) {
+      free(dl->data[i].doc);
+      dl->data[i].doc = ny_strdup(doc);
     }
+    if (def) {
+      free(dl->data[i].def);
+      dl->data[i].def = ny_strdup(def);
+    }
+    if (src) {
+      free(dl->data[i].src);
+      dl->data[i].src = ny_strdup(src);
+    }
+    if (kind != 0)
+      dl->data[i].kind = kind;
+    return;
   }
+  (void)doclist_index_ensure(dl, dl->len + 1);
   if (dl->len == dl->cap) {
     size_t new_cap = dl->cap ? dl->cap * 2 : 64;
     ny_doc_entry *nd = realloc(dl->data, new_cap * sizeof(ny_doc_entry));
@@ -161,7 +228,9 @@ void doclist_set(doc_list_t *dl, const char *name, const char *doc,
   dl->data[dl->len].def = def ? ny_strdup(def) : NULL;
   dl->data[dl->len].src = src ? ny_strdup(src) : NULL;
   dl->data[dl->len].kind = kind;
+  size_t inserted = dl->len;
   dl->len += 1;
+  doclist_index_insert(dl, inserted);
 }
 
 static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s,
@@ -250,7 +319,7 @@ void doclist_add_from_prog(doc_list_t *dl, program_t *prog) {
 }
 
 void doclist_free(doc_list_t *dl) {
-  if (!dl || !dl->data)
+  if (!dl)
     return;
   for (size_t i = 0; i < dl->len; ++i) {
     free(dl->data[i].name);
@@ -262,6 +331,8 @@ void doclist_free(doc_list_t *dl) {
       free(dl->data[i].src);
   }
   free(dl->data);
+  free(dl->name_slots);
+  memset(dl, 0, sizeof(*dl));
 }
 
 static int doclist_show_source(void) {
