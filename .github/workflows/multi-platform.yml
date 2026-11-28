@@ -147,7 +147,8 @@ jobs:
           if [[ "$CI_MODE" == ui ]]; then
             mkdir -p build/ci
             pattern="${CI_PATTERN:-elm-native-windows.nshape}"
-            args=(--no-stdlib --cold --no-debug-failures --pattern "$pattern")
+            fixture="etc/labs/tests/code/probes/ui/${pattern##*/}"
+            args=(--no-stdlib --cold --no-debug-failures --pattern "${pattern##*/}" "$fixture")
             if [[ "${{ matrix.platform }}" == ubuntu ]]; then
               set +e
               xvfb-run -a ./make -j 1 test "${args[@]}" 2>&1 | tee build/ci/tests.log
