@@ -8,6 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* compat.h maps the POSIX write function to _write on Windows. This file
+ * uses the `write` member of nyr_poly_access_t and never calls POSIX write. */
+#ifdef _WIN32
+#undef write
+#endif
+
 static bool checked(ny_i128 v, int64_t *out) {
   if (v < INT64_MIN || v > INT64_MAX)
     return false;

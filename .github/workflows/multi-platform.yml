@@ -57,7 +57,7 @@ jobs:
     runs-on: >-
       ${{ matrix.platform == 'ubuntu' && 'ubuntu-latest' ||
           matrix.platform == 'windows' && 'windows-latest' ||
-          (inputs.mode == 'tests' || inputs.mode == 'benchmarks' || inputs.mode == 'full') &&
+          (inputs.mode == 'tests' || inputs.mode == 'benchmarks' || inputs.mode == 'full' || inputs.mode == 'ui') &&
           'macos-26-intel' || 'macos-latest' }}
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.mode != 'checks' && 180 || 30 }}
     strategy:
@@ -109,6 +109,9 @@ jobs:
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "LLVM_CONFIG=$llvm_prefix/bin/llvm-config" >> "$GITHUB_ENV"
           echo "NYTRIX_LLVM_INCLUDE=$llvm_prefix/include" >> "$GITHUB_ENV"
+      - name: Install Ubuntu UI display dependencies
+        if: matrix.platform == 'ubuntu' && inputs.mode == 'ui'
+        run: sudo apt-get install -y libegl1-mesa-dev libgl1-mesa-dev xvfb
 
       # Default gate: build, hygiene, formatting, parser checks, audit, and the
       # full cold fixture suite with stdlib, replay and benchmarks. CI must not
@@ -142,6 +145,7 @@ jobs:
           NYTRIX_TEST_USE_STD_BC: ${{ inputs.pattern != '' && '0' || 'auto' }}
         run: |
           if [[ "$CI_MODE" == ui ]]; then
+            mkdir -p build/ci
             pattern="${CI_PATTERN:-elm-native-windows.nshape}"
             args=(--no-stdlib --cold --no-debug-failures --pattern "$pattern")
             if [[ "${{ matrix.platform }}" == ubuntu ]]; then
