@@ -4,7 +4,7 @@ shape elm-native-windows {
   features ["ny", "ui", "elm", "x11", "wayland", "win32", "cocoa"]
   template ny-test-case
   expect compile_and_run
-  flags_matrix "--native-backend=llvm --jit -O0; --native-backend=llvm --jit -O3"
+  flags_matrix "--native-only -O0; --native-only -O3"
   expect_stdout "ELM-NATIVE-WINDOWS-OK"
   source ny <<'NY'
 ;; Run under an isolated display:
