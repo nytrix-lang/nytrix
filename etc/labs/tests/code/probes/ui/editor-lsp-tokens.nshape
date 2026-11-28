@@ -38,6 +38,13 @@ def modifier_runs = lsp.merge_semantic_tokens(st, "a b c d e", [[syntax.TOK_VARI
    {"col": 8, "length": 1, "type": "variable", "modifiers": ["modification"]}
 ])
 assert(merged_kind(modifier_runs, 0) == 10008 && merged_kind(modifier_runs, 2) == 10007 && merged_kind(modifier_runs, 4) == 10009 && merged_kind(modifier_runs, 6) == 10010 && merged_kind(modifier_runs, 8) == 10011, "LSP modifiers select distinct editor styles")
+def standard_modifiers = lsp.merge_semantic_tokens(st, "a b c d", [[syntax.TOK_VARIABLE, 0, 7]], [
+   {"col": 0, "length": 1, "type": "variable", "modifiers": ["static"]},
+   {"col": 2, "length": 1, "type": "class", "modifiers": ["abstract"]},
+   {"col": 4, "length": 1, "type": "string", "modifiers": ["documentation"]},
+   {"col": 6, "length": 1, "type": "variable", "modifiers": ["defaultLibrary"]}
+])
+assert(merged_kind(standard_modifiers, 0) == 10012 && merged_kind(standard_modifiers, 2) == 10013 && merged_kind(standard_modifiers, 4) == 10014 && merged_kind(standard_modifiers, 6) == 10015, "remaining standard semantic modifiers select visible editor styles")
 st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["event", "decorator", "label", "other", "method"]}}}
 def standard = lsp.decode_semantic_tokens(st, {"data": [0, 0, 3, 0, 0, 0, 4, 3, 1, 0, 0, 4, 3, 2, 0, 0, 4, 3, 3, 0, 0, 4, 3, 4, 0]})
 def standard_runs = lsp.merge_semantic_tokens(st, "abc def ghi jkl mno", [[syntax.TOK_COMMENT, 0, 19]], standard)

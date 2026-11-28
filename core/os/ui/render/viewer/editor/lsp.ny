@@ -786,6 +786,10 @@ fn _semantic_modifier_style(int kind, list modifiers) int {
    if modifiers.contains("declaration") || modifiers.contains("definition") { return 10009 }
    if modifiers.contains("async") { return 10010 }
    if modifiers.contains("modification") { return 10011 }
+   if modifiers.contains("static") { return 10012 }
+   if modifiers.contains("abstract") { return 10013 }
+   if modifiers.contains("documentation") { return 10014 }
+   if modifiers.contains("defaultLibrary") { return 10015 }
    kind
 }
 

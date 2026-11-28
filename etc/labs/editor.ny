@@ -7567,6 +7567,10 @@ fn _body_run_color(int kind) any {
    if kind == 10009 { return C_ACCENT }
    if kind == 10010 { return C_ACCENT_2 }
    if kind == 10011 { return C_WARN }
+   if kind == 10012 { return C_TYPE }
+   if kind == 10013 { return C_FUNC }
+   if kind == 10014 { return C_DIM }
+   if kind == 10015 { return C_PROPERTY }
    _tok_color(kind)
 }
 
