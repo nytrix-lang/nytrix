@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, start_window_move, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, poll_all_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
+module core.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, start_window_move, start_file_drag, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, poll_all_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -12,6 +12,7 @@ use core.os.ui.window.platform.api as backend_api
 use core.os.ui.window.consts as ui_consts
 use core.os.ui.window.event as ui_event
 use core.common as common
+use core.os.ffi as ffi
 use core.math (abs)
 use core.os.ui.render.vk.vulkan (vk_create_win32_surface_khr)
 
@@ -283,6 +284,8 @@ mut _cursor_visible_asserted = false
    #link "shell32"
    #link "shcore"
    #link "imm32"
+   #link "ole32"
+   #link "shlwapi"
    #include <windows.h>
    #include <dwmapi.h>
    #include <shellapi.h>
@@ -354,6 +357,17 @@ mut _cursor_visible_asserted = false
       fn ImmGetCompositionStringW(any _ctx, any _index, any _buf, any _len) any
       fn ImmGetContext(any _hwnd) any
       fn ImmReleaseContext(any _hwnd, any _ctx) any
+      fn OleInitialize(ptr _reserved) i32
+      fn OleUninitialize() any
+      fn DoDragDrop(ptr _data, ptr _source, u32 _allowed_effects, ptr _effect) i32
+      fn PathCreateFromUrlW(ptr _url, ptr _path, ptr _path_chars, u32 _flags) i32
+      fn SHParseDisplayName(ptr _name, ptr _bind_ctx, ptr _pidl, u32 _attrs, ptr _attrs_out) i32
+      fn SHCreateDataObject(ptr _folder, u32 _count, ptr _children, ptr _inner, ptr _iid, ptr _out) i32
+      fn ILCloneFull(ptr _pidl) ptr
+      fn ILFindLastID(ptr _pidl) ptr
+      fn ILRemoveLastID(ptr _pidl) i32
+      fn ILIsEqual(ptr _left, ptr _right) i32
+      fn ILFree(ptr _pidl) any
       fn IsIconic(ptr _hwnd) i32
       fn IsWindowVisible(ptr _hwnd) i32
       fn IsZoomed(ptr _hwnd) i32
@@ -2935,6 +2949,197 @@ fn start_window_move(any win) bool {
    ReleaseCapture()
    SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
    true
+}
+
+#windows {
+   def _DRAGDROP_S_DROP = 0x00040100
+   def _DRAGDROP_S_CANCEL = 0x00040101
+   def _DRAGDROP_S_USEDEFAULTCURSORS = 0x00040102
+   def _DROPEFFECT_COPY = 1
+   def _MK_LBUTTON = 1
+
+   fn _drop_source_query_interface(ptr self, ptr iid, ptr out) i32 {
+      if !self || !iid || !out { return -2147467261 }
+      def data1 = load32(iid, 0)
+      def data2 = load16(iid, 4)
+      def data3 = load16(iid, 6)
+      def tail = load64_h(iid, 8)
+      def common_tail = tail == 0x46000000000000c0
+      if common_tail && data2 == 0 && data3 == 0 && (data1 == 0 || data1 == 0x121) {
+         store64_h(out, self, 0)
+         _drop_source_add_ref(self)
+         return 0
+      }
+      store64_h(out, 0, 0)
+      -2147467262
+   }
+
+   fn _drop_source_add_ref(ptr self) u32 {
+      if !self { return 0 }
+      def count = int(load32(self, 8)) + 1
+      store32(self, count, 8)
+      count
+   }
+
+   fn _drop_source_release(ptr self) u32 {
+      if !self { return 0 }
+      def count = max(0, int(load32(self, 8)) - 1)
+      store32(self, count, 8)
+      if count == 0 {
+         def table = load64_h(self, 0)
+         free(self)
+         if table { free(table) }
+      }
+      count
+   }
+
+   fn _drop_source_continue(ptr self, i32 escape, u32 keys) i32 {
+      if escape != 0 { return _DRAGDROP_S_CANCEL }
+      if band(int(keys), _MK_LBUTTON) == 0 { return _DRAGDROP_S_DROP }
+      0
+   }
+
+   fn _drop_source_feedback(ptr self, u32 effect) i32 {
+      _DRAGDROP_S_USEDEFAULTCURSORS
+   }
+
+   fn _new_drop_source() ptr {
+      def table = zalloc(40)
+      def source = zalloc(16)
+      if !table || !source { free(table, source) return 0 }
+      store64_h(table, _drop_source_query_interface, 0)
+      store64_h(table, _drop_source_add_ref, 8)
+      store64_h(table, _drop_source_release, 16)
+      store64_h(table, _drop_source_continue, 24)
+      store64_h(table, _drop_source_feedback, 32)
+      store64_h(source, table, 0)
+      store32(source, 1, 8)
+      source
+   }
+
+   fn _win32_file_path_from_uri(str uri) ptr {
+      def wide_uri = utf16_from_utf8(uri)
+      if !wide_uri { return 0 }
+      def capacity = uri.len + 2
+      def wide_path = zalloc(capacity * 2)
+      def capacity_ptr = zalloc(4)
+      if !wide_path || !capacity_ptr {
+         free(wide_uri, wide_path, capacity_ptr)
+         return 0
+      }
+      store32(capacity_ptr, capacity, 0)
+      def hr = PathCreateFromUrlW(wide_uri, wide_path, capacity_ptr, 0)
+      free(wide_uri, capacity_ptr)
+      if hr != 0 { free(wide_path) return 0 }
+      wide_path
+   }
+
+   fn _win32_drag_pidls(str uri_list) list {
+      mut pidls = []
+      for line in str.split(uri_list, "\n") {
+         def uri = str.strip(to_str(line))
+         if uri.len == 0 || str.startswith(uri, "#") { continue }
+         def path = _win32_file_path_from_uri(uri)
+         if !path { continue }
+         def pidl_out = zalloc(8)
+         if !pidl_out { free(path) continue }
+         def hr = SHParseDisplayName(path, 0, pidl_out, 0, 0)
+         def pidl = load64_h(pidl_out, 0)
+         free(path, pidl_out)
+         if hr == 0 && pidl { pidls = pidls.append(pidl) }
+      }
+      pidls
+   }
+
+   fn _win32_create_file_data_object(list pidls) ptr {
+      if pidls.len == 0 { return 0 }
+      def children = malloc(pidls.len * 8)
+      def iid = zalloc(16)
+      def out = zalloc(8)
+      def parent = ILCloneFull(pidls.get(0, 0))
+      if !children || !iid || !out || !parent {
+         if parent { ILFree(parent) }
+         free(children, iid, out)
+         return 0
+      }
+      if ILRemoveLastID(parent) == 0 {
+         ILFree(parent)
+         free(children, iid, out)
+         return 0
+      }
+      mut i = 0
+      while i < pidls.len {
+         def absolute = pidls.get(i, 0)
+         def candidate_parent = ILCloneFull(absolute)
+         if !candidate_parent || ILRemoveLastID(candidate_parent) == 0 || !ILIsEqual(parent, candidate_parent) {
+            if candidate_parent { ILFree(candidate_parent) }
+            ILFree(parent)
+            free(children, iid, out)
+            return 0
+         }
+         ILFree(candidate_parent)
+         def child = ILFindLastID(absolute)
+         if !child {
+            ILFree(parent)
+            free(children, iid, out)
+            return 0
+         }
+         store64_h(children, child, i * 8)
+         i += 1
+      }
+      ;; IID_IDataObject = 0000010e-0000-0000-c000-000000000046.
+      store32(iid, 0x10e, 0)
+      store16(iid, 0, 4)
+      store16(iid, 0, 6)
+      store64_h(iid, 0x46000000000000c0, 8)
+      def hr = SHCreateDataObject(parent, pidls.len, children, 0, iid, out)
+      def data = hr == 0 ? load64_h(out, 0) : 0
+      ILFree(parent)
+      free(children, iid, out)
+      data
+   }
+
+   fn _win32_start_file_drag(str uri_list) bool {
+      if uri_list.len == 0 { return false }
+      def pidls = _win32_drag_pidls(uri_list)
+      if pidls.len == 0 { return false }
+      def ole_hr = OleInitialize(0)
+      if ole_hr < 0 {
+         for pidl in pidls { ILFree(pidl) }
+         return false
+      }
+      def data = _win32_create_file_data_object(pidls)
+      for pidl in pidls { ILFree(pidl) }
+      if !data {
+         OleUninitialize()
+         return false
+      }
+      def source = _new_drop_source()
+      def effect = zalloc(4)
+      if !source || !effect {
+         if source { _drop_source_release(source) }
+         def table = load64_h(data, 0)
+         ffi.pointer1(load64_h(table, 16), data)
+         free(effect)
+         OleUninitialize()
+         return false
+      }
+      def result = DoDragDrop(data, source, _DROPEFFECT_COPY, effect)
+      def copied = result == _DRAGDROP_S_DROP && band(int(load32(effect, 0)), _DROPEFFECT_COPY) != 0
+      _drop_source_release(source)
+      def table = load64_h(data, 0)
+      ffi.pointer1(load64_h(table, 16), data)
+      free(effect)
+      OleUninitialize()
+      copied
+   }
+} #endif
+
+fn start_file_drag(any win, str uri_list) bool {
+   "Starts an OLE copy drag for the file URLs in a CRLF-separated text/uri-list."
+   if !available() || !win || uri_list.len == 0 { return false }
+   #windows { return _win32_start_file_drag(uri_list) } #endif
+   false
 }
 
 comptime template _win32_hwnd_bool(name, doc, call_fn){

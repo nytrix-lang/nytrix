@@ -1780,6 +1780,7 @@ fn start_file_drag(any win, str uri_list) bool {
    def native = _native_window(win)
    if b == "wayland" { return wayland_backend.start_file_drag(native, uri_list) }
    if b == "cocoa" { return cocoa_impl.start_file_drag(native, uri_list) }
+   if b == "win32" { return win32_impl.start_file_drag(native, uri_list) }
    false
 }
 
