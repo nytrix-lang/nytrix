@@ -62,7 +62,7 @@ module core.os.ui.render(
    texture_destroy, texture_bind, texture_bind_default,
    texture_last_created_id, texture_count,
    texture_size, draw_texture, draw_sprite, draw_underline, draw_squiggly_underline, create_cubemap, FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST,
-   FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_first, font_at_size, font_destroy,
+   FONT_FILTER_LINEAR, FONT_FILTER_BILINEAR, font_load, font_load_lcd, font_load_first, font_at_size, font_destroy,
    font_allow_color_fallback, _font_get, font_prepare, draw_text, draw_text_3d, measure_text,
    font_line_height, font_ascent, mesh_load, mesh_create, mesh_create_cpu,
    draw_text_centered, draw_text_centered_x, draw_text_pair,
@@ -1976,11 +1976,11 @@ fn _font_build_fallback_chain(int font_id) bool {
    true
 }
 
-fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
+fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT, any glyphs=nil, bool lcd=false) int {
    if !is_str(path) || path.len == 0 { return 0 }
    if size < 4 { size = 4 }
    if !is_dict(_font_cache_by_key) { _font_cache_by_key = dict(32) }
-   def cache_key = path + ":" + to_str(size) + ":" + to_str(filter)
+   def cache_key = path + ":" + to_str(size) + ":" + to_str(filter) + (lcd ? ":lcd" : "")
    def cached_id = _font_cache_by_key.get(cache_key, 0)
    if cached_id && _font_get(cached_id) { return cached_id }
    mut f_info = _font_info(path)
@@ -2009,7 +2009,7 @@ fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT, any glyph
    mut font_obj = {
       "_kind": "ttf", "path": path, "size": size, "data": f_data, "info": f_info,
       "scale": scale, "ascent": ascent, "descent": descent, "line_height": line_h,
-      "glyphs": dict(256), "filter": resolved_filter,
+      "glyphs": dict(256), "filter": resolved_filter, "lcd": lcd,
       "atlas": a, "atlas_chain": [a], "atlas_size": atlas_sz
    }
    def id = _font_register(font_obj)
@@ -2552,6 +2552,7 @@ fn _font_prepare_bitmap_for_atlas(
    def ptr bdata = __ffi_untag_ptr(out_bm.get("data", 0))
    def bw = _dict_int(out_bm, "width", 0)
    def bh = _dict_int(out_bm, "height", 0)
+   def is_lcd = _dict_bool(bm, "is_lcd", false)
    def is_color = _font_bitmap_is_color_like(font_obj, bm)
    out_bm["is_color"] = is_color ? 1 : 0
    if raster_os > 1.0 && !is_color {
@@ -2577,7 +2578,7 @@ fn _font_prepare_bitmap_for_atlas(
    if !is_dict(a) { return [out_bm, font_obj] }
    mut ptr atlas_pixels = bdata
    mut ptr atlas_pixels_tmp = 0
-   if !is_color {
+   if !is_color && !is_lcd {
       def total_px = bw * bh
       atlas_pixels_tmp = malloc(total_px * 4)
       if atlas_pixels_tmp {
@@ -2664,7 +2665,9 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true, bool glyph_
       return empty
    }
    def raster_os = _font_raster_oversample(font_obj)
-   mut bm = lib_ttf.get_glyph_bitmap(info, scale * raster_os, scale * raster_os, gi)
+   mut bm = 0
+   if _dict_bool(font_obj, "lcd", false) { bm = lib_ttf.get_glyph_bitmap_lcd(info, scale * raster_os, scale * raster_os, gi) }
+   if !bm { bm = lib_ttf.get_glyph_bitmap(info, scale * raster_os, scale * raster_os, gi) }
    ;; Measure advances at the logical font size.  Do not inherit the face size
    ;; left by bitmap rasterization or divide a raster-sized advance afterward;
    ;; that mixes bitmap pixels with monospace cell metrics and causes stretched
@@ -2676,6 +2679,7 @@ fn _font_resolve_glyph(int font_id, int cp, bool allow_default=true, bool glyph_
       bm, font_obj = bm_state.get(0, bm), bm_state.get(1, font_obj)
    }
    glyph["bitmap"] = bm
+   glyph["is_lcd"] = _dict_bool(bm, "is_lcd", false)
    glyph["advance"] = _list_num_safe(hm, 0, 0.0)
    glyph["_font_id"] = font_id
    if _used_q_fallback { glyph["_provisional"] = true }
@@ -8882,6 +8886,14 @@ fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil)
    id
 }
 
+fn font_load_lcd(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
+   "Loads a TrueType font using FreeType LCD coverage when available, with grayscale fallback."
+   def id = _font_load_impl(path, size, int(filter), glyphs, true)
+   if id { _default_font_fail_sizes = _default_font_fail_sizes.delete(max(4, size)) }
+   if !id && _is_debug() { ui_profile.print_text("[GFX] LCD font load failed: " + to_str(path)) }
+   id
+}
+
 fn font_at_size(int font, int size) int {
    "Returns a cached size variant of a loaded face, or the default face when font is zero."
    if size <= 0 { return font }
@@ -8890,7 +8902,7 @@ fn font_at_size(int font, int size) int {
    if !face { return _ensure_default_font(size) }
    if int(face.get("size", 0)) == size { return font }
    if face.get("_kind", "") == "builtin" { return _font_builtin_create(size) }
-   def variant = _font_load_impl(to_str(face.get("path", "")), size, int(face.get("filter", FONT_FILTER_DEFAULT)))
+   def variant = _font_load_impl(to_str(face.get("path", "")), size, int(face.get("filter", FONT_FILTER_DEFAULT)), nil, _dict_bool(face, "lcd", false))
    variant > 0 ? variant : font
 }
 
@@ -9134,7 +9146,7 @@ fn _gl_draw_text_glyph_fast(ptr glyphs_ptr, f64 x, f64 baseline_y, int cp, int c
    if !verts { return false }
    def gx = floor(x + load32_f32(g_off, render_shared.GLYPH_XOFF) + 0.5)
    def gy = floor(baseline_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
-   def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) != 0) ? 0xffffffff : color_u32
+   def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) & 1) != 0 ? 0xffffffff : color_u32
    _gl_store_text_quad(
       verts,
       gx,
@@ -9164,7 +9176,7 @@ fn _gl_draw_terminal_glyph_fast(any glyphs_ptr, f64 cell_x, f64 baseline_y, int 
    mut gy = floor(baseline_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
    def verts = _shape_scratch_alloc(VERTEX_STRIDE * 6)
    if !verts { return false }
-   def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) != 0) ? 0xffffffff : color_u32
+   def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) & 1) != 0 ? 0xffffffff : color_u32
    _gl_store_text_quad(
       verts,
       gx,
@@ -9239,7 +9251,7 @@ fn _gl_draw_terminal_line_ptr(ptr line_ptr, int co, f64 px, f64 baseline_y, f64 
                      if (md & reverse_mask) != 0 {
                         fg = load32(line_ptr, off + 8) | 0xff000000
                      }
-                     def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) != 0) ? 0xffffffff : fg
+                     def col = (load32(g_off, render_shared.GLYPH_IS_COLOR) & 1) != 0 ? 0xffffffff : fg
                      def gx = floor(px + float(c) * cw + load32_f32(g_off, render_shared.GLYPH_XOFF) + 0.5)
                      def gy = floor(baseline_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
                      _gl_store_text_quad(
@@ -9514,7 +9526,7 @@ fn _gl_draw_text_fast_inner(int font_id, str text, f64 x, f64 y, int color_u32, 
       cur_tex = tex_id
       def gx = floor(pen_x + load32_f32(g_off, render_shared.GLYPH_XOFF) + 0.5)
       def gy = floor(pen_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
-      def color = (load32(g_off, render_shared.GLYPH_IS_COLOR) != 0) ? 0xffffffff : color_u32
+      def color = (load32(g_off, render_shared.GLYPH_IS_COLOR) & 1) != 0 ? 0xffffffff : color_u32
       _gl_store_text_quad(
          verts + glyphs * VERTEX_STRIDE * 6,
          gx, gy, bw, load32_f32(g_off, render_shared.GLYPH_BH),

@@ -264,7 +264,7 @@ fn _vkr_draw_text_fast_inner(str text, f64 x, f64 y, int color_u32, any glyphs_p
       if bw_check <= 0.0 { pen_x += load32_f32(g_off, 0) prev_gi = gi continue }
       def tid = load32(g_off, 36)
       if tid < 0 { pen_x += load32_f32(g_off, 0) prev_gi = gi continue }
-      def is_color = load32(g_off, 44) != 0
+      def is_color = (load32(g_off, 44) & 1) != 0
       if tid != page_tid_cur {
          _vertex_offset = v_off
          _ensure_glyph_text_page(tid)
@@ -334,7 +334,7 @@ fn _vkr_draw_text_ascii_run(str text, int n, f64 pen_x, f64 pen_y, int color_u32
          def gx = floor(pen_x + load32_f32(g_off, 4) + 0.5)
          def bh = load32_f32(g_off, 16)
          def gy = floor(pen_y - load32_f32(g_off, 8) + 0.5)
-         def c = load32(g_off, 44) != 0 ? 0xFFFFFFFF : color_u32
+         def c = (load32(g_off, 44) & 1) != 0 ? 0xFFFFFFFF : color_u32
          _store_text_glyph_rect(p, tpl, tid, float(gx), float(gy), bw, bh,
             load32_f32(g_off, 20), load32_f32(g_off, 24), load32_f32(g_off, 28), load32_f32(g_off, 32), c)
          p += quad_bytes
@@ -431,7 +431,7 @@ fn _vkr_draw_text_runs_flat_inner(list runs, int color_u32, any glyphs_ptr, any 
             if bw_check <= 0.0 { pen_x += load32_f32(g_off, 0) continue }
             def tid = load32(g_off, 36)
             if tid < 0 { pen_x += load32_f32(g_off, 0) continue }
-            def is_color = load32(g_off, 44) != 0
+            def is_color = (load32(g_off, 44) & 1) != 0
             if tid != page_tid_cur {
                _vertex_offset = v_off
                _ensure_glyph_text_page(tid)
@@ -637,7 +637,7 @@ fn __vkr_draw_text(int font_id, any text, any x, any y, any color, any glyphs_pt
       if !g_off { if page0 { g_off = ptr_add(page0, 63 * 48) } else { continue } }
       def tex_id = load32(g_off, 36)
       if tex_id < 0 { pen_x = pen_x + load32_f32(g_off, 0) prev_gi = gi continue }
-      def is_color = load32(g_off, 44) != 0
+      def is_color = (load32(g_off, 44) & 1) != 0
       if tex_id != page_tid_cur {
          _ensure_glyph_text_page(tex_id)
          page_tid_cur = tex_id
@@ -757,7 +757,7 @@ fn draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, 
                   def fg = ((md & reverse_mask) != 0) ? (load32(line_ptr, off + 8) | 0xFF000000) : (load32(line_ptr, off + 4) | 0xFF000000)
                   def gx = floor(pen_x + load32_f32(g_off, 4) + 0.5)
                   def gy = floor(baseline_y - load32_f32(g_off, 8) + 0.5)
-                  def color = (load32(g_off, 44) != 0) ? 0xFFFFFFFF : fg
+                  def color = (load32(g_off, 44) & 1) != 0 ? 0xFFFFFFFF : fg
                   _push_text_glyph_rect_unchecked(
                      gx,
                      gy,

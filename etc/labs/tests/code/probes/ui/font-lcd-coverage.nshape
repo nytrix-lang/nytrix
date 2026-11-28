@@ -8,6 +8,7 @@ shape font_lcd_coverage {
   source ny <<'NY'
 use core
 use core.os.ui.font.truetype as font
+use core.os.ui.render as ui
 
 def info = font.load_path("etc/assets/fonts/jetbrains.ttf")
 assert(is_dict(info), "bundled font loads")
@@ -36,6 +37,19 @@ while i < w * h {
 assert(visible && differing, "LCD channels carry independent subpixel coverage")
 free(pixels)
 font.unload(info)
+def ui_font_id = ui.font_load_lcd("etc/assets/fonts/jetbrains.ttf", 18, ui.FONT_FILTER_NEAREST, "A")
+assert(ui_font_id > 0, "LCD-enabled UI font loads")
+def initial_font = ui._font_get(ui_font_id)
+assert(is_dict(initial_font) && initial_font.get("lcd", false), "UI font retains LCD raster mode")
+assert(ui.font_prepare(ui_font_id, "A") == ui_font_id, "LCD font glyph atlas prepares")
+def ui_font = ui._font_get(ui_font_id)
+def glyph_items = dict_items(ui_font.get("glyphs", dict(0)))
+assert(glyph_items.len > 0, "LCD font caches primed glyphs")
+def glyph_pair = glyph_items.get(0, [])
+def glyph_entry = glyph_pair.get(1, 0)
+def lcd_bitmap = glyph_entry ? glyph_entry.get("bitmap", 0) : 0
+assert(is_dict(lcd_bitmap) && lcd_bitmap.get("is_lcd", false), "resolved UI glyph uses LCD raster")
+ui.font_destroy(ui_font_id)
 print("FONT-LCD-COVERAGE-OK")
 NY
 }
