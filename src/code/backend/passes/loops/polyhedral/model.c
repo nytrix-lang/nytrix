@@ -8,12 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* compat.h maps the POSIX write function to _write on Windows. This file
- * uses the `write` member of nyr_poly_access_t and never calls POSIX write. */
-#ifdef _WIN32
-#undef write
-#endif
-
 static bool checked(ny_i128 v, int64_t *out) {
   if (v < INT64_MIN || v > INT64_MAX)
     return false;
@@ -111,7 +105,7 @@ static bool access_model(const nyr_func_t *f, const int *defs,
                      NYIR_EFFECT_MAY_TRAP;
   if (nyr_effective_effects(in) & ~allowed)
     return false;
-  nyr_poly_access_t a = {.write = in->op == NYIR_STORE_I64,
+  nyr_poly_access_t a = {.is_write = in->op == NYIR_STORE_I64,
                          .width = (in->flags & NYIR_INST_F_MEM_BYTE) ? 1u :
                           (in->flags & NYIR_INST_F_MEM_U16) ? 2u :
                           (in->flags & NYIR_INST_F_MEM_I32) ? 4u : 8u};

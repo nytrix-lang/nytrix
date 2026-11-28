@@ -61,7 +61,7 @@ static bool events_build(const nyr_poly_region_t *r, events_t *out) {
         uint64_t at=offset3(a,i,j,z);
         for (unsigned b=0;b<a->width;++b)
           out->data[out->count++]=(event_t){at+b,(unsigned)a->offset.base,
-                                           instance,a->write};
+                                           instance,a->is_write};
       }
   qsort(out->data,out->count,sizeof(*out->data),cmp_event);
   return true;
@@ -179,7 +179,7 @@ static bool independent(const nyr_poly_region_t *r) {
   for (size_t i = 0; i < r->access_count; ++i)
     for (size_t j = i; j < r->access_count; ++j) {
       const nyr_poly_access_t *a = &r->access[i], *b = &r->access[j];
-      if ((!a->write && !b->write) || a->offset.base != b->offset.base)
+      if ((!a->is_write && !b->is_write) || a->offset.base != b->offset.base)
         continue;
       ny_i128 al, ah, bl, bh;
       if (!bounds(r,a,&al,&ah) || !bounds(r,b,&bl,&bh)) return false;
@@ -320,7 +320,7 @@ static bool symbolic_legal(const nyr_poly_region_t *r, nyr_poly_schedule_t s) {
   for (size_t i=0;i<r->access_count;++i)
     for (size_t j=i;j<r->access_count;++j) {
       const nyr_poly_access_t *a=&r->access[i], *b=&r->access[j];
-      if ((!a->write && !b->write) || a->offset.base!=b->offset.base) continue;
+      if ((!a->is_write && !b->is_write) || a->offset.base!=b->offset.base) continue;
       ny_i128 al,ah,bl,bh;
       if (!bounds(r,a,&al,&ah) || !bounds(r,b,&bl,&bh)) return false;
       if (ah<bl || bh<al || slice_ordered(r,a,b)) continue;
@@ -408,7 +408,7 @@ static bool symbolic_relation_legal(const nyr_poly_region_t *r, nyr_poly_schedul
   for (size_t i=0;i<r->access_count;++i)
     for (size_t j=i;j<r->access_count;++j) {
       const nyr_poly_access_t *a=&r->access[i],*b=&r->access[j];
-      if ((!a->write&&!b->write)||a->offset.base!=b->offset.base) continue;
+      if ((!a->is_write&&!b->is_write)||a->offset.base!=b->offset.base) continue;
       ny_i128 al,ah,bl,bh;
       if (!bounds(r,a,&al,&ah)||!bounds(r,b,&bl,&bh)) return false;
       if (ah<bl||bh<al||(nyr_poly_dims(r)==3&&layout3(r,a,b)) ||
@@ -451,7 +451,7 @@ bool nyr_poly_fusion_legal(const nyr_poly_region_t *a,const nyr_poly_region_t *b
   for (size_t i=0;i<a->access_count;++i)
     for (size_t j=0;j<b->access_count;++j) {
       const nyr_poly_access_t *x=&a->access[i],*y=&b->access[j];
-      if ((!x->write&&!y->write)||x->offset.base!=y->offset.base) continue;
+      if ((!x->is_write&&!y->is_write)||x->offset.base!=y->offset.base) continue;
       ny_i128 xl,xh,yl,yh;
       if (!bounds(a,x,&xl,&xh)||!bounds(b,y,&yl,&yh)) return false;
       if (xh<yl||yh<xl) continue;
@@ -479,7 +479,7 @@ bool nyr_poly_parallel_band(const nyr_poly_region_t *r, nyr_poly_schedule_t s,
   for (size_t i=0;i<r->access_count;++i)
     for (size_t j=0;j<r->access_count;++j) {
       const nyr_poly_access_t *a=&r->access[i],*b=&r->access[j];
-      if ((!a->write&&!b->write)||a->offset.base!=b->offset.base) continue;
+      if ((!a->is_write&&!b->is_write)||a->offset.base!=b->offset.base) continue;
       ny_i128 al,ah,bl,bh;
       if (!bounds(r,a,&al,&ah)||!bounds(r,b,&bl,&bh)) return false;
       if (ah<bl||bh<al) continue;
@@ -502,7 +502,7 @@ bool nyr_poly_permutable(const nyr_poly_region_t *r, nyr_poly_schedule_t s) {
   for (size_t i=0;i<r->access_count;++i)
     for (size_t j=i;j<r->access_count;++j) {
       const nyr_poly_access_t *a=&r->access[i],*b=&r->access[j];
-      if ((!a->write&&!b->write)||a->offset.base!=b->offset.base) continue;
+      if ((!a->is_write&&!b->is_write)||a->offset.base!=b->offset.base) continue;
       ny_i128 al,ah,bl,bh;
       if (!bounds(r,a,&al,&ah)||!bounds(r,b,&bl,&bh)) return false;
       if (ah<bl||bh<al) continue;
@@ -732,7 +732,7 @@ bool nyr_poly_choose_stream3(const nyr_poly_region_t *r,nyr_poly_schedule_t *out
   for (unsigned d=0;d<3;++d)
     if (r->symbolic[d]) return false;
   for (size_t i=0;i<r->access_count;++i)
-    strided_write|=r->access[i].write&&magnitude(r->access[i].offset.coeff[2])>=64;
+    strided_write|=r->access[i].is_write&&magnitude(r->access[i].offset.coeff[2])>=64;
   if (!strided_write||!independent(r)) return false;
   bool found=false;
   ny_i128 best=0;
@@ -744,7 +744,7 @@ bool nyr_poly_choose_stream3(const nyr_poly_region_t *r,nyr_poly_schedule_t *out
     for (size_t i=0;i<r->access_count;++i) {
       const nyr_poly_access_t *a=&r->access[i];
       contiguous&=magnitude(a->offset.coeff[inner])<=a->width;
-      score+=(ny_i128)magnitude(a->offset.coeff[middle])*(a->write?2:1);
+      score+=(ny_i128)magnitude(a->offset.coeff[middle])*(a->is_write?2:1);
     }
     if (contiguous&&(!found||score<best)) {found=true;best=score;*out=s;}
   }
@@ -770,7 +770,7 @@ bool nyr_poly_choose(const nyr_poly_region_t *r, nyr_poly_schedule_t *out) {
     uint64_t inner=magnitude(a->offset.coeff[1]);
     if (inner>a->width) contiguous=false;
     if (outer>a->width) swapped_contiguous=false;
-    if (a->write && inner>=64 && outer==a->width) strided_write=true;
+    if (a->is_write && inner>=64 && outer==a->width) strided_write=true;
   }
   if (contiguous) return false;
   bool free_order=independent(r);

@@ -170,7 +170,7 @@ static int inline_plan(const nyr_func_t *f,const nyr_poly_region_t *a,
       b->access_count>NYR_POLY_MAX_ACCESS) return -1;
   for (size_t k=0;k<a->access_count;++k) {
     const nyr_poly_access_t *w=&a->access[k];
-    if (!w->write||w->offset.base<0) continue;
+    if (!w->is_write||w->offset.base<0) continue;
     const nyr_inst_t *wi=access_inst(f,a,k);
     if (!wi||!point_word(wi,w)) continue;
     bool ok=true,read=false;
@@ -180,7 +180,7 @@ static int inline_plan(const nyr_func_t *f,const nyr_poly_region_t *a,
       const nyr_poly_access_t *x=&b->access[j];
       if (x->offset.base!=w->offset.base) continue;
       const nyr_inst_t *ri=access_inst(f,b,j);
-      if (x->write||!same_ref(w,x)||!ri||!point_word(ri,x)||
+      if (x->is_write||!same_ref(w,x)||!ri||!point_word(ri,x)||
           ri->scalar_class!=wi->scalar_class) ok=false;
       else read=true;
     }
@@ -227,7 +227,7 @@ static bool plan_recompute(emitter_t *e,const nyr_poly_region_t *a,
     if (a->symbolic[d]||b->symbolic[d]||a->initial[d]||a->stride[d]!=1||
         b->stride[d]!=1||!a->extent[d]||!b->extent[d]) return false;
   size_t writer=SIZE_MAX;
-  for (size_t k=0;k<a->access_count;++k) if (a->access[k].write) {
+  for (size_t k=0;k<a->access_count;++k) if (a->access[k].is_write) {
     if (writer!=SIZE_MAX) return false;
     writer=k;
   }
@@ -243,7 +243,7 @@ static bool plan_recompute(emitter_t *e,const nyr_poly_region_t *a,
     const nyr_inst_t *ri=access_inst(f,a,k);
     if (x->offset.base==w->offset.base||!ri||!plain_word(ri,x)) return false;
     for (size_t j=0;j<b->access_count;++j)
-      if (b->access[j].write&&b->access[j].offset.base==x->offset.base) return false;
+      if (b->access[j].is_write&&b->access[j].offset.base==x->offset.base) return false;
   }
   unsigned fast=w->offset.coeff[1]==8?1:0,slow=fast^1u;
   int64_t pitch=(int64_t)a->extent[fast]*8;
@@ -258,7 +258,7 @@ static bool plan_recompute(emitter_t *e,const nyr_poly_region_t *a,
     const nyr_poly_access_t *x=&b->access[k];
     if (x->offset.base!=w->offset.base) continue;
     const nyr_inst_t *ri=access_inst(f,b,k);
-    if (x->write||!ri||!point_word(ri,x)||ri->scalar_class!=wi->scalar_class||
+    if (x->is_write||!ri||!point_word(ri,x)||ri->scalar_class!=wi->scalar_class||
         x->offset.coeff[0]!=w->offset.coeff[0]||x->offset.coeff[1]!=w->offset.coeff[1])
       return false;
     ny_i128 delta=(ny_i128)x->offset.constant-w->offset.constant;
@@ -362,10 +362,10 @@ static void emit_point_body(emitter_t *e,const nyr_poly_region_t *r,
     }
     if (access>=r->access_count) {e->ok=false;return;}
     const nyr_poly_access_t *a=&r->access[access++];
-    if (a->write!=(in.op==NYIR_STORE_I64)) {e->ok=false;return;}
+    if (a->is_write!=(in.op==NYIR_STORE_I64)) {e->ok=false;return;}
     bool word=point_word(&in,a);
     if (e->producer&&a->offset.base==e->inline_root) {
-      if (a->write||!word) {e->ok=false;return;}
+      if (a->is_write||!word) {e->ok=false;return;}
       /* Reuse repeated identical translated reads in the same consumer. */
       int value=-1;
       for (size_t k=0;k<*count;++k)
@@ -378,7 +378,7 @@ static void emit_point_body(emitter_t *e,const nyr_poly_region_t *r,
       if (*count<3*NYR_POLY_MAX_ACCESS) values[(*count)++]=(point_value_t){*a,in.dst,in.scalar_class};
       continue;
     }
-    if (a->write) {
+    if (a->is_write) {
       for (size_t k=0;k<*count;) {
         if (point_overlap(r,a,&values[k].access)) values[k]=values[--*count];
         else ++k;
@@ -397,10 +397,10 @@ static void emit_point_body(emitter_t *e,const nyr_poly_region_t *r,
      * Every consumer load must actually forward, otherwise abort the
      * transaction instead of accidentally reading uninitialized storage. */
     if (inline_storage(e,a->offset.base)) {
-      if (!a->write||!word||*count>=3*NYR_POLY_MAX_ACCESS) {e->ok=false;return;}
+      if (!a->is_write||!word||*count>=3*NYR_POLY_MAX_ACCESS) {e->ok=false;return;}
     } else emit(e,in);
     if (word&&*count<3*NYR_POLY_MAX_ACCESS)
-      values[(*count)++]=(point_value_t){*a,a->write?in.c:in.dst,in.scalar_class};
+      values[(*count)++]=(point_value_t){*a,a->is_write?in.c:in.dst,in.scalar_class};
   }
   if (!r->external&&access!=r->access_count) e->ok=false;
 }
@@ -426,7 +426,7 @@ static bool plan_promotion(emitter_t *e) {
   size_t wr=SIZE_MAX,rd=SIZE_MAX;
   for (size_t k=0;k<r->access_count;++k) {
     const nyr_poly_access_t *a=&r->access[k];
-    if (!a->write) continue;
+    if (!a->is_write) continue;
     if (wr!=SIZE_MAX||a->width!=8||a->offset.coeff[inner]) return false;
     wr=k;
   }
@@ -497,7 +497,7 @@ static int promotion_address(emitter_t *e,unsigned inner,unsigned lane) {
   const nyr_poly_region_t *r=e->r;
   const nyr_poly_affine_t *a=NULL;
   for (size_t k=0;k<r->access_count;++k)
-    if (r->access[k].write) {a=&r->access[k].offset;break;}
+    if (r->access[k].is_write) {a=&r->access[k].offset;break;}
   if (!a) {e->ok=false;return -1;}
   int addr=a->base;
   if (a->constant) addr=bin(e,NYIR_ADD_I64,addr,constant(e,a->constant));
@@ -553,7 +553,7 @@ static bool vector_body(emitter_t *e,bool generate,unsigned group) {
         if (generate) e->promote_value[group]=c;
         continue;
       }
-      if (x->write||(x->offset.coeff[mid]!=0&&x->offset.coeff[mid]!=8)) return false;
+      if (x->is_write||(x->offset.coeff[mid]!=0&&x->offset.coeff[mid]!=8)) return false;
       if (p==e->promote_load) value=generate?e->promote_phi[group]:in.dst;
       else if (x->offset.coeff[mid]==8) {
         value=in.dst;
@@ -638,7 +638,7 @@ static void emit_promoted_body(emitter_t *e) {
         }
       }
       if (p==e->promote_store) {e->promote_value[lane]=in.c;continue;}
-      if (p==e->promote_load||(lane&&a&&!a->write&&!a->offset.coeff[mid])) {
+      if (p==e->promote_load||(lane&&a&&!a->is_write&&!a->offset.coeff[mid])) {
         nyr_inst_t copy=inst(NYIR_COPY);copy.dst=in.dst;
         copy.a=p==e->promote_load?e->promote_phi[lane]:original;
         copy.scalar_class=in.scalar_class;copy.debug=in.debug;emit(e,copy);
@@ -982,7 +982,7 @@ static int unsigned_le(emitter_t *e,int a,int b,int sign) {
   return emit(e,in);
 }
 
-typedef struct { int base, low, high; int64_t lo, hi; bool write; } envelope_t;
+typedef struct { int base, low, high; int64_t lo, hi; bool is_write; } envelope_t;
 /* Dynamic rectangles: exact affine min/max over the actual ordinal box.
  * For an empty dimension use ordinal zero; the resulting nonempty envelope
  * is conservative (the scheduled loop still executes zero times).
@@ -1028,7 +1028,7 @@ static bool alias_guard(emitter_t *e,int64_t fast,int64_t slow) {
       if (count==4) return false;
       roots[count++]=(envelope_t){.base=a->offset.base,.lo=(int64_t)lo,.hi=(int64_t)hi};
     }
-    envelope_t *x=&roots[i];x->write|=a->write;
+    envelope_t *x=&roots[i];x->is_write|=a->is_write;
     if (!dynamic) {
       if (lo<x->lo) x->lo=(int64_t)lo;
       if (hi>x->hi) x->hi=(int64_t)hi;
@@ -1057,7 +1057,7 @@ static bool alias_guard(emitter_t *e,int64_t fast,int64_t slow) {
   }
   for (unsigned i=0;i<count;++i) for (unsigned j=i+1;j<count;++j) {
     envelope_t *a=&roots[i],*b=&roots[j];
-    if (!a->write&&!b->write) continue;
+    if (!a->is_write&&!b->is_write) continue;
     int separate=bin(e,NYIR_OR_I64,unsigned_le(e,a->high,b->low,sign),
                          unsigned_le(e,b->high,a->low,sign));
     ok=bin(e,NYIR_AND_I64,ok,separate);
@@ -1375,7 +1375,7 @@ static unsigned profitable_promotion(const nyr_func_t *f,const nyr_poly_region_t
       r->extent[1]<32||r->extent[2]<32) return 0;
   size_t wr=SIZE_MAX,readers=0;int bases[2]={-1,-1};
   bool contiguous=true,shared=false;
-  for (size_t k=0;k<r->access_count;++k) if (r->access[k].write) {
+  for (size_t k=0;k<r->access_count;++k) if (r->access[k].is_write) {
     if (wr!=SIZE_MAX) return 0;
     wr=k;
   }
@@ -1416,7 +1416,7 @@ static unsigned profitable_horizontal(const nyr_func_t *f,const nyr_poly_region_
   for (unsigned d=0;d<3;++d)
     if (r->symbolic[d]||r->initial[d]||r->stride[d]!=1) return 0;
   const nyr_poly_access_t *w=NULL;
-  for (size_t k=0;k<r->access_count;++k) if (r->access[k].write) {
+  for (size_t k=0;k<r->access_count;++k) if (r->access[k].is_write) {
     if (w) return 0;
     w=&r->access[k];
   }
@@ -1426,7 +1426,7 @@ static unsigned profitable_horizontal(const nyr_func_t *f,const nyr_poly_region_
   for (size_t k=0;k<r->access_count;++k) {
     const nyr_poly_access_t *a=&r->access[k];
     if (a->offset.base==w->offset.base) continue;
-    if (reads==2||a->write||a->width!=8||a->offset.coeff[2]!=8) return 0;
+    if (reads==2||a->is_write||a->width!=8||a->offset.coeff[2]!=8) return 0;
     roots[reads++]=a->offset.base;
     row|=!a->offset.coeff[1]&&a->offset.coeff[0]>=(int64_t)r->extent[2]*8;
     col|=!a->offset.coeff[0]&&a->offset.coeff[1]>=(int64_t)r->extent[2]*8;

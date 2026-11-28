@@ -20,7 +20,7 @@ typedef struct {
 typedef struct {
   nyr_poly_affine_t offset;
   unsigned width;
-  bool write;
+  bool is_write;
 } nyr_poly_access_t;
 
 typedef struct {

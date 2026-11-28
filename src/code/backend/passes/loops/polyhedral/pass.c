@@ -29,7 +29,7 @@ static bool fusion_candidate(const nyr_poly_region_t *a,const nyr_poly_region_t 
   for (size_t i=0;i<a->access_count;++i)
     for (size_t j=0;j<b->access_count;++j) {
       const nyr_poly_access_t *x=&a->access[i],*y=&b->access[j];
-      if (x->write&&!y->write&&x->width==y->width&&x->offset.base==y->offset.base&&
+      if (x->is_write&&!y->is_write&&x->width==y->width&&x->offset.base==y->offset.base&&
           x->offset.constant==y->offset.constant&&x->offset.coeff[0]==y->offset.coeff[0]&&
           x->offset.coeff[1]==y->offset.coeff[1]) reuse=true;
     }
@@ -47,13 +47,13 @@ static bool possible_inline(const nyr_func_t *f,const nyr_poly_region_t *r) {
       r->symbolic[0]||r->symbolic[1]||
       (uint64_t)r->extent[0]*r->extent[1]<1024) return false;
   int root=-1;
-  for (size_t k=0;k<r->access_count;++k) if (r->access[k].write) {
+  for (size_t k=0;k<r->access_count;++k) if (r->access[k].is_write) {
     if (root>=0||r->access[k].width!=8) return false;
     root=r->access[k].offset.base;
   }
   if (root<0) return false;
   for (size_t k=0;k<r->access_count;++k)
-    if (!r->access[k].write&&r->access[k].offset.base==root) return false;
+    if (!r->access[k].is_write&&r->access[k].offset.base==root) return false;
   return true;
 }
 

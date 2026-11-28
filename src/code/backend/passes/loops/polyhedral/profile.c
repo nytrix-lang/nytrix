@@ -24,7 +24,7 @@ uint64_t nyr_poly_model_key(const nyr_func_t *f,const nyr_poly_region_t *r) {
   }
   for (size_t a=0;a<r->access_count;++a) {
     const nyr_poly_access_t *x=&r->access[a];
-    h=mix(h,x->offset.base);h=mix(h,x->offset.constant);h=mix(h,x->width);h=mix(h,x->write);
+    h=mix(h,x->offset.base);h=mix(h,x->offset.constant);h=mix(h,x->width);h=mix(h,x->is_write);
     for (unsigned d=0;d<dims;++d) h=mix(h,x->offset.coeff[d]);
   }
   for (size_t p=r->body_begin;p<r->body_end&&p<f->len;++p) {
@@ -94,7 +94,7 @@ static void dump_statement(FILE *out,const nyr_poly_region_t *r) {
   for (size_t a=0;a<r->access_count;++a) {
     const nyr_poly_access_t *x=&r->access[a];
     fprintf(out,"%s{\"base\":%d,\"write\":%s,\"width\":%u,\"constant\":%" PRId64 ",\"coefficients\":[",
-            a?",":"",x->offset.base,x->write?"true":"false",x->width,x->offset.constant);
+            a?",":"",x->offset.base,x->is_write?"true":"false",x->width,x->offset.constant);
     for (unsigned d=0;d<dims;++d) fprintf(out,"%s%" PRId64,d?",":"",x->offset.coeff[d]);
     fputs("]}",out);
   }
