@@ -28,7 +28,7 @@ module core.os.ui.render(
    init_window, init_mock_surface, close_window, set_active_window, render_init,
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
-   draw_triangles, draw_triangles_clipped, draw_path, draw_path_outline, draw_path_quadratic, draw_path_cubic, draw_path_commands, draw_polyline, draw_triangle, draw_quad, draw_rect,
+   draw_triangles, draw_triangles_clipped, draw_scissored, draw_path, draw_path_outline, draw_path_quadratic, draw_path_cubic, draw_path_commands, draw_polyline, draw_triangle, draw_quad, draw_rect,
    draw_pixel, draw_pixel_v, draw_line_v, draw_line_ex, draw_line_strip,
    draw_rect_v, draw_rect_rec, draw_rect_pro, draw_rect_lines, draw_rect_lines_ex,
    draw_rect_gradient_v, draw_rect_gradient_h, draw_rect_gradient_ex,
@@ -7849,6 +7849,13 @@ fn scissor_pop() bool {
       }
    }
    true
+}
+
+fn draw_scissored(f64 x, f64 y, f64 w, f64 h, fnptr draw_fn) any {
+   "Runs any renderer draw callback inside a nested rectangular clip. Every primitive and backend draw is clipped by the same scissor state. The previous clip is restored even when the callback returns early."
+   if !draw_fn || !scissor_push(x, y, w, h) { return false }
+   defer { scissor_pop() }
+   draw_fn()
 }
 
 mut _texture_cache = dict(8)
