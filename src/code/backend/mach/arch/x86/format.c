@@ -2452,7 +2452,7 @@ static bool ny_native_emit_macho_x64_object_bundle_code(
   for (size_t i = 0; i < def_count; ++i) {
     if (!nyr_obj_u32(&file, def_name_offs[i]) || !nyr_obj_u8(&file, 0x0f) ||
         !nyr_obj_u8(&file, 1) || !nyr_obj_u16(&file, 0) ||
-        !nyr_obj_u16(&file, 0) || !nyr_obj_u64(&file, defs[i].off))
+        !nyr_obj_u64(&file, defs[i].off))
       goto done;
   }
   for (size_t i = 0; i < reloc_symbol_count; ++i) {

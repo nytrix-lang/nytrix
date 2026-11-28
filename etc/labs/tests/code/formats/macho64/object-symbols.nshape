@@ -1,0 +1,68 @@
+shape x86_64_macho_object_symbol_table {
+  family "runtime-native"
+  generator "regression"
+  features ["native", "object", "macho", "x86_64", "symbols", "reloc"]
+  template ny-test-case
+  flags "--native-only -O0"
+  expect compile_and_run
+  timeout 120
+  expect_stdout "MACHO-SYMBOLS-OK"
+  source ny <<'NY'
+use core
+use core.os (file_read, file_write, file_remove, pid, temp_dir)
+use core.os.subprocess (run_capture)
+
+fn u32_at(any data, int off) int {
+   int(load8(data, off)) + int(load8(data, off + 1)) * 256 + int(load8(data, off + 2)) * 65536 + int(load8(data, off + 3)) * 16777216
+}
+
+fn name_at(any data, int off, int end) str {
+   mut stop = off
+   while stop < end && load8(data, stop) != 0 { stop += 1 }
+   assert(stop < end, "terminated Mach-O symbol name")
+   slice(data, off, stop)
+}
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0, "runner compiler")
+def base = temp_dir() + "/ny-macho-symbols-" + to_str(pid())
+def src = base + ".ny"
+def obj = base + ".o"
+defer { file_remove(src) file_remove(obj) }
+unwrap(file_write(src, "use core\n@noinline\nfn sum(i64 a, i64 b) i64 { a + b }\n@noinline\nfn mix(i64 n) i64 { sum(n, 5) * 2 }\nprint(mix(7))\n"))
+for opt in ["-O0", "-O3"] {
+   def build = run_capture([compiler, "--native-only", "--host-triple=x86_64-apple-darwin", opt, "-g", "-emit-only", "-o", obj, src], [], nil, false)
+   assert(int(build.get("code", 127)) == 0, "Mach-O object builds: " + to_str(build.get("stderr", "")))
+   def data = unwrap(file_read(obj))
+   assert(u32_at(data, 0) == 0xfeedfacf, "Mach-O 64 header")
+   mut cursor = 32
+   mut symbols, count, strings, size = 0, 0, 0, 0
+   for i in range(u32_at(data, 16)) {
+      def command = u32_at(data, cursor)
+      def command_size = u32_at(data, cursor + 4)
+      assert(command_size >= 8 && cursor + command_size <= data.len, "valid load command")
+      if command == 2 {
+         symbols = u32_at(data, cursor + 8)
+         count = u32_at(data, cursor + 12)
+         strings = u32_at(data, cursor + 16)
+         size = u32_at(data, cursor + 20)
+      }
+      cursor += command_size
+   }
+   assert(count > 2 && symbols > 0 && strings == symbols + count * 16, "nlist_64 stride")
+   assert(strings + size == data.len && load8(data, strings) == 0, "string table bounds")
+   mut found_sum, found_mix = false, false
+   for i in range(count) {
+      def offset = symbols + i * 16
+      def name_index = u32_at(data, offset)
+      assert(name_index > 0 && name_index < size, "symbol name index is in bounds")
+      def name = name_at(data, strings + name_index, strings + size)
+      assert(name.len > 0, "nonempty symbol name")
+      if name.contains("ny_fn_sum") { found_sum = true }
+      if name.contains("ny_fn_mix") { found_mix = true }
+   }
+   assert(found_sum && found_mix, "both function definitions survive")
+}
+print("MACHO-SYMBOLS-OK")
+NY
+}
