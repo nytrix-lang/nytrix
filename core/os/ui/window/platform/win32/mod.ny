@@ -232,6 +232,7 @@ def XBUTTON2 = 0x0002
 def UNICODE_NOCHAR = 0xffff
 def MAPVK_VK_TO_VSC = 0
 def GCS_COMPSTR = 0x0008
+def GCS_CURSORPOS = 0x0080
 def GCS_RESULTSTR = 0x0800
 def SM_XVIRTUALSCREEN = 76
 def SM_YVIRTUALSCREEN = 77
@@ -2018,6 +2019,64 @@ fn _emit_ime_result_events(list events, any win) list {
    [win, out]
 }
 
+fn _utf16_prefix_utf8_len(ptr text, int total_units, int target_units) int {
+   "Maps a UTF-16 cursor offset to a UTF-8 byte offset without splitting surrogate pairs."
+   mut i = 0
+   mut bytes = 0
+   while i < total_units {
+      def unit = int(__load16_idx(text, i * 2))
+      if i >= target_units { break }
+      if unit >= 0xd800 && unit <= 0xdbff && i + 1 < total_units {
+         def low = int(__load16_idx(text, (i + 1) * 2))
+         if low >= 0xdc00 && low <= 0xdfff {
+            ;; An IME cursor should be on a scalar boundary. If it points
+            ;; between the surrogate halves, keep it before the codepoint.
+            if i + 1 >= target_units { break }
+            bytes += 4
+            i += 2
+            continue
+         }
+      }
+      if unit < 0x80 { bytes += 1 }
+      elif unit < 0x800 { bytes += 2 }
+      else { bytes += 3 }
+      i += 1
+   }
+   bytes
+}
+
+fn _emit_ime_preedit_events(list events, any win) list {
+   if !available() || !win || !is_dict(win) { return [win, events] }
+   def hwnd = win.get("handle", 0)
+   if !hwnd { return [win, events] }
+   def himc = ImmGetContext(hwnd)
+   if !himc { return [win, events] }
+   mut out = events
+   def bytes = ImmGetCompositionStringW(himc, GCS_COMPSTR, 0, 0)
+   mut text = ""
+   mut cursor = 0
+   if bytes > 0 {
+      def buffer = zalloc(bytes + 2)
+      if buffer {
+         def got = ImmGetCompositionStringW(himc, GCS_COMPSTR, buffer, bytes)
+         if got > 0 {
+            text = utf8_from_utf16(buffer)
+            def position = int(ImmGetCompositionStringW(himc, GCS_CURSORPOS, 0, 0))
+            if position < 0 { cursor = -1 }
+            elif position > got / 2 { cursor = text.len }
+            else { cursor = _utf16_prefix_utf8_len(buffer, got / 2, position) }
+         } else { cursor = -1 }
+         free(buffer)
+      } else { cursor = -1 }
+   }
+   mut data = dict(4)
+   data = data.set("text", text)
+   data = data.set("cursor", cursor)
+   _push_event(out, ui_consts.EVENT_TEXT_PREEDIT, win, data)
+   ImmReleaseContext(hwnd, himc)
+   [win, out]
+}
+
 fn _translate_message_general(any win, list events, int typ, any wparam, any lparam) list {
    match typ {
       WM_CLOSE, WM_QUIT -> {
@@ -2032,13 +2091,20 @@ fn _translate_message_general(any win, list events, int typ, any wparam, any lpa
       }
       WM_IME_ENDCOMPOSITION -> {
          win = win.set("ime_composing", false)
+         mut preedit = dict(4)
+         preedit = preedit.set("text", "")
+         preedit = preedit.set("cursor", -1)
+         _push_event(events, ui_consts.EVENT_TEXT_PREEDIT, win, preedit)
       }
       WM_IME_COMPOSITION -> {
          if band(int(lparam), GCS_RESULTSTR) != 0 {
             def res = _emit_ime_result_events(events, win)
             win, events = res.get(0, win), res.get(1, events)
-         } elif band(int(lparam), GCS_COMPSTR) != 0 {
+         }
+         if band(int(lparam), GCS_COMPSTR) != 0 {
             win = win.set("ime_composing", true)
+            def pre = _emit_ime_preedit_events(events, win)
+            win, events = pre.get(0, win), pre.get(1, events)
          }
       }
       WM_IME_SETCONTEXT -> {
@@ -3896,6 +3962,19 @@ fn get_win32_adapter(any mon) any {
    def style = get_window_style(ui_consts.WINDOW_NORMAL, false)
    assert((style & 0x00080000) != 0, "win32 normal style")
    assert(get_window_ex_style(ui_consts.WINDOW_FLOATING, false) != 0, "win32 floating ex style")
+   def ime_text = zalloc(8)
+   if ime_text {
+      store16(ime_text, 0x0061, 0)
+      store16(ime_text, 0x00e9, 2)
+      store16(ime_text, 0xd83d, 4)
+      store16(ime_text, 0xde00, 6)
+      assert(_utf16_prefix_utf8_len(ime_text, 4, 0) == 0, "IME cursor before UTF-16 text")
+      assert(_utf16_prefix_utf8_len(ime_text, 4, 1) == 1, "IME cursor after ASCII")
+      assert(_utf16_prefix_utf8_len(ime_text, 4, 2) == 3, "IME cursor after multibyte BMP scalar")
+      assert(_utf16_prefix_utf8_len(ime_text, 4, 3) == 3, "IME cursor does not split surrogate pair")
+      assert(_utf16_prefix_utf8_len(ime_text, 4, 4) == 7, "IME cursor after supplementary scalar")
+      free(ime_text)
+   }
    if !available() {
       assert(!init_dpi_awareness() && !init_timer(), "win32 init fallback")
       assert(get_timer_value() == 0 && get_timer_frequency() == 0 && module_handle() == 0, "win32 timer fallback")
