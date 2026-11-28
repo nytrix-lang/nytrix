@@ -91,6 +91,8 @@ use core.os.ui.render.vk as lib_vkr
 use core.os.ui.render.vk.draw as lib_vk_draw
 use core.os.ui.render.vk.font as lib_vk_font
 use core.os.ui.render.gl as lib_glr
+use core.os.ui.render.gl.state as lib_gl_state
+use core.os.ui.window.consts (WINDOW_TRANSPARENT)
 use core.os.ui.render.texture as render_texture
 use core.os.ui.render.utils as render_utils
 use core.os.ui.render.shared as render_shared
@@ -3034,6 +3036,25 @@ fn _draw_glyph_texture_quad(
    false
 }
 
+fn _draw_gl_lcd_glyph(f64 x, f64 y, f64 w, f64 h, list uv, int tex_id, list rgba) bool {
+   if !_backend_texture_id_valid(tex_id) || uv.len != 4 { return false }
+   if lib_gl_state._soft_enabled() || !lib_gl_state._has("glBlendFuncSeparate") { return false }
+   if (int(_active_win.get("flags", 0)) & WINDOW_TRANSPARENT) != 0 { return false }
+   def alpha = _list_num_safe(rgba, 3, 1.0)
+   ;; Fixed-function texture modulation supplies the RGB blend factors.
+   lib_glr.set_blend_mode(BLEND_CUSTOM, 0, 9)
+   def attenuated = _draw_glyph_texture_quad(x, y, w, h, uv, tex_id, alpha, alpha, alpha, 1.0)
+   mut drew = false
+   if attenuated {
+      lib_glr.set_blend_mode(BLEND_CUSTOM, 1, 1)
+      drew = _draw_glyph_texture_quad(x, y, w, h, uv, tex_id,
+         _list_num_safe(rgba, 0, 1.0) * alpha, _list_num_safe(rgba, 1, 1.0) * alpha,
+         _list_num_safe(rgba, 2, 1.0) * alpha, 1.0)
+   }
+   _apply_blend_op(_blend_op)
+   drew
+}
+
 fn _ttf_draw_bitmap_glyph(
    dict font_obj,
    dict bm,
@@ -3049,6 +3070,7 @@ fn _ttf_draw_bitmap_glyph(
    mut bw, bh = float(bm.get("draw_width", bm.get("width", 0))), float(bm.get("draw_height", bm.get("height", 0)))
    def uv = bm.get("uv", 0)
    def is_color = bm.get("is_color", 0)
+   def is_lcd = bm.get("is_lcd", false)
    def xoff = float(bm.get("draw_xoff", bm.get("xoff", 0)))
    def yoff = float(bm.get("draw_yoff", bm.get("yoff", 0)))
    mut bpp = int(bm.get("bpp", 4))
@@ -3062,7 +3084,7 @@ fn _ttf_draw_bitmap_glyph(
    if bw <= 0.0 || bh <= 0.0 { return [g_adv, drew] }
    def vk_cpu_text = _font_vk_safe_cpu_text()
    def atlas_ref = _font_bitmap_atlas_ref(font_obj, bm)
-   if _backend == BACKEND_MOCK && !bdata {
+   if (_backend == BACKEND_MOCK || (_backend == BACKEND_GL && is_lcd)) && !bdata {
       ;; Packed glyphs may drop their standalone bitmap; sample the atlas
       ;; region directly rather than copying a glyph out for software draws.
       if !is_dict(atlas_ref) || !is_list(uv) || uv.len < 4 { return [g_adv, false] }
@@ -3131,10 +3153,17 @@ fn _ttf_draw_bitmap_glyph(
       gx = float(floor(gx + 0.5))
       gy = float(floor(gy + 0.5))
    }
-   if _backend == BACKEND_VK && bm.get("is_lcd", false) && is_list(uv) {
+   if _backend == BACKEND_VK && is_lcd && is_list(uv) {
       if lib_vk_draw.draw_lcd_glyph(gx, gy, bw, bh, uv, tex_id, _cpu_pack_color(cr, cg, cb, ca)) {
          return [g_adv, true]
       }
+   }
+   if _backend == BACKEND_GL && is_lcd {
+      if is_list(uv) && _draw_gl_lcd_glyph(gx, gy, bw, bh, uv, tex_id, [cr, cg, cb, ca]) {
+         return [g_adv, true]
+      }
+      return [g_adv, _draw_glyph_bitmap_scaled_runs(bdata, int(bm.get("width", 0)),
+         int(bm.get("height", 0)), int(bw), int(bh), gx, gy, cr, cg, cb, ca, bpp, false, pitch)]
    }
    if (gl_soft_text || vk_cpu_text) && bdata {
       drew = _draw_glyph_bitmap_scaled_runs(
@@ -8893,7 +8922,7 @@ fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil)
 }
 
 fn font_load_lcd(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
-   "Loads a TrueType font with horizontal RGB coverage for opaque Vulkan windows. Falls back to grayscale rasterization when FreeType LCD coverage is unavailable."
+   "Loads a TrueType font with horizontal RGB coverage for opaque Vulkan and native OpenGL windows. Transparent windows and software OpenGL use grayscale coverage."
    def id = _font_load_impl(path, size, int(filter), glyphs, true)
    if id { _default_font_fail_sizes = _default_font_fail_sizes.delete(max(4, size)) }
    if !id && _is_debug() { ui_profile.print_text("[GFX] LCD font load failed: " + to_str(path)) }
@@ -9689,7 +9718,7 @@ fn draw_text_batch(int font, list lines, f64 x, f64 y, f64 spacing, int color_u3
    "Draws multiple lines of text with minimal interpreter overhead."
    def font_id = _resolve_text_font(font)
    def n_lines = is_list(lines) ? lines.len : 0
-   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && !_font_uses_lcd(font_id) {
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
       def glyphs_ptr = f ? f.get("fast_glyphs", 0) : 0
@@ -9741,7 +9770,7 @@ fn draw_text_runs(int font, list runs, any color=WHITE) bool {
    def font_id = _resolve_text_font(font)
    def n_runs = is_list(runs) ? runs.len : 0
    if n_runs <= 0 { return false }
-   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && !_font_uses_lcd(font_id) {
       _prime_text_runs_list(font_id, runs)
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
@@ -9783,7 +9812,7 @@ fn draw_text_runs_flat(int font, list runs, any color=WHITE) bool {
    def font_id = _resolve_text_font(font)
    def n = is_list(runs) ? runs.len : 0
    if n < 3 { return false }
-   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && !_font_uses_lcd(font_id) {
       _prime_text_runs_flat_list(font_id, runs)
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
@@ -9817,7 +9846,7 @@ fn draw_text_runs_flat_colors(int font, list runs) bool {
    def font_id = _resolve_text_font(font)
    def n = is_list(runs) ? runs.len : 0
    if n < 4 { return false }
-   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && !_font_uses_lcd(font_id) {
       _prime_text_runs_flat_color_list(font_id, runs)
       _font_sync_and_ensure_gpu(font_id)
       def f = _font_get(font_id)
@@ -9938,7 +9967,7 @@ fn _draw_text_impl(int font, any text, f64 x, f64 y, any color=WHITE) bool {
       _draw_text_builtin(text, x, y, packed)
       return true
    }
-   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && font_id > 0 {
+   if _backend == BACKEND_GL && _font_can_use_fast_gl_text() && !_font_uses_lcd(font_id) && font_id > 0 {
       def f = _font_get(font_id)
       def glyphs_ptr = f ? f.get("fast_glyphs", 0) : 0
       if glyphs_ptr {

@@ -12,25 +12,34 @@ use core.common as common
 use core.os.ui.font.truetype as font
 use core.os.ui.render as ui
 use core.os.ui.render.vk as vk
+use core.os.ui.render.gl as gl
 
-fn check_vulkan_lcd(int font_id) {
-   assert(ui.apply_backend_name("vk"), "select Vulkan renderer")
-   assert(ui.init_window(128, 80, "LCD coverage", 0, false, false, 1) && vk._get_device(), "create Vulkan device")
+fn check_gpu_lcd(int font_id, str backend, bool grayscale=false) {
+   assert(ui.apply_backend_name(backend), "select LCD test renderer")
+   assert(ui.init_window(128, 80, "LCD coverage", 0, false, false, 1), "create LCD test window")
+   assert(ui.get_active_backend_name() == backend, "selected renderer remains active")
+   if backend == "vulkan" {
+      assert(vk._get_device(), "create Vulkan device")
+   } else {
+      assert(bool(gl.capabilities().get("software_upload", false)) == grayscale, "select the expected OpenGL drawing mode")
+   }
+   mut fb = 0
    mut frame = 0
    while frame < 3 {
-      if frame == 2 { assert(ui.request_frame_capture(), "request Vulkan readback") }
+      if frame == 2 && backend == "vulkan" { assert(ui.request_frame_capture(), "request Vulkan readback") }
       assert(ui.begin_frame_clear([0.4, 0.4, 0.4, 1.0]), "begin LCD frame")
       ui.set_ortho_2d(0.0, 128.0, 80.0, 0.0)
       assert(ui.draw_text(font_id, "A", 24.0, 26.0, [0.0, 0.0, 0.0, 1.0]), "draw black LCD glyph")
       assert(ui.draw_text_runs(font_id, [["A", 80.0, 26.0]], [1.0, 1.0, 1.0, 1.0]), "draw white LCD glyph")
+      if frame == 2 && backend == "opengl" { fb = ui.read_framebuffer() }
       assert(ui.end_frame(), "present LCD frame")
       frame += 1
    }
-   def fb = ui.read_framebuffer()
+   if backend == "vulkan" { fb = ui.read_framebuffer() }
    def data = fb.get("data", 0)
    def width = int(fb.get("width", 0))
    def height = int(fb.get("height", 0))
-   assert(data && width > 0 && height > 0, "read Vulkan pixels")
+   assert(data && width > 0 && height > 0, "read LCD framebuffer pixels")
    def background = load8(data, 0)
    mut dark_edge = false
    mut light_edge = false
@@ -39,14 +48,15 @@ fn check_vulkan_lcd(int font_id) {
       def red = load8(data, i * 4)
       def green = load8(data, i * 4 + 1)
       def blue = load8(data, i * 4 + 2)
-      if red != green || green != blue {
+      if grayscale { assert(red == green && green == blue, "grayscale fallback has no colored pixels") }
+      if (red == green && green == blue) == grayscale {
          if i % width < width / 2 && int(min(red, min(green, blue))) < background { dark_edge = true }
          if i % width >= width / 2 && int(max(red, max(green, blue))) > background { light_edge = true }
       }
       i += 1
    }
    free(data)
-   assert(dark_edge && light_edge, "Vulkan composites RGB coverage for both black and white glyphs")
+   assert(dark_edge && light_edge, backend + " composites the expected coverage for both black and white glyphs")
    ui.font_destroy(font_id)
    ui.close_window()
 }
@@ -110,7 +120,8 @@ while row < h {
    row += 1
 }
 free(pixels)
-if common.env_truthy("NYTRIX_TEST_LCD_VULKAN") { check_vulkan_lcd(ui_font_id) }
+if common.env_truthy("NYTRIX_TEST_LCD_VULKAN") { check_gpu_lcd(ui_font_id, "vulkan") }
+elif common.env_truthy("NYTRIX_TEST_LCD_OPENGL") { check_gpu_lcd(ui_font_id, "opengl", common.env_truthy("NY_GL_SOFTWARE_DRAW")) }
 else { ui.font_destroy(ui_font_id) }
 print("FONT-LCD-COVERAGE-OK")
 NY
