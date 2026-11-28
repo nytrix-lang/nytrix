@@ -8,8 +8,48 @@ shape font_lcd_coverage {
   expect_stdout "FONT-LCD-COVERAGE-OK"
   source ny <<'NY'
 use core
+use core.common as common
 use core.os.ui.font.truetype as font
 use core.os.ui.render as ui
+use core.os.ui.render.vk as vk
+
+fn check_vulkan_lcd(int font_id) {
+   assert(ui.apply_backend_name("vk"), "select Vulkan renderer")
+   assert(ui.init_window(128, 80, "LCD coverage", 0, false, false, 1) && vk._get_device(), "create Vulkan device")
+   mut frame = 0
+   while frame < 3 {
+      if frame == 2 { assert(ui.request_frame_capture(), "request Vulkan readback") }
+      assert(ui.begin_frame_clear([0.4, 0.4, 0.4, 1.0]), "begin LCD frame")
+      ui.set_ortho_2d(0.0, 128.0, 80.0, 0.0)
+      assert(ui.draw_text(font_id, "A", 24.0, 26.0, [0.0, 0.0, 0.0, 1.0]), "draw black LCD glyph")
+      assert(ui.draw_text_runs(font_id, [["A", 80.0, 26.0]], [1.0, 1.0, 1.0, 1.0]), "draw white LCD glyph")
+      assert(ui.end_frame(), "present LCD frame")
+      frame += 1
+   }
+   def fb = ui.read_framebuffer()
+   def data = fb.get("data", 0)
+   def width = int(fb.get("width", 0))
+   def height = int(fb.get("height", 0))
+   assert(data && width > 0 && height > 0, "read Vulkan pixels")
+   def background = load8(data, 0)
+   mut dark_edge = false
+   mut light_edge = false
+   mut i = 0
+   while i < width * height {
+      def red = load8(data, i * 4)
+      def green = load8(data, i * 4 + 1)
+      def blue = load8(data, i * 4 + 2)
+      if red != green || green != blue {
+         if i % width < width / 2 && int(min(red, min(green, blue))) < background { dark_edge = true }
+         if i % width >= width / 2 && int(max(red, max(green, blue))) > background { light_edge = true }
+      }
+      i += 1
+   }
+   free(data)
+   assert(dark_edge && light_edge, "Vulkan composites RGB coverage for both black and white glyphs")
+   ui.font_destroy(font_id)
+   ui.close_window()
+}
 
 def info = font.load_path("etc/assets/fonts/jetbrains.ttf")
 assert(is_dict(info), "bundled font loads")
@@ -70,7 +110,8 @@ while row < h {
    row += 1
 }
 free(pixels)
-ui.font_destroy(ui_font_id)
+if common.env_truthy("NYTRIX_TEST_LCD_VULKAN") { check_vulkan_lcd(ui_font_id) }
+else { ui.font_destroy(ui_font_id) }
 print("FONT-LCD-COVERAGE-OK")
 NY
 }

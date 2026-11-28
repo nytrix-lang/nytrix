@@ -4,11 +4,12 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_glass_panel, draw_rounded_rect_sdf_clipped, draw_rounded_rect_outline_sdf, draw_rounded_rect_outline_sdf_clipped, draw_rounded_rect_shadow_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
+module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, draw_lcd_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_glass_panel, draw_rounded_rect_sdf_clipped, draw_rounded_rect_outline_sdf, draw_rounded_rect_outline_sdf_clipped, draw_rounded_rect_shadow_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use core
 use core.mem
 use core.math
 use core.math.simmd as simmd
+use core.os.ui.window.consts (WINDOW_TRANSPARENT)
 use core.os.ui.render.vk.state as vk_state
 use core.os.ui.render.vk.vulkan (
    cmd_bind_descriptor_sets, cmd_push_constants, cmd_bind_vertex_buffers, cmd_bind_index_buffer,
@@ -17,7 +18,7 @@ use core.os.ui.render.vk.vulkan (
 
 use core.os.ui.render.dump as ui_profile
 use core.os.ui.render.vk.utils
-use core.os.ui.render.vk.pipeline (blend_op_pipeline, _ensure_circle_pipeline,
+use core.os.ui.render.vk.pipeline (blend_op_pipeline, _ensure_lcd_pipelines, _ensure_circle_pipeline,
    _ensure_ring_pipeline,
    _ensure_rounded_rect_pipeline,
    _ensure_line_pipeline,
@@ -655,6 +656,33 @@ fn draw_glyph(f64 x,
    _vertex_offset += _VKR_VERT_STRIDE * 6
    _prim_rect_quads += 1
    0
+}
+
+fn draw_lcd_glyph(f64 x, f64 y, f64 w, f64 h, list uv, int tex_id, int color) bool {
+   "Composites one horizontal RGB glyph mask onto the current UI target."
+   if !vk_state.frame_open() || tex_id < 0 || uv.len != 4 { return false }
+   if is_str(_cfg_frag_spv) && _cfg_frag_spv.len > 0 { return false }
+   def subpixel = (_current_window_flags & WINDOW_TRANSPARENT) == 0 && _ensure_lcd_pipelines()
+   if !_check_flush(_VKR_VERT_STRIDE * (subpixel ? 12 : 6)) { return false }
+   _begin_ui_triangle_stream(tex_id)
+   _ensure_ui_vertex_material_mode_fast(76)
+   def u0, v0 = float(uv[0]), float(uv[1])
+   def u1, v1 = float(uv[2]), float(uv[3])
+   ;; Keep each glyph's two draws adjacent so overlapping glyphs compose in
+   ;; submission order. Neither pass requires copying the framebuffer.
+   if subpixel {
+      _activate_pipeline_target(_lcd_attenuate_pipeline)
+      _push_rect_tex_direct(_local_vertex_map + _vertex_offset, x, y, w, h, u0, v0, u1, v1, color, _current_tex_index | 0x40000000)
+      _vertex_offset += _VKR_VERT_STRIDE * 6
+      _activate_pipeline_target(_lcd_ink_pipeline)
+   }
+   def index = subpixel ? _current_tex_index | 0x20000000 : _current_tex_index
+   _push_rect_tex_direct(_local_vertex_map + _vertex_offset, x, y, w, h, u0, v0, u1, v1, color, index)
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   _use_default_triangle_pipeline()
+   _ensure_ui_vertex_material_mode_fast(44)
+   _prim_rect_quads += subpixel ? 2 : 1
+   true
 }
 
 fn draw_rect_tex_uv(f64 x,

@@ -2316,6 +2316,7 @@ fn _pack_base_tex_word(int tex_id, int vc_mode) int {
    if band(vc_mode, 8) != 0 { flags = flags | 0x04000000 }
    if band(vc_mode, 16) != 0 { flags = flags | 0x08000000 }
    if band(vc_mode, 32) != 0 { flags = flags | 0x02000000 }
+   if band(vc_mode, 64) != 0 { flags = flags | 0x01000000 }
    if tex_id >= 0 && !_format_is_srgb(texture_format(tex_id)) { flags = flags | 0x02000000 }
    (tex_id >= 0 ? band(tex_id, 0xffff) : 0x80000000) | flags
 }
@@ -3770,7 +3771,7 @@ fn _destroy_pipeline_resources() any {
       _mesh_fast_opaque_nocull_flip_pipeline, _mesh_fast_env_opaque_pipeline, _mesh_fast_env_opaque_nocull_pipeline, _mesh_fast_env_opaque_flip_pipeline,
       _mesh_fast_env_opaque_nocull_flip_pipeline, _flip_pipeline, _flip_unlit_pipeline, _line_pipeline,
       _sdf_line_pipeline, _point_pipeline, _wire_pipeline, _circle_pipeline,
-      _ring_pipeline, _rounded_rect_pipeline, _skybox_pipeline, _target_pipeline
+      _ring_pipeline, _rounded_rect_pipeline, _lcd_attenuate_pipeline, _lcd_ink_pipeline, _skybox_pipeline, _target_pipeline
    ]
    mut seen = dict(64)
    mut i = 0
@@ -3818,6 +3819,8 @@ fn _destroy_pipeline_resources() any {
    _circle_pipeline = 0
    _ring_pipeline = 0
    _rounded_rect_pipeline = 0
+   _lcd_attenuate_pipeline = 0
+   _lcd_ink_pipeline = 0
    _skybox_pipeline = 0
    _target_pipeline = 0
    if _pipeline_layout { destroy_pipeline_layout(_device, _pipeline_layout, 0) }

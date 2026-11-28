@@ -88,6 +88,7 @@ use core.os.ui.render.dump as ui_profile
 use core.os.ui.window as lib_uiw
 use core.os.ui.window.platform as ui_backend
 use core.os.ui.render.vk as lib_vkr
+use core.os.ui.render.vk.draw as lib_vk_draw
 use core.os.ui.render.vk.font as lib_vk_font
 use core.os.ui.render.gl as lib_glr
 use core.os.ui.render.texture as render_texture
@@ -3129,6 +3130,11 @@ fn _ttf_draw_bitmap_glyph(
    if _backend == BACKEND_GL || _backend == BACKEND_VK {
       gx = float(floor(gx + 0.5))
       gy = float(floor(gy + 0.5))
+   }
+   if _backend == BACKEND_VK && bm.get("is_lcd", false) && is_list(uv) {
+      if lib_vk_draw.draw_lcd_glyph(gx, gy, bw, bh, uv, tex_id, _cpu_pack_color(cr, cg, cb, ca)) {
+         return [g_adv, true]
+      }
    }
    if (gl_soft_text || vk_cpu_text) && bdata {
       drew = _draw_glyph_bitmap_scaled_runs(
@@ -8887,7 +8893,7 @@ fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil)
 }
 
 fn font_load_lcd(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
-   "Loads a TrueType font using FreeType LCD coverage when available, with grayscale fallback."
+   "Loads a TrueType font with horizontal RGB coverage for opaque Vulkan windows. Falls back to grayscale rasterization when FreeType LCD coverage is unavailable."
    def id = _font_load_impl(path, size, int(filter), glyphs, true)
    if id { _default_font_fail_sizes = _default_font_fail_sizes.delete(max(4, size)) }
    if !id && _is_debug() { ui_profile.print_text("[GFX] LCD font load failed: " + to_str(path)) }
@@ -9697,7 +9703,7 @@ fn draw_text_batch(int font, list lines, f64 x, f64 y, f64 spacing, int color_u3
          return drew_gl
       }
    }
-   if _backend != BACKEND_VK || !_font_can_use_fast_vk_text() {
+   if _backend != BACKEND_VK || !_font_can_use_fast_vk_text() || _font_uses_lcd(font_id) {
       mut i = 0
       while i < n_lines {
          draw_text(font_id, lines[i], x, y + float(i) * float(spacing), color_u32)
@@ -9754,7 +9760,7 @@ fn draw_text_runs(int font, list runs, any color=WHITE) bool {
          return drew_gl
       }
    }
-   if !_font_can_use_fast_vk_text() {
+   if !_font_can_use_fast_vk_text() || _font_uses_lcd(font_id) {
       _draw_text_runs_list(font_id, runs, color)
       return true
    }
@@ -9787,7 +9793,7 @@ fn draw_text_runs_flat(int font, list runs, any color=WHITE) bool {
          return _gl_draw_text_runs_flat_inner(font_id, runs, col_gl, glyphs_ptr, f.get("ascent", 0.0), f.get("line_height", f.get("size", 16.0)))
       }
    }
-   if !_font_can_use_fast_vk_text() {
+   if !_font_can_use_fast_vk_text() || _font_uses_lcd(font_id) {
       if _mock_fast_text_enabled() { return _draw_text_mock_flat_bars(runs, color) }
       _draw_text_runs_flat_list(font_id, runs, color)
       return true
@@ -9824,7 +9830,7 @@ fn draw_text_runs_flat_colors(int font, list runs) bool {
       _draw_text_runs_flat_color_list(font_id, runs)
       return true
    }
-   if !_font_can_use_fast_vk_text() {
+   if !_font_can_use_fast_vk_text() || _font_uses_lcd(font_id) {
       if _mock_fast_text_enabled() { return _draw_text_mock_flat_color_bars(runs) }
       _draw_text_runs_flat_color_list(font_id, runs)
       return true
@@ -9945,11 +9951,15 @@ fn _draw_text_impl(int font, any text, f64 x, f64 y, any color=WHITE) bool {
    true
 }
 
+fn _font_uses_lcd(int font_id) bool {
+   _dict_bool(_font_get(font_id), "lcd", false)
+}
+
 @jit
 fn _draw_text_ttf_fast(int font_id, str text, f64 x, f64 y, int packed_color) bool {
    if _backend == BACKEND_VK && !_font_can_use_fast_vk_text() { return false }
    def f = _font_get(font_id)
-   if !f { return false }
+   if !f || f.get("lcd", false) { return false }
    def glyphs_ptr = f.get("fast_glyphs", 0)
    if !glyphs_ptr { return false }
    _font_maybe_prime_string(font_id, text)

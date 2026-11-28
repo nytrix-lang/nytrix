@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.pipeline(blend_op_pipeline, compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
+module core.os.ui.render.vk.pipeline(blend_op_pipeline, _ensure_lcd_pipelines, compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
 use core
 use core.mem
 use core.os (file_exists, file_read, file_remove, file_write, ticks)
@@ -109,6 +109,22 @@ fn blend_op_pipeline(int op, int fsrc_code, int fdst_code) ?handle {
    def ?handle pipe = _create_pipeline_ex(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0, 1.0, enc)
    _blend_pipe_set(op, pipe)
    pipe
+}
+
+fn _ensure_lcd_pipelines() bool {
+   if _lcd_attenuate_pipeline && _lcd_ink_pipeline { return true }
+   if !_mesh_pipeline_ready_basic() { return false }
+   if !_lcd_attenuate_pipeline {
+      ;; ZERO / ONE_MINUS_SRC_COLOR
+      def blend = _PIPE_BLEND_FACTORS | _PIPE_BLEND_KEEP_ALPHA | 3
+      _lcd_attenuate_pipeline = _create_pipeline_ex(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0, 1.0, blend)
+   }
+   if !_lcd_ink_pipeline {
+      ;; ONE / ONE
+      def blend = _PIPE_BLEND_FACTORS | _PIPE_BLEND_KEEP_ALPHA | (1 << 4) | 1
+      _lcd_ink_pipeline = _create_pipeline_ex(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0, 1.0, blend)
+   }
+   _lcd_attenuate_pipeline && _lcd_ink_pipeline
 }
 
 fn _blend_custom_pipeline(int fsrc_code, int fdst_code) ?handle {

@@ -358,6 +358,18 @@ void main(){
   vec4 tex = vec4(1.0) ;
   vec2 baseUV = baseUv() ;
   if(!vertexColorPrimary && baseIndex < 1024u){ tex = texture(texSamplers[nonuniformEXT(baseIndex)], baseUV) ; }
+  if((pc.baseTexIndex & 0x01000000u) != 0u){
+    if((vTexIndex & 0x60000000u) == 0u){
+      outColor = vec4(baseTint.rgb, tex.a * baseTint.a) ;
+      return ;
+    }
+    vec3 coverage = tex.rgb * baseTint.a ;
+    // The first draw attenuates the destination by (1 - coverage).
+    // The second adds the foreground multiplied by that same coverage.
+    bool attenuate = (vTexIndex & 0x40000000u) != 0u ;
+    outColor = vec4(attenuate ? coverage : baseTint.rgb * coverage, 0.0) ;
+    return ;
+  }
   vec3 texBaseLinear = tex.rgb ;
 
   uint alphaMode = pc.alphaPacked & 3u ;
