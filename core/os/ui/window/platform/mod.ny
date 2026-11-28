@@ -1466,7 +1466,7 @@ fn set_size(any win, int w, int h) any {
    def native = _native_window(win)
    if b == "x11" { x11_backend.set_size(native, w, h) }
    elif b == "wayland" { wayland_backend.set_size(native, w, h) }
-   elif b == "win32" { win32_impl.set_size(native, w, h) }
+   elif b == "win32" { win32_impl.set_window_size(native, w, h) }
    elif b == "cocoa" { cocoa_impl.set_size(native, w, h) }
 }
 
