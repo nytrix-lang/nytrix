@@ -21,7 +21,7 @@ if target == "win32" || target == "cocoa" {
    def second = window.open_window("Second", 100, 0, 80, 50)
    defer { window.close(second) }
    assert(window.backend() == target && window.id(first) && window.id(second), "two native windows on the requested backend")
-   def first_id, second_id = window.id(first), window.id(second)
+   def int first_id, second_id = int(window.id(first)), int(window.id(second))
    assert(platform.set_size(first, 115, 70), "resize the first native window")
    assert(platform.set_size(second, 155, 90), "resize the second native window")
    mut seen_first, seen_second = false, false
@@ -30,14 +30,14 @@ if target == "win32" || target == "cocoa" {
       window.poll_events()
       mut event = window.check_event(first)
       while event {
-         if window.event_type(event) == event_kind.EVENT_WINDOW_RESIZED && window.event_window_id(event) == first_id && int(window.event_data(event).get("w", 0)) == 115 {
+         if window.event_type(event) == event_kind.EVENT_WINDOW_RESIZED && int(window.event_window_id(event)) == first_id && int(window.event_data(event).get("w", 0)) == 115 {
             seen_first = true
          }
          event = window.check_event(first)
       }
       event = window.check_event(second)
       while event {
-         if window.event_type(event) == event_kind.EVENT_WINDOW_RESIZED && window.event_window_id(event) == second_id && int(window.event_data(event).get("w", 0)) == 155 {
+         if window.event_type(event) == event_kind.EVENT_WINDOW_RESIZED && int(window.event_window_id(event)) == second_id && int(window.event_data(event).get("w", 0)) == 155 {
             seen_second = true
          }
          event = window.check_event(second)

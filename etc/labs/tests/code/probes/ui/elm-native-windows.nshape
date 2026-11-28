@@ -44,8 +44,8 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
    def second = window.open_window("Second", 100, 0, 80, 50)
    defer { window.close(second) }
    assert(window.backend() == target && window.id(first) && window.id(second), "native windows on the requested backend")
-   def first_id = window.id(first)
-   def second_id = window.id(second)
+   def int first_id = int(window.id(first))
+   def int second_id = int(window.id(second))
    def app = elm.new(dict(4))
    elm.subscribe(app, "window.lifecycle", lifecycle_message)
    if target != "wayland" {
