@@ -24,7 +24,7 @@ module core.os.ui.window.platform(
    get_win32_monitor, get_wgl_context, get_cocoa_window, get_nsgl_context, get_cocoa_monitor, get_cocoa_view,
    get_egl_display, get_egl_context, get_egl_surface, get_egl_config, get_osmesa_context,
    get_osmesa_color_buffer, get_osmesa_depth_buffer, get_window_monitor, set_window_monitor,
-   get_x11_selection_string, set_x11_selection_string, set_window_decorated, start_window_move, set_window_floating,
+   get_x11_selection_string, set_x11_selection_string, set_window_decorated, start_window_move, start_file_drag, set_window_floating,
    set_window_resizable, get_clipboard, set_clipboard, text_input_start, text_input_stop,
    text_input_state, get_surface_support, joystick_present,
    get_joystick_axes, get_joystick_buttons, get_joystick_hats, get_joystick_name, get_joystick_guid,
@@ -1776,6 +1776,13 @@ fn start_window_move(any win) bool {
    if backend_name == "win32" { return win32_impl.start_window_move(native) }
    if backend_name == "cocoa" { return cocoa_impl.start_window_move(native) }
    false
+}
+
+fn start_file_drag(any win, str uri_list) bool {
+   "Starts a native file drag from win using a CRLF-separated text/uri-list."
+   if !win || uri_list.len == 0 { return false }
+   if _select_backend_name() != "wayland" { return false }
+   wayland_backend.start_file_drag(_native_window(win), uri_list)
 }
 
 comptime emit _native_set1_all(set_window_floating, x11_backend.set_window_floating, win32_impl.set_window_floating, cocoa_impl.set_window_floating)
