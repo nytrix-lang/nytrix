@@ -28,7 +28,7 @@ module core.os.ui.render(
    init_window, init_mock_surface, close_window, set_active_window, render_init,
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
-   draw_triangles, draw_triangles_clipped, draw_path, draw_path_outline, draw_path_quadratic, draw_path_cubic, draw_polyline, draw_triangle, draw_quad, draw_rect,
+   draw_triangles, draw_triangles_clipped, draw_path, draw_path_outline, draw_path_quadratic, draw_path_cubic, draw_path_commands, draw_polyline, draw_triangle, draw_quad, draw_rect,
    draw_pixel, draw_pixel_v, draw_line_v, draw_line_ex, draw_line_strip,
    draw_rect_v, draw_rect_rec, draw_rect_pro, draw_rect_lines, draw_rect_lines_ex,
    draw_rect_gradient_v, draw_rect_gradient_h, draw_rect_gradient_ex,
@@ -5541,6 +5541,69 @@ fn draw_path_cubic(any start, any control1, any control2, any finish, any color,
       i += 1
    }
    draw_polyline(points, color, thickness)
+}
+
+fn draw_path_commands(list commands, any color, f64 thickness=1.0, bool filled=false, int curve_segments=24) bool {
+   "Draws a single-contour path command list: [M,x,y], [L,x,y], [Q,cx,cy,x,y], [C,c1x,c1y,c2x,c2y,x,y], and [Z]."
+   if !is_list(commands) || commands.len == 0 { return false }
+   curve_segments = int(clamp(curve_segments, 2, 128))
+   mut points = []
+   mut closed = false
+   mut i = 0
+   while i < commands.len {
+      def command = commands[i]
+      if !is_list(command) || command.len == 0 || !is_str(command[0]) || closed { return false }
+      def op = command[0]
+      if op == "M" {
+         if command.len < 3 || points.len != 0 { return false }
+         points = points.append([float(command[1]), float(command[2]), 0.0])
+      } elif op == "L" {
+         if command.len < 3 || points.len == 0 { return false }
+         points = points.append([float(command[1]), float(command[2]), 0.0])
+      } elif op == "Q" {
+         if command.len < 5 || points.len == 0 { return false }
+         def start = points[points.len - 1]
+         def control = [float(command[1]), float(command[2])]
+         def finish = [float(command[3]), float(command[4])]
+         mut step = 1
+         while step <= curve_segments {
+            def t = float(step) / float(curve_segments)
+            def u = 1.0 - t
+            points = points.append([
+               u * u * float(start[0]) + 2.0 * u * t * float(control[0]) + t * t * float(finish[0]),
+               u * u * float(start[1]) + 2.0 * u * t * float(control[1]) + t * t * float(finish[1]),
+               0.0
+            ])
+            step += 1
+         }
+      } elif op == "C" {
+         if command.len < 7 || points.len == 0 { return false }
+         def start = points[points.len - 1]
+         def c1, c2 = [float(command[1]), float(command[2])], [float(command[3]), float(command[4])]
+         def finish = [float(command[5]), float(command[6])]
+         mut step = 1
+         while step <= curve_segments {
+            def t = float(step) / float(curve_segments)
+            def u = 1.0 - t
+            points = points.append([
+               u * u * u * float(start[0]) + 3.0 * u * u * t * float(c1[0]) + 3.0 * u * t * t * float(c2[0]) + t * t * t * float(finish[0]),
+               u * u * u * float(start[1]) + 3.0 * u * u * t * float(c1[1]) + 3.0 * u * t * t * float(c2[1]) + t * t * t * float(finish[1]),
+               0.0
+            ])
+            step += 1
+         }
+      } elif op == "Z" {
+         if command.len != 1 || points.len < 3 { return false }
+         closed = true
+      } else { return false }
+      i += 1
+   }
+   if points.len < 2 { return false }
+   if filled {
+      if !closed { return false }
+      return draw_path(points, color)
+   }
+   draw_polyline(points, color, thickness, closed)
 }
 
 fn draw_polyline(list points, any color, f64 thickness=0.02, bool closed=false) bool {
