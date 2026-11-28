@@ -70,7 +70,7 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
       msleep(5)
       attempts += 1
    }
-   assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs")
+   assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs: model=" + to_str(elm.model(app)) + " first_size=" + to_str(platform.get_size(first_id)) + " second_size=" + to_str(platform.get_size(second_id)))
    if target == "win32" || target == "cocoa" {
       window.maximize(first)
       window.maximize(second)
