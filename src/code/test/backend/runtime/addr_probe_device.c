@@ -13,7 +13,9 @@
 #include "code/backend/runtime/shared.h"
 #include <stdio.h>
 #include <string.h>
+#ifdef __linux__
 #include <sys/mman.h>
+#endif
 
 static int expect(const char *what, uintptr_t p, int want) {
   int got = rt_addr_probe_os(p, 1);
