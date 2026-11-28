@@ -401,6 +401,9 @@ _editor_values["semantic_lines"] = dict(0)
 _editor_values["inlay_path"] = ""
 _editor_values["inlay_requested_path"] = ""
 _editor_values["inlay_lines"] = dict(0)
+_editor_values["inlay_hit_rects"] = []
+_editor_values["inlay_hover_key"] = ""
+_editor_values["inlay_hover_frames"] = 0
 _editor_values["code_lens_path"] = ""
 _editor_values["code_lens_requested_path"] = ""
 _editor_values["code_lens_lines"] = dict(0)
@@ -6258,6 +6261,7 @@ fn _handle_mouse_press(dict lay, any data) int {
       return 0
    }
    if _context_contains(lay, mx, my) { return 0 }
+   if button == 0 && _activate_inlay_hit(_inlay_hit_at(mx, my)) { return 0 }
    if _gui_overlay_live && gui.window_rect("ed_find").len >= 4 && find.is_open(_editor_get("find_state")) {
       def fr = gui.window_rect("ed_find")
       if widgets.hit(mx, my, float(fr.get(0, 0.0)), float(fr.get(1, 0.0)), float(fr.get(2, 0.0)), float(fr.get(3, 0.0))) { return 0 }
@@ -7631,6 +7635,7 @@ fn _append_highlight_runs(list out, str filename, str line, int li, f64 x, f64 y
             for hint in hints {
                if _inlay_col(line, hint) == col + c {
                   def label = _inlay_label(hint)
+                  _record_inlay_hit(hint, line, col + c, x, y, added)
                   result = result.append(label).append(x + _measure_prefix(line, col + c) + added).append(y).append(10006)
                   added += _inlay_width(hint)
                }
@@ -7643,6 +7648,7 @@ fn _append_highlight_runs(list out, str filename, str line, int li, f64 x, f64 y
       for hint in hints {
          if _inlay_col(line, hint) == col {
             def label = _inlay_label(hint)
+            _record_inlay_hit(hint, line, col, x, y, added)
             result = result.append(label).append(x + _measure_prefix(line, col) + added).append(y).append(10006)
             added += _inlay_width(hint)
          }
@@ -7779,6 +7785,83 @@ fn _inlay_col(str line, dict hint) int {
 fn _inlay_width(dict hint) f64 {
    def label = _inlay_label(hint)
    _measure_ui(int(_editor_get("font_body")), label, float(str.utf8_len(label)) * float(_editor_get("FONT_BODY_ADV")))
+}
+
+fn _record_inlay_hit(dict hint, str line, int col, f64 x, f64 y, f64 added) any {
+   def parts = hint.get("parts", [])
+   def label_x = x + _measure_prefix(line, col) + added
+   def padding = _measure_ui(int(_editor_get("font_body")), " ", float(_editor_get("FONT_BODY_ADV")))
+   mut f64 at = label_x
+   if bool(hint.get("padding_left", false)) { at += padding }
+   if parts.len <= 0 {
+      _editor_values["inlay_hit_rects"] = _editor_get("inlay_hit_rects").append([label_x, y, _inlay_width(hint), float(ed.LINE_H), hint, dict(0)])
+      return 0
+   }
+   for part in parts {
+      def value = to_str(part.get("value", ""))
+      def width = _measure_ui(int(_editor_get("font_body")), value, float(str.utf8_len(value)) * float(_editor_get("FONT_BODY_ADV")))
+      _editor_values["inlay_hit_rects"] = _editor_get("inlay_hit_rects").append([at, y, width, float(ed.LINE_H), hint, part])
+      at += width
+   }
+   0
+}
+
+fn _inlay_hit_at(f64 x, f64 y) list {
+   def hits = _editor_get("inlay_hit_rects")
+   mut int i = hits.len - 1
+   while i >= 0 {
+      def hit = hits.get(i, [])
+      if hit.len >= 6 && widgets.hit(x, y, float(hit.get(0, 0.0)), float(hit.get(1, 0.0)), float(hit.get(2, 0.0)), float(hit.get(3, 0.0))) { return hit }
+      i -= 1
+   }
+   []
+}
+
+fn _draw_inlay_tooltip(dict lay) int {
+   def p = window.mouse_pos(_editor_get("win"))
+   def hit = _inlay_hit_at(float(p.get(0, 0.0)), float(p.get(1, 0.0)))
+   if hit.len < 6 {
+      _editor_values["inlay_hover_key"] = ""
+      _editor_values["inlay_hover_frames"] = 0
+      return 0
+   }
+   def hint = hit.get(4, dict(0))
+   def part = hit.get(5, dict(0))
+   mut tip = to_str(part.get("tooltip", hint.get("tooltip", "")))
+   if tip.len <= 0 { return 0 }
+   def key = to_str(hint.get("line", -1)) + ":" + to_str(hint.get("col", -1)) + ":" + to_str(hit.get(0, 0.0))
+   if key == to_str(_editor_get("inlay_hover_key")) {
+      _editor_values["inlay_hover_frames"] = int(_editor_get("inlay_hover_frames")) + 1
+   } else {
+      _editor_values["inlay_hover_key"] = key
+      _editor_values["inlay_hover_frames"] = 1
+   }
+   if int(_editor_get("inlay_hover_frames")) < 18 { return 0 }
+   def font = int(_editor_get("font_small"))
+   def sw = _layout_sw(lay)
+   def sh = _layout_sh(lay)
+   def width = min(max(_measure_ui(font, tip, 0.0) + 14.0, 72.0), max(72.0, sw - 16.0))
+   def height = float(ed.LINE_H) + 8.0
+   def tx = min(max(float(p.get(0, 0.0)) + 14.0, 8.0), max(8.0, sw - width - 8.0))
+   def ty = min(max(float(p.get(1, 0.0)) + 18.0, 8.0), max(8.0, sh - height - 8.0))
+   _fill_rect(tx, ty, width, height, C_RAIL)
+   _stroke_rect(tx, ty, width, height, C_LINE_2, 1.0)
+   _text(font, tip, tx + 7.0, ty + 5.0, C_TEXT)
+   1
+}
+
+fn _activate_inlay_hit(list hit) bool {
+   if hit.len < 6 { return false }
+   def hint = hit.get(4, dict(0))
+   def part = hit.get(5, dict(0))
+   def edits = hint.get("text_edits", [])
+   if edits.len > 0 { _lsp_apply_current(edits, "inlay hint") return true }
+   def command = part.get("command", dict(0))
+   if is_dict(command) && to_str(command.get("command", "")).len > 0 {
+      _editor_values["lsp_state"] = lsp.execute_command(_lsp(), to_str(command.get("command", "")), command.get("arguments", []))
+      return true
+   }
+   false
 }
 
 fn _visual_prefix(str line, int li, int col) f64 {
@@ -8751,6 +8834,7 @@ fn _queue_fold_markers(dict lay, list view, int start, int rows) int {
 }
 
 fn _draw_editor(dict lay, bool caret) int {
+   _editor_values["inlay_hit_rects"] = []
    def x = float(lay.get("edit_x", 0.0))
    def y = float(lay.get("edit_y", 0.0))
    def w = float(lay.get("edit_w", 0.0))
@@ -8829,6 +8913,7 @@ fn _draw_editor(dict lay, bool caret) int {
    _flush_rects()
    if line_runs.len > 0 { gfx.draw_text_runs_flat(int(_editor_get("font_small")), line_runs, C_MUTED) }
    if text_runs.len > 0 { _draw_editor_body_runs(int(_editor_get("font_body")), text_runs) }
+   _draw_inlay_tooltip(lay)
    if lens_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), lens_runs) }
    if blame_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), blame_runs) }
    _draw_minimap(lay, rows, start_vis, view.len)
@@ -9950,6 +10035,15 @@ if probe_flags.get("SYNTAX", false) {
    _touch_content()
    assert(to_str(_editor_values.get("semantic_path", "")) == "", "editing clears stale semantic tokens")
    assert(_inlays_for_line(0).len == 0, "editing clears stale inlays")
+   _editor_values["inlay_path"] = "/tmp/semantic.ny"
+   _editor_values["inlay_lines"] = {"0": [{"line": 0, "col": 2, "label": ": int", "padding_left": true, "padding_right": true, "parts": [{"value": ": ", "tooltip": "inferred type"}, {"value": "int"}], "text_edits": [{"line": 0, "col": 0, "end_line": 0, "end_col": 5, "text": "value"}]}]}
+   _editor_values["inlay_hit_rects"] = []
+   _append_highlight_runs([], "semantic.ny", "thing", 0, 0.0, 0.0, false)
+   def inlay_rects = _editor_get("inlay_hit_rects")
+   def inlay_rect = inlay_rects.get(0, [])
+   def inlay_hit = _inlay_hit_at(float(inlay_rect.get(0, 0.0)) + 1.0, float(inlay_rect.get(1, 0.0)) + 1.0)
+   assert(inlay_rects.len == 2 && to_str(inlay_hit.get(5, dict(0)).get("tooltip", "")) == "inferred type", "inlay label parts have tooltip hit regions")
+   assert(_activate_inlay_hit(inlay_hit) && _current_text() == "value", "clicking an inlay applies its server text edit")
    _editor_get("st")["buffers"] = old_buffers
    _editor_get("st")["active"] = old_active
    mut big = []

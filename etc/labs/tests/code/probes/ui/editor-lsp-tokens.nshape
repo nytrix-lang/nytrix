@@ -49,9 +49,11 @@ st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["event", "dec
 def standard = lsp.decode_semantic_tokens(st, {"data": [0, 0, 3, 0, 0, 0, 4, 3, 1, 0, 0, 4, 3, 2, 0, 0, 4, 3, 3, 0, 0, 4, 3, 4, 0]})
 def standard_runs = lsp.merge_semantic_tokens(st, "abc def ghi jkl mno", [[syntax.TOK_COMMENT, 0, 19]], standard)
 assert(merged_kind(standard_runs, 1) == syntax.TOK_PROPERTY && merged_kind(standard_runs, 5) == syntax.TOK_DIRECTIVE && merged_kind(standard_runs, 9) == syntax.TOK_LABEL && merged_kind(standard_runs, 13) == syntax.TOK_TEXT && merged_kind(standard_runs, 17) == syntax.TOK_FUNCTION, "all remaining standard semantic token kinds overlay lexical colors")
-def hints = lsp.decode_inlay_hints([{"position": {"line": 1, "character": 3}, "label": [{"value": ": "}, {"value": "i32"}], "paddingLeft": true}])
+def hints = lsp.decode_inlay_hints([{"position": {"line": 1, "character": 3}, "label": [{"value": ": "}, {"value": "i32", "tooltip": {"kind": "markdown", "value": "inferred **i32**"}, "location": {"uri": "file:///tmp/a.ny"}}], "paddingLeft": true, "tooltip": "inferred type", "textEdits": [{"range": {"start": {"line": 1, "character": 3}, "end": {"line": 1, "character": 3}}, "newText": " : i32"}]}])
 def hint = hints.get(0, dict(0))
 assert(hints.len == 1 && to_str(hint.get("label", "")) == ": i32" && bool(hint.get("padding_left", false)), "inlay label parts and padding")
+assert(to_str(hint.get("tooltip", "")) == "inferred type" && to_str(hint.get("parts", []).get(1, dict(0)).get("tooltip", "")) == "inferred **i32**", "inlay tooltip data survives decoding")
+assert(to_str(hint.get("parts", []).get(1, dict(0)).get("location", dict(0)).get("uri", "")) == "file:///tmp/a.ny" && to_str(hint.get("text_edits", []).get(0, dict(0)).get("text", "")) == " : i32", "inlay navigation and edit payloads survive decoding")
 def lenses = lsp.decode_code_lenses([
    {"range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}}, "command": {"title": "Run", "command": "nytrix.run", "arguments": [{"uri": "file:///tmp/a.ny", "line": 2}]}},
    {"range": {"start": {"line": 4, "character": 1}, "end": {"line": 4, "character": 1}}, "command": "legacy.lens", "arguments": []},

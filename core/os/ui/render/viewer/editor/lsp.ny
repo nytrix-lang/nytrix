@@ -665,7 +665,22 @@ fn decode_inlay_hints(any res) list {
       def pos = hint.get("position", dict(0))
       def any label = hint.get("label", nil)
       mut text = ""
-      if is_list(label) { for part in label { if is_dict(part) { text = text + to_str(part.get("value", "")) } } }
+      mut parts = []
+      if is_list(label) {
+         for part in label {
+            if !is_dict(part) { continue }
+            def value = to_str(part.get("value", ""))
+            text = text + value
+            mut dict decoded_part = {"value": value}
+            def tip = part.get("tooltip", nil)
+            if !is_nil(tip) { decoded_part["tooltip"] = _markup(tip) }
+            def location = part.get("location", nil)
+            if is_dict(location) { decoded_part["location"] = location }
+            def command = part.get("command", nil)
+            if is_dict(command) { decoded_part["command"] = command }
+            parts = parts.append(decoded_part)
+         }
+      }
       elif is_str(label) { text = to_str(label) }
       if text.len == 0 { continue }
       mut dict item = dict(8)
@@ -675,6 +690,10 @@ fn decode_inlay_hints(any res) list {
       item["kind"] = int(hint.get("kind", 0))
       item["padding_left"] = bool(hint.get("paddingLeft", false))
       item["padding_right"] = bool(hint.get("paddingRight", false))
+      item["parts"] = parts
+      def tooltip = hint.get("tooltip", nil)
+      if !is_nil(tooltip) { item["tooltip"] = _markup(tooltip) }
+      item["text_edits"] = _text_edits(hint.get("textEdits", []))
       item["raw"] = hint
       out = out.append(item)
    }
