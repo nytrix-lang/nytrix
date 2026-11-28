@@ -149,7 +149,8 @@ jobs:
             mkdir -p build/ci
             pattern="${CI_PATTERN:-elm-native-windows.nshape}"
             fixture="etc/labs/tests/code/probes/ui/${pattern##*/}"
-            args=(--no-stdlib --cold --no-debug-failures --pattern "${pattern##*/}" "$fixture")
+            args=(--no-stdlib --cold --pattern "${pattern##*/}" "$fixture")
+            if [[ "$CI_REPLAY" == true ]]; then args+=(--with-replay); else args+=(--no-debug-failures); fi
             if [[ "${{ matrix.platform }}" == ubuntu ]]; then
               set +e
               xvfb-run -a ./make -j 1 test "${args[@]}" 2>&1 | tee build/ci/tests.log
