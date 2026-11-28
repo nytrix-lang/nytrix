@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.font
 ;; - core.os
-module core.os.ui.font.truetype(load, load_path, unload, shutdown, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_box)
+module core.os.ui.font.truetype(load, load_path, unload, shutdown, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_bitmap_lcd, get_glyph_box)
 use core
 use core.mem
 use core.math.checked (checked_mul)
@@ -371,11 +371,12 @@ fn get_kern(any info, int g1, int g2, int px=0) float {
    float(kx_s) / 64.0
 }
 
-fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
-   "Rasterizes glyph `gi` at the requested pixel scale and returns bitmap metadata."
+fn _get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi, bool lcd) any {
+   "Rasterizes glyph `gi`, optionally preserving FreeType's three LCD coverage samples per pixel."
    def face = info.get("face", 0)
    if !face { return 0 }
    def is_color_font = info.get("is_color", false)
+   if lcd && is_color_font { return 0 }
    def is_scalable = info.get("is_scalable", true)
    mut px = 0
    if is_color_font || !is_scalable { px = __flt_to_int(scale_y + 0.5) } else {
@@ -391,6 +392,7 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    ;; not force auto-hinting here: at editor sizes it visibly distorts some
    ;; mono glyph stems and makes text look stretched/jagged.
    mut load_flags = 4
+   if lcd { load_flags = load_flags | 0x30000 }
    if is_color_font { load_flags = load_flags | 0x100000 }
    def rc = _ft_load_glyph(_raw_ptr(face), gi, load_flags)
    if rc != 0 { return 0 }
@@ -399,7 +401,8 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    if !gs { return 0 }
    def ptr gs_p = _raw_ptr(gs)
    def int rows  = _load_i32_h(gs_p, 152)
-   def int width = _load_i32_h(gs_p, 156)
+   def int source_width = _load_i32_h(gs_p, 156)
+   def int width = lcd ? source_width / 3 : source_width
    def int pitch = _load_i32_h(gs_p, 160)
    def src   = load64_h(gs_p, 168)
    def ptr src_p = _raw_ptr(src)
@@ -407,7 +410,8 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    def int bt_s = _load_i32_h(gs_p, 196)
    def int mode  = _load_u8_h(gs_p, 178)
    def int pitch_s = pitch
-   if rows <= 0 || width <= 0 {
+   if lcd && mode != 5 { return 0 }
+   if rows <= 0 || source_width <= 0 || width <= 0 || (lcd && source_width % 3 != 0) {
       mut res = dict(16)
       res["data"] = 0
       res["width"] = 0
@@ -446,13 +450,23 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    memset(bmp, 0, bsize)
    mut int abs_pitch = pitch_s
    if abs_pitch < 0 { abs_pitch = -abs_pitch }
+   mut int min_source_row = source_width * (mode == 7 ? 4 : 1)
+   if mode == 1 { min_source_row = (source_width + 7) / 8 }
+   if abs_pitch < min_source_row { return 0 }
    for row_idx in 0..(rows - 1) {
       mut int row_src = 0
       if pitch_s > 0 { row_src = row_idx * pitch_s } else { row_src = (rows - 1 - row_idx) * abs_pitch }
       def int row_dst = row_idx * width * 4
       for col_idx in 0..(width - 1) {
          def int dst = row_dst + col_idx * 4
-         if mode == 7 {
+         if lcd && mode == 5 {
+            def int sx = row_src + col_idx * 3
+            def int red = _load_u8_h(src_p, sx)
+            def int green = _load_u8_h(src_p, sx + 1)
+            def int blue = _load_u8_h(src_p, sx + 2)
+            def int alpha = (red + green + blue + 1) / 3
+            store32(bmp, red | (green << 8) | (blue << 16) | (alpha << 24), dst)
+         } elif mode == 7 {
             def int sx = row_src + col_idx * 4
             def int pixel = _load_u8_h(src_p, sx+2)|(_load_u8_h(src_p, sx+1)<<8)|(_load_u8_h(src_p, sx)<<16)|(_load_u8_h(src_p, sx+3)<<24)
             store32(bmp, pixel, dst)
@@ -477,6 +491,17 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    res["yoff"] = bt_s
    res["bpp"] = 4
    res["is_color"] = (mode == 7)
+   res["is_lcd"] = lcd && mode == 5
    bitmap_cleanup = 0
    res
+}
+
+fn get_glyph_bitmap(dict info, any scale_x, any scale_y, int gi) any {
+   "Rasterizes a grayscale or color glyph into RGBA bitmap metadata."
+   _get_glyph_bitmap(info, scale_x, scale_y, gi, false)
+}
+
+fn get_glyph_bitmap_lcd(dict info, any scale_x, any scale_y, int gi) any {
+   "Rasterizes an RGB LCD glyph and returns one RGB coverage triplet per output pixel."
+   _get_glyph_bitmap(info, scale_x, scale_y, gi, true)
 }
