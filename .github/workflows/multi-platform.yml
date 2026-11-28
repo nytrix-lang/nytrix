@@ -77,7 +77,7 @@ jobs:
       CI_OPT: ${{ inputs.optimization || 'O3' }}
       NYTRIX_TEST_DIAG_DIR: build/ci/diagnostics
       NY_TEST_ELM_PLATFORM: ${{ inputs.mode == 'ui' && (matrix.platform == 'windows' && 'win32' || matrix.platform == 'macos' && 'cocoa' || 'x11') || '' }}
-      NYTRIX_TEST_ALLOW_DISPLAY: ${{ inputs.mode == 'ui' && matrix.platform == 'ubuntu' && '1' || '0' }}
+      NYTRIX_TEST_ALLOW_DISPLAY: ${{ inputs.mode == 'ui' && '1' || '0' }}
     steps:
       # Toolchain: no emulators or cross-compiler packages.
       - name: Check out source and version history
