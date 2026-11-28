@@ -1,0 +1,34 @@
+shape ui_path_primitives {
+  family "runtime/ui"
+  generator "regression"
+  features [ui gpu paths triangulation framebuffer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --jit -O0"
+  expect compile_and_run
+  expect_stdout "UI-PATH-PRIMITIVES-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+
+assert(gfx.apply_backend_name("mock"), "select software renderer")
+def win = gfx.init_window(64, 64, "UI path probe", 0, false, false, 1)
+assert(win, "software window")
+assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin frame")
+gfx.set_ortho_2d(0.0, 64.0, 64.0, 0.0)
+assert(gfx.draw_path([[8.0, 8.0], [48.0, 8.0], [48.0, 24.0], [24.0, 24.0], [24.0, 48.0], [8.0, 48.0]], [1.0, 0.0, 0.0, 1.0]), "triangulate concave L contour")
+assert(gfx.draw_path_outline([[34.0, 32.0], [54.0, 32.0], [54.0, 54.0], [34.0, 54.0]], [0.0, 0.0, 1.0, 1.0], 2.0), "stroke closed path")
+assert(gfx.end_frame(), "present frame")
+def frame = gfx.read_framebuffer()
+def ptr pixels = __ffi_untag_ptr(frame.get("data", 0))
+assert(pixels, "framebuffer readback")
+def int filled = load8(pixels, (40 * 64 + 16) * 4) & 255
+def int notch = load8(pixels, (40 * 64 + 40) * 4) & 255
+def int outline = load8(pixels, (32 * 64 + 44) * 4 + 2) & 255
+free(pixels)
+assert(filled > 220, "concave fill covers the L arm")
+assert(notch > 245, "concave fill leaves the notch transparent")
+assert(outline > 180, "closed path outline renders")
+gfx.close_window()
+print("UI-PATH-PRIMITIVES-OK")
+NY
+}

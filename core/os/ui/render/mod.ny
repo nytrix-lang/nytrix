@@ -28,7 +28,7 @@ module core.os.ui.render(
    init_window, init_mock_surface, close_window, set_active_window, render_init,
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
-   draw_triangles, draw_polyline, draw_triangle, draw_quad, draw_rect,
+   draw_triangles, draw_path, draw_path_outline, draw_polyline, draw_triangle, draw_quad, draw_rect,
    draw_pixel, draw_pixel_v, draw_line_v, draw_line_ex, draw_line_strip,
    draw_rect_v, draw_rect_rec, draw_rect_pro, draw_rect_lines, draw_rect_lines_ex,
    draw_rect_gradient_v, draw_rect_gradient_h, draw_rect_gradient_ex,
@@ -5352,6 +5352,93 @@ fn draw_triangles(list vertices, any color) bool {
       i += 1
    }
    _draw_triangles_impl(verts, tri_count)
+}
+
+fn _path_cross(any a, any b, any c) f64 {
+   (float(b.get(0, 0.0)) - float(a.get(0, 0.0))) * (float(c.get(1, 0.0)) - float(a.get(1, 0.0))) -
+      (float(b.get(1, 0.0)) - float(a.get(1, 0.0))) * (float(c.get(0, 0.0)) - float(a.get(0, 0.0)))
+}
+
+fn _path_point_in_triangle(any p, any a, any b, any c, f64 winding) bool {
+   def e = 0.000001
+   _path_cross(a, b, p) * winding >= -e &&
+      _path_cross(b, c, p) * winding >= -e &&
+      _path_cross(c, a, p) * winding >= -e
+}
+
+fn draw_path(list points, any color) bool {
+   "Fills a simple concave or convex polygon path with ear clipping. The contour must be non-self-intersecting."
+   if !is_list(points) || points.len < 3 || points.len > 2048 { return false }
+   mut contour = []
+   mut i = 0
+   while i < points.len {
+      def p = points[i]
+      if !is_list(p) || p.len < 2 { return false }
+      if contour.len == 0 || float(p.get(0, 0.0)) != float(contour[contour.len - 1].get(0, 0.0)) || float(p.get(1, 0.0)) != float(contour[contour.len - 1].get(1, 0.0)) {
+         contour = contour.append(p)
+      }
+      i += 1
+   }
+   if contour.len > 3 && float(contour[0].get(0, 0.0)) == float(contour[contour.len - 1].get(0, 0.0)) && float(contour[0].get(1, 0.0)) == float(contour[contour.len - 1].get(1, 0.0)) {
+      contour = slice(contour, 0, contour.len - 1)
+   }
+   def n = contour.len
+   if n < 3 { return false }
+   mut area = 0.0
+   i = 0
+   while i < n {
+      def p, q = contour[i], contour[(i + 1) % n]
+      area += float(p.get(0, 0.0)) * float(q.get(1, 0.0)) - float(q.get(0, 0.0)) * float(p.get(1, 0.0))
+      i += 1
+   }
+   if abs(area) <= 0.000001 { return false }
+   def winding = area > 0.0 ? 1.0 : -1.0
+   mut remaining = []
+   i = 0
+   while i < n { remaining = remaining.append(i) i += 1 }
+   mut triangles = []
+   mut attempts = 0
+   while remaining.len > 3 && attempts < n * n {
+      mut ear = false
+      i = 0
+      while i < remaining.len && !ear {
+         def prev_i = remaining[(i + remaining.len - 1) % remaining.len]
+         def curr_i = remaining[i]
+         def next_i = remaining[(i + 1) % remaining.len]
+         def a, b, c = contour[prev_i], contour[curr_i], contour[next_i]
+         if _path_cross(a, b, c) * winding > 0.000001 {
+            mut contains = false
+            mut j = 0
+            while j < remaining.len && !contains {
+               def test_i = remaining[j]
+               if test_i != prev_i && test_i != curr_i && test_i != next_i && _path_point_in_triangle(contour[test_i], a, b, c, winding) { contains = true }
+               j += 1
+            }
+            if !contains {
+               triangles = triangles.append([a, b, c])
+               mut next_remaining = []
+               mut ri = 0
+               while ri < remaining.len {
+                  if ri != i { next_remaining = next_remaining.append(remaining[ri]) }
+                  ri += 1
+               }
+               remaining = next_remaining
+               ear = true
+            }
+         }
+         i += 1
+      }
+      if !ear { return false }
+      attempts += 1
+   }
+   if remaining.len != 3 { return false }
+   triangles = triangles.append([contour[remaining[0]], contour[remaining[1]], contour[remaining[2]]])
+   draw_triangles(triangles, color)
+}
+
+fn draw_path_outline(list points, any color, f64 thickness=1.0) bool {
+   "Strokes a closed path contour with connected line segments."
+   draw_polyline(points, color, thickness, true)
 }
 
 fn draw_polyline(list points, any color, f64 thickness=0.02, bool closed=false) bool {
