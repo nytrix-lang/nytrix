@@ -28,6 +28,7 @@ while frame < 3 {
    gfx.set_ortho_2d(0.0, 64.0, 64.0, 0.0)
    assert(gfx.draw_rect_rounded_shadow_sdf_clipped(20.0, 20.0, 24.0, 24.0, 7.0, 7.0, 6.0, 0.0, [0.0, 0.0, 0.0, 0.8], [0.0, 0.0, 54.0, 64.0]), "submit clipped shadow")
    assert(gfx.draw_rect_rounded_sdf(20.0, 20.0, 24.0, 24.0, 7.0, [1.0, 1.0, 1.0, 1.0]), "submit rounded surface")
+   if frame == 2 { assert(gfx.draw_scissored(4.0, 4.0, 8.0, 8.0, _draw_scissored_probe), "scope clipping around the renderer callback") }
    assert(gfx.end_frame(), "present frame")
    frame += 1
 }
@@ -47,19 +48,11 @@ def int left = sample(pixels, fb_width, fb_height, 16, 31)
 def int near = sample(pixels, fb_width, fb_height, 49, 31)
 def int far = sample(pixels, fb_width, fb_height, 52, 31)
 def int clipped = sample(pixels, fb_width, fb_height, 54, 31)
-free(pixels)
 assert(body > 245 && left > 245 && near > 35 && near < far && far < 220 && clipped > 245,
    "shadow uses its offset, feathers toward the edge, preserves the body, and obeys clip: " + to_str([body, left, near, far, clipped]))
-assert(gfx.begin_frame_clear([1.0, 1.0, 1.0, 1.0]), "begin generic scissor frame")
-gfx.set_ortho_2d(0.0, 64.0, 64.0, 0.0)
-assert(gfx.draw_scissored(4.0, 4.0, 8.0, 8.0, _draw_scissored_probe), "scope clipping around the renderer callback")
-assert(gfx.end_frame(), "present generic scissor frame")
-def scoped = gfx.read_framebuffer()
-def ptr scoped_pixels = __ffi_untag_ptr(scoped.get("data", 0))
-assert(scoped_pixels, "generic scissor framebuffer pixels are available")
-def int scoped_inside = sample(scoped_pixels, int(scoped.get("width", 0)), int(scoped.get("height", 0)), 8, 8)
-def int scoped_outside = sample(scoped_pixels, int(scoped.get("width", 0)), int(scoped.get("height", 0)), 14, 8)
-free(scoped_pixels)
+def int scoped_inside = sample(pixels, fb_width, fb_height, 8, 8)
+def int scoped_outside = sample(pixels, fb_width, fb_height, 14, 8)
+free(pixels)
 assert(scoped_inside < 20 && scoped_outside > 245,
    "generic callback clipping applies in this backend and restores afterward: " + to_str([scoped_inside, scoped_outside]))
 gfx.close_window()
