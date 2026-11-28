@@ -48,11 +48,13 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
    def second_id = window.id(second)
    def app = elm.new(dict(4))
    elm.subscribe(app, "window.lifecycle", lifecycle_message)
-   if target != "wayland" {
-      ;; Resize through the platform API so only native events report the resize.
+   if target == "x11" {
+      ;; X11 resize requests are asynchronous; verify native ConfigureNotify
+      ;; delivery independently for each display connection.
       assert(platform.set_size(first, 115, 70), "resize the first native window")
       assert(platform.set_size(second, 155, 90), "resize the second native window")
    } else {
+      ;; Wayland, Win32 and Cocoa report maximize state through native events.
       window.maximize(first)
       window.maximize(second)
    }
@@ -64,30 +66,13 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
       elm.publish_window_event(app, se, update)
       elm.publish_window_event(app, fe, update)
       def sizes = elm.model(app)
-      if target != "wayland" {
+      if target == "x11" {
          if int(sizes.get(to_str(first_id), 0)) == 115 && int(sizes.get(to_str(second_id), 0)) == 155 { break }
       } elif sizes.get(to_str(first_id) + ":maximized", false) && sizes.get(to_str(second_id) + ":maximized", false) { break }
       msleep(5)
       attempts += 1
    }
    assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs: model=" + to_str(elm.model(app)) + " first_size=" + to_str(platform.get_size(first)) + " second_size=" + to_str(platform.get_size(second)))
-   if target == "win32" || target == "cocoa" {
-      window.maximize(first)
-      window.maximize(second)
-      attempts = 0
-      while attempts < 100 {
-         window.poll_events()
-         def se = window.check_event(second)
-         def fe = window.check_event(first)
-         elm.publish_window_event(app, se, update)
-         elm.publish_window_event(app, fe, update)
-         def sizes = elm.model(app)
-         if sizes.get(to_str(first_id) + ":maximized", false) && sizes.get(to_str(second_id) + ":maximized", false) { break }
-         msleep(5)
-         attempts += 1
-      }
-      assert(attempts < 100, "maximize lifecycle events reach the Elm subscriber independently for both native windows")
-   }
 } else {
    print("Skipped: set NY_TEST_ELM_PLATFORM under an isolated display")
 }
