@@ -1346,6 +1346,13 @@ fn _drag_updated(any self, any sel, any sender) int {
    1
 }
 
+fn _drag_destination_window(any sender) any {
+   "Returns the tracked NSWindow receiving this drag, without assuming key-window focus."
+   if !sender { return 0 }
+   def hwnd = objc_msgSend_ptr(sender, get_selector("draggingDestinationWindow"))
+   _find_window_by_handle(hwnd)
+}
+
 fn _drag_performed(any self, any sel, any sender) bool {
    "NSDraggingDestination performDragOperation: — reads pasteboard, pushes EVENT_DROP."
    if !sender { return false }
@@ -1366,8 +1373,7 @@ fn _drag_performed(any self, any sel, any sender) bool {
          idx += 1
       }
    }
-   def hwnd = _last_key_window()
-   def win = _find_window_by_handle(hwnd)
+   def win = _drag_destination_window(sender)
    if win && paths.len > 0 {
       mut data = dict(8)
       data = data.set("paths", paths)
