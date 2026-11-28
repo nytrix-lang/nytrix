@@ -6352,6 +6352,21 @@ fn draw_rect_rounded_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, any color) bool
    draw_rect_rounded(x, y, w, h, radius, color, 48)
 }
 
+fn draw_glass_panel(f64 x, f64 y, f64 w, f64 h, f64 radius, any color,
+   f64 blur=8.0, f64 refraction=1.5, f64 rim_width=1.5, f64 rim_strength=0.28) bool {
+   "Draws a frosted rounded glass panel. Vulkan samples the current framebuffer; other backends draw a translucent rounded tint and rim."
+   if w <= 0.0 || h <= 0.0 { return false }
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 0.78)
+   if _backend == BACKEND_VK {
+      return lib_vkr.draw_glass_panel(x, y, w, h, radius, r, g, b, a, blur, refraction, rim_width, rim_strength)
+   }
+   def tint = [r, g, b, min(a, 0.42)]
+   draw_rect_rounded_sdf(x, y, w, h, radius, tint)
+   draw_rect_rounded_sdf_outline(x, y, w, h, radius, max(0.5, rim_width), [1.0, 1.0, 1.0, min(0.65, rim_strength)])
+   true
+}
+
 fn draw_rect_rounded_sdf_outline(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 thickness, any color) bool {
    "Draws a rounded-rectangle outline. Vulkan evaluates the stroke in its SDF; OpenGL and software use the rounded line mesh."
    if w <= 0.0 || h <= 0.0 || thickness <= 0.0 { return false }

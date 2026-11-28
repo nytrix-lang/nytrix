@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.renderer(renderer_config, init, _update_default_mvp, _mvp_matrix, set_model_matrix, set_mvp, set_ortho, set_perspective, set_frame_time_sec, begin_frame, set_unlit, set_target_pipeline, set_double_sided, set_vertex_color_mode, _sync_pc, _flush, _check_flush, set_next_frame_load_color, set_scissor_rect, reset_scissor_rect, end_frame, _end_frame_internal, clear, clear_depth, set_clear_color, shutdown, set_wireframe, request_frame_capture, _take_frame_capture, capture_scene_color_resume_pass, clear_scene_color_capture, _create_instance, _create_surface, _pick_physical_device, _create_logical_device, _choose_composite_alpha, _choose_present_mode, set_mask, _create_headless_image, _create_swapchain, _create_swapchain_image_views, _destroy_swapchain_objects, _recreate_swapchain, _create_image_views, _create_depth_resources, _create_render_pass, _create_framebuffers, _create_sync_objects, _create_command_pool, _create_command_buffers, notify_window_resize, get_swapchain_size, get_swapchain_width, get_swapchain_height, set_cam_pos, set_env_tex, set_env_spec_tex, set_scene_lights, set_scene_lights_slab, set_ui_material, set_material_from_slab, set_material_from_slab_base, draw_parts_flat, draw_parts_flat_range, draw_parts_flat_range_no_restore, draw_parts_flat_range_state_no_restore, draw_part_flat_no_restore, draw_part0_flat_no_restore, draw_part0_flat_state_no_restore, debug_stage)
+module core.os.ui.render.vk.renderer(renderer_config, init, _update_default_mvp, _mvp_matrix, set_model_matrix, set_mvp, set_ortho, set_perspective, set_frame_time_sec, begin_frame, set_unlit, set_target_pipeline, set_double_sided, set_vertex_color_mode, _sync_pc, _flush, _check_flush, set_next_frame_load_color, set_scissor_rect, reset_scissor_rect, end_frame, _end_frame_internal, clear, clear_depth, set_clear_color, shutdown, set_wireframe, request_frame_capture, _take_frame_capture, capture_scene_color_resume_pass, scene_color_capture_texture_id, clear_scene_color_capture, _create_instance, _create_surface, _pick_physical_device, _create_logical_device, _choose_composite_alpha, _choose_present_mode, set_mask, _create_headless_image, _create_swapchain, _create_swapchain_image_views, _destroy_swapchain_objects, _recreate_swapchain, _create_image_views, _create_depth_resources, _create_render_pass, _create_framebuffers, _create_sync_objects, _create_command_pool, _create_command_buffers, notify_window_resize, get_swapchain_size, get_swapchain_width, get_swapchain_height, set_cam_pos, set_env_tex, set_env_spec_tex, set_scene_lights, set_scene_lights_slab, set_ui_material, set_material_from_slab, set_material_from_slab_base, draw_parts_flat, draw_parts_flat_range, draw_parts_flat_range_no_restore, draw_parts_flat_range_state_no_restore, draw_part_flat_no_restore, draw_part0_flat_no_restore, draw_part0_flat_state_no_restore, debug_stage)
 use core
 use core.mem
 use core.math
@@ -831,6 +831,11 @@ fn capture_scene_color_resume_pass() bool {
    _active_scene_color_tex_id = _scene_color_capture_tex_id
    _pc_dirty = true
    _begin_load_render_pass()
+}
+
+fn scene_color_capture_texture_id() int {
+   "Returns the current scene-color capture texture, or -1 when no capture is active."
+   _active_scene_color_tex_id
 }
 
 fn clear_scene_color_capture() any {

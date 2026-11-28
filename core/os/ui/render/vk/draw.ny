@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_rounded_rect_sdf_clipped, draw_rounded_rect_outline_sdf, draw_rounded_rect_outline_sdf_clipped, draw_rounded_rect_shadow_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
+module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_glass_panel, draw_rounded_rect_sdf_clipped, draw_rounded_rect_outline_sdf, draw_rounded_rect_outline_sdf_clipped, draw_rounded_rect_shadow_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_vertices_raw, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use core
 use core.mem
 use core.math
@@ -26,7 +26,7 @@ use core.os.ui.render.vk.pipeline (blend_op_pipeline, _ensure_circle_pipeline,
    _get_nocull_pipeline,
    _get_unlit_nocull_pipeline,
    push_constants)
-use core.os.ui.render.vk.renderer (_check_flush, _flush, _sync_pc, set_ui_material, set_unlit, set_target_pipeline)
+use core.os.ui.render.vk.renderer (_check_flush, _flush, _sync_pc, set_ui_material, set_unlit, set_target_pipeline, capture_scene_color_resume_pass, scene_color_capture_texture_id)
 use core.os.ui.render.vk.texture (bind_texture, bind_default_texture, bindless_sync_texture_slot, texture_format)
 
 mut _ui_rect_trace_hits = 0
@@ -1742,6 +1742,36 @@ fn draw_rounded_rect_sdf(f64 x, f64 y, f64 w, f64 h, f64 radius, f64 r, f64 g, f
       c, w, h, rr
    )
    _vertex_offset += _VKR_VERT_STRIDE * 6
+   true
+}
+
+fn draw_glass_panel(f64 x, f64 y, f64 w, f64 h, f64 radius,
+   f64 r=1.0, f64 g=1.0, f64 b=1.0, f64 a=0.78,
+   f64 blur=8.0, f64 refraction=1.5, f64 rim_width=1.5, f64 rim_strength=0.28) bool {
+   "Captures the current framebuffer and draws a frosted rounded glass panel with tint, refraction, and a bright rim."
+   if w <= 0.0 || h <= 0.0 || a <= 0.0 { return false }
+   if !capture_scene_color_resume_pass() { return false }
+   def scene_tex = scene_color_capture_texture_id()
+   if scene_tex < 0 || scene_tex >= 1024 { return false }
+   def previous_tex = vk_state._current_texture_id
+   bind_texture(scene_tex)
+   if !_rounded_rect_pipeline && !_ensure_rounded_rect_pipeline() {
+      bind_texture(previous_tex)
+      return false
+   }
+   if !_prepare_sdf_draw(_rounded_rect_pipeline) {
+      bind_texture(previous_tex)
+      return false
+   }
+   def rr = min(max(0.0, radius), min(w, h) * 0.5)
+   def packed = _pack_color(r, g, b, a)
+   def tag = bor(0x40000000, band(scene_tex, 0x3ff))
+   __vkr_push_rect_sdf(_local_vertex_map + _vertex_offset,
+      x, y, w, h, packed, w, h, rr, tag,
+      max(0.0, blur), max(0.0, refraction), max(0.25, rim_width), max(0.0, rim_strength))
+   _vertex_offset += _VKR_VERT_STRIDE * 6
+   ;; Switching back flushes this glass draw while its capture descriptor is bound.
+   bind_texture(previous_tex)
    true
 }
 
