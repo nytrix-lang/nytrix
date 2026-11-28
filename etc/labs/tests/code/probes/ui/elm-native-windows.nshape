@@ -50,8 +50,8 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
    elm.subscribe(app, "window.lifecycle", lifecycle_message)
    if target != "wayland" {
       ;; Resize through the platform API so only native events report the resize.
-      platform.set_size(first_id, 115, 70)
-      platform.set_size(second_id, 155, 90)
+      assert(platform.set_size(first, 115, 70), "resize the first native window")
+      assert(platform.set_size(second, 155, 90), "resize the second native window")
    } else {
       window.maximize(first)
       window.maximize(second)
@@ -70,7 +70,7 @@ if target == "x11" || target == "wayland" || target == "win32" || target == "coc
       msleep(5)
       attempts += 1
    }
-   assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs: model=" + to_str(elm.model(app)) + " first_size=" + to_str(platform.get_size(first_id)) + " second_size=" + to_str(platform.get_size(second_id)))
+   assert(attempts < 100, "both native lifecycle events reach the Elm subscriber with their source window IDs: model=" + to_str(elm.model(app)) + " first_size=" + to_str(platform.get_size(first)) + " second_size=" + to_str(platform.get_size(second)))
    if target == "win32" || target == "cocoa" {
       window.maximize(first)
       window.maximize(second)
