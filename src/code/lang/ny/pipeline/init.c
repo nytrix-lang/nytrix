@@ -506,6 +506,54 @@ static const char **ny_build_program_argv(const ny_options *opt,
 
 static void ny_free_program_argv(char **argv) { free(argv); }
 
+static const char *ny_cross_runner(const ny_options *opt) {
+  return opt && opt->run_aot && opt->host_triple && opt->cross_runner &&
+                 *opt->cross_runner
+             ? opt->cross_runner
+             : NULL;
+}
+
+static int ny_spawn_aot_program(const ny_options *opt, const char *path,
+                                const char *const argv[], bool safe) {
+  const char *runner = ny_cross_runner(opt);
+  const char *const *run_argv = argv;
+  const char **cross_argv = NULL;
+  if (runner) {
+    size_t count = 0;
+    while (argv[count])
+      ++count;
+    const char *basename = strrchr(runner, '/');
+    basename = basename ? basename + 1 : runner;
+    const char *win_basename = strrchr(basename, '\\');
+    if (win_basename)
+      basename = win_basename + 1;
+    /* QEMU supports an explicit guest argv[0]; generic runners take the
+       executable followed by user arguments. */
+    bool qemu_argv0 = count && strncmp(basename, "qemu-", 5) == 0;
+    size_t dst = 0;
+    cross_argv = calloc(count + (qemu_argv0 ? 4 : 2), sizeof(*cross_argv));
+    if (!cross_argv)
+      return 1;
+    cross_argv[dst++] = runner;
+    if (qemu_argv0) {
+      cross_argv[dst++] = "-0";
+      cross_argv[dst++] = argv[0];
+    }
+    cross_argv[dst++] = path;
+    for (size_t i = 1; i < count; ++i)
+      cross_argv[dst++] = argv[i];
+    run_argv = cross_argv;
+  }
+  const char *executable = runner ? runner : path;
+  int result = safe
+                   ? ny_safe_run_spawn_argv0(
+                         &opt->safe_run, executable, run_argv,
+                         opt->input_file ? opt->input_file : path)
+                   : ny_exec_spawn_argv0(executable, run_argv);
+  free(cross_argv);
+  return result;
+}
+
 static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
@@ -556,7 +604,7 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     }
     return 0;
   }
-  if (execute) {
+  if (execute && !ny_cross_runner(opt)) {
     ny_tick_t t_jit_compile = opt->do_timing ? ny_ticks_now() : 0;
 #ifndef _WIN32
     /*
@@ -684,11 +732,8 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     const char *fallback[] = {output_path, NULL};
     argv_exec = fallback;
   }
-  int rc = ny_safe_run_requested(&opt->safe_run)
-               ? ny_safe_run_spawn_argv0(
-                     &opt->safe_run, output_path, argv_exec,
-                     opt->input_file ? opt->input_file : "native-only workload")
-               : ny_exec_spawn_argv0(output_path, argv_exec);
+  int rc = ny_spawn_aot_program(opt, output_path, argv_exec,
+                               ny_safe_run_requested(&opt->safe_run));
   ny_free_program_argv(program_argv);
   if (remove_output)
     unlink(output_path);
@@ -2031,18 +2076,22 @@ static bool ny_pipeline_prepare_aot_run_output(ny_options *opt,
    * native-only branch into emit-object-and-return: programs silently do
    * nothing with exit 0.  Leave output unset so native-only executes.
    */
-  if (opt->native_only)
+  if (opt->native_only && !ny_cross_runner(opt))
     return false;
 #ifdef _WIN32
-  snprintf(path, path_len, "%s/ny_aot_run_%d.exe", ny_get_temp_dir(),
-           (int)getpid());
+  const char *suffix = ".exe";
 #else
-  snprintf(path, path_len, "%s/ny_aot_run_%d", ny_get_temp_dir(),
-           (int)getpid());
+  const char *triple = opt->host_triple;
+  const char *suffix =
+      triple && (strstr(triple, "windows") || strstr(triple, "mingw"))
+          ? ".exe"
+          : "";
 #endif
+  snprintf(path, path_len, "%s/ny_aot_run_%d%s", ny_get_temp_dir(),
+           (int)getpid(), suffix);
   opt->output_file = path;
   *output_path = opt->output_file;
-  opt->emit_only = true;
+  opt->emit_only = !opt->native_only;
   opt->run_jit = false;
   return true;
 }
@@ -2752,7 +2801,7 @@ int ny_pipeline_run(ny_options *opt) {
                 const char *fallback[] = {output_path, NULL};
                 argv_exec = fallback;
               }
-              int rc = ny_exec_spawn_argv0(output_path, argv_exec);
+              int rc = ny_spawn_aot_program(opt, output_path, argv_exec, false);
               ny_free_program_argv(program_argv);
               if (rc != 0)
                 exit_code = rc;
@@ -3397,7 +3446,8 @@ int ny_pipeline_run(ny_options *opt) {
       exit_code = 0;
       goto exit_success;
     }
-    exit_code = ny_run_native_only(&prog, opt, output_path, true, true);
+    exit_code = ny_run_native_only(&prog, opt, output_path, true,
+                                   !ny_cross_runner(opt) || aot_run_temp);
     goto exit_success;
   }
 
@@ -4475,11 +4525,7 @@ skip_compilation:
         const char *fallback[] = {output_path, NULL};
         argv_exec = fallback;
       }
-      int rc = use_safe_run
-                   ? ny_safe_run_spawn_argv0(
-                         &opt->safe_run, output_path, argv_exec,
-                         opt->input_file ? opt->input_file : output_path)
-                   : ny_exec_spawn_argv0(output_path, argv_exec);
+      int rc = ny_spawn_aot_program(opt, output_path, argv_exec, use_safe_run);
       ny_free_program_argv(program_argv);
       if (rc != 0)
         exit_code = rc;

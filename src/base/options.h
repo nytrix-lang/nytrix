@@ -207,6 +207,7 @@ typedef struct {
   const char *host_cflags;
   const char *host_ldflags;
   const char *host_triple;
+  const char *cross_runner;
   const char *native_backend_raw;
   const char *native_abi_raw;
   const char *c_frontend_raw;

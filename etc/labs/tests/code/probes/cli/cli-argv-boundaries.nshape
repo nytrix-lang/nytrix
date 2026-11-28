@@ -83,6 +83,18 @@ if int(cross_tools.get("code", 1)) == 0 {
   assert(int(cross.get("code", 127)) == 0 &&
          str(cross.get("stdout", "")).contains("CLI_ARGS_OK"),
          "cross-run forwards exact inline arguments")
+  def cross_native = run_capture(
+      [compiler, "--cross=linux-x64", "--cross-run", "--native-only", "-c", code] + args,
+      [], nil, false)
+  assert(int(cross_native.get("code", 127)) == 0 &&
+         str(cross_native.get("stdout", "")).contains("CLI_ARGS_OK"),
+         "native-only cross-run forwards exact inline arguments")
+  def cross_runner = run_capture(
+      ["env", "NYTRIX_CROSS_RUNNER=/usr/bin/false", compiler,
+       "--cross=linux-x64", "--cross-run", "--native-only", "-c", "exit(0)"],
+      [], nil, false)
+  assert(int(cross_runner.get("code", 127)) == 1,
+         "native-only cross-run returns configured runner exit status")
 }
 def script = temp_dir() + "/ny-cli-argv-" + to_str(pid()) + ".ny"
 def script_code =

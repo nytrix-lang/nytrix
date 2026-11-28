@@ -2544,23 +2544,32 @@ int main(int argc, char **argv, char **envp) {
      */
     char cc_name[256];
     snprintf(cc_name, sizeof(cc_name), "%s-gcc", cross_triple);
-    char *cc_path = ny_doctor_which(cc_name);
-    if (!cc_path) {
-      snprintf(cc_name, sizeof(cc_name), "%s-clang", cross_triple);
-      cc_path = ny_doctor_which(cc_name);
-    }
-    if (cc_path) {
-      ny_setenv_force("NYTRIX_CC", cc_path);
-      free(cc_path);
+    const char *configured_cc = getenv("NYTRIX_CC");
+    if (!configured_cc || !*configured_cc) {
+      char *cc_path = ny_doctor_which(cc_name);
+      if (!cc_path && strcmp(cross_triple, "x86_64-w64-windows-gnu") == 0)
+        cc_path = ny_doctor_which("x86_64-w64-mingw32-gcc");
+      if (!cc_path) {
+        snprintf(cc_name, sizeof(cc_name), "%s-clang", cross_triple);
+        cc_path = ny_doctor_which(cc_name);
+      }
+      if (cc_path) {
+        ny_setenv_force("NYTRIX_CC", cc_path);
+        free(cc_path);
+      }
     }
     /*
      * If cross-run, find QEMU/Wine.  Use preset runner if available, else
      * probe.
      */
-    if (cross_run) {
+    const char *configured_runner = getenv("NYTRIX_CROSS_RUNNER");
+    if (cross_run && (!configured_runner || !*configured_runner)) {
       const char *runner = cross_qemu;
       if (!runner) {
-        if (strstr(cross_triple, "aarch64") || strstr(cross_triple, "arm64"))
+        if (strstr(cross_triple, "windows") ||
+            strstr(cross_triple, "mingw"))
+          runner = "wine";
+        else if (strstr(cross_triple, "aarch64") || strstr(cross_triple, "arm64"))
           runner = "qemu-aarch64";
         else if (strstr(cross_triple, "arm"))
           runner = "qemu-arm";
@@ -2569,17 +2578,14 @@ int main(int argc, char **argv, char **envp) {
         else if (strstr(cross_triple, "x86_64") ||
                  strstr(cross_triple, "amd64"))
           runner = "qemu-x86_64";
-        else if (strstr(cross_triple, "windows") ||
-                 strstr(cross_triple, "mingw"))
-          runner = "wine";
       }
-      if (runner) {
-        char *qemu = ny_doctor_which(runner);
-        if (qemu) {
-          ny_setenv_force("NYTRIX_CROSS_RUNNER", qemu);
-          free(qemu);
-        }
+      char *runner_path = runner ? ny_doctor_which(runner) : NULL;
+      if (!runner_path) {
+        fprintf(stderr, "ny: no cross runner found for %s\n", cross_triple);
+        return 2;
       }
+      ny_setenv_force("NYTRIX_CROSS_RUNNER", runner_path);
+      free(runner_path);
     }
     /*
      * Strip --cross=... and insert --host-triple=...
@@ -2645,6 +2651,12 @@ int main(int argc, char **argv, char **envp) {
   ny_options opt;
   ny_options_init(&opt);
   ny_options_parse(&opt, argc, argv);
+  if (cross_run) {
+    opt.cross_runner = getenv("NYTRIX_CROSS_RUNNER");
+    opt.run_aot = true;
+    opt.run_jit = false;
+    opt.emit_only = false;
+  }
   bool gpu_backend_arg_seen = false;
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--gpu-backend") == 0 ||
