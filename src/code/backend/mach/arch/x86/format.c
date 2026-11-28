@@ -1191,53 +1191,84 @@ oom:
   return false;
 }
 
-/*
- * Emit a compact CodeView C13 line subsection for COFF consumers.
- */
+/* CodeView C13 subsections use 32-bit lengths, unlike symbol records. */
+static bool nyr_codeview_subsection(nyr_obj_buf_t *out, uint32_t kind,
+                                    const nyr_obj_buf_t *payload) {
+  if (payload->len > UINT32_MAX || !nyr_obj_u32(out, kind) ||
+      !nyr_obj_u32(out, (uint32_t)payload->len) ||
+      !nyr_obj_emit(out, payload->data, payload->len))
+    return false;
+  while (out->len & 3u)
+    if (!nyr_obj_u8(out, 0))
+      return false;
+  return true;
+}
+
+static const char *nyr_codeview_source(const nyr_native_debug_line_t *line) {
+  return line->file && line->file[0] ? line->file : "<unknown>";
+}
+
 static bool nyr_native_build_codeview_lines(
     const nyr_native_debug_line_t *lines, size_t line_count, size_t code_len,
-    const char *path, nyr_obj_buf_t *out, char *err, size_t err_len) {
-  if (!out || (!lines && line_count))
+    nyr_obj_buf_t *out, uint32_t *reloc_base, char *err, size_t err_len) {
+  if (!out || !reloc_base || (!lines && line_count))
     return false;
   out->len = 0;
+  *reloc_base = 0;
   if (!line_count)
     return true;
-  if (!nyr_obj_u32(out, 4))
-    goto fail;
-  size_t name_len = strlen(path && path[0] ? path : "nytrix");
-  size_t obj_payload = 4 + name_len + 1;
-  if (obj_payload > UINT16_MAX - 2 ||
-      !nyr_obj_u16(out, (uint16_t)(obj_payload + 2)) ||
-      !nyr_obj_u16(out, 0x1101) || !nyr_obj_u32(out, 0) ||
-      !nyr_obj_emit(out, path && path[0] ? path : "nytrix", name_len + 1))
-    goto fail;
-  while (out->len & 3u)
-    if (!nyr_obj_u8(out, 0))
-      goto fail;
-  size_t payload = 12 + 12 + line_count * 8;
-  if (payload > UINT16_MAX - 2 || !nyr_obj_u16(out, (uint16_t)(payload + 2)) ||
-      !nyr_obj_u16(out, 0x00f2) || !nyr_obj_u32(out, 0) ||
-      !nyr_obj_u16(out, 1) || !nyr_obj_u16(out, 0) ||
-      !nyr_obj_u32(out, (uint32_t)code_len) || !nyr_obj_u32(out, 0) ||
-      !nyr_obj_u32(out, (uint32_t)line_count) ||
-      !nyr_obj_u32(out, (uint32_t)(line_count * 8)))
-    goto fail;
-  for (size_t i = 0; i < line_count; ++i) {
-    uint32_t line = lines[i].line ? lines[i].line : 1;
-    uint32_t column = lines[i].column ? lines[i].column : 1;
-    uint32_t flags = (line & 0x00ffffffu) | ((column & 0x7fu) << 24);
-    if (!nyr_obj_u32(out, (uint32_t)lines[i].offset) ||
-        !nyr_obj_u32(out, flags))
-      goto fail;
+  nyr_obj_buf_t table = {0}, names = {0}, checksums = {0};
+  nyr_native_debug_line_t *ordered = calloc(line_count, sizeof(*ordered));
+  bool ok = false;
+  if (!ordered || code_len > UINT32_MAX || !nyr_obj_u8(&names, 0) ||
+      !nyr_obj_u32(&table, 0) || !nyr_obj_u16(&table, 0) ||
+      !nyr_obj_u16(&table, 0) || !nyr_obj_u32(&table, (uint32_t)code_len))
+    goto done;
+  memcpy(ordered, lines, line_count * sizeof(*ordered));
+  qsort(ordered, line_count, sizeof(*ordered), nyr_native_debug_line_cmp);
+  for (size_t i = 0; i < line_count;) {
+    const char *source = nyr_codeview_source(&ordered[i]);
+    size_t end = i + 1;
+    while (end < line_count &&
+           strcmp(source, nyr_codeview_source(&ordered[end])) == 0)
+      ++end;
+    size_t count = end - i;
+    if (count > (UINT32_MAX - 12u) / 8u || names.len > UINT32_MAX ||
+        checksums.len > UINT32_MAX ||
+        !nyr_obj_u32(&table, (uint32_t)checksums.len) ||
+        !nyr_obj_u32(&table, (uint32_t)count) ||
+        !nyr_obj_u32(&table, (uint32_t)(12u + count * 8u)) ||
+        !nyr_obj_u32(&checksums, (uint32_t)names.len) ||
+        !nyr_obj_u32(&checksums, 0) ||
+        !nyr_obj_emit(&names, source, strlen(source) + 1))
+      goto done;
+    for (; i < end; ++i) {
+      uint32_t line = ordered[i].line ? ordered[i].line : 1;
+      /* Bit 31 marks a statement. Column data is omitted. */
+      uint32_t flags = (line & 0x00ffffffu) | 0x80000000u;
+      if (ordered[i].offset > UINT32_MAX ||
+          !nyr_obj_u32(&table, (uint32_t)ordered[i].offset) ||
+          !nyr_obj_u32(&table, flags))
+        goto done;
+    }
   }
-  while (out->len & 3u)
-    if (!nyr_obj_u8(out, 0))
-      goto fail;
-  return true;
-fail:
-  out->len = 0;
-  nyr_set_error(err, err_len, "CodeView line table emission failed");
-  return false;
+  if (!nyr_obj_u32(out, 4))
+    goto done;
+  /* The line subsection starts with a SECREL/SECTION pair for .text. */
+  *reloc_base = (uint32_t)out->len + 8;
+  ok = nyr_codeview_subsection(out, 0xf2, &table) &&
+       nyr_codeview_subsection(out, 0xf4, &checksums) &&
+       nyr_codeview_subsection(out, 0xf3, &names);
+done:
+  free(ordered);
+  nyr_obj_free(&table);
+  nyr_obj_free(&names);
+  nyr_obj_free(&checksums);
+  if (!ok) {
+    out->len = 0;
+    nyr_set_error(err, err_len, "CodeView line table emission failed");
+  }
+  return ok;
 }
 
 /*
@@ -2161,8 +2192,9 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
     goto done;
   }
   const size_t header_size = 20;
+  uint32_t debug_reloc_base = 0;
   if (!nyr_native_build_codeview_lines(debug_lines, debug_line_count, code_len,
-                                       path, &debug, err, err_len))
+                                       &debug, &debug_reloc_base, err, err_len))
     goto done;
   const size_t section_count = debug.len ? 2 : 1;
   const size_t section_table_size = 40 * section_count;
@@ -2170,7 +2202,8 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
   const size_t reloc_off = text_off + code_len;
   const size_t reloc_size = reloc_count * 10;
   const size_t debug_off = reloc_off + reloc_size;
-  const size_t symtab_off = debug_off + debug.len;
+  const size_t debug_reloc_off = debug_off + debug.len;
+  const size_t symtab_off = debug_reloc_off + (debug.len ? 20 : 0);
 
   if (!nyr_x64_obj_collect_external_reloc_symbols(
           relocs, reloc_count, defs, def_count, reloc_symbols,
@@ -2218,8 +2251,9 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
     if (!nyr_obj_emit(&file, debug_name, sizeof(debug_name)) ||
         !nyr_obj_u32(&file, 0) || !nyr_obj_u32(&file, 0) ||
         !nyr_obj_u32(&file, (uint32_t)debug.len) ||
-        !nyr_obj_u32(&file, (uint32_t)debug_off) || !nyr_obj_u32(&file, 0) ||
-        !nyr_obj_u32(&file, 0) || !nyr_obj_u16(&file, 0) ||
+        !nyr_obj_u32(&file, (uint32_t)debug_off) ||
+        !nyr_obj_u32(&file, (uint32_t)debug_reloc_off) ||
+        !nyr_obj_u32(&file, 0) || !nyr_obj_u16(&file, 2) ||
         !nyr_obj_u16(&file, 0) || !nyr_obj_u32(&file, 0x42000040u))
       goto done;
   }
@@ -2242,7 +2276,12 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
         !nyr_obj_u32(&file, sym_index) || !nyr_obj_u16(&file, 0x0004))
       goto done;
   }
-  if (debug.len && !nyr_obj_emit(&file, debug.data, debug.len))
+  if (debug.len &&
+      (!nyr_obj_emit(&file, debug.data, debug.len) ||
+       !nyr_obj_u32(&file, debug_reloc_base) || !nyr_obj_u32(&file, 0) ||
+       !nyr_obj_u16(&file, 0x000b) || /* IMAGE_REL_AMD64_SECREL */
+       !nyr_obj_u32(&file, debug_reloc_base + 4) || !nyr_obj_u32(&file, 0) ||
+       !nyr_obj_u16(&file, 0x000a))) /* IMAGE_REL_AMD64_SECTION */
     goto done;
   if (!ny_coff_write_sym(&file, ".text", 0, 0, 1, 0, 3))
     goto done;
