@@ -7562,6 +7562,11 @@ fn _body_run_color(int kind) any {
    if kind == 10004 { return C_WARN }
    if kind == 10005 { return C_ACCENT_2 }
    if kind == 10006 { return C_MUTED }
+   if kind == 10007 { return C_MUTED }
+   if kind == 10008 { return C_CYAN }
+   if kind == 10009 { return C_ACCENT }
+   if kind == 10010 { return C_ACCENT_2 }
+   if kind == 10011 { return C_WARN }
    _tok_color(kind)
 }
 

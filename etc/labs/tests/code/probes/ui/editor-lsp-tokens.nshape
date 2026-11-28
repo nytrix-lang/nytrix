@@ -30,6 +30,14 @@ def merged = lsp.merge_semantic_tokens(st, "a😀b", [[syntax.TOK_COMMENT, 0, 6]
 assert(merged.len == 2 && int(merged.get(0).get(1)) == 0 && int(merged.get(0).get(2)) == 5 && int(merged.get(1).get(0)) == syntax.TOK_FUNCTION && int(merged.get(1).get(1)) == 5, "semantic UTF-16 spans overlay lexical bytes")
 def fallback = lsp.merge_semantic_tokens(st, "abc", [[syntax.TOK_COMMENT, 0, 3]], [{"col": 0, "length": 2, "type": "unknown"}])
 assert(fallback.len == 1 && int(fallback.get(0).get(0)) == syntax.TOK_COMMENT, "unknown types preserve syntax")
+def modifier_runs = lsp.merge_semantic_tokens(st, "a b c d e", [[syntax.TOK_VARIABLE, 0, 9]], [
+   {"col": 0, "length": 1, "type": "variable", "modifiers": ["readonly"]},
+   {"col": 2, "length": 1, "type": "function", "modifiers": ["deprecated"]},
+   {"col": 4, "length": 1, "type": "variable", "modifiers": ["declaration"]},
+   {"col": 6, "length": 1, "type": "method", "modifiers": ["async"]},
+   {"col": 8, "length": 1, "type": "variable", "modifiers": ["modification"]}
+])
+assert(merged_kind(modifier_runs, 0) == 10008 && merged_kind(modifier_runs, 2) == 10007 && merged_kind(modifier_runs, 4) == 10009 && merged_kind(modifier_runs, 6) == 10010 && merged_kind(modifier_runs, 8) == 10011, "LSP modifiers select distinct editor styles")
 st["caps"] = {"semanticTokensProvider": {"legend": {"tokenTypes": ["event", "decorator", "label", "other", "method"]}}}
 def standard = lsp.decode_semantic_tokens(st, {"data": [0, 0, 3, 0, 0, 0, 4, 3, 1, 0, 0, 4, 3, 2, 0, 0, 4, 3, 3, 0, 0, 4, 3, 4, 0]})
 def standard_runs = lsp.merge_semantic_tokens(st, "abc def ghi jkl mno", [[syntax.TOK_COMMENT, 0, 19]], standard)

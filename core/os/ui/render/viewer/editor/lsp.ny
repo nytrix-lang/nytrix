@@ -779,13 +779,24 @@ fn _semantic_kind(str typ) int {
    }
 }
 
+fn _semantic_modifier_style(int kind, list modifiers) int {
+   "Assigns a small set of visible editor styles to common LSP modifiers."
+   if modifiers.contains("deprecated") { return 10007 }
+   if modifiers.contains("readonly") { return 10008 }
+   if modifiers.contains("declaration") || modifiers.contains("definition") { return 10009 }
+   if modifiers.contains("async") { return 10010 }
+   if modifiers.contains("modification") { return 10011 }
+   kind
+}
+
 fn merge_semantic_tokens(dict st, str line, list lexical, list semantic) list {
    "Overlays one line's semantic spans on byte-based syntax tokens. LSP columns
    and lengths use the negotiated encoding ; unrecognized types retain lexical colors."
    mut spans = []
    for token in semantic {
-      def int kind = _semantic_kind(to_str(token.get("type", "")))
-      if kind < 0 { continue }
+      def int base_kind = _semantic_kind(to_str(token.get("type", "")))
+      if base_kind < 0 { continue }
+      def int kind = _semantic_modifier_style(base_kind, token.get("modifiers", []))
       def int col = int(token.get("col", 0))
       def int len = int(token.get("length", 0))
       if col < 0 || len <= 0 { continue }
