@@ -16,9 +16,22 @@ use core
 use core.common as common
 use core.os (file_write, file_read, file_remove, file_exists, temp_dir, msleep, now_ms)
 use core.os.subprocess (run_capture)
+use core.os.ui.elm as elm
 use core.os.ui.window as window
 use core.os.ui.window.consts as event_kind
 use core.os.ui.render as gfx
+
+fn drop_message(any event) any {
+   if int(event.get("kind", 0)) == event_kind.EVENT_DATA_DROP { return event }
+   nil
+}
+
+fn update_drop(any model, any event) any {
+   def dict m = model
+   m["window_id"] = int(event.get("window_id", 0))
+   m["data"] = event.get("data", nil)
+   m
+}
 
 def str display = common.env_trim("WAYLAND_DISPLAY")
 def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
@@ -44,6 +57,9 @@ if display.len == 0 || driver.len == 0 || sway_socket.len == 0 {
          if win { gfx.close_window() }
          print("skip: compositor has no usable Vulkan surface")
       } else {
+         def int handle = int(window.id(win))
+         def app = elm.new({"window_id": 0, "data": nil})
+         elm.subscribe(app, "window.lifecycle", drop_message)
          mut int frame = 0
          while frame < 4 {
             if gfx.begin_frame_clear([0.08, 0.08, 0.08, 1.0]) { gfx.end_frame() }
@@ -87,21 +103,23 @@ if display.len == 0 || driver.len == 0 || sway_socket.len == 0 {
          assert(to_str(positioned_source.get("stdout", "")).contains("\"success\": true"), "Sway positions the drag source: " + to_str(positioned_source.get("stdout", positioned_source.get("stderr", ""))))
          file_write(script, "move 850 200\ndown\nsleep 0.2\nmove 250 200\nsleep 0.2\nup\n")
          run_capture(["sh", "-c", driver_cmd + " run " + script + " >/dev/null 2>&1 &"], [], nil, false)
-         mut any dropped = nil
+         mut bool routed = false
          def int end = now_ms() + 5000
-         while is_nil(dropped) && now_ms() < end {
+         while !routed && now_ms() < end {
             if gfx.begin_frame_clear([0.08, 0.08, 0.08, 1.0]) { gfx.end_frame() }
             window.poll_events()
             mut any e = window.check_event(win)
             while !is_nil(e) && !(is_int(e) && int(e) == 0) {
                def int typ = window.event_type(e)
                if typ == event_kind.EVENT_DATA_DROP {
-                  dropped = window.event_data(e)
+                  assert(elm.publish_window_event(app, e, update_drop) == 1, "Wayland file drop reaches the Elm lifecycle subscriber")
+                  routed = true
                }
                e = window.check_event(win)
             }
-            if is_nil(dropped) { msleep(10) }
+            if !routed { msleep(10) }
          }
+         def dropped = elm.model(app).get("data", nil)
          def paths = is_dict(dropped) ? dropped.get("paths", []) : []
          def source_result = file_read(source_log)
          def source_output = is_ok(source_result) ? to_str(unwrap(source_result)) : ""
@@ -111,6 +129,7 @@ if display.len == 0 || driver.len == 0 || sway_socket.len == 0 {
          file_remove(ready)
          assert(source_output.len > 0 && !source_output.contains("panic"), "Wayland source client starts the native file drag: " + source_output)
          assert(is_list(paths) && paths.len == 1 && to_str(paths.get(0)) == payload_path, "Wayland transfers the URI list through EVENT_DATA_DROP: " + to_str(dropped))
+         assert(int(elm.model(app).get("window_id", 0)) == handle, "Elm drop event retains its source window ID")
       }
    }
 }
