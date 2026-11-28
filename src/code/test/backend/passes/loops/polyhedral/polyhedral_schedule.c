@@ -43,7 +43,7 @@ static bool brute(const nyr_poly_region_t *r, nyr_poly_schedule_t s) {
             for (size_t a = 0; a < r->access_count; ++a)
               for (size_t b = 0; b < r->access_count; ++b) {
                 nyr_poly_access_t p = r->access[a], q = r->access[b];
-                if (p.offset.base != q.offset.base || (!p.write && !q.write))
+                if (p.offset.base != q.offset.base || (!p.is_write && !q.is_write))
                   continue;
                 int64_t u = byte_at(p, i, j), v = byte_at(q, x, y);
                 if (u < v + q.width && v < u + p.width) return false;
@@ -62,7 +62,7 @@ static bool brute_band(const nyr_poly_region_t *r,nyr_poly_schedule_t s,unsigned
       if (band ? (a!=b||u0==v0) : a==b) continue;
       for (size_t u=0;u<r->access_count;++u) for (size_t v=0;v<r->access_count;++v) {
         const nyr_poly_access_t *p=&r->access[u],*q=&r->access[v];
-        if (p->offset.base!=q->offset.base||(!p->write&&!q->write)) continue;
+        if (p->offset.base!=q->offset.base||(!p->is_write&&!q->is_write)) continue;
         int64_t l=byte_at(*p,i,j),h=byte_at(*q,x,y);
         if (l<h+q->width&&h<l+p->width) return false;
       }
@@ -84,7 +84,7 @@ static bool brute_permutable(const nyr_poly_region_t *r,nyr_poly_schedule_t s) {
           if (!inversion) continue;
           for (size_t a=0;a<r->access_count;++a) for (size_t b=0;b<r->access_count;++b) {
             const nyr_poly_access_t *u=&r->access[a],*v=&r->access[b];
-            if (u->offset.base!=v->offset.base||(!u->write&&!v->write)) continue;
+            if (u->offset.base!=v->offset.base||(!u->is_write&&!v->is_write)) continue;
             int64_t l=byte_at(*u,i,j)+u->offset.coeff[2]*k;
             int64_t h=byte_at(*v,x,y)+v->offset.coeff[2]*z;
             if (l<h+v->width&&h<l+u->width) return false;
@@ -115,7 +115,7 @@ static bool random_legality(void) {
                              (int)(next_random() % 17) - 8},
                    .constant = 128 + next_random() % 24,
                    .base = (int)(next_random() % 2)},
-        .width = 1u << (next_random() % 4), .write = next_random() % 2};
+        .width = 1u << (next_random() % 4), .is_write = next_random() % 2};
     }
     for (unsigned q=0;q<5;++q) {
       nyr_poly_schedule_t band={.wavefront=q!=0,.skew=q>2?q-2:q,.interchange=q>2};
@@ -353,7 +353,7 @@ static bool exact_tiles(void) {
 static bool profitability(void) {
   nyr_poly_region_t r={.extent={512,512},.access_count=2};
   r.access[0]=(nyr_poly_access_t){.offset={.coeff={4096,8},.base=0},.width=8};
-  r.access[1]=(nyr_poly_access_t){.offset={.coeff={4096,8},.base=1},.width=8,.write=true};
+  r.access[1]=(nyr_poly_access_t){.offset={.coeff={4096,8},.base=1},.width=8,.is_write=true};
   nyr_poly_schedule_t s;
   if (nyr_poly_choose(&r,&s)) return false;
   r.access[1].offset.coeff[0]=8;
@@ -495,7 +495,7 @@ static bool brute3(const nyr_poly_region_t *r,nyr_poly_schedule_t s) {
       for (size_t x=0;x<r->access_count;++x)
         for (size_t y=0;y<r->access_count;++y) {
           nyr_poly_access_t a=r->access[x],b=r->access[y];
-          if (a.offset.base!=b.offset.base||(!a.write&&!b.write)) continue;
+          if (a.offset.base!=b.offset.base||(!a.is_write&&!b.is_write)) continue;
           int64_t u=byte3(a,p[i]),v=byte3(b,p[j]);
           if (u<v+b.width&&v<u+a.width) return false;
         }
@@ -510,7 +510,7 @@ static bool legality3(void) {
     for (size_t a=0;a<r.access_count;++a) {
       r.access[a]=(nyr_poly_access_t){.offset={.base=(int)(next_random()%2),.constant=128+next_random()%16,
         .coeff={(int)(next_random()%17)-8,(int)(next_random()%17)-8,(int)(next_random()%17)-8}},
-        .width=1u<<(next_random()%4),.write=next_random()%2};
+        .width=1u<<(next_random()%4),.is_write=next_random()%2};
       if (trial%3==0) {
         r.access[a].offset.constant=0;
         r.access[a].offset.coeff[0]=128;r.access[a].offset.coeff[1]=8;r.access[a].offset.coeff[2]=0;
@@ -762,7 +762,7 @@ static bool fusion_brute(const nyr_poly_region_t *a,const nyr_poly_region_t *b,
         if (!nyr_poly_contains(b,x,y)||order(s,i,j,x,y)<=0) continue;
         for (size_t p=0;p<a->access_count;++p) for (size_t q=0;q<b->access_count;++q) {
           nyr_poly_access_t u=a->access[p],v=b->access[q];
-          if (u.offset.base!=v.offset.base||(!u.write&&!v.write)) continue;
+          if (u.offset.base!=v.offset.base||(!u.is_write&&!v.is_write)) continue;
           int64_t l=byte_at(u,i,j),h=byte_at(v,x,y);
           if (l<h+v.width&&h<l+u.width) return false;
         }
@@ -781,7 +781,7 @@ static bool fusion_legality(void) {
     for (unsigned k=0;k<2;++k) for (unsigned j=0;j<2;++j) {
       r[k]->access[j]=(nyr_poly_access_t){.offset={.base=next_random()%2,
         .constant=128+next_random()%24,.coeff={(int)(next_random()%17)-8,(int)(next_random()%17)-8}},
-        .width=1u<<(next_random()%4),.write=next_random()%2};
+        .width=1u<<(next_random()%4),.is_write=next_random()%2};
     }
     for (unsigned k=0;k<sizeof(schedules)/sizeof(schedules[0]);++k) {
       bool expected=fusion_brute(&a,&b,schedules[k]);
