@@ -28,7 +28,7 @@ module core.os.ui.render(
    init_window, init_mock_surface, close_window, set_active_window, render_init,
    window_should_close, get_active_window, begin_frame, begin_frame_clear, end_frame,
    begin_drawing, end_drawing, begin_mode_3d, end_mode_3d, clear_background,
-   draw_triangles, draw_triangles_clipped, draw_path, draw_path_outline, draw_polyline, draw_triangle, draw_quad, draw_rect,
+   draw_triangles, draw_triangles_clipped, draw_path, draw_path_outline, draw_path_quadratic, draw_path_cubic, draw_polyline, draw_triangle, draw_quad, draw_rect,
    draw_pixel, draw_pixel_v, draw_line_v, draw_line_ex, draw_line_strip,
    draw_rect_v, draw_rect_rec, draw_rect_pro, draw_rect_lines, draw_rect_lines_ex,
    draw_rect_gradient_v, draw_rect_gradient_h, draw_rect_gradient_ex,
@@ -5507,6 +5507,40 @@ fn draw_path(list points, any color) bool {
 fn draw_path_outline(list points, any color, f64 thickness=1.0) bool {
    "Strokes a closed path contour with connected line segments."
    draw_polyline(points, color, thickness, true)
+}
+
+fn draw_path_quadratic(any start, any control, any finish, any color, f64 thickness=1.0, int segments=24) bool {
+   "Strokes a quadratic Bezier path segment from `start` through `control` to `finish`."
+   if !is_list(start) || start.len < 2 || !is_list(control) || control.len < 2 || !is_list(finish) || finish.len < 2 { return false }
+   segments = int(clamp(segments, 2, 256))
+   mut points = []
+   mut i = 0
+   while i <= segments {
+      def t = float(i) / float(segments)
+      def u = 1.0 - t
+      def x = u * u * float(start.get(0, 0.0)) + 2.0 * u * t * float(control.get(0, 0.0)) + t * t * float(finish.get(0, 0.0))
+      def y = u * u * float(start.get(1, 0.0)) + 2.0 * u * t * float(control.get(1, 0.0)) + t * t * float(finish.get(1, 0.0))
+      points = points.append([x, y, float(start.get(2, 0.0)) + (float(finish.get(2, 0.0)) - float(start.get(2, 0.0))) * t])
+      i += 1
+   }
+   draw_polyline(points, color, thickness)
+}
+
+fn draw_path_cubic(any start, any control1, any control2, any finish, any color, f64 thickness=1.0, int segments=32) bool {
+   "Strokes a cubic Bezier path segment from `start` through `control1` and `control2` to `finish`."
+   if !is_list(start) || start.len < 2 || !is_list(control1) || control1.len < 2 || !is_list(control2) || control2.len < 2 || !is_list(finish) || finish.len < 2 { return false }
+   segments = int(clamp(segments, 3, 256))
+   mut points = []
+   mut i = 0
+   while i <= segments {
+      def t = float(i) / float(segments)
+      def u = 1.0 - t
+      def x = u * u * u * float(start.get(0, 0.0)) + 3.0 * u * u * t * float(control1.get(0, 0.0)) + 3.0 * u * t * t * float(control2.get(0, 0.0)) + t * t * t * float(finish.get(0, 0.0))
+      def y = u * u * u * float(start.get(1, 0.0)) + 3.0 * u * u * t * float(control1.get(1, 0.0)) + 3.0 * u * t * t * float(control2.get(1, 0.0)) + t * t * t * float(finish.get(1, 0.0))
+      points = points.append([x, y, float(start.get(2, 0.0)) + (float(finish.get(2, 0.0)) - float(start.get(2, 0.0))) * t])
+      i += 1
+   }
+   draw_polyline(points, color, thickness)
 }
 
 fn draw_polyline(list points, any color, f64 thickness=0.02, bool closed=false) bool {
