@@ -1010,23 +1010,14 @@ fn poll_events() any {
       if display { wayland_backend.wait_events(display, 0) }
    }
    if b == "win32" {
-      mut i = 0
-      def windows_n = windows.len
-      while i < windows_n {
-         def win = windows.get(i)
-         if is_dict(win) {
-            def handle = win.get("handle", 0)
-            def result = win32_impl.poll_window_events(win)
-            def updated_win = result.get(0, win)
-            def evs = result.get(1, [])
-            mut current_native_windows = _get_platform_val("native_windows", native_windows)
-            if handle && is_dict(updated_win) {
-               current_native_windows[handle] = updated_win
-               platform_state._set_platform_dict("native_windows", current_native_windows)
-            }
-            def _ignored_win32_events = _queue_native_events(evs, handle, have_window_callbacks)
-         }
-         i += 1
+      def result = win32_impl.poll_all_window_events(windows)
+      def updated_windows = result.get(0, dict(8))
+      def events_by_handle = result.get(1, dict(8))
+      platform_state._set_platform_dict("native_windows",
+         _merge_native_window_updates(updated_windows, native_windows))
+      def handles = dict_keys(events_by_handle)
+      for handle in handles {
+         _queue_native_events(events_by_handle.get(handle, []), handle, have_window_callbacks)
       }
       return 0
    }

@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, start_window_move, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
+module core.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, start_window_move, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, poll_all_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -3370,6 +3370,53 @@ fn poll_window_events(any win, int max_messages=512) list {
    win = _recenter_disabled_cursor(win)
    win = _apply_cursor_handle(win)
    [win, events]
+}
+
+fn poll_all_window_events(list windows, int max_messages=512) list {
+   "Drains the Win32 thread queue once and routes each message to its owning native window."
+   mut updated_windows = dict(8)
+   mut events_by_handle = dict(8)
+   for win in windows {
+      if !is_dict(win) { continue }
+      def handle = int(win.get("handle", 0))
+      if handle { updated_windows[handle] = win }
+   }
+   if updated_windows.len <= 0 { return [updated_windows, events_by_handle] }
+   wait_messages(0)
+   def messages = pump_window_messages(0, max_messages)
+   for msg in messages {
+      if !is_dict(msg) { continue }
+      def msg_handle = int(msg.get("hwnd", 0))
+      mut owner_handle = msg_handle
+      mut win = updated_windows.get(owner_handle, 0)
+      if !is_dict(win) {
+         if msg_handle != 0 { continue }
+         def handles = dict_keys(updated_windows)
+         if handles.len <= 0 { continue }
+         owner_handle = int(handles.get(0, 0))
+         win = updated_windows.get(owner_handle, 0)
+      }
+      if !is_dict(win) { continue }
+      def translated = translate_message(win, msg)
+      win = translated.get(0, win)
+      def evs = translated.get(1, [])
+      updated_windows[owner_handle] = win
+      if is_list(evs) && evs.len > 0 {
+         events_by_handle[owner_handle] = events_by_handle.get(owner_handle, []).extend(evs)
+      }
+   }
+   def handles = dict_keys(updated_windows)
+   for handle in handles {
+      mut win = updated_windows.get(handle, 0)
+      mut evs = events_by_handle.get(handle, [])
+      def synced = _sync_special_key_releases(win, evs)
+      win, evs = synced.get(0, win), synced.get(1, evs)
+      win = _recenter_disabled_cursor(win)
+      win = _apply_cursor_handle(win)
+      updated_windows[handle] = win
+      events_by_handle[handle] = evs
+   }
+   [updated_windows, events_by_handle]
 }
 
 fn primary_screen_size() list {
